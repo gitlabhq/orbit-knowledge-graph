@@ -1,0 +1,16 @@
+import: [shapes]
+
+stages:
+  c_statements:
+    - '(declaration declarator: (init_declarator declarator: $N:identifier value: $V:__call))': '(__binding @$N (__declaration) (__rhs $V))'
+    - '(declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V:__call))': '(__binding @$N (__declaration) (__rhs $V))'
+    - '(declaration declarator: (init_declarator declarator: $N:identifier value: $V))': '(__binding @$N (__declaration) (__rhs @$V $V))'
+    - '(declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V))': '(__binding @$N (__declaration) (__rhs @$V $V))'
+    - '(assignment_expression left: $N:identifier right: $R:__call)': '%bind_call($N, $R)'
+    - '(assignment_expression left: $N:identifier right: $R)': '%bind($N, $R)'
+    - '(if_statement condition: $C consequence: $Q alternative:? $A)': '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
+    - '(switch_statement condition: $C body: $B)': '(__ssa_branch $C $B)'
+    - '(conditional_expression condition: $C consequence: $Q alternative: $A)': '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm $A))'
+    - '(for_statement $$$H body: $B)': '(__ssa_loop $$$H $B)'
+    - '(while_statement condition: $C body: $B)': '(__ssa_loop $C $B)'
+    - '(do_statement body: $B condition: $C)': '(__ssa_loop $B $C)'

@@ -1,0 +1,79 @@
+import: [canonical, display, roots, shapes]
+
+data:
+  builtins: ['@as', '@alignCast', '@alignOf', '@bitCast', '@bitOffsetOf', '@bitSizeOf', '@byteSwap', '@call',
+    '@cDefine', '@cImport', '@cInclude', '@cUndef', '@clz', '@compileError', '@compileLog', '@ctz', '@embedFile',
+    '@enumFromInt', '@errorFromInt', '@errorName', '@errorReturnTrace', '@field', '@fieldParentPtr', '@floatCast',
+    '@floatFromInt', '@hasDecl', '@hasField', '@import', '@inComptime', '@intCast', '@intFromBool', '@intFromEnum',
+    '@intFromError', '@intFromFloat', '@intFromPtr', '@max', '@memcpy', '@memset', '@min', '@offsetOf',
+    '@panic', '@popCount', '@ptrCast', '@ptrFromInt', '@sizeOf', '@src', '@tagName', '@This', '@trap',
+    '@truncate', '@Type', '@typeInfo', '@typeName', '@TypeOf', '@Vector', '@abs', '@addWithOverflow',
+    '@atomicLoad', '@atomicRmw', '@atomicStore', '@bitReverse', '@ceil', '@cmpxchgStrong', '@cmpxchgWeak',
+    '@cos', '@divExact', '@divFloor', '@divTrunc', '@exp', '@exp2', '@floor', '@log', '@log2', '@log10',
+    '@mod', '@mulAdd', '@mulWithOverflow', '@reduce', '@rem', '@round', '@select', '@shlExact', '@shlWithOverflow',
+    '@shrExact', '@shuffle', '@sin', '@splat', '@sqrt', '@subWithOverflow', '@tan', '@trunc']
+  external: [std, builtin]
+  lookup_from: [__source_root]
+  branches: [if_expression, switch_expression]
+  loops: [while_statement, for_statement]
+
+canonicalize:
+  - stage: mark
+    rewrite:
+      - '(enum_declaration $$$F:container_field)': '(enum_declaration $$$F->zig_enum_member)'
+  - stage: normalize
+    rewrite:
+      - '(source_file $$$C)': '%source_file($$$C)'
+      - '(return_expression $$$V)': '(__ssa_return $$$V)'
+      - '(parameter name: $N:identifier type: $T:identifier)': '%typed_param($N, $T)'
+      - '(parameter name: $N:identifier)': '(__binding @$N)'
+      - '(zig_enum_member name: $N:identifier)': '(__def (__defname @$N) (__enum_variant))'
+      - '(container_field name: $N:identifier)': '(__def (__defname @$N) (__field_def))'
+  - stage: retag-calls
+    rewrite:
+      - '(call_expression function: (field_expression object: $O:identifier member: $M:identifier) $$$A)': '(__call (__callee %member_text($M, $O)) $$$A)'
+      - '(call_expression function: $F:identifier $$$A)': '%call($F, $$$A)'
+      - '(struct_initializer $T:identifier $L:initializer_list)': '%call($T, $L)'
+  - stage: classify
+    rewrite:
+      - '(variable_declaration $N:identifier $D:struct_declaration)': '(__def (__defname @$N) (__struct) $D)'
+      - '(variable_declaration $N:identifier $D:enum_declaration)': '(__def (__defname @$N) (__enum) $D)'
+      - '(variable_declaration $N:identifier $D:union_declaration)': '(__def (__defname @$N) (__struct) $D)'
+      - '(variable_declaration (const) $N:identifier $V:__call)': '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N (__declaration) (__rhs $V)))'
+      - '(variable_declaration (const) $N:identifier ("=") $V:identifier)': '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N (__declaration) (__rhs @$V $V)))'
+      - '(variable_declaration (const) $N:identifier $$$V)': '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N $$$V))'
+      - '(variable_declaration (var) $N:identifier $V:__call)': '(zig_var (__def (__defname @$N) (__variable)) (__binding @$N (__declaration) (__rhs $V)))'
+      - '(variable_declaration (var) $N:identifier ("=") $V:identifier)': '(zig_var (__def (__defname @$N) (__variable)) (__binding @$N (__declaration) (__rhs @$V $V)))'
+      - '(variable_declaration (var) $N:identifier $$$V)': '(zig_var (__def (__defname @$N) (__variable)) (__binding @$N $$$V))'
+      - '(%branches $$$X)': '(__ssa_branch (__ssa_arm $$$X))'
+      - '(%loops $$$X)': '%loop($$$X)'
+      - '(function_declaration name: $N:identifier $P:parameters type:? $RT:identifier body: $B:block)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
+      - '(function_declaration name: $N:identifier $P:parameters $$$R)': '(__def (__defname @$N) (__function) $P)'
+      - '(test_declaration (string $S:string_content) $B:block)': '(__def (__defname @$S) (__function) $B)'
+      - '(test_declaration $B:block)': '(__def (__defname "test") (__function) $B)'
+  - stage: ssa-cleanup
+    rewrite:
+      - '(block $$$B)': '(__scope $$$B)'
+      - '(__ssa_return $V:identifier)': '%return_value($V)'
+  - stage: tag-defs
+    rewrite:
+      - use: function_def_tags
+      - use: type_def_tags
+      - '(__def (__field_def))': '#value=true'
+      - '(__def (__variable))': '#value=true'
+      - '(__def (__constant))': '#value=true'
+  - use: tag_file_dir
+  - use: resolve_paths
+
+project:
+  - stage: roots
+    rewrite:
+      - use: src_root
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #file_path=@$M #language=@$M | split_last(".") | map("zig:zig")'
+      - use: def_fqn_dotted_except_impl
+  - use: def_types
+  - use: display_wildcard_imports

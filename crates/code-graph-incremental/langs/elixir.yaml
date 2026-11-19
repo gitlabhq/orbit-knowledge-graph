@@ -1,0 +1,90 @@
+import: [canonical, display, shapes]
+
+data:
+  callable_kinds: [__function, __method, __lambda, __enum_variant]
+  builtins: [abs, apply, binary_part, bit_size, byte_size, ceil, div, elem, exit, floor, hd, inspect,
+    is_atom, is_binary, is_bitstring, is_boolean, is_float, is_function, is_integer, is_list, is_map,
+    is_map_key, is_nil, is_number, is_pid, is_port, is_reference, is_tuple, length, make_ref, map_size,
+    max, min, node, put_elem, raise, rem, round, self, send, spawn, spawn_link, spawn_monitor, struct,
+    struct!, throw, tl, trunc, tuple_size]
+  stdlib: [Kernel, Bitwise, Enum, Access, Agent, Application, Atom, Base, Calendar, Code, Date, DateTime,
+    DynamicSupervisor, Exception, File, Float, Function, GenServer, IO, Integer, Keyword, List, Logger,
+    Macro, Map, MapSet, Module, NaiveDateTime, Node, OptionParser, Path, Port, Process, Protocol, Range,
+    Record, Regex, Registry, Stream, String, StringIO, Supervisor, System, Task, Time, Tuple, URI, Version]
+  providers:
+  - [Kernel, '%builtins']
+  - [Bitwise, band, bnot, bor, bsl, bsr, bxor]
+  - [Enum, 'all?', 'any?', at, chunk_by, chunk_every, concat, count, dedup, drop, each, 'empty?', fetch,
+    fetch!, filter, find, find_index, flat_map, frequencies, group_by, into, join, map, max, min, reduce,
+    reject, reverse, sort, sort_by, split, sum, take, to_list, uniq, uniq_by, unzip, with_index, zip]
+  lookup_from: [__source_root]
+
+canonicalize:
+  - stage: imports
+    rewrite:
+      - '(call target: (identifier "alias") (arguments (dot left: $L:alias right: (tuple $$$M:alias))))': '(__import (__source @$L) (__source_path @$L | replace(".", "/")) $$$M->__name) #import_type=Alias'
+      - '(call target: (identifier "alias") (arguments $A:alias (keywords (pair value: $T:alias))))': '(__import (__source @$A | regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A | regex_replace("(^|\.)[^.]+$", "") | replace(".", "/")) (__name @$A | split_last(".") (__alias @$T))) #import_type=Alias'
+      - '(call target: (identifier "alias") (arguments $A:alias))': '(__import (__source @$A | regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A | replace(".", "/")) (__name @$A | split_last("."))) #import_type=Alias'
+      - '(call target: (identifier "import") (arguments $A:alias $$$R))': '(__import (__source @$A) (__source_path @$A | replace(".", "/")) (__name @$A (__ssa_hint "*"))) #import_type=Import'
+      - '(call target: (identifier "require") (arguments $A:alias $$$R))': '(__import (__source @$A | regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A | replace(".", "/")) (__name @$A | split_last("."))) #import_type=Require'
+      - '(call target: (identifier "use") (arguments $A:alias $$$R))': '(__import (__source @$A | regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A | replace(".", "/")) (__name @$A | split_last("."))) #import_type=Use'
+  - stage: defs
+    rewrite:
+      - '(source $$$C)': '%source_file($$$C)'
+      - '(call target: (identifier "defmodule") (arguments $A:alias) (do_block $$$B))': '(__def (__defname @$A) (__class) $$$B)'
+      - '(call target: (identifier "defprotocol") (arguments $A:alias) (do_block $$$B))': '(__def (__defname @$A) (__trait) $$$B)'
+      - '(call target: (identifier "defimpl") (arguments $A:alias (keywords (pair key: (keyword) value: $T:alias))) (do_block $$$B))': '(__def (__defname @$T) (__impl) (__supertype @$A) $$$B)'
+      - '(call target: (identifier "def") (arguments (call target: $N:identifier $P:arguments)) $B:do_block)': '(__def (__defname @$N) (__function) $P $B)'
+      - '(call target: (identifier "def") (arguments (call target: $N:identifier $P:arguments) $K:keywords))': '(__def (__defname @$N) (__function) $P $K)'
+      - '(call target: (identifier "def") (arguments (binary_operator left: (call target: $N:identifier $P:arguments))) $B:do_block)': '(__def (__defname @$N) (__function) $P $B)'
+      - '(call target: (identifier "defp") (arguments (binary_operator left: (call target: $N:identifier $P:arguments))) $B:do_block)': '(__def (__defname @$N) (__function) $P $B)'
+      - '(call target: (identifier "def") (arguments $N:identifier) $B:do_block)': '(__def (__defname @$N) (__function) $B)'
+      - '(call target: (identifier "def") (arguments $N:identifier $K:keywords))': '(__def (__defname @$N) (__function) $K)'
+      - '(call target: (identifier "defp") (arguments (call target: $N:identifier $P:arguments)) $B:do_block)': '(__def (__defname @$N) (__function) $P $B)'
+      - '(call target: (identifier "defp") (arguments (call target: $N:identifier $P:arguments) $K:keywords))': '(__def (__defname @$N) (__function) $P $K)'
+      - '(call target: (identifier "defp") (arguments $N:identifier) $B:do_block)': '(__def (__defname @$N) (__function) $B)'
+      - '(call target: (identifier "defp") (arguments $N:identifier $K:keywords))': '(__def (__defname @$N) (__function) $K)'
+      - '(call target: (identifier "defmacro") (arguments (call target: $N:identifier $P:arguments)) $B:do_block)': '(__def (__defname @$N) (__function) $P $B)'
+      - '(call target: (identifier "if") $$$X)': '(__ssa_branch (__ssa_arm $$$X))'
+      - '(call target: (identifier "unless") $$$X)': '(__ssa_branch (__ssa_arm $$$X))'
+      - '(call target: (identifier "case") $$$X)': '(__ssa_branch (__ssa_arm $$$X))'
+      - '(call target: (identifier "cond") $$$X)': '(__ssa_branch (__ssa_arm $$$X))'
+      - '(call target: (identifier "with") $$$X)': '(__ssa_branch (__ssa_arm $$$X))'
+      - '(call target: (identifier "for") $$$X)': '%loop($$$X)'
+  - stage: retag-calls
+    rewrite:
+      - '(call target: (dot left: $M:alias right: $F:identifier) $A:arguments)': '(ex_ref (__import (__source @$M) (__source_path @$M | replace(".", "/")) (__name @$M | split_last("."))) (__call (__callee (__member @$F (__object @$M | split_last(".") $M))) $A)) #import_type@__import=Module'
+      - '(call target: (dot left: $M:identifier right: $F:identifier) $A:arguments)': '(__call (__callee %member_text($F, $M)) $A)'
+      - '(call target: $F:identifier $A:arguments $$$B)': '(__call (__callee @$F $F) $A $$$B)'
+  - stage: lexical-scopes
+    rewrite:
+      - '(do_block $$$B)': '(__scope $$$B) #hoisted=true'
+  - stage: tag-defs
+    rewrite:
+      - '(__def (__class))': '#declares_type=true #value=true #exports=$ROOT | child_sym("__defname") | split_last(".")'
+      - use: function_def_tags
+      - '(__def (__class))': '#value=true #declares_type=true #scoped=true #hoisted=true'
+      - '(__def (__lambda))': '#callable=true'
+      - '(__def (__enum_variant))': '#callable=true #value=true'
+      - '(__def (__struct))': '#value=true #declares_type=true #scoped=true'
+      - use: trait_def_tags
+  - use: tag_file_dir
+  - use: resolve_paths
+  - stage: weak-imports
+    rewrite:
+      - '(__import)': '#weak=true'
+      - '(__import_type)': '#weak=true'
+
+project:
+  - stage: roots
+    rewrite:
+      - '(__dir "lib" $$$REST)': '(__dir "lib" (__source_root) $$$REST)'
+      - '(__dir "test" $$$REST)': '(__dir "test" (__source_root) $$$REST)'
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #file_path=@$M #language=@$M | split_last(".") | map("ex:elixir", "exs:elixir")'
+      - use: def_fqn_dotted_except_impl
+  - use: def_types
+  - use: display_imports

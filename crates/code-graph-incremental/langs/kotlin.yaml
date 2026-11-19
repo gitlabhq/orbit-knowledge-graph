@@ -1,0 +1,160 @@
+import: [canonical, display, roots, shapes, statements]
+
+data:
+  callable_kinds: [__function, __method, __class, __lambda, __enum_variant, __property]
+  kotlin_symbols: [require, requireNotNull, check, checkNotNull, error, TODO, lazy, run, with, repeat,
+    arrayOf, assert, arrayOfNulls, booleanArrayOf, byteArrayOf, charArrayOf, doubleArrayOf, floatArrayOf,
+    intArrayOf, longArrayOf, shortArrayOf, runCatching, synchronized, Pair, Triple, Result, Unit, Any,
+    String, Boolean, Byte, Char, Double, Float, Int, Long, Short, Array, BooleanArray, ByteArray, CharArray,
+    DoubleArray, FloatArray, IntArray, LongArray, ShortArray]
+  io_symbols: [print, println, readLine, readln, readlnOrNull]
+  collections_symbols: [listOf, setOf, mapOf, mutableListOf, mutableSetOf, mutableMapOf, emptyList, emptySet,
+    emptyMap, setOfNotNull, listOfNotNull, linkedMapOf, linkedSetOf, hashMapOf, hashSetOf, buildList,
+    buildMap, buildSet]
+  sequences_symbols: [sequenceOf, emptySequence]
+  builtins: ['%kotlin_symbols', '%io_symbols', '%collections_symbols', '%sequences_symbols']
+  stdlib: [javax, jdk, kotlin/io, kotlin/collections, kotlin/sequences, kotlin/math]
+  external: [java, kotlin]
+  providers:
+  - [kotlin, '%kotlin_symbols']
+  - [kotlin/io, '%io_symbols']
+  - [kotlin/collections, '%collections_symbols']
+  - [kotlin/sequences, '%sequences_symbols']
+  - [kotlin/math, abs, acos, acosh, asin, asinh, atan, atan2, atanh, cbrt, ceil, cos, cosh, exp, expm1,
+    floor, hypot, ln, ln1p, log, log10, log2, max, min, round, sign, sin, sinh, sqrt, tan, tanh, truncate]
+  lookup_from: [__source_root]
+  params: [class_parameter, parameter]
+  loops: [for_statement, while_statement, do_while_statement]
+
+canonicalize:
+  - stage: imports
+    rewrite:
+      - '(import_header $I:identifier (import_alias $A:type_identifier))': '(__import (__source @$I | regex_replace("\.[^.]+$", "") $I) (__source_path @$I | replace(".", "/")) (__name @$I | split_last(".") (__alias @$A)))'
+      - '(import_header $I:identifier (wildcard_import))': '(__import (__source @$I $I) (__source_path @$I | replace(".", "/")) (__name "*"))'
+      - '(import_header $I:identifier)': '(__import (__source @$I | regex_replace("\.[^.]+$", "") $I) (__source_path @$I | replace(".", "/")) (__name @$I | split_last(".")))'
+  - stage: attach-getters
+    rewrite:
+      - '(source_file $$$A $P:property_declaration $G:getter $$$B)': '(source_file @$ROOT $$$A $P { $G } $$$B)'
+      - '(class_body $$$A $P:property_declaration $G:getter $$$B)': '(class_body $$$A $P { $G } $$$B)'
+  - stage: normalize
+    rewrite:
+      - '(callable_reference $N:simple_identifier)': '(__call (__callee @$N))'
+      - '(source_file $$$C)': '%source_file($$$C)'
+      - '(package_header $I:identifier)': '(kt_pkg (__package @$I $I) (__module_export (__import (__source @$I) (__source_path @$I | replace(".", "/") | regex_replace("$", "/*")) (__name "*"))))'
+      - '(jump_expression (throw) $$$V)': '(__ssa_branch $$$V)'
+      - '(null_literal)': '(__ssa_branch)'
+      - '(jump_expression (return) $$$V)': '(__ssa_return $$$V)'
+      - '(user_type $A:type_identifier $B:type_identifier $C:type_identifier $D:type_identifier)': '$ROOT'
+      - '(user_type $O:type_identifier $I:type_identifier $T:type_identifier)': '(__member @$T (__object %member_text($I, $O)))'
+      - '(user_type $O:type_identifier $T:type_identifier)': '%member_text($T, $O)'
+      - '(user_type $T:type_identifier)': '(type_identifier @$T)'
+      - '(annotation (constructor_invocation $T:__member $A:value_arguments))': '(__decorator $T $A)'
+      - '(annotation $T:__member)': '(__decorator $T)'
+      - '(annotation (constructor_invocation $T:type_identifier $A:value_arguments))': '(__decorator @$T $A)'
+      - '(annotation $T:type_identifier)': '(__decorator @$T)'
+      - '(navigation_expression (this_expression) (navigation_suffix $N:simple_identifier))': '(__ivar @$N $N)'
+      - '(delegation_specifier (constructor_invocation $T:__member $A:value_arguments))': '(__supertype $T)'
+      - '(delegation_specifier $T:__member)': '(__supertype $T)'
+      - '(delegation_specifier (constructor_invocation $T:type_identifier $A:value_arguments))': '(__supertype @$T)'
+      - '(delegation_specifier $T:type_identifier)': '(__supertype @$T)'
+      - '(class_parameter (binding_pattern_kind) $N:simple_identifier $T:__member)': '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee $T))))) (__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T)))))'
+      - '(class_parameter (binding_pattern_kind) $N:simple_identifier $T:type_identifier)': '(kt_prop (__def (__defname @$N $N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
+      - '(class_parameter (binding_pattern_kind) $N:simple_identifier)': '(__def (__defname @$N) (__property))'
+      - '(%params $N:simple_identifier $T:__member)': '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
+      - '(class_parameter $N:simple_identifier $T:type_identifier)': '%typed_param($N, $T)'
+      - '(class_parameter $N:simple_identifier)': '(__binding @$N)'
+      - '(parameter $N:simple_identifier $T:type_identifier)': '(__binding @$N $N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
+      - '(parameter $N:simple_identifier)': '(__binding @$N)'
+      - '(catch_block $N:simple_identifier $T:type_identifier $$$B)': '(catch_block %typed_param($N, $T) $$$B)'
+  - stage: retag-expressions
+    rewrite:
+      - '(parenthesized_expression ("(") $E (")"))': '$E'
+      - '(additive_expression $L:simple_identifier ("+") $R)': '(__call (__callee (__member "plus" (__object @$L $L))) (__args $R))'
+      - '(additive_expression $L ("+") $R)': '(__call (__callee (__member "plus" (__object $L))) (__args $R))'
+      - '(navigation_expression $O:__ivar (navigation_suffix $M:simple_identifier))': '%member($M, $O)'
+      - '(navigation_expression $O:__member (navigation_suffix $M:simple_identifier))': '%member($M, $O)'
+      - '(navigation_expression $O:__call (navigation_suffix $M:simple_identifier))': '%member($M, $O)'
+      - '(navigation_expression (super_expression) (navigation_suffix $M:simple_identifier))': '(__member @$M (__object (__ivar "super")))'
+      - '(navigation_expression $O (navigation_suffix $M:simple_identifier))': '%member_text($M, $O)'
+      - use: suffix_calls
+  - stage: property-receivers
+    rewrite:
+      - '(__call (__callee $M:(__member (__object $P:__member))) $$$A)': '(__call (__callee (__member @$M (__object (__call (__property) (__callee $P))))) $$$A)'
+  - stage: classify
+    rewrite:
+      - '(property_declaration (binding_pattern_kind) (multi_variable_declaration $$$V:variable_declaration) $E:__call)': '(__destructure (__rhs $E) $$$V->__binding)'
+      - '(property_declaration (binding_pattern_kind) (multi_variable_declaration $$$V:variable_declaration) $E:simple_identifier)': '(__destructure (__rhs @$E $E) $$$V->__binding)'
+      - '(property_declaration (binding_pattern_kind) $R:type_identifier (variable_declaration $N:simple_identifier) $$$V)': '(__def (__defname @$R) (__impl) (__def (__defname @$N) (__property) $$$V))'
+      - '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:__member) $G:getter)': '(__def (__defname @$N) (__property) (__ssa_return_type $T) $G)'
+      - '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T?:type_identifier) $G:getter)': '(__def (__defname @$N) (__property) (__ssa_return_type? @$T) $G)'
+      - '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:__member) $$$V)': '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee $T))))) (__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__type) (__callee $T)))) $$$V)'
+      - '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:type_identifier) $V:__call)': '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T))))) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)))'
+      - '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:type_identifier))': '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T))))) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
+      - '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $V:__call)': '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs $V))) (__binding @$N (__declaration) (__rhs $V)))'
+      - '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $V:__ssa_branch)': '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs $V)))'
+      - '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $V:simple_identifier)': '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs @$V $V)))'
+      - '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $$$V)': '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs $$$V)))'
+      - '(assignment (directly_assignable_expression $N:__ivar) $R:__call)': '(__binding $N (__rhs $R))'
+      - '(assignment (directly_assignable_expression $N:__ivar) $R)': '(__binding $N (__rhs @$R $R))'
+      - '(assignment (directly_assignable_expression $N:simple_identifier) $R:__call)': '%bind_call($N, $R)'
+      - '(assignment (directly_assignable_expression $N:simple_identifier) $R)': '%bind($N, $R)'
+      - '(if_expression condition: $C consequence: $Q alternative:? $A)': '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
+      - '(when_expression $S?:when_subject $$$E:when_entry)': '(__ssa_branch $S $$$E->__ssa_arm)'
+      - '(try_expression $B:statements $$$ALTS:catch_block $F?:finally_block)': '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm $F)'
+      - '(function_body ("=") $V)': '(function_body (__ssa_return $V))'
+      - '(%loops $$$C)': '%loop($$$C)'
+      - '(enum_entry $N:simple_identifier $$$R)': '(__def (__defname @$N) (__enum_variant) $$$R)'
+      - '(function_declaration $M?:modifiers $N:simple_identifier $P:function_value_parameters $RT:__member $B?:function_body)': '(__def (__defname @$N) (__function) (__ssa_return_type $RT) $M $P $B)'
+      - '(function_declaration $M?:modifiers $R:type_identifier $N:simple_identifier $P:function_value_parameters $RT?:type_identifier $B?:function_body)': '(__def (__defname @$R) (__impl) (__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M (__binding "this" (__ssa_typed @$R)) $P $B))'
+      - '(function_declaration $M?:modifiers $N:simple_identifier $P:function_value_parameters $RT?:type_identifier $B?:function_body)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M $P $B)'
+      - '(companion_object $N:type_identifier $B:class_body)': '(__def (__defname @$N) (__class) (__impl) $B)'
+      - '(companion_object $B:class_body)': '(__def (__defname "Companion") (__class) (__impl) $B)'
+      - '(object_declaration $N:type_identifier $$$D:__supertype $B?:class_body)': '(__def (__defname @$N) (__class) $$$D $B)'
+      - '(class_declaration $M?:modifiers (interface) $N:type_identifier $$$D:__supertype $B?:class_body)': '(__def (__defname @$N) (__interface) $M $$$D $B)'
+      - '(class_declaration $M?:modifiers (enum) $N:type_identifier $P?:primary_constructor $$$D:__supertype $B?:enum_class_body)': '(__def (__defname @$N) (__enum @$N) $M $P $$$D $B)'
+      - '(class_declaration $M?:modifiers $N:type_identifier $P?:primary_constructor $S:__supertype $$$D:__supertype $B?:class_body)': '(__def (__defname @$N) (__class) $M $P $S $$$D (__binding (__ivar "super") (__rhs (__call @$S->__callee))) $B)'
+      - '(class_declaration $M?:modifiers $N:type_identifier $P?:primary_constructor $B?:class_body)': '(__def (__defname @$N) (__class) $M $P $B)'
+  - stage: data-components
+    rewrite:
+      - '(__def $$$A (modifiers (class_modifier "data")) $$$B (primary_constructor $$$P) $$$C)': '(__def $$$A (modifiers (class_modifier "data")) $$$B (__positional $$$P) $$$C)'
+  - stage: ssa-cleanup
+    rewrite:
+      - '(statements $$$B)': '(__scope $$$B)'
+      - '(__ssa_return $V:simple_identifier)': '%return_value($V)'
+  - stage: tag-defs
+    rewrite:
+      - '(__def (__property))': '#callable=true #value=true #scoped=true'
+      - use: function_def_tags
+      - use: type_def_tags
+      - use: interface_def_tags
+  - use: tag_file_dir
+  - use: resolve_paths
+
+project:
+  - stage: roots
+    rewrite:
+      - '(__dir "kotlin" $$$REST)': '(__dir "kotlin" (__source_root) $$$REST)'
+      - use: src_root
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #fqn=$M | child_sym("__package") #file_path=@$M #language=@$M | split_last(".") | map("kt:kotlin", "kts:kotlin")'
+      - '(__def (__impl) !(__class))': '#entity=Definition #file_path=$ROOT | ancestor_tag("file_path")'
+      - '(__def !(__impl))': '#entity=Definition #fqn=$ROOT | ancestor_tag("fqn") | concat(".", $ROOT | child_sym("__defname")) | keep_last(".", 64, 4096) #file_path=$ROOT | ancestor_tag("file_path")'
+      - '(__def (__class) (__impl))': '#entity=Definition #fqn=$ROOT | ancestor_tag("fqn") | concat(".", $ROOT | child_sym("__defname")) | keep_last(".", 64, 4096) #file_path=$ROOT | ancestor_tag("file_path")'
+  - stage: def_type
+    rewrite:
+      - use: function_def_types
+      - '(__def (__class))': '#def_type=Class'
+      - '(__def (__struct))': '#def_type=Struct'
+      - '(__def (__interface))': '#def_type=Interface'
+      - '(__def (__enum))': '#def_type=Enum'
+      - '(__def (__enum_variant))': '#def_type=EnumVariant'
+      - '(__def (__trait))': '#def_type=Trait'
+      - '(__def (__impl) !(__class))': '#def_type=Impl'
+      - use: value_def_types
+      - '(__def (__field_def))': '#def_type=Field'
+      - '(__def (__property))': '#def_type=Property'
+      - '(__def (__type_alias))': '#def_type=TypeAlias'
+  - use: display_wildcard_imports

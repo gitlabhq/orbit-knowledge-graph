@@ -1,0 +1,71 @@
+import: [canonical, display, shapes]
+
+data:
+  callable_kinds: [__function, __method, __class, __lambda, __enum_variant, __variable]
+
+canonicalize:
+  - stage: normalize
+    rewrite:
+      - '(source_file $$$C)': '%source_file($$$C)'
+  - stage: drop-self-expansions
+    repeat: true
+    rewrite:
+      - '(env_pair name: $N value: (unquoted_string $$$A (expansion $X:variable) $$$B)) when @$N | eq(@$X)': '(env_pair name: $N value: (unquoted_string $$$A $$$B))'
+      - '(env_pair name: $N value: (unquoted_string $$$A (expansion $X:variable) $$$B)) when @$N | ne(@$X)': '(env_pair name: $N value: (unquoted_string $$$A (__expansion $X) $$$B))'
+      - '(env_pair name: $N value: (double_quoted_string $$$A (expansion $X:variable) $$$B)) when @$N | eq(@$X)': '(env_pair name: $N value: (double_quoted_string $$$A $$$B))'
+      - '(env_pair name: $N value: (double_quoted_string $$$A (expansion $X:variable) $$$B)) when @$N | ne(@$X)': '(env_pair name: $N value: (double_quoted_string $$$A (__expansion $X) $$$B))'
+      - '(arg_pair name: $N default: (unquoted_string $$$A (expansion $X:variable) $$$B)) when @$N | eq(@$X)': '(arg_pair name: $N default: (unquoted_string $$$A $$$B))'
+      - '(arg_pair name: $N default: (unquoted_string $$$A (expansion $X:variable) $$$B)) when @$N | ne(@$X)': '(arg_pair name: $N default: (unquoted_string $$$A (__expansion $X) $$$B))'
+      - '(arg_pair name: $N default: (double_quoted_string $$$A (expansion $X:variable) $$$B)) when @$N | eq(@$X)': '(arg_pair name: $N default: (double_quoted_string $$$A $$$B))'
+      - '(arg_pair name: $N default: (double_quoted_string $$$A (expansion $X:variable) $$$B)) when @$N | ne(@$X)': '(arg_pair name: $N default: (double_quoted_string $$$A (__expansion $X) $$$B))'
+  - stage: expansions
+    rewrite:
+      - '$V:variable': '(__call (__callee @$V $V))'
+  - stage: pair-defs
+    rewrite:
+      - '(arg_pair name: $N default:? $V)': '(__def (__defname @$N) (__variable) $V)'
+      - '(env_pair name: $N value:? $V)': '(__def (__defname @$N) (__variable) $V)'
+  - stage: from-heads
+    rewrite:
+      - '(from_instruction (image_spec name: $N tag: (image_tag $$$T)) as: $A) when @$N | eq(@$A)': '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N | prepend("image:")))) (__call (__callee @$N | prepend("image:") $N)) $$$T)'
+      - '(from_instruction (image_spec name: $N) as: $A) when @$N | eq(@$A)': '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N | prepend("image:")))) (__call (__callee @$N | prepend("image:") $N)))'
+      - '(from_instruction (image_spec name: $N tag: (image_tag $$$T)) as: $A)': '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N | prepend("image:")))) (__call (__callee @$N | prepend("image:") $N)) (__call (__callee @$N $N)) $$$T)'
+      - '(from_instruction (image_spec name: $N) as: $A)': '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N | prepend("image:")))) (__call (__callee @$N | prepend("image:") $N)) (__call (__callee @$N $N)))'
+      - '(from_instruction (image_spec name: $N tag: (image_tag $$$T)))': '(__from (__defname @$ROOT | child_sym("image_spec") | concat("#", $ROOT | sibling_index) | regex_replace("(:[^/:#@]*)?(@[^#]*)?#", "#") | prepend("stage:")) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N | prepend("image:")))) (__call (__callee @$N | prepend("image:") $N)) (__call (__callee @$N $N)) $$$T)'
+      - '(from_instruction (image_spec name: $N))': '(__from (__defname @$ROOT | child_sym("image_spec") | concat("#", $ROOT | sibling_index) | regex_replace("(:[^/:#@]*)?(@[^#]*)?#", "#") | prepend("stage:")) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N | prepend("image:")))) (__call (__callee @$N | prepend("image:") $N)) (__call (__callee @$N $N)))'
+  - stage: copy-from
+    rewrite:
+      - '(copy_instruction $P:(param "^--from="))': '(__call (__callee @$P | strip("--from=") $P))'
+  - stage: group-stages
+    repeat: true
+    rewrite:
+      - '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)': '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+  - stage: group-last-stage
+    rewrite:
+      - '(__source_file $$$PRE (__from $$$H) $$$BODY)': '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY))'
+  - stage: group-leftover-stages
+    rewrite:
+      - '(__from $$$H)': '(__def $$$H)'
+  - stage: tag-defs
+    rewrite:
+      - use: function_def_tags
+      - use: class_lambda_def_tags
+      - '(__def (__enum_variant))': '#callable=true #value=true #scoped=true'
+      - '(__def (__struct))': '#value=true #declares_type=true #scoped=true'
+      - '(__def (__variable))': '#callable=true #value=true #scoped=true'
+      - use: trait_def_tags
+  - use: tag_file_dir
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #fqn=@$M | stem | split_last("/") #file_path=@$M #language=@$M | split_last("/") | regex_replace("(?i)^(.*)\.(tt|erb|template|tmpl|tpl|j2|jinja|jinja2|in|diff|patch|md|txt|bak|orig|dockerignore|yml|yaml|json|toml|lock)$", "_.${2}") | regex_replace("(?i)^((docker|container)file(\..*)?|.*\.(docker|container)file)$", "dockerfile.dockerfile") | split_last(".")'
+      - use: def_fqn_dotted_except_impl
+  - use: def_types
+  - stage: imports
+    rewrite:
+      - use: import_entity
+      - '(__import)': '#import_type=Source'
+      - '(__name "*")': '#resolved=$ROOT | has_incoming("Imports")'
+      - use: aliased_import_type
+      - '(__name)': '#resolved=$ROOT | has_incoming("Imports")'

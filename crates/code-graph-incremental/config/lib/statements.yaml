@@ -1,0 +1,17 @@
+import: [shapes]
+
+stages:
+  canonical_callee_calls:
+    - '(call_expression function: $F:__ivar arguments: $A)': '(__call (__callee $F) $A)'
+    - '(call_expression function: $F:__member arguments: $A)': '(__call (__callee $F) $A)'
+  c_like_assignments:
+    - '(assignment_expression left: $N:__ivar right: $R:__call)': '(__binding $N (__rhs $R))'
+    - '(assignment_expression left: $N:__ivar right: $R)': '(__binding $N (__rhs @$R $R))'
+    - '(assignment_expression left: $N:identifier right: $R:__call)': '%bind_call($N, $R)'
+    - '(assignment_expression left: $N:identifier right: $R)': '%bind($N, $R)'
+    - '(if_statement condition: $C consequence: $Q alternative:? $A)': '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
+  suffix_calls:
+    - '(call_expression $F:__ivar (call_suffix $$$A))': '(__call (__callee $F) $$$A)'
+    - '(call_expression $F:__member (call_suffix $$$A))': '(__call (__callee $F) $$$A)'
+    - '(call_expression $F:simple_identifier (call_suffix $$$A))': '%call($F, $$$A)'
+    - '(call_expression $F (call_suffix $$$A))': '%call($F, $$$A)'

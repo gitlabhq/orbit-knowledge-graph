@@ -1,0 +1,105 @@
+import: [canonical, display, roots, shapes, statements]
+
+data:
+  value_kinds: [__class, __struct, __trait, __enum, __enum_variant, __field_def, __property, __constant,
+    __static_constant, __variable, __type_alias, __interface, __function]
+  builtins: [assert, assume, classOf, identity, implicitly, locally, print, printf, println, require,
+    summon, synchronized, valueOf]
+  stdlib: [scala, javax, jdk, scala/Predef, scala/math]
+  external: [java]
+  providers:
+  - [scala/Predef, '%builtins']
+  - [scala/math, abs, acos, asin, atan, atan2, cbrt, ceil, cos, cosh, exp, expm1, floor, hypot, log, log10,
+    log1p, max, min, pow, random, rint, round, signum, sin, sinh, sqrt, tan, tanh, toDegrees, toRadians,
+    ulp]
+  lookup_from: [__source_root]
+  value_defs: [val_definition, var_definition]
+  loops: [for_expression, while_expression]
+  classes: [class_definition, object_definition]
+
+canonicalize:
+  - stage: import-aliases
+    rewrite:
+      - '(arrow_renamed_identifier name: $N:identifier alias: $A:identifier)': '(arrow_renamed_identifier @$N (__alias @$A))'
+  - stage: import-selectors
+    rewrite:
+      - '(import_declaration $$$P:identifier (namespace_selectors $$$S:identifier|arrow_renamed_identifier (namespace_wildcard)))': '(sc_imports (__import (__source @$ROOT | regex_replace("^import\s+", "") | regex_replace("\.\{.*$", "")) (__source_path @$ROOT | regex_replace("^import\s+", "") | regex_replace("\.\{.*$", "") | replace(".", "/")) $$$S->__name) (__import (__source @$ROOT | regex_replace("^import\s+", "") | regex_replace("\.\{.*$", "")) (__source_path @$ROOT | regex_replace("^import\s+", "") | regex_replace("\.\{.*$", "") | replace(".", "/")) (__name "*"))) #import_type@__import=GroupedImport'
+      - '(import_declaration $$$P:identifier (namespace_selectors $$$S:identifier|arrow_renamed_identifier))': '(__import (__source @$ROOT | regex_replace("^import\s+", "") | regex_replace("\.\{.*$", "")) (__source_path @$ROOT | regex_replace("^import\s+", "") | regex_replace("\.\{.*$", "") | replace(".", "/")) $$$S->__name) #import_type=GroupedImport'
+  - stage: import-wildcards
+    rewrite:
+      - '(import_declaration $$$P:identifier (namespace_wildcard))': '(__import (__source @$ROOT | regex_replace("^import\s+", "") | regex_replace("\._$", "")) (__source_path @$ROOT | regex_replace("^import\s+", "") | regex_replace("\._$", "") | replace(".", "/")) (__name "*")) #import_type=Import'
+  - stage: import-simple
+    rewrite:
+      - '(import_declaration $$$P:identifier)': '(__import (__source @$ROOT | regex_replace("^import\s+", "") | regex_replace("\.[^.]+$", "")) (__source_path @$ROOT | regex_replace("^import\s+", "") | replace(".", "/")) (__name @$ROOT | split_last("."))) #import_type=Import'
+  - stage: normalize
+    rewrite:
+      - '(compilation_unit $$$C)': '%source_file($$$C)'
+      - '(package_clause name: $N:package_identifier)': '(sc_pkg (__package @$N $N) (__module_export (__import (__source @$N) (__source_path @$N | replace(".", "/") | regex_replace("$", "/*")) (__name "*")))) #import_type@__import=Import'
+      - '(return_expression $$$V)': '(__ssa_return $$$V)'
+      - '(generic_type type: $T:type_identifier)': '(type_identifier @$T)'
+      - '(field_expression value: (this) field: $F:identifier)': '(__ivar @$F)'
+      - '(extends_clause type: $T:type_identifier $$$W:type_identifier)': '(extends_clause (__supertype @$T) $$$W=>__supertype)'
+      - '(class_parameter name: $N:identifier type: $T:type_identifier)': '(sc_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
+      - '(class_parameter name: $N:identifier)': '(__def (__defname @$N) (__property))'
+      - '(parameter name: $N:identifier type: $T:type_identifier)': '%typed_param($N, $T)'
+      - '(parameter name: $N:identifier)': '(__binding @$N)'
+  - stage: retag-refs
+    rewrite:
+      - '(field_expression value: $O:__ivar field: $F:identifier)': '%member($F, $O)'
+      - '(field_expression value: $O:__member field: $F:identifier)': '%member($F, $O)'
+      - '(field_expression value: $O:call_expression field: $F:identifier)': '%member($F, $O)'
+      - '(field_expression value: $O field: $F:identifier)': '%member_text($F, $O)'
+  - stage: retag-calls
+    rewrite:
+      - use: canonical_callee_calls
+      - '(call_expression function: $F:identifier arguments: $A)': '%call($F, $A) #implicit_self=true'
+      - '(call_expression function: $F arguments: $A)': '%call($F, $A)'
+      - '(instance_expression $T:type_identifier $A:arguments)': '%call($T, $A)'
+      - '(instance_expression $T:type_identifier)': '(__call (__callee @$T $T))'
+  - stage: classify
+    rewrite:
+      - '(postfix_expression $N:identifier (identifier "_"))': '(identifier @$N)'
+      - '(%value_defs pattern: $N:identifier type:? $T:type_identifier value: $V:__call)': '(__binding @$N (__declaration) (__ssa_typed? @$T) (__rhs $V))'
+      - '(val_definition pattern: $N:identifier type:? $T:type_identifier value: $V:__ssa_branch)': '(__binding @$N (__declaration) (__ssa_typed? @$T) (__rhs $V))'
+      - '(val_definition pattern: $N:identifier type:? $T:type_identifier value: $V)': '(__binding @$N (__declaration) (__ssa_typed? @$T) (__rhs @$V $V))'
+      - '(var_definition pattern: $N:identifier type:? $T:type_identifier value: $V)': '(__binding @$N (__declaration) (__ssa_typed? @$T) (__rhs @$V $V))'
+      - '(assignment_expression left: $N:identifier right: $R:__call)': '%bind_call($N, $R)'
+      - '(assignment_expression left: $N:identifier right: $R)': '%bind($N, $R)'
+      - '(throw_expression $$$V)': '(__ssa_branch $$$V)'
+      - '(if_expression condition: $C consequence: $Q alternative:? $A)': '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
+      - '(match_expression value: $V body: (case_block $$$C:case_clause))': '(__ssa_branch $V $$$C->__ssa_arm)'
+      - '(try_expression body: $B $$$ALTS:catch_clause|finally_clause)': '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm)'
+      - '(%loops body: $B)': '%loop($B)'
+      - '(function_definition $M?:modifiers name: $N:identifier $TP?:type_parameters parameters: $P return_type:? $RT:type_identifier body: $B)': '(__def (__defname @$N $N) (__function) (__ssa_return_type? @$RT) $M $P $B)'
+      - '(function_definition $M?:modifiers name: $N:identifier $TP?:type_parameters return_type:? $RT:type_identifier body: $B)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M $B)'
+      - '(function_declaration $M?:modifiers name: $N:identifier parameters:? $P return_type:? $RT:type_identifier)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M $P)'
+      - '(%classes $M?:modifiers name: $N:identifier $$$PRE (extends_clause $S:__supertype $$$W:__supertype) $B?:template_body)': '(__def (__defname @$N) (__class) $M $$$PRE $S $$$W (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
+      - '(class_definition $M?:modifiers name: $N:identifier $$$PRE $B?:template_body)': '(__def (__defname @$N) (__class) $M $$$PRE $B)'
+      - '(trait_definition $M?:modifiers name: $N:identifier $$$PRE $B?:template_body)': '(__def (__defname @$N) (__trait) $M $$$PRE $B)'
+      - '(object_definition $M?:modifiers name: $N:identifier $$$PRE $B?:template_body)': '(__def (__defname @$N) (__class) $M $$$PRE $B)'
+  - stage: ssa-cleanup
+    rewrite:
+      - '(block $$$B)': '(__scope $$$B) #hoisted=true'
+      - '(__ssa_return $V:identifier)': '%return_value($V)'
+  - stage: tag-defs
+    rewrite:
+      - '(__def (__function))': '#callable=true #value=true #scoped=true'
+      - '(__def (__method))': '#callable=true #value=true #scoped=true'
+      - use: type_def_tags
+      - '(__def (__property))': '#value=true'
+  - use: tag_file_dir
+  - use: resolve_paths
+
+project:
+  - stage: roots
+    rewrite:
+      - '(__dir "scala" $$$REST)': '(__dir "scala" (__source_root) $$$REST)'
+      - use: src_root
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #fqn=$M | child_sym("__package") #file_path=@$M #language=@$M | split_last(".") | map("scala:scala", "sc:scala")'
+      - use: def_fqn_dotted_except_impl
+  - use: def_types
+  - use: display_wildcard_imports

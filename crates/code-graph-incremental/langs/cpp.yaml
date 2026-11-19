@@ -1,0 +1,141 @@
+import: [c_family, canonical, display, roots, shapes, statements]
+
+data:
+  callable_kinds: [__function, __method, __class, __lambda, __enum_variant, __struct]
+  stdlib: [cstdio, cstdlib, cstring, cassert, cmath, cctype, algorithm, any, array, atomic, barrier, bit,
+    bitset, cerrno, cfenv, cfloat, charconv, chrono, cinttypes, climits, clocale, codecvt, compare, complex,
+    concepts, condition_variable, coroutine, csetjmp, csignal, cstdarg, cstddef, cstdint, ctime, cuchar,
+    cwchar, cwctype, deque, exception, execution, expected, filesystem, format, forward_list, fstream,
+    functional, future, initializer_list, iomanip, ios, iosfwd, iostream, istream, iterator, latch, limits,
+    list, locale, map, memory, memory_resource, mutex, new, numbers, numeric, optional, ostream, print,
+    queue, random, ranges, ratio, regex, scoped_allocator, semaphore, set, shared_mutex, source_location,
+    span, sstream, stack, stacktrace, stdexcept, stop_token, streambuf, string, string_view, syncstream,
+    system_error, thread, tuple, type_traits, typeindex, typeinfo, unordered_map, unordered_set, utility,
+    valarray, variant, vector, version]
+  providers:
+  - [cstdio, clearerr, fclose, feof, ferror, fflush, fgetc, fgetpos, fgets, fopen, fprintf, fputc, fputs,
+    fread, freopen, fscanf, fseek, fsetpos, ftell, fwrite, getc, getchar, perror, printf, putc, putchar,
+    puts, remove, rename, rewind, scanf, setbuf, setvbuf, snprintf, sprintf, sscanf, tmpfile, tmpnam,
+    ungetc, vfprintf, vfscanf, vprintf, vscanf, vsnprintf, vsprintf, vsscanf]
+  - [cstdlib, abort, abs, atexit, atof, atoi, atol, atoll, at_quick_exit, aligned_alloc, bsearch, calloc,
+    div, exit, free, getenv, labs, ldiv, llabs, lldiv, malloc, mblen, mbstowcs, mbtowc, qsort, quick_exit,
+    rand, realloc, srand, strtod, strtof, strtol, strtold, strtoll, strtoul, strtoull, system, wcstombs,
+    wctomb, _Exit]
+  - [cstring, memchr, memcmp, memcpy, memmove, memset, strcat, strchr, strcmp, strcoll, strcpy, strcspn,
+    strerror, strlen, strncat, strncmp, strncpy, strpbrk, strrchr, strspn, strstr, strtok, strxfrm]
+  - [cassert, assert]
+  - [cmath, abs, acos, asin, atan, atan2, ceil, cos, cosh, exp, exp2, expm1, fabs, floor, fmod, frexp,
+    hypot, ldexp, log, log10, log1p, log2, modf, pow, remainder, round, sin, sinh, sqrt, tan, tanh, trunc]
+  - [cctype, isalnum, isalpha, isblank, iscntrl, isdigit, isgraph, islower, isprint, ispunct, isspace,
+    isupper, isxdigit, tolower, toupper]
+  lookup_from: [__source_root]
+
+canonicalize:
+  - stage: imports
+    rewrite:
+      - '(preproc_include path: $S:string_literal)': '(__import (__source @$S $S) (__source_path @$S | regex_replace("^.", "") | regex_replace(".$", "") | prepend("./")) (__name "*"))'
+      - '(preproc_include path: $S:system_lib_string)': '(__import (__source @$S | strip("<") | strip_suffix(">")) (__source_path @$S | strip("<") | strip_suffix(">")) (__name "*"))'
+  - stage: normalize
+    rewrite:
+      - '(translation_unit $$$C)': '%source_file($$$C)'
+      - '(return_statement $$$V)': '(__ssa_return $$$V)'
+      - '(field_expression argument: (this) field: $F:field_identifier)': '(__ivar @$F)'
+      - '(base_class_clause $$$S:type_identifier)': '(base_class_clause $$$S=>__supertype)'
+      - '(template_type name: $T:type_identifier)': '(type_identifier @$T)'
+      - '(parameter_declaration type: $T:type_identifier declarator: $N:identifier)': '%typed_param($N, $T)'
+      - '(parameter_declaration type: $T:type_identifier declarator: (reference_declarator $N:identifier))': '%typed_param($N, $T)'
+      - '(parameter_declaration type: $T:type_identifier declarator: (pointer_declarator declarator: $N:identifier))': '%typed_param($N, $T)'
+      - '(parameter_declaration declarator: $N:identifier)': '(__binding @$N)'
+      - '(parameter_declaration declarator: (pointer_declarator declarator: $N:identifier))': '(__binding @$N)'
+      - '(parameter_declaration declarator: (reference_declarator $N:identifier))': '(__binding @$N)'
+      - '(enumerator name: $N:identifier)': '(__def (__defname @$N) (__enum_variant))'
+  - stage: retag-refs
+    rewrite:
+      - '(field_expression argument: $O:__ivar field: $F:field_identifier)': '%member($F, $O)'
+      - '(field_expression argument: $O:__member field: $F:field_identifier)': '%member($F, $O)'
+      - '(field_expression argument: $O field: (template_method name: $F:field_identifier))': '%member_text($F, $O)'
+      - '(field_expression argument: $O field: $F:field_identifier)': '%member_text($F, $O)'
+  - stage: retag-calls
+    rewrite:
+      - use: canonical_callee_calls
+      - '(call_expression function: (qualified_identifier scope: $S:namespace_identifier name: (qualified_identifier scope: $T:namespace_identifier name: (qualified_identifier scope: $U:namespace_identifier name: $N:identifier))) arguments: $A)': '(__call (__callee (__member @$N (__object (__member @$U (__object %member_text($T, $S)))))) $A)'
+      - '(call_expression function: (qualified_identifier scope: $S:namespace_identifier name: (qualified_identifier scope: $T:namespace_identifier name: $N:identifier)) arguments: $A)': '(__call (__callee (__member @$N (__object %member_text($T, $S)))) $A)'
+      - '(call_expression function: (qualified_identifier scope: $S:namespace_identifier name: $N:identifier) arguments: $A)': '(__call (__callee %member_text($N, $S)) $A)'
+      - '(call_expression function: (template_function name: $N:identifier) arguments: $A)': '%call($N, $A)'
+      - '(call_expression function: $F:identifier arguments: $A)': '%call($F, $A)'
+      - '(new_expression type: $T:type_identifier arguments:? $A)': '%call($T, $A)'
+  - stage: classify
+    rewrite:
+      - '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: (parenthesized_declarator (ms_call_modifier) $N:identifier) parameters: $P) body: $B)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
+      - '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: (parenthesized_declarator $N:identifier) parameters: $P) body: $B)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
+      - '(function_definition type:? $RT:type_identifier declarator: (attributed_declarator (function_declarator declarator: $N:identifier parameters: $P)) body: $B)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
+      - '(function_definition type:? $RT:type_identifier declarator: (pointer_declarator declarator: (function_declarator declarator: $Q:qualified_identifier parameters: $P)) body: $B)': '(__def (__defname @$Q $Q) (__function) (__ssa_return_type? @$RT) $P $B)'
+      - '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: $Q:qualified_identifier parameters: $P) body: $B)': '(__def (__defname @$Q $Q) (__function) (__ssa_return_type? @$RT) $P $B)'
+      - '(function_definition declarator: $Q:qualified_identifier body: $B)': '(__def (__defname @$Q | regex_replace("\s*\(\s*\)\s*(const)?\s*$", "") | regex_replace("\s*/\*[^*]*\*/\s*$", "") $Q) (__function) $B)'
+      - '(function_definition declarator: $C:operator_cast body: $B)': '(__def (__defname @$C | regex_replace("\s*\(\s*\)\s*(const)?\s*$", "") | regex_replace("\s*/\*[^*]*\*/\s*$", "") $C) (__function) $B)'
+      - '(declaration declarator: (function_declarator declarator: $N:identifier))': '(__defname @$N) #exports=@$N'
+      - '(declaration declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier)))': '(__defname @$N) #exports=@$N'
+      - '(field_declaration type:? $RT:type_identifier declarator: (function_declarator declarator: $N:field_identifier parameters: $P))': '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P)'
+      - '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: $N:field_identifier parameters: $P) body: $B)': '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P $B)'
+      - '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: $N:operator_name parameters: $P) body: $B)': '(__def (__defname @$N $N) (__method) (__ssa_return_type? @$RT) $P $B)'
+      - '(field_declaration type:? $RT:type_identifier declarator: (function_declarator declarator: $N:operator_name parameters: $P))': '(__def (__defname @$N $N) (__method) (__ssa_return_type? @$RT) $P)'
+      - '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: (qualified_identifier scope: $S:namespace_identifier name: $N:operator_name) parameters: $P) body: $B)': '(__def (__defname @$S) (__impl) (__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B))'
+      - '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: (qualified_identifier scope: $S:namespace_identifier name: $N:identifier) parameters: $P) body: $B)': '(__def (__defname @$S) (__impl) (__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B))'
+      - '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: $N:identifier parameters: $P) body: $B)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
+      - '(function_definition type:? $RT:type_identifier declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier parameters: $P)) body: $B)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
+      - '(function_definition type:? $RT:type_identifier declarator: (reference_declarator (function_declarator declarator: $N:identifier parameters: $P)) body: $B)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
+      - '(field_declaration type: $T:struct_specifier declarator: $N:field_identifier)': '(field_declaration $T (__def (__defname @$N) (__field_def)))'
+      - '(field_declaration type: $T:class_specifier declarator: $N:field_identifier)': '(field_declaration $T (__def (__defname @$N) (__field_def)))'
+      - '(field_declaration type: $T:type_identifier declarator: $N:field_identifier)': '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))))'
+      - '(field_declaration declarator: $N:field_identifier)': '(__def (__defname @$N) (__field_def))'
+      - '(field_declaration declarator: (pointer_declarator declarator: $N:field_identifier))': '(__def (__defname @$N) (__field_def))'
+      - '(declaration type: $T:type_identifier declarator: (function_declarator declarator: $N:identifier parameters: $A))': '(__binding @$N (__declaration) (__ssa_typed @$T) $A)'
+      - '(declaration type: $T:qualified_identifier declarator: (function_declarator declarator: $N:identifier parameters: $A))': '(__binding @$N (__declaration) (__ssa_typed @$T | split_last("::")) $A)'
+      - '(declaration type: $T:qualified_identifier declarator: (init_declarator declarator: $N:identifier value: $V:__call))': '(__binding @$N (__declaration) (__ssa_typed @$T | split_last("::") $T) (__rhs $V))'
+      - '(declaration type: $T:qualified_identifier declarator: $N:identifier)': '(__binding @$N (__declaration) (__ssa_typed @$T | split_last("::") $T))'
+      - '(declaration type: $T:type_identifier declarator: (init_declarator declarator: $N:identifier value: $V:__call))': '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V))'
+      - '(declaration type: $T:type_identifier declarator: (init_declarator declarator: $N:identifier value: $V))': '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs @$V $V))'
+      - '(declaration type: $T:type_identifier declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V:__call))': '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V))'
+      - '(declaration type: $T:type_identifier declarator: $N:identifier)': '(__binding @$N (__declaration) (__ssa_typed @$T))'
+      - '(declaration type: $T:type_identifier declarator: (pointer_declarator declarator: $N:identifier))': '(__binding @$N (__declaration) (__ssa_typed @$T))'
+      - use: c_statements
+      - '(for_range_loop type:? $T:type_identifier declarator: $N:identifier right: $V body: $B)': '(__scope (__ssa_loop $V (__binding @$N (__declaration) (__ssa_typed? @$T)) $B))'
+      - '(for_range_loop declarator: $N:identifier right: $V body: $B)': '(__scope (__ssa_loop $V (__binding @$N (__declaration)) $B))'
+      - '(for_range_loop right: $V body: $B)': '(__ssa_loop $V $B)'
+      - '(class_specifier name: $N:type_identifier $$$ANN body: $B)': '(__def (__defname @$N) (__class) $$$ANN $B)'
+      - '(struct_specifier name: $N:type_identifier $$$ANN body: $B)': '(__def (__defname @$N) (__struct) $$$ANN $B)'
+      - '(enum_specifier name: $N:type_identifier body: $B)': '(__def (__defname @$N) (__enum) $B)'
+      - '(union_specifier name: $N:type_identifier body: $B)': '(__def (__defname @$N) (__struct) $B)'
+      - '(type_definition type: $T declarator: $N:type_identifier)': '(type_definition (__def (__defname @$N) (__type_alias)) $T)'
+      - '(alias_declaration name: $N:type_identifier)': '(__def (__defname @$N) (__type_alias))'
+      - '(concept_definition name: $N:identifier)': '(__def (__defname @$N) (__interface))'
+      - '(namespace_definition name: $N body: $B)': '(__def (__defname @$N $N) (__class) $B)'
+  - stage: ssa-cleanup
+    rewrite:
+      - '(compound_statement $$$B)': '(__scope $$$B)'
+      - '(__ssa_return $V:identifier)': '%return_value($V)'
+  - stage: tag-defs
+    rewrite:
+      - use: function_def_tags
+      - use: class_lambda_def_tags
+      - use: callable_struct_def_tags
+      - use: trait_def_tags
+      - use: interface_def_tags
+      - use: alias_field_def_tags
+  - use: tag_file_dir
+  - use: resolve_paths
+
+project:
+  - stage: roots
+    rewrite:
+      - use: src_root
+      - '(__dir "include" $$$REST)': '(__dir "include" (__source_root) $$$REST)'
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #fqn=@$M | stem | split_last("/") #file_path=@$M #language=@$M | split_last(".") | map("cpp:cpp", "cc:cpp", "cxx:cpp", "hpp:cpp", "hh:cpp", "hxx:cpp")'
+      - '(__def (__impl))': '#fqn=$ROOT | ancestor_tag("fqn") | concat("::", $ROOT | child_sym("__defname")) | keep_last("::", 64, 4096)'
+      - use: def_fqn_colons_except_impl
+  - use: def_types
+  - use: display_wildcard_imports

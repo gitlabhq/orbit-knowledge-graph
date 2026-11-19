@@ -1,5 +1,5 @@
 data:
-  search: [roots]
+  search: [external, roots, stdlib]
   callable_kinds: [__function, __method, __class, __lambda, __enum_variant]
   value_kinds: [__class, __struct, __trait, __enum, __enum_variant, __field_def, __property, __constant, __static_constant,
     __variable, __type_alias, __interface]

@@ -1,0 +1,109 @@
+import: [canonical, display, shapes]
+
+data:
+  builtins: [append, cap, clear, close, complex, copy, delete, imag, len, make, max, min, new, panic,
+    print, println, real, recover, bool, byte, complex64, complex128, float32, float64, int, int8, int16,
+    int32, int64, rune, string, uint, uint8, uint16, uint32, uint64, uintptr]
+  external: [builtin, fmt/*, errors/*, archive, bufio, bytes, cmp, compress, container, context, crypto,
+    database, debug, embed, encoding, expvar, flag, go, hash, html, image, index, io, iter, log, maps,
+    math, mime, net, os, path, plugin, reflect, regexp, runtime, slices, sort, strconv, strings, structs,
+    sync, syscall, testing, text, time, unicode, unique, unsafe, weak]
+  providers:
+  - [builtin, '%builtins']
+  - [fmt/*, Append, Appendf, Appendln, Errorf, Fprint, Fprintf, Fprintln, Fscan, Fscanf, Fscanln, Print,
+    Printf, Println, Scan, Scanf, Scanln, Sprint, Sprintf, Sprintln, Sscan, Sscanf, Sscanln]
+  - [errors/*, As, Is, Join, New, Unwrap]
+  parse_files:
+  - [go.mod, raw, '(?m)^(module)\s+(\S+)']
+  params: [parameter_declaration, variadic_parameter_declaration]
+  type_specs: [type_spec, type_alias]
+
+canonicalize:
+  - stage: normalize
+    rewrite:
+      - '(source_file $$$C)': '%source_file($$$C)'
+      - '(package_clause $P:package_identifier)': '(go_pkg (__package @$P) (__module_export (__import (__source @$P) (__source_path "./*") (__name "*"))))'
+      - '(return_statement $$$VALS)': '(__ssa_return $$$VALS)'
+      - '(generic_type type: $T:type_identifier)': '(type_identifier @$T)'
+      - '(pointer_type $T:type_identifier)': '(type_identifier @$T)'
+      - '(composite_literal type: $T:type_identifier body: $B)': '(__struct_lit @$T $B)'
+      - '(unary_expression operand: $O:__struct_lit)': '$O'
+      - '(parameter_declaration name: $A:identifier name: $B:identifier type: $T:type_identifier)': '(parameter_declaration (__binding @$A (__ssa_typed @$T)) (__binding @$B (__ssa_typed @$T)))'
+      - '(parameter_declaration name: $N:identifier type: $T:type_identifier)': '(__binding @$N (__ssa_typed @$T))'
+      - '(%params name: $N:identifier)': '(__binding @$N)'
+  - stage: retag-expressions
+    rewrite:
+      - '(parenthesized_expression $V:__call)': '$V'
+      - '(selector_expression operand: $O:__member field: $F)': '%member($F, $O)'
+      - '(selector_expression operand: $O:__call field: $F)': '%member($F, $O)'
+      - '(selector_expression operand: $O field: $F)': '%member_text($F, $O)'
+      - '(call_expression function: $F:__member arguments: $A)': '(__call (__callee $F) $A)'
+      - '(call_expression function: $F arguments: $A)': '%call($F, $A)'
+  - stage: imports
+    rewrite:
+      - '(import_spec name: $A:package_identifier path: (interpreted_string_literal $P:interpreted_string_literal_content))': '(__import (__source @$P) (__source_path @$P | regex_replace("$", "/*")) (__name @$P | split_last("/") (__alias @$A)))'
+      - '(import_spec name: (dot) path: (interpreted_string_literal $P:interpreted_string_literal_content))': '(__import (__source @$P) (__source_path @$P | regex_replace("$", "/*")) (__name @$P | split_last("/") (__ssa_hint "*")))'
+      - '(import_spec path: (interpreted_string_literal $P:interpreted_string_literal_content))': '(__import (__source @$P) (__source_path @$P | regex_replace("$", "/*")) (__name @$P | split_last("/")))'
+  - stage: classify
+    rewrite:
+      - '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))': '(__binding @$N (__declaration) (__ssa_typed @$R) (__rhs $R))'
+      - '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__call))': '(__binding @$N (__declaration) (__rhs $R))'
+      - '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R))': '(__binding @$N (__declaration) (__rhs @$R $R))'
+      - '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))': '(__binding @$N (__ssa_typed @$R) (__rhs $R))'
+      - '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__call))': '%bind_call($N, $R)'
+      - '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R))': '%bind($N, $R)'
+      - '(var_spec name: $N:identifier type: $T:type_identifier value: (expression_list $V))': '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__ssa_typed @$T) (__rhs $V)))'
+      - '(var_spec name: $N:identifier type: $T:type_identifier)': '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__ssa_typed @$T)))'
+      - '(var_spec name: $N:identifier value: (expression_list $V:__struct_lit))': '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__ssa_typed @$V) (__rhs $V)))'
+      - '(var_spec name: $N:identifier value: (expression_list $V:__call))': '(var_spec (__def (__defname @$N) (__variable)) %bind_call($N, $V))'
+      - '(var_spec name: $N:identifier value: (expression_list $V))': '(var_spec (__def (__defname @$N) (__variable)) %bind($N, $V))'
+      - '(var_spec name: $N:identifier)': '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N))'
+      - '(const_spec name: $N:identifier)': '(__def (__defname @$N) (__constant))'
+      - '(if_statement initializer:? $I condition: $COND consequence: $C alternative:? $A)': '(__ssa_branch $I $COND (__ssa_arm $C) (__ssa_arm? $A))'
+      - '(expression_switch_statement value:? $V $$$CASES:expression_case|default_case)': '(__ssa_branch $V $$$CASES->__ssa_arm)'
+      - '(type_switch_statement $$$CASES:type_case|default_case)': '(__ssa_branch $$$CASES->__ssa_arm)'
+      - '(select_statement $$$CASES:communication_case|default_case)': '(__ssa_branch $$$CASES->__ssa_arm)'
+      - '(for_statement $$$H body: $B)': '(__ssa_loop $$$H $B)'
+      - '(method_elem name: $N parameters: $P result:? $RT:type_identifier)': '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P)'
+      - '(type_spec name: $N type: (struct_type (field_declaration_list $$$F:field_declaration)))': '(__def (__defname @$N) (__struct) $$$F->struct_field)'
+      - '(type_spec name: $N type: (interface_type $$$M))': '(__def (__defname @$N) (__interface) $$$M)'
+      - '(%type_specs name: $N)': '(__def (__defname @$N) (__type_alias))'
+      - '(function_declaration name: $N parameters: $P result:? $RT:type_identifier body: $B)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
+      - '(method_declaration receiver: (parameter_list $R:(__binding $T:__ssa_typed)) name: $N parameters: $P result:? $RT:type_identifier body: $B)': '(__def (__defname @$T) (__impl) (__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $R $P $B))'
+      - '(method_declaration receiver: (parameter_list (parameter_declaration type: $T:type_identifier)) name: $N parameters: $P result:? $RT:type_identifier body: $B)': '(__def (__defname @$T) (__impl) (__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P $B))'
+  - stage: ssa-cleanup
+    rewrite:
+      - '(struct_field name: $N:field_identifier type: (func_type))': '(__def (__defname @$N) (__field_def)) #callable=true'
+      - '(struct_field name: $N:field_identifier)': '(__def (__defname @$N) (__field_def))'
+      - '(struct_field type: $T:type_identifier)': '(__supertype @$T)'
+      - '(__ssa_return (expression_list $V:__struct_lit))': '(__ssa_return (__call (__callee @$V) $V))'
+      - '(__ssa_return (expression_list $V:identifier))': '%return_value($V)'
+  - stage: tag-defs
+    rewrite:
+      - '(block $$$V)': '(__scope $$$V)'
+      - use: function_def_tags
+      - use: type_def_tags
+      - use: interface_def_tags
+      - use: alias_field_def_tags
+      - '(__def (__variable))': '#value=true'
+      - '(__def (__constant))': '#value=true'
+  - use: tag_file_dir
+  - use: resolve_paths
+
+project:
+  - stage: modules
+    rewrite:
+      - '(__file "go.mod" (__field "module" $V:__str))': '(__file "go.mod" (__alias @$V | regex_replace("$", "/*") (__str @$ROOT | tree_path("/") | regex_replace("go\.mod$", "*"))))'
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #fqn=$M | child_sym("__package") #file_path=@$M #language=@$M | split_last(".") | map("go:go")'
+      - '(__def (__impl))': '#entity=Definition #file_path=$ROOT | ancestor_tag("file_path")'
+      - '(__def !(__impl))': '#entity=Definition #fqn=$ROOT | ancestor_tag("fqn") | concat(".", $ROOT | child_sym("__defname")) | keep_last(".", 64, 4096) #file_path=$ROOT | ancestor_tag("file_path")'
+  - use: def_types
+  - stage: imports
+    rewrite:
+      - use: import_entity
+      - use: aliased_import_type
+      - '(__name)': '#import_type=Import #resolved=$ROOT | has_incoming("Imports")'

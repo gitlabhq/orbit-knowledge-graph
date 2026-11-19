@@ -1,0 +1,92 @@
+import: [canonical, display, roots, shapes, statements]
+
+data:
+  builtins: [abs, assert, assertionFailure, debugPrint, dump, fatalError, getVaList, isKnownUniquelyReferenced,
+    max, min, numericCast, precondition, preconditionFailure, print, readLine, repeatElement, sequence,
+    stride, swap, type, unsafeBitCast, unsafeDowncast, withExtendedLifetime, withUnsafeBytes, withUnsafeMutableBytes,
+    withUnsafeMutablePointer, withUnsafePointer, withVaList, withoutActuallyEscaping, zip]
+  stdlib: [Foundation, Dispatch, Darwin, Glibc, ObjectiveC, Combine, SwiftUI, UIKit, AppKit, XCTest]
+  external: [Swift]
+  providers:
+  - [Swift, '%builtins']
+  - [Foundation, NSLog, NSStringFromClass, NSClassFromString, NSStringFromSelector, NSSelectorFromString,
+    NSHomeDirectory, NSTemporaryDirectory, NSSearchPathForDirectoriesInDomains]
+  lookup_from: [__source_root]
+  wrapped_types: [user_type, optional_type]
+  branches: [if_statement, guard_statement, switch_statement]
+  loops: [for_statement, while_statement, repeat_while_statement]
+
+canonicalize:
+  - stage: imports
+    rewrite:
+      - '(import_declaration $I:identifier)': '(__import (__source @$I $I) (__source_path @$I | replace(".", "/")) (__name @$I | split_last(".")))'
+  - stage: normalize
+    rewrite:
+      - '(source_file $$$C)': '%source_file($$$C)'
+      - '(control_transfer_statement (return) $$$V)': '(__ssa_return $$$V)'
+      - '(%wrapped_types $T:type_identifier)': '(type_identifier @$T)'
+      - '(inheritance_specifier $T:type_identifier)': '(__supertype @$T)'
+      - '(navigation_expression target: (self_expression) suffix: (navigation_suffix suffix: $N:simple_identifier))': '(__ivar @$N)'
+      - '(parameter name: $N:simple_identifier $T:type_identifier)': '%typed_param($N, $T)'
+      - '(parameter name: $N:simple_identifier)': '(__binding @$N)'
+  - stage: retag-refs
+    rewrite:
+      - '(navigation_expression target: $O:__ivar suffix: (navigation_suffix suffix: $M:simple_identifier))': '%member($M, $O)'
+      - '(navigation_expression target: $O:__member suffix: (navigation_suffix suffix: $M:simple_identifier))': '%member($M, $O)'
+      - '(navigation_expression target: $O:call_expression suffix: (navigation_suffix suffix: $M:simple_identifier))': '%member($M, $O)'
+      - '(navigation_expression target: (super_expression) suffix: (navigation_suffix suffix: $M:simple_identifier))': '(__member @$M (__object (__ivar "super")))'
+      - '(navigation_expression target: $O suffix: (navigation_suffix suffix: $M:simple_identifier))': '%member_text($M, $O)'
+  - stage: retag-calls
+    rewrite:
+      - use: suffix_calls
+  - stage: classify
+    rewrite:
+      - '(property_declaration (pattern bound_identifier: $N:simple_identifier) (type_annotation $T:type_identifier) value: $V:__call)': '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))))'
+      - '(property_declaration (pattern bound_identifier: $N:simple_identifier) (type_annotation $T:type_identifier))': '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs (__member (__object @$T $T)))) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T)))))'
+      - '(property_declaration (pattern bound_identifier: $N:simple_identifier) value: $V:__call)': '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs $V)) (__binding (__ivar @$N) (__rhs $V)))'
+      - '(property_declaration (pattern bound_identifier: $N:simple_identifier) value: $V)': '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs @$V $V)))'
+      - '(property_declaration (pattern bound_identifier: $N:simple_identifier) $$$R)': '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration)) $$$R)'
+      - '(assignment target: (directly_assignable_expression $T:__ivar) result: $R:__call)': '(__binding $T (__rhs $R))'
+      - '(assignment target: (directly_assignable_expression $T:__ivar) result: $R)': '(__binding $T (__rhs @$R $R))'
+      - '(assignment target: (directly_assignable_expression $T:simple_identifier) result: $R:__call)': '%bind_call($T, $R)'
+      - '(assignment target: (directly_assignable_expression $T:simple_identifier) result: $R)': '%bind($T, $R)'
+      - '(control_transfer_statement (throw_keyword) $$$V)': '(__ssa_branch $$$V)'
+      - '(%branches $$$X)': '(__ssa_branch (__ssa_arm $$$X))'
+      - '(%loops $$$X)': '%loop($$$X)'
+      - '(enum_entry name: $N:simple_identifier $$$R)': '(__def (__defname @$N) (__enum_variant) $$$R)'
+      - '(protocol_function_declaration name: $N:simple_identifier $$$P:__binding $RT?:type_identifier)': '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $$$P)'
+      - '(init_declaration $$$P:__binding body: $B:function_body)': '(__def (__defname "init") (__method) $$$P $B)'
+      - '(function_declaration $M?:modifiers name: $N:simple_identifier $$$P:__binding $RT:type_identifier body: $B:function_body)': '(__def (__defname @$N) (__function) (__ssa_return_type @$RT) $M $$$P $B)'
+      - '(function_declaration $M?:modifiers name: $N:simple_identifier $$$P:__binding body: $B:function_body)': '(__def (__defname @$N) (__function) $M $$$P $B)'
+      - '(class_declaration (struct) name: $N:type_identifier $$$ANN body: (class_body $$$B))': '(__def (__defname @$N) (__struct) $$$ANN $$$B)'
+      - '(class_declaration (enum) name: $N:type_identifier $$$ANN body: (enum_class_body $$$B))': '(__def (__defname @$N) (__enum) $$$ANN $$$B)'
+      - '(class_declaration (extension) name: $N:type_identifier $$$ANN body: (class_body $$$B))': '(__def (__defname @$N) (__impl) $$$ANN $$$B)'
+      - '(class_declaration name: $N:type_identifier $S:__supertype $$$ANN body: (class_body $$$B))': '(__def (__defname @$N) (__class) $S $$$ANN (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $$$B)'
+      - '(class_declaration name: $N:type_identifier $$$ANN body: (class_body $$$B))': '(__def (__defname @$N) (__class) $$$ANN $$$B)'
+      - '(protocol_declaration name: $N:type_identifier $$$ANN body: (protocol_body $$$B))': '(__def (__defname @$N) (__interface) $$$ANN $$$B)'
+  - stage: ssa-cleanup
+    rewrite:
+      - '(statements $$$B)': '(__scope $$$B)'
+      - '(__ssa_return $V:simple_identifier)': '%return_value($V)'
+  - stage: tag-defs
+    rewrite:
+      - use: function_def_tags
+      - use: type_def_tags
+      - use: interface_def_tags
+      - '(__def (__property))': '#value=true'
+  - use: tag_file_dir
+  - use: resolve_paths
+
+project:
+  - stage: roots
+    rewrite:
+      - '(__dir "Sources" $$$REST)': '(__dir "Sources" (__source_root) $$$REST)'
+      - use: src_root
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #file_path=@$M #language=@$M | split_last(".") | map("swift:swift")'
+      - use: def_fqn_dotted_except_impl
+  - use: def_types
+  - use: display_wildcard_imports

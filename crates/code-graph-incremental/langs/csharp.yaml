@@ -1,0 +1,134 @@
+import: [canonical, display, roots, shapes, statements]
+
+data:
+  value_kinds: [__class, __struct, __trait, __enum, __enum_variant, __field_def, __property, __constant,
+    __static_constant, __variable, __type_alias, __interface, __method]
+  stdlib: [System, System/Math, System/Console]
+  providers:
+  - [System/Math, Abs, Acos, Acosh, Asin, Asinh, Atan, Atan2, Atanh, BigMul, Cbrt, Ceiling, Clamp, CopySign,
+    Cos, Cosh, DivRem, Exp, Floor, IEEERemainder, Log, Log10, Log2, Max, Min, Pow, Round, ScaleB, Sign,
+    Sin, SinCos, Sinh, Sqrt, Tan, Tanh, Truncate]
+  - [System/Console, Beep, Clear, OpenStandardError, OpenStandardInput, OpenStandardOutput, Read, ReadKey,
+    ReadLine, ResetColor, SetBufferSize, SetCursorPosition, SetError, SetIn, SetOut, SetWindowPosition,
+    SetWindowSize, Write, WriteLine]
+  lookup_from: [__source_root]
+  merge_same_named_types: true
+  throws: [throw_statement, throw_expression]
+  wrapped_types: [generic_name, nullable_type]
+  typed_params: [parameter, catch_declaration]
+  call_wrappers: [await_expression, postfix_unary_expression, parenthesized_expression]
+  loops: [for_statement, while_statement, do_statement]
+
+canonicalize:
+  - stage: imports
+    rewrite:
+      - '(namespace_declaration name: $N body: (declaration_list $$$B))': '(namespace_declaration (cs_pkg (__package @$N $N) (__module_export (__import (__source @$N) (__source_path @$N | replace(".", "/") | regex_replace("$", "/*")) (__name "*")))) $$$B) #import_type@__import=WildcardImport'
+      - '(file_scoped_namespace_declaration name: $N)': '(cs_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N | replace(".", "/") | regex_replace("$", "/*")) (__name "*")))) #import_type@__import=WildcardImport'
+      - '(using_directive (static) $Q:qualified_name)': '(__import (__source @$Q $Q) (__source_path @$Q | replace(".", "/")) (__name "*")) #import_type=StaticImport #callable=true'
+      - '(using_directive (static) $Q:identifier)': '%wildcard_import($Q) #import_type=StaticImport #callable=true'
+      - '(using_directive name: $A:identifier $Q:qualified_name)': '(__import (__source @$Q $Q) (__source_path @$Q | strip("global::") | regex_replace("<.*$", "") | replace(".", "/")) (__name @$Q | regex_replace("<.*$", "") | split_last(".") | split_last("::") (__alias @$A)))'
+      - '(using_directive name: $A:identifier $Q:alias_qualified_name)': '(__import (__source @$Q $Q) (__source_path @$Q | strip("global::") | regex_replace("<.*$", "") | replace(".", "/")) (__name @$Q | regex_replace("<.*$", "") | split_last(".") | split_last("::") (__alias @$A)))'
+      - '(using_directive name: $A:identifier $Q:generic_name)': '(__import (__source @$Q) (__source_path @$Q | strip("global::") | regex_replace("<.*$", "") | replace(".", "/")) (__name @$Q | regex_replace("<.*$", "") | split_last(".") | split_last("::") (__alias @$A)))'
+      - '(using_directive name: $A:identifier $Q:identifier)': '(__import (__source @$Q) (__source_path @$Q | strip("global::") | regex_replace("<.*$", "") | replace(".", "/")) (__name @$Q | regex_replace("<.*$", "") | split_last(".") | split_last("::") (__alias @$A)))'
+      - '(using_directive $Q:qualified_name)': '(__import (__source @$Q $Q) (__source_path @$Q | replace(".", "/")) (__name "*")) #import_type=WildcardImport'
+      - '(using_directive $Q:identifier)': '%wildcard_import($Q) #import_type=WildcardImport'
+  - stage: normalize
+    rewrite:
+      - '(compilation_unit $$$C)': '%source_file($$$C)'
+      - '(return_statement $$$V)': '(__ssa_return $$$V)'
+      - '(%throws $$$V)': '(__ssa_branch $$$V)'
+      - '(type_parameter_list $$$T:type_parameter)': '(type_parameter_list $$$T->__binding)'
+      - '(%wrapped_types $T:identifier)': '(identifier @$T)'
+      - '(qualified_name name: $T:identifier)': '(cs_qualified @$T)'
+      - '(attribute name: $N:identifier)': '(__decorator @$N)'
+      - '(member_access_expression (this) name: $N:identifier)': '(__ivar @$N)'
+      - '(base_list $$$T:identifier)': '(base_list $$$T=>__supertype)'
+      - '(%typed_params type: $T:identifier name: $N:identifier)': '%typed_param($N, $T)'
+      - '(parameter name: $N:identifier)': '(__binding @$N)'
+  - stage: retag-expressions
+    rewrite:
+      - '(%call_wrappers $V:__call)': '$V'
+      - '(member_access_expression expression: $O:__ivar name: $M:identifier)': '%member($M, $O)'
+      - '(member_access_expression expression: $O:__member name: $M:identifier)': '%member($M, $O)'
+      - '(member_access_expression expression: $O:__call name: $M:identifier)': '%member($M, $O)'
+      - '(member_access_expression (base) name: $M:identifier)': '(__member @$M (__object (__ivar "base")))'
+      - '(conditional_access_expression condition: $O:identifier (member_binding_expression name: $M:identifier))': '%member_text($M, $O)'
+      - '(conditional_access_expression condition: $O (member_binding_expression name: $M:identifier))': '%member($M, $O)'
+      - '(member_access_expression expression: $O:cs_qualified name: $M:identifier)': '%member_text($M, $O)'
+      - '(member_access_expression expression: $O name: $M:identifier)': '%member_text($M, $O)'
+      - '(invocation_expression function: $F:__ivar arguments: $A)': '(__call (__callee $F) $A)'
+      - '(invocation_expression function: $F:__member arguments: $A)': '(__call (__callee $F) $A)'
+      - '(invocation_expression function: $F:identifier arguments: $A)': '%call($F, $A) #implicit_self=true'
+      - '(invocation_expression function: $F arguments: $A)': '%call($F, $A)'
+      - '(object_creation_expression type: $T:identifier arguments:? $A $$$B:initializer_expression)': '(__call (__callee @$T $T) $A $$$B)'
+      - '(object_creation_expression type: $T:cs_qualified arguments:? $A)': '%call($T, $A)'
+  - stage: classify
+    rewrite:
+      - '(variable_declaration type: (implicit_type) (variable_declarator name: $N:identifier $V:__call))': '(__binding @$N (__declaration) (__rhs $V))'
+      - '(variable_declaration type: (implicit_type) (variable_declarator name: $N:identifier $V:__ssa_branch))': '(__binding @$N (__declaration) (__rhs $V))'
+      - '(variable_declaration type: (implicit_type) (variable_declarator name: $N:identifier $V))': '(__binding @$N (__declaration) (__rhs @$V $V))'
+      - '(variable_declaration type: $T:identifier (variable_declarator name: $N:identifier $V:__call))': '(cs_local (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)))'
+      - '(variable_declaration type: $T:identifier (variable_declarator name: $N:identifier $V:__ssa_branch))': '(cs_local (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)))'
+      - '(variable_declaration type: $T:identifier (variable_declarator name: $N:identifier $V))': '(cs_local (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs @$V $V)))'
+      - '(variable_declaration type: $T:identifier (variable_declarator name: $N:identifier))': '(cs_local (__binding @$N (__declaration) (__ssa_typed @$T)))'
+      - '(variable_declaration (variable_declarator name: $N:identifier $V:__call))': '(cs_local (__binding @$N (__declaration) (__rhs $V)))'
+      - '(variable_declaration (variable_declarator name: $N:identifier $V))': '(cs_local (__binding @$N (__declaration) (__rhs @$V $V)))'
+      - '(variable_declaration (variable_declarator name: $N:identifier))': '(cs_local (__binding @$N (__declaration)))'
+      - use: c_like_assignments
+      - '(switch_statement value: $V body: $B)': '(__ssa_branch $V $B)'
+      - '(switch_expression $V $$$ARMS:switch_expression_arm)': '(__ssa_branch $V $$$ARMS->__ssa_arm)'
+      - '(conditional_expression condition: $C consequence: $Q alternative: $A)': '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm $A))'
+      - '(try_statement body: $B $$$ALTS:catch_clause|finally_clause)': '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm)'
+      - '(foreach_statement type: $T:identifier left: $N:identifier right: $V body: $B)': '(__ssa_loop $V (__binding @$N (__ssa_typed @$T)) $B)'
+      - '(foreach_statement left: $N:identifier right: $V body: $B)': '(__ssa_loop $V (__binding @$N) $B)'
+      - '(%loops body: $B)': '%loop($B)'
+      - '(field_declaration $$$PRE (variable_declaration type: $T:identifier (variable_declarator name: $N:identifier $$$V)))': '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))) $$$V)'
+      - '(field_declaration $$$PRE (variable_declaration (variable_declarator name: $N:identifier $$$V)))': '(__def (__defname @$N) (__field_def) $$$V)'
+      - '(property_declaration $$$PRE type: $T:identifier name: $N:identifier $$$B)': '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))) $$$B)'
+      - '(property_declaration $$$PRE name: $N:identifier $$$B)': '(__def (__defname @$N) (__property) $$$B)'
+      - '(enum_member_declaration name: $N:identifier)': '(__def (__defname @$N) (__enum_variant))'
+      - '(method_declaration $$$PRE returns: $RT:identifier name: $N:identifier parameters: $P body:? $B)': '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $$$PRE $P (__call (__callee @$RT $RT)) $B)'
+      - '(method_declaration $$$PRE name: $N:identifier parameters: $P body:? $B)': '(__def (__defname @$N) (__method) $$$PRE $P $B)'
+      - '(constructor_declaration $$$PRE name: $N:identifier parameters: $P body: $B)': '(__def (__defname @$N) (__method) $$$PRE $P $B)'
+      - '(local_function_statement $$$PRE name: $N:identifier parameters: $P body: $B)': '(__def (__defname @$N) (__function) $$$PRE $P $B)'
+      - '(class_declaration $$$PRE name: $N:identifier (base_list $S:__supertype $$$REST) body: (declaration_list $$$B))': '(__def (__defname @$N) (__class) $$$PRE $S $$$REST (__binding (__ivar "base") (__rhs (__call (__callee @$S)))) $$$B)'
+      - '(class_declaration $$$PRE name: $N:identifier $$$ANN body: (declaration_list $$$B))': '(__def (__defname @$N) (__class) $$$PRE $$$ANN $$$B)'
+      - '(record_declaration $$$PRE ("struct") name: $N:identifier $P?:parameter_list $$$ANN body:? (declaration_list $$$B))': '(__def (__defname @$N) (__struct) $$$PRE $$$ANN $P $$$B)'
+      - '(record_declaration $$$PRE name: $N:identifier $P?:parameter_list $$$ANN body:? (declaration_list $$$B))': '(__def (__defname @$N) (__class) $$$PRE $$$ANN $P $$$B)'
+      - '(struct_declaration $$$PRE name: $N:identifier $$$ANN body: (declaration_list $$$B))': '(__def (__defname @$N) (__struct) $$$PRE $$$ANN $$$B)'
+      - '(interface_declaration $$$PRE name: $N:identifier $$$ANN body: (declaration_list $$$B))': '(__def (__defname @$N) (__interface) $$$PRE $$$ANN $$$B)'
+      - '(enum_declaration $$$PRE name: $N:identifier $$$ANN body: (enum_member_declaration_list $$$B))': '(__def (__defname @$N) (__enum) $$$PRE $$$ANN $$$B)'
+  - use: ssa_cleanup
+  - stage: tag-defs
+    rewrite:
+      - '(block $$$B)': '(__scope $$$B) #hoisted=true'
+      - '(__def (__function))': '#callable=true #scoped=true'
+      - '(__def (__method))': '#callable=true #value=true #scoped=true'
+      - use: type_def_tags
+      - use: interface_def_tags
+      - '(__def (__field_def))': '#value=true'
+      - '(__def (__property) (__binding (__rhs (__call (__callee "Func")))))': '#callable=true'
+      - '(__def (__property) (__binding (__rhs (__call (__callee "Predicate")))))': '#callable=true'
+      - '(__def (__property) (__binding (__rhs (__call (__callee "Action")))))': '#callable=true'
+      - '(__def (__property) (__binding (__rhs (__call (__callee "EventHandler")))))': '#callable=true'
+      - '(__def (__property))': '#value=true'
+  - use: tag_file_dir
+  - use: resolve_paths
+
+project:
+  - stage: roots
+    rewrite:
+      - use: src_root
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #fqn=$M | child_sym("__package") #file_path=@$M #language=@$M | split_last(".") | map("cs:csharp")'
+      - use: def_fqn_dotted
+  - use: def_types
+  - stage: imports
+    rewrite:
+      - use: import_entity
+      - '(__name "*")': '#resolved=$ROOT | has_incoming("Imports")'
+      - use: aliased_import_type
+      - '(__name)': '#resolved=$ROOT | has_incoming("Imports")'

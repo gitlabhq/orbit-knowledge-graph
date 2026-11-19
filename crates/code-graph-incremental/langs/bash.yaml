@@ -1,0 +1,50 @@
+import: [canonical, display, shapes]
+
+data:
+  builtins: [alias, bg, bind, break, builtin, caller, cd, command, compgen, complete, compopt, continue,
+    declare, dirs, disown, echo, enable, eval, exec, exit, export, 'false', fc, fg, getopts, hash, help,
+    history, jobs, kill, let, local, logout, mapfile, popd, printf, pushd, pwd, read, readarray, readonly,
+    return, set, shift, shopt, source, suspend, test, times, trap, 'true', type, typeset, ulimit, umask,
+    unalias, unset, wait]
+  loops: [for_statement, c_style_for_statement, while_statement]
+
+canonicalize:
+  - stage: imports
+    rewrite:
+      - '(command name: (command_name (word "source")) argument: $P:word)': '%wildcard_import($P)'
+      - '(command name: (command_name (word ".")) argument: $P:word)': '%wildcard_import($P)'
+      - '(command name: (command_name (word "source")) argument: (string $P:string_content))': '%wildcard_import($P)'
+  - stage: normalize
+    rewrite:
+      - '(program $$$C)': '%source_file($$$C)'
+  - stage: retag-calls
+    rewrite:
+      - '(command name: (command_name $W:word) $$$A)': '%call($W, $$$A)'
+  - stage: classify
+    rewrite:
+      - '(variable_assignment name: $N:variable_name value: $V:__call)': '(__binding @$N | prepend("$") (__rhs $V))'
+      - '(variable_assignment name: $N:variable_name value: $V)': '(__binding @$N | prepend("$") (__rhs @$V $V))'
+      - '(if_statement $$$X)': '(__ssa_branch (__ssa_arm $$$X))'
+      - '(case_statement value: $V $$$X:case_item)': '(__ssa_branch $V $$$X->__ssa_arm)'
+      - '(%loops body: $B)': '%loop($B)'
+      - '(function_definition name: $N:word body: $B)': '(__def (__defname @$N) (__function) $B)'
+  - stage: tag-defs
+    rewrite:
+      - use: function_def_tags
+      - use: type_def_tags
+  - use: tag_file_dir
+  - use: resolve_paths
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #fqn=@$M | stem | split_last("/") #file_path=@$M #language=@$M | split_last(".") | map("sh:bash", "bash:bash", "zsh:bash")'
+      - use: def_fqn_dotted_except_impl
+  - use: def_types
+  - stage: imports
+    rewrite:
+      - use: import_entity
+      - '(__import)': '#import_type=Source'
+      - '(__name "*")': '#resolved=$ROOT | has_incoming("Imports")'
+      - use: aliased_import_type
+      - '(__name)': '#resolved=$ROOT | has_incoming("Imports")'

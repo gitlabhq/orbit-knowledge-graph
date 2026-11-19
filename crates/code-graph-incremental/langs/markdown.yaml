@@ -1,0 +1,23 @@
+import: [shapes]
+
+canonicalize:
+  - stage: normalize
+    rewrite:
+      - '(document $$$C)': '%source_file($$$C)'
+  - stage: classify
+    rewrite:
+      - '(section $N:heading $K:section_key $$$C)': '(__def (__defname @$N) (__section) (__fqn_segment @$K) $$$C)'
+      - '(front_matter $N:name $K:segment $$$C)': '(__def (__defname @$N) (__front_matter) (__fqn_segment @$K) $$$C)'
+  - stage: tag-defs
+    rewrite:
+      - '(__def (__section))': '#scoped=true #definition_span=true'
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #fqn=@$M | stem | split_last("/") | replace("\", "\\") | replace("#", "\#") #file_path=@$M #language=markdown'
+      - '(__def)': '#entity=Definition #fqn=$ROOT | ancestor_tag("fqn") | concat("#", $ROOT | child_sym("__fqn_segment")) #file_path=$ROOT | ancestor_tag("file_path")'
+  - stage: def_type
+    rewrite:
+      - '(__def (__section))': '#def_type=Section'
+      - '(__def (__front_matter))': '#def_type=FrontMatter'

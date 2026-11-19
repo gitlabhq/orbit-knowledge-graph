@@ -1,0 +1,78 @@
+import: [canonical, display, roots, shapes]
+
+data:
+  builtins: [assert, collectgarbage, dofile, error, getmetatable, ipairs, load, loadfile, next, pairs,
+    pcall, print, rawequal, rawget, rawlen, rawset, require, select, setmetatable, tonumber, tostring,
+    type, warn, xpcall]
+  external: [coroutine, debug, io, math, os, package, string, table, utf8]
+  providers:
+  - [math, abs, acos, asin, atan, ceil, cos, deg, exp, floor, fmod, log, max, min, modf, rad, random,
+    randomseed, sin, sqrt, tan, tointeger, type, ult]
+  - [string, byte, char, dump, find, format, gmatch, gsub, len, lower, match, pack, packsize, rep, reverse,
+    sub, unpack, upper]
+  - [table, concat, insert, move, pack, remove, sort, unpack]
+  lookup_from: [__source_root]
+  loops: [for_statement, while_statement, repeat_statement]
+
+canonicalize:
+  - stage: imports
+    rewrite:
+      - '(function_call name: (identifier "require") arguments: (arguments (string content: $S:string_content)))': '(lua_require @$S)'
+  - stage: imports-bind
+    rewrite:
+      - '(variable_declaration (assignment_statement (variable_list $N:identifier) (expression_list $R:lua_require)))': '(__import (__source @$R) (__source_path @$R | replace(".", "/")) (__name @$R | split_last(".") (__alias @$N)))'
+      - '(assignment_statement (variable_list $N:identifier) (expression_list $R:lua_require))': '(__import (__source @$R) (__source_path @$R | replace(".", "/")) (__name @$R | split_last(".") (__alias @$N)))'
+  - stage: imports-bare
+    rewrite:
+      - '(lua_require)': '(__import (__source @$ROOT) (__source_path @$ROOT | replace(".", "/")) (__name @$ROOT | split_last(".")))'
+  - stage: normalize
+    rewrite:
+      - '(variable_declaration (assignment_statement (variable_list $N:identifier) (expression_list $V)))': '(local_assignment (__name @$N) $V)'
+      - '(chunk $$$C)': '%source_file($$$C)'
+      - '(return_statement $$$V)': '(__ssa_return $$$V)'
+      - '(parameters $$$P)': '(parameters $$$P=>__binding)'
+  - stage: retag-calls
+    rewrite:
+      - '(function_call name: (dot_index_expression table: $T:identifier field: $F:identifier) arguments: $A)': '(__call (__callee %member_text($F, $T)) $A)'
+      - '(function_call name: (method_index_expression table: $T:identifier method: $F:identifier) arguments: $A)': '(__call (__callee %member_text($F, $T)) $A)'
+      - '(function_call name: $F:identifier arguments: $A)': '%call($F, $A)'
+  - stage: classify
+    rewrite:
+      - '(local_assignment $N:__name $V:table_constructor)': '(__def (__defname @$N $N) (__class) $V)'
+      - '(local_assignment $N:__name $V:__call)': '(__binding @$N $N (__declaration) (__rhs $V))'
+      - '(local_assignment $N:__name $V)': '(__binding @$N $N (__declaration) (__rhs @$V $V))'
+      - '(assignment_statement (variable_list $N:identifier) (expression_list $V:table_constructor))': '(__def (__defname @$N) (__class) $V)'
+      - '(assignment_statement (variable_list $N:identifier) (expression_list $V:__call))': '%bind_call($N, $V)'
+      - '(assignment_statement (variable_list $N:identifier) (expression_list $V))': '%bind($N, $V)'
+      - '(if_statement condition: $C $$$X)': '(__ssa_branch $C (__ssa_arm $$$X))'
+      - '(%loops body: $B)': '%loop($B)'
+      - '(function_declaration name: (dot_index_expression table: $T:identifier field: $F:identifier) parameters: $P body:? $B)': '(__def (__defname @$T) (__impl) (__def (__defname @$F) (__function) $P $B))'
+      - '(function_declaration name: (method_index_expression table: $T:identifier method: $F:identifier) parameters: $P body:? $B)': '(__def (__defname @$T) (__impl) (__def (__defname @$F) (__method) (__binding "self" (__ssa_typed @$T)) $P $B))'
+      - '(function_declaration name: $N:identifier parameters: $P body:? $B)': '(__def (__defname @$N) (__function) $P $B)'
+      - '(function_definition parameters: $P body: $B)': '(function_definition $P $B)'
+  - stage: ssa-cleanup
+    rewrite:
+      - '(block $$$B)': '(__scope $$$B)'
+      - '(__ssa_return (expression_list $V:identifier))': '%return_value($V)'
+  - stage: tag-defs
+    rewrite:
+      - use: function_def_tags
+      - use: type_def_tags
+  - use: tag_file_dir
+  - use: resolve_paths
+
+project:
+  - stage: roots
+    rewrite:
+      - use: src_root
+      - '(__dir "lua" $$$REST)': '(__dir "lua" (__source_root) $$$REST)'
+      - '(__dir "lib" $$$REST)': '(__dir "lib" (__source_root) $$$REST)'
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #file_path=@$M #language=@$M | split_last(".") | map("lua:lua")'
+      - '(__def (__impl))': '#fqn=$ROOT | ancestor_tag("fqn") | concat(".", $ROOT | child_sym("__defname")) | keep_last(".", 64, 4096)'
+      - use: def_fqn_dotted_except_impl
+  - use: def_types
+  - use: display_wildcard_imports

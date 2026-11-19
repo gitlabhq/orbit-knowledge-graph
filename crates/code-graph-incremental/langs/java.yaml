@@ -1,0 +1,164 @@
+import: [canonical, display, roots, shapes, statements]
+
+data:
+  builtins: [AssertionError, Boolean, Byte, Character, Class, ClassCastException, ClassNotFoundException,
+    Double, Enum, Error, Exception, Float, IllegalArgumentException, IllegalStateException, IndexOutOfBoundsException,
+    Integer, Long, NullPointerException, Number, Object, RuntimeException, SecurityException, Short, String,
+    StringBuffer, StringBuilder, Thread, Throwable, UnsupportedOperationException, ArithmeticException,
+    ArrayIndexOutOfBoundsException, ArrayStoreException, IllegalMonitorStateException, IllegalThreadStateException,
+    InterruptedException, NegativeArraySizeException, NumberFormatException, ReflectiveOperationException,
+    StringIndexOutOfBoundsException, StackTraceElement, ThreadGroup, ThreadLocal, InheritableThreadLocal,
+    ProcessBuilder, RuntimePermission]
+  stdlib: [javax, jdk, java/lang/Math, java/util/Objects]
+  external: [java, java/lang]
+  providers:
+  - [java/lang, '%builtins']
+  - [java/lang/Math, abs, acos, asin, atan, atan2, cbrt, ceil, copySign, cos, cosh, exp, expm1, floor,
+    floorDiv, floorMod, hypot, log, log10, log1p, max, min, multiplyExact, nextAfter, nextDown, nextUp,
+    pow, random, rint, round, scalb, signum, sin, sinh, sqrt, tan, tanh, toDegrees, toRadians, ulp]
+  - [java/util/Objects, checkFromIndexSize, checkFromToIndex, checkIndex, compare, deepEquals, equals,
+    hash, hashCode, isNull, nonNull, requireNonNull, requireNonNullElse, requireNonNullElseGet, toString]
+  lookup_from: [__source_root]
+  record_overrides: [hashCode, toString]
+  interface_lists: [super_interfaces, extends_interfaces]
+  loops: [for_statement, while_statement, do_statement]
+
+canonicalize:
+  - stage: imports
+    rewrite:
+      - '(import_declaration (static) $S:scoped_identifier (asterisk))': '(__import (__source @$S $S) (__source_path @$S | replace(".", "/")) (__name "*")) #import_type=StaticImport #callable=true'
+      - '(import_declaration (static) $S:scoped_identifier)': '(__import (__source @$S | regex_replace("\.[^.]+$", "") $S) (__source_path @$S | regex_replace("\.[^.]+$", "") | replace(".", "/")) (__name @$S | split_last("."))) #import_type=StaticImport #callable=true'
+      - '(import_declaration $S:scoped_identifier (asterisk))': '(__import (__source @$S $S) (__source_path @$S | replace(".", "/")) (__name "*")) #import_type=WildcardImport'
+      - '(import_declaration $S:scoped_identifier)': '(__import (__source @$S | regex_replace("\.[^.]+$", "") $S) (__source_path @$S | replace(".", "/")) (__name @$S | split_last(".")))'
+  - stage: normalize
+    rewrite:
+      - '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: (cast_expression type: $T:type_identifier value: $V)))': '(local_variable_declaration type: $T declarator: (variable_declarator name: $N value: $V))'
+      - '(program $P:java_pkg $$$C)': '(__source_file @$ROOT $P $$$C)'
+      - '(program $$$C)': '(__source_file @$ROOT (__module_export (__import (__source ".") (__source_path "./*") (__name "*"))) $$$C) #import_type@__import=WildcardImport'
+      - '(package_declaration $S:scoped_identifier)': '(java_pkg (__package @$S $S) (__module_export (__import (__source @$S) (__source_path @$S | replace(".", "/") | regex_replace("$", "/*")) (__name "*")))) #import_type@__import=WildcardImport'
+      - '(package_declaration $S:identifier)': '(java_pkg (__package @$S) (__module_export (__import (__source @$S) (__source_path @$S | replace(".", "/") | regex_replace("$", "/*")) (__name "*")))) #import_type@__import=WildcardImport'
+      - '(return_statement $$$V)': '(__ssa_return $$$V)'
+      - '(generic_type $T:__member)': '$T'
+      - '(array_type element: $T:__member)': '$T'
+      - '(generic_type $T:type_identifier)': '(type_identifier @$T)'
+      - '(scoped_type_identifier $O:__member $T:type_identifier)': '%member($T, $O)'
+      - '(scoped_type_identifier $O:type_identifier $T:type_identifier)': '%member_text($T, $O)'
+      - '(array_type element: $T:type_identifier)': '(type_identifier @$T)'
+      - '(marker_annotation name: $N:identifier)': '(__decorator @$N)'
+      - '(permits (type_list $$$T:type_identifier))': '(java_permits $$$T->__decorator)'
+      - '(annotation name: $N:identifier arguments: $A)': '(__decorator @$N (__args $A))'
+      - '(instanceof_expression left: $L right: $T:type_identifier name: $N:identifier)': '(instanceof_expression $L (__call (__callee @$T $T)) (__binding @$N (__ssa_typed @$T)))'
+      - '(instanceof_expression left: $L right: $T:type_identifier)': '(instanceof_expression $L (__call (__callee @$T $T)))'
+      - '(throw_statement $$$V)': '(__ssa_branch $$$V)'
+      - '(record_pattern_component (type_identifier "var") $N:identifier)': '(__binding @$N)'
+      - '(record_pattern_component $T:type_identifier $N:identifier)': '(__binding @$N (__ssa_typed @$T))'
+      - '(record_pattern_component $N:identifier)': '(__binding @$N)'
+      - '(record_pattern_component $D:__destructure)': '$D'
+      - '(record_pattern $T:identifier (record_pattern_body $$$S))': '(__destructure (__call (__callee @$T $T)) $$$S)'
+      - '(field_access object: (this) field: $F:identifier)': '(__ivar @$F)'
+      - '(superclass $T:__member)': '(__supertype $T)'
+      - '(superclass $T:type_identifier)': '(__supertype @$T)'
+      - '(%interface_lists (type_list $$$T:type_identifier|__member))': '(java_supertypes $$$T->__supertype)'
+      - '(formal_parameter type: $T:__member name: $N:identifier)': '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
+      - '(formal_parameter type: $T:type_identifier name: $N:identifier)': '%typed_param($N, $T)'
+      - '(formal_parameter name: $N:identifier)': '(__binding @$N)'
+      - '(spread_parameter (variable_declarator name: $N:identifier))': '(__binding @$N)'
+      - '(catch_formal_parameter (catch_type $T:__member) name: $N:identifier)': '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
+      - '(catch_formal_parameter (catch_type $T:type_identifier) name: $N:identifier)': '%typed_param($N, $T)'
+      - '(catch_formal_parameter name: $N:identifier)': '(__binding @$N)'
+  - stage: qualified-references
+    rewrite:
+      - '(scoped_identifier scope: $O:__member name: $N:identifier)': '%member($N, $O)'
+      - '(scoped_identifier scope: $O:identifier name: $N:identifier)': '%member_text($N, $O)'
+      - '(marker_annotation name: $N:__member)': '(__decorator $N)'
+      - '(annotation name: $N:__member arguments: $A)': '(__decorator $N (__args $A))'
+  - stage: retag-expressions
+    rewrite:
+      - '(cast_expression value: $V:__call)': '$V'
+      - '(parenthesized_expression $V:__call)': '$V'
+      - '(field_access object: $O:__ivar field: $F:identifier)': '%member($F, $O)'
+      - '(field_access object: $O:__member field: $F:identifier)': '%member($F, $O)'
+      - '(field_access object: $O field: $F:identifier)': '%member_text($F, $O)'
+      - '(method_invocation object: (this) name: $N:identifier arguments: $A)': '(__call (__callee (__ivar @$N)) $A)'
+      - '(method_invocation object: (super) name: $N:identifier arguments: $A)': '(__call (__callee (__member @$N (__object (__ivar "super")))) $A)'
+      - '(method_invocation object: $O:__ivar name: $N:identifier arguments: $A)': '(__call (__callee %member($N, $O)) $A)'
+      - '(method_invocation object: $O:__member name: $N:identifier arguments: $A)': '(__call (__callee %member($N, $O)) $A)'
+      - '(method_invocation object: $O:__call name: $N:identifier arguments: $A)': '(__call (__callee %member($N, $O)) $A)'
+      - '(method_invocation object: $O name: $N:identifier arguments: $A)': '(__call (__callee %member_text($N, $O)) $A)'
+      - '(method_invocation name: $N:identifier arguments: $A)': '%call($N, $A) #implicit_self=true'
+      - '(object_creation_expression type: $T:__member arguments: $A $$$B:class_body)': '(__call (__callee $T) $A $$$B)'
+      - '(object_creation_expression type: $T:type_identifier arguments: $A $$$B:class_body)': '(__call (__callee @$T $T) $A $$$B)'
+  - stage: classify
+    rewrite:
+      - '(local_variable_declaration type: $T:__member declarator: (variable_declarator name: $N:identifier value:? $V))': '(java_local $V (__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__type) (__callee $T)))))'
+      - '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__call))': '(__binding @$N (__declaration) (__rhs $V))'
+      - '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__member))': '(__binding @$N (__declaration) (__rhs $V))'
+      - '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__ssa_branch))': '(__binding @$N (__declaration) (__rhs $V))'
+      - '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V))': '(__binding @$N (__declaration) (__rhs @$V $V))'
+      - '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value: $V:__call))': '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V))'
+      - '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value: $V:__ssa_branch))': '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V))'
+      - '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value: $V))': '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs @$V $V))'
+      - '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier))': '(__binding @$N (__declaration) (__ssa_typed @$T))'
+      - '(local_variable_declaration declarator: (variable_declarator name: $N:identifier value: $V:__call))': '(__binding @$N (__declaration) (__rhs $V))'
+      - '(local_variable_declaration declarator: (variable_declarator name: $N:identifier value: $V))': '(__binding @$N (__declaration) (__rhs @$V $V))'
+      - '(local_variable_declaration declarator: (variable_declarator name: $N:identifier))': '(__binding @$N (__declaration))'
+      - use: c_like_assignments
+      - '(switch_expression condition: $C body: (switch_block $$$ARMS:switch_rule|switch_block_statement_group))': '(__ssa_branch $C $$$ARMS->__ssa_arm)'
+      - '(ternary_expression condition: $C consequence: $Q alternative: $A)': '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm $A))'
+      - '(try_statement body: $B $$$ALTS:catch_clause|finally_clause)': '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm)'
+      - '(try_with_resources_statement resources: $R body: $B $$$ALTS:catch_clause|finally_clause)': '(__ssa_branch $R (__ssa_arm $B) $$$ALTS->__ssa_arm)'
+      - '(enhanced_for_statement type: $T:type_identifier name: $N:identifier value: $V body: $B)': '(__ssa_loop $V (__binding @$N (__ssa_typed @$T)) $B)'
+      - '(enhanced_for_statement name: $N:identifier value: $V body: $B)': '(__ssa_loop $V (__binding @$N) $B)'
+      - '(%loops body: $B)': '%loop($B)'
+      - '(field_declaration type: $T:__member declarator: (variable_declarator name: $N:identifier value:? $V))': '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee $T)))) $V)'
+      - '(field_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value:? $V))': '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))) $V)'
+      - '(field_declaration declarator: (variable_declarator name: $N:identifier value:? $V))': '(__def (__defname @$N) (__field_def) $V)'
+      - '(constant_declaration declarator: (variable_declarator name: $N:identifier))': '(__def (__defname @$N) (__constant))'
+      - '(enum_constant name: $N:identifier arguments:? $A body:? $B)': '(__def (__defname @$N) (__enum_variant) $A $B)'
+      - '(method_declaration $M?:modifiers type: $RT:__member name: $N:identifier parameters: $P body:? $B)': '(__def (__defname @$N) (__method) (__ssa_return_type $RT) $M $P $B)'
+      - '(method_declaration $M?:modifiers type: $RT:type_identifier name: $N:identifier parameters: $P body:? $B)': '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $M $P (__call (__callee @$RT $RT)) $B)'
+      - '(method_declaration $M?:modifiers name: $N:identifier parameters: $P body:? $B)': '(__def (__defname @$N) (__method) $M $P $B)'
+      - '(constructor_declaration $M?:modifiers name: $N:identifier parameters: $P body: $B)': '(__def (__defname @$N) (__method) $M $P $B)'
+      - '(compact_constructor_declaration $M?:modifiers name: $N:identifier body: $B)': '(__def (__defname @$N) (__method) $M $B)'
+      - '(class_declaration $M?:modifiers name: $N:identifier $$$PRE superclass: $S:__supertype $$$ANN body: (class_body $$$B))': '(__def (__defname @$N) (__class) $M $$$PRE $S $$$ANN (__binding (__ivar "super") (__rhs (__call @$S->__callee))) $$$B)'
+      - '(class_declaration $M?:modifiers name: $N:identifier $$$ANN body: (class_body $$$B))': '(__def (__defname @$N) (__class) $M $$$ANN $$$B)'
+      - '(record_declaration $M?:modifiers name: $N:identifier parameters: (formal_parameters $$$P:__binding) $$$ANN body: (class_body $$$B))': '(__def (__defname @$N) (__class) $M $$$ANN (__positional $$$P) $$$B $$$P->record_component (record_component "equals") (record_component "hashCode") (record_component "toString"))'
+      - '(interface_declaration $M?:modifiers name: $N:identifier $$$ANN body: (interface_body $$$B))': '(__def (__defname @$N) (__interface) $M $$$ANN $$$B)'
+      - '(enum_declaration $M?:modifiers name: $N:identifier $$$ANN body: (enum_body $$$B))': '(__def (__defname @$N) (__enum) $M $$$ANN $$$B)'
+      - '(annotation_type_declaration $M?:modifiers name: $N:identifier body: $B)': '(__def (__defname @$N) (__interface) $M $B)'
+  - stage: records
+    rewrite:
+      - '(record_component "/^equals$/")': '(__def (__defname @$ROOT) (__method) (formal_parameters (__binding "o"))) unique (__def (__method))'
+      - '(record_component %record_overrides)': '(__def (__defname @$ROOT) (__method) (formal_parameters)) unique (__def (__method) (formal_parameters !(__binding)))'
+      - '(record_component $T:__ssa_typed)': '(__def (__defname @$ROOT) (__method) (__ssa_return_type @$T) (formal_parameters)) unique (__def (__method) (formal_parameters !(__binding))) #value=true'
+      - '(record_component)': '(__def (__defname @$ROOT) (__method) (formal_parameters)) unique (__def (__method) (formal_parameters !(__binding))) #value=true'
+  - use: ssa_cleanup
+  - stage: tag-defs
+    rewrite:
+      - '(block $$$B)': '(__scope $$$B)'
+      - '(__def (__function))': '#callable=true #scoped=true'
+      - '(__def (__method))': '#callable=true #scoped=true #definition_span=true'
+      - use: type_def_tags
+      - use: interface_def_tags
+      - '(__def (__field_def))': '#value=true'
+      - '(__def (__constant))': '#value=true'
+  - use: tag_file_dir
+  - use: resolve_paths
+
+project:
+  - stage: roots
+    rewrite:
+      - '(__dir "java" $$$REST)': '(__dir "java" (__source_root) $$$REST)'
+      - use: src_root
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #fqn=$M | child_sym("__package") #file_path=@$M #language=@$M | split_last(".") | map("java:java")'
+      - use: def_fqn_dotted
+  - use: def_types
+  - stage: imports
+    rewrite:
+      - use: import_entity
+      - '(__name "*")': '#resolved=$ROOT | has_incoming("Imports")'
+      - '(__name)': '#resolved=$ROOT | has_incoming("Imports")'

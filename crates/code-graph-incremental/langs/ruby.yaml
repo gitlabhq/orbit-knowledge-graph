@@ -1,0 +1,190 @@
+import: [canonical, display, shapes]
+
+data:
+  callable_kinds: [__function, __method, __class, __lambda, __enum_variant, __property]
+  builtins: [abort, at_exit, autoload, binding, 'block_given?', caller, caller_locations, catch, chomp,
+    chop, eval, exec, exit, exit!, fail, fork, format, gets, global_variables, 'iterator?', lambda, load,
+    local_variables, loop, open, p, print, printf, proc, putc, puts, raise, rand, readline, readlines,
+    require, require_relative, select, sleep, spawn, sprintf, srand, syscall, system, test, throw, trace_var,
+    trap, untrace_var, warn]
+  stdlib: [kernel, pp, abbrev, base64, benchmark, bigdecimal, bundler, cgi, csv, date, delegate, digest,
+    drb, erb, etc, fcntl, fiddle, fileutils, find, forwardable, getoptlong, io, ipaddr, irb, json, logger,
+    monitor, mutex_m, net, nkf, objspace, observer, open-uri, open3, openssl, optparse, ostruct, pathname,
+    prettyprint, pstore, psych, racc, rdoc, readline, resolv, ripper, securerandom, set, shellwords, singleton,
+    socket, stringio, strscan, syslog, tempfile, time, timeout, tmpdir, tsort, un, uri, weakref, yaml,
+    zlib]
+  external: [rails, active_record, active_model, active_support, action_controller, action_dispatch, action_view,
+    action_mailer, action_cable, active_job, active_storage, action_mailbox, action_text, arel]
+  providers:
+  - [kernel, '%builtins']
+  - [pp, pp, pretty_inspect]
+  frameworks: [rails]
+  lookup_from: [__source_root]
+  module_hooks: [included, prepended]
+  class_attributes: [class_attribute, mattr_accessor, mattr_reader, mattr_writer, cattr_accessor, cattr_reader,
+    cattr_writer]
+  plural_associations: [has_many, has_and_belongs_to_many]
+  send_methods: [send, public_send, __send__]
+  params: [optional_parameter, splat_parameter, hash_splat_parameter, keyword_parameter, block_parameter]
+  conditionals: [if, elsif, unless]
+  modifiers: [if_modifier, unless_modifier]
+  loops: [while, until, for]
+  namespaces: [class, module]
+  blocks: [block, do_block]
+
+canonicalize:
+  - stage: imports
+    rewrite:
+      - '(call method: (identifier "require_relative") arguments: (argument_list (string $S:string_content)))': '(__import (__source @$S) (__source_path @$S | prepend("./")) (__name "*")) #import_type=RequireRelative'
+      - '(call method: (identifier "require") arguments: (argument_list (string $S:string_content)))': '%wildcard_import($S) #import_type=Require'
+      - '(call receiver: !$RECEIVER method: (identifier %module_hooks) block: (do_block $$$B))': '(rb_synth $$$B)'
+      - '(call method: (identifier "include") arguments: (argument_list $$$M:constant|scope_resolution))': '(rb_synth $$$M->rb_include)'
+      - '(call method: (identifier "extend") arguments: (argument_list $$$M:constant|scope_resolution))': '(rb_synth $$$M->rb_extend)'
+      - '(call method: (identifier "prepend") arguments: (argument_list $$$M:constant|scope_resolution))': '(rb_synth $$$M->rb_prepend)'
+      - '(call method: (identifier "attr_accessor") arguments: (argument_list $$$S:simple_symbol))': '(rb_synth $$$S->rb_attr)'
+      - '(call method: (identifier "attr_reader") arguments: (argument_list $$$S:simple_symbol))': '(rb_synth $$$S->rb_attr)'
+      - '(call method: (identifier "attr_writer") arguments: (argument_list $$$S:simple_symbol))': '(rb_synth $$$S->rb_attr)'
+      - '(call receiver: !$RECEIVER method: (identifier %class_attributes) arguments: (argument_list $S:simple_symbol $$$REST:simple_symbol))': '(rb_synth (rb_attr @$S) $$$REST->rb_attr)'
+      - '(call receiver: !$RECEIVER method: (identifier "delegate") arguments: (argument_list $S:simple_symbol $$$REST:simple_symbol))': '(rb_synth (rb_method @$S) $$$REST->rb_method)'
+      - '(call method: (identifier "def_delegators") arguments: (argument_list (simple_symbol) $$$S:simple_symbol))': '(rb_synth $$$S->rb_method)'
+      - '(call receiver: !$RECEIVER method: (identifier "def_delegator") arguments: (argument_list (simple_symbol) (simple_symbol) $A:simple_symbol))': '(rb_synth (rb_method @$A))'
+      - '(call receiver: !$RECEIVER method: (identifier "def_delegator") arguments: (argument_list (simple_symbol) $S:simple_symbol))': '(rb_synth (rb_method @$S))'
+      - '(call receiver: !$RECEIVER method: (identifier "define_method") arguments: (argument_list $S:simple_symbol) block:? $B)': '(rb_synth (rb_method @$S $B))'
+      - '(call receiver: !$RECEIVER method: (identifier "define_method") arguments: (argument_list (string $S:string_content)) block:? $B)': '(rb_synth (rb_method @$S $B))'
+      - '(alias name: $N:simple_symbol alias: $O:simple_symbol)': '(rb_synth (rb_method @$N (__call (__callee (__ivar @$O | strip(":"))))))'
+      - '(call receiver: !$RECEIVER method: (identifier %plural_associations) arguments: (argument_list $S:simple_symbol))': '(rb_synth (rb_method @$S))'
+      - '(call receiver: !$RECEIVER method: (identifier "has_one") arguments: (argument_list $S:simple_symbol))': '(rb_synth (rb_method @$S))'
+      - '(call receiver: !$RECEIVER method: (identifier "belongs_to") arguments: (argument_list $S:simple_symbol))': '(rb_synth (rb_method @$S))'
+      - '(call receiver: !$RECEIVER method: (identifier "scope") arguments: (argument_list $S:simple_symbol $$$L))': '(rb_synth (rb_method @$S $$$L))'
+      - '(call receiver:? $R method: $M:(identifier %send_methods) arguments: (argument_list $N:_*_named $$$A) block:? $B)': '(rb_send receiver: $R method: $M (rb_send_name $N) arguments: (argument_list $$$A) block: $B)'
+  - stage: synth
+    rewrite:
+      - '(rb_send_name $N:simple_symbol)': '(rb_literal_method @$N | strip(":"))'
+      - '(rb_send_name (string !(interpolation) $N:string_content))': '(rb_literal_method @$N)'
+      - '(rb_include)': '(rb_synth (__supertype @$ROOT | split_last("::")) (__import (__source @$ROOT | regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT | strip("::") | replace("::", "/") | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$ROOT | split_last("::")))) #import_type@__import=Include'
+      - '(rb_extend)': '(rb_synth (__supertype @$ROOT | split_last("::")) (__import (__source @$ROOT | regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT | strip("::") | replace("::", "/") | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$ROOT | split_last("::")))) #import_type@__import=Extend'
+      - '(rb_prepend)': '(rb_synth (__supertype @$ROOT | split_last("::")) (__import (__source @$ROOT | regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT | strip("::") | replace("::", "/") | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$ROOT | split_last("::")))) #import_type@__import=Prepend'
+      - '(rb_attr)': '(__def (__defname @$ROOT | strip(":")) (__property))'
+      - '(rb_method $$$B)': '(__def (__defname @$ROOT | strip(":")) (__method) $$$B)'
+  - stage: literal-dispatch
+    rewrite:
+      - '(rb_send receiver:? $R method: $M $N:rb_literal_method arguments: $A block:? $B)': '(call receiver: $R method: (identifier @$N) arguments: $A block: $B)'
+      - '(rb_send receiver:? $R method: $M (rb_send_name $N) arguments: (argument_list $$$A) block:? $B)': '(call receiver: $R method: $M arguments: (argument_list $N $$$A) block: $B)'
+  - stage: constants
+    rewrite:
+      - '(assignment left: $N:constant right: $R:lambda)': '(__def (__defname @$N) (__lambda) $R)'
+      - '(assignment left: $N:constant right: (call method: (identifier "lambda") block: $B))': '(__def (__defname @$N) (__lambda) $B)'
+      - '(assignment left: $N:constant right: (call method: (identifier "proc") block: $B))': '(__def (__defname @$N) (__lambda) $B)'
+      - '(assignment left: $N:constant right: (call receiver: (constant "Proc") method: (identifier "new") block: $B))': '(__def (__defname @$N) (__lambda) $B)'
+      - '(assignment left: $N:identifier right: $R:lambda)': '(__def (__defname @$N) (__lambda) $R)'
+      - '(assignment left: $N:constant right: $R)': '(__def (__defname @$N) (__constant) $R)'
+      - '(assignment left: $N:scope_resolution right: $R)': '(__def (__defname @$N | strip("::") $N) (__constant) $R)'
+  - stage: normalize
+    rewrite:
+      - '(program $$$C)': '%source_file($$$C)'
+      - '(return $$$V)': '(__ssa_return $$$V)'
+      - '(superclass $S:constant)': '(rb_super (__supertype @$S) (__import (__source @$S) (__source_path @$S | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$S))) #import_type@__import=Autoload'
+      - '(superclass $S:scope_resolution)': '(rb_super (__supertype @$S | strip("::") | split_last("::") $S) (__import (__source @$S | regex_replace("(::)?[^:]+$", "")) (__source_path @$S | strip("::") | replace("::", "/") | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$S | strip("::") | split_last("::")))) #import_type@__import=Autoload'
+      - '(%params name: $N:identifier)': '(__binding @$N)'
+      - '(method_parameters $$$P)': '(method_parameters $$$P=>__binding)'
+      - '(block_parameters $$$P)': '(block_parameters $$$P=>block_local)'
+      - '(lambda_parameters $$$P)': '(lambda_parameters $$$P=>__binding)'
+      - '(exception_variable $V:identifier)': '(__binding @$V)'
+  - stage: retag-calls
+    rewrite:
+      - '(call receiver: (self) method: $M:identifier arguments:? $A block:? $B)': '(__call (__callee (__ivar @$M)) $A $B)'
+      - '(call receiver: $R:instance_variable method: $M:identifier arguments:? $A block:? $B)': '(__call (__callee (__member @$M (__object (__ivar @$R | strip("@"))))) $A $B)'
+      - '(call receiver: $R:constant method: (identifier "new") arguments:? $A block:? $B)': '(rb_ref (__import (__source @$R) (__source_path @$R | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$R)) (__call (__callee @$R) $A $B)) #import_type@__import=Autoload'
+      - '(call receiver: $R:scope_resolution method: (identifier "new") arguments:? $A block:? $B)': '(rb_ref (__import (__source @$R $R) (__source_path @$R | strip("::") | replace("::", "/") | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$R | split_last("::"))) (__call (__callee @$R | split_last("::")) $A $B)) #import_type@__import=Autoload'
+      - '(call receiver: $R:constant method: $M:identifier arguments:? $A block:? $B)': '(rb_ref (__import (__source @$R) (__source_path @$R | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$R)) (__call (__callee (__member @$M (__object @$R))) $A $B)) #import_type@__import=Autoload'
+      - '(call receiver: $R:scope_resolution method: $M:identifier arguments:? $A block:? $B)': '(rb_ref (__import (__source @$R $R) (__source_path @$R | strip("::") | replace("::", "/") | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$R | split_last("::"))) (__call (__callee (__member @$M (__object @$R | split_last("::")))) $A $B)) #import_type@__import=Autoload'
+      - '(call receiver: $R:__call method: $M:identifier arguments:? $A block:? $B)': '(__call (__callee %member($M, $R)) $A $B)'
+      - '(call receiver: $R:rb_ref method: $M:identifier arguments:? $A block:? $B)': '(__call (__callee %member($M, $R)) $A $B)'
+      - '(call receiver: $R:identifier method: $M:identifier arguments:? $A block:? $B)': '(__call (__callee (__member @$M (__object @$R))) $A $B)'
+      - '(call receiver: $R method: $M:identifier arguments:? $A block:? $B)': '(__call (__callee %member_text($M, $R)) $A $B)'
+      - '(call method: $M:identifier arguments:? $A block:? $B)': '(__call (__callee @$M) $A $B) #implicit_self=true'
+  - stage: classify
+    rewrite:
+      - '(assignment left: $L:instance_variable right: $R:__call)': '(__binding (__ivar @$L | strip("@")) (__rhs $R))'
+      - '(assignment left: $L:instance_variable right: $R:rb_ref)': '(__binding (__ivar @$L | strip("@")) (__rhs $R))'
+      - '(assignment left: $L:instance_variable right: $R:begin)': '(__binding (__ivar @$L | strip("@")) (__rhs $R))'
+      - '(assignment left: $L:instance_variable right: $R:parenthesized_statements)': '(__binding (__ivar @$L | strip("@")) (__rhs $R))'
+      - '(assignment left: $L:instance_variable right: $R:constant)': '(__binding (__ivar @$L | strip("@")) (__rhs (__call (__callee @$R))))'
+      - '(assignment left: $L:instance_variable right: $R)': '(__binding (__ivar @$L | strip("@")) (__rhs @$R $R))'
+      - '(assignment left: $L:identifier right: $R:__call)': '%bind_call($L, $R)'
+      - '(assignment left: $L:identifier right: $R:rb_ref)': '%bind_call($L, $R)'
+      - '(assignment left: $L:identifier right: $R:__ssa_branch)': '%bind_call($L, $R)'
+      - '(assignment left: $L:identifier right: $R:begin)': '%bind_call($L, $R)'
+      - '(assignment left: $L:identifier right: $R:parenthesized_statements)': '%bind_call($L, $R)'
+      - '(assignment left: $L:identifier right: $R:constant)': '(__binding @$L (__rhs (__call (__callee @$R))))'
+      - '(assignment left: $L:identifier right: $R:identifier)': '(__binding @$L (__rhs (__call (__callee @$R)))) #implicit_self@__call=true'
+      - '(assignment left: $L:identifier right: $R)': '%bind($L, $R)'
+      - '(operator_assignment left: $L:instance_variable ("||=") right: $R)': '(__binding (__ivar @$L | strip("@")) (__rhs $R))'
+      - '(operator_assignment left: $L:identifier ("||=") right: $R)': '(__binding @$L (__rhs (__ssa_branch (__ssa_arm (__call (__callee @$L))) (__ssa_arm $R))))'
+      - '(%conditionals condition: $C consequence:? $Q alternative:? $A)': '(__ssa_branch $C (__ssa_arm? $Q) (__ssa_arm? $A))'
+      - '(%modifiers body: $B condition: $C)': '(__ssa_branch $C (__ssa_arm $B))'
+      - '(conditional condition: $C consequence: $Q alternative: $A)': '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm $A))'
+      - '(case value:? $V $$$W:when|else)': '(__ssa_branch $V $$$W->__ssa_arm)'
+      - '(begin $$$BODY $R:rescue $$$ALTS $E:ensure)': '(begin (__ssa_branch (__ssa_arm $$$BODY) (__ssa_arm $R) $$$ALTS->__ssa_arm) (__side_effect $E))'
+      - '(begin $$$BODY $E:ensure)': '(begin $$$BODY (__side_effect $E))'
+      - '(rescue_modifier body: $B handler: $H)': '(begin $B (__side_effect $H))'
+      - '(begin $$$BODY $R:rescue $$$ALTS)': '(__ssa_branch (__ssa_arm $$$BODY) (__ssa_arm $R) $$$ALTS->__ssa_arm)'
+      - '(body_statement $$$BODY $R:rescue $$$ALTS)': '(body_statement (__ssa_branch (__ssa_arm $$$BODY) (__ssa_arm $R) $$$ALTS->__ssa_arm))'
+      - '(%loops body: $B)': '%loop($B)'
+      - '(method name: $N parameters:? $P body:? $B)': '(__def (__defname @$N) (__method) $P $B)'
+      - '(singleton_method object: (self) name: $N parameters:? $P body:? $B)': '(__def (__defname @$N) (__method) $P $B)'
+      - '(singleton_class value: (self) body: $B)': '(rb_singleton $B)'
+      - '(class name: $N superclass: (rb_super $S:__supertype $I:__import) body:? $B)': '(__def (__defname @$N | strip("::") $N) (__class) $S $I (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
+      - '(%namespaces name: $N body:? $B)': '(__def (__defname @$N | strip("::")) (__class) $B)'
+  - stage: refs
+    rewrite:
+      - '(identifier)': '(__call (__callee @$ROOT)) #implicit_self=true'
+      - '(constant)': '(__call (__callee @$ROOT))'
+      - '(scope_resolution)': '(__call (__callee (__member @$ROOT | split_last("::") (__object @$ROOT | strip("::") | regex_replace("::[^:]+$", "")))))'
+  - stage: ssa-cleanup
+    rewrite:
+      - '(__ssa_return $V:instance_variable)': '(__ssa_return (__rhs (__ivar @$V | strip("@"))))'
+  - stage: lexical-scopes
+    rewrite:
+      - '(block_local)': '(__binding @$ROOT (__declaration))'
+      - '(%blocks $$$B)': '(__scope $$$B)'
+  - stage: tag-defs
+    rewrite:
+      - use: function_def_tags
+      - '(__def (__class))': '#declares_type=true #value=true #callable=true #scoped=true #exports=$ROOT | child_sym("__defname")'
+      - '(__def (__lambda))': '#callable=true #scoped=true'
+      - '(__def (__property))': '#callable=true #value=true'
+      - '(__def (__enum_variant))': '#callable=true #value=true'
+      - '(__def (__struct))': '#value=true #declares_type=true #scoped=true'
+      - use: trait_def_tags
+      - '(__def (__constant))': '#value=true'
+  - use: tag_file_dir
+  - use: resolve_paths
+  - stage: weak-imports
+    rewrite:
+      - '(__import)': '#weak=true'
+      - '(__import_type)': '#weak=true'
+
+project:
+  - stage: roots
+    rewrite:
+      - '(__dir "models" $$$REST)': '(__dir "models" (__source_root) $$$REST)'
+      - '(__dir "concerns" $$$REST)': '(__dir "concerns" (__source_root) $$$REST)'
+      - '(__dir "services" $$$REST)': '(__dir "services" (__source_root) $$$REST)'
+      - '(__dir "controllers" $$$REST)': '(__dir "controllers" (__source_root) $$$REST)'
+      - '(__dir "workers" $$$REST)': '(__dir "workers" (__source_root) $$$REST)'
+      - '(__dir "helpers" $$$REST)': '(__dir "helpers" (__source_root) $$$REST)'
+      - '(__dir "policies" $$$REST)': '(__dir "policies" (__source_root) $$$REST)'
+      - '(__dir "finders" $$$REST)': '(__dir "finders" (__source_root) $$$REST)'
+      - '(__dir "jobs" $$$REST)': '(__dir "jobs" (__source_root) $$$REST)'
+      - '(__dir "mailers" $$$REST)': '(__dir "mailers" (__source_root) $$$REST)'
+      - '(__dir "lib" $$$REST)': '(__dir "lib" (__source_root) $$$REST)'
+      - '(__dir "app" $$$REST)': '(__dir "app" (__source_root) $$$REST)'
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #file_path=@$M #language=@$M | split_last(".") | map("rb:ruby")'
+      - use: def_fqn_colons
+  - use: def_types
+  - use: display_imports
