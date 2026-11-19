@@ -747,7 +747,7 @@ fn tree_budget(phase: &Phase, env: &Env, label: &str) -> Sentinel {
         .tree
         .as_deref()
         .and_then(|name| env.limits.ms(name))
-        .unwrap_or(0);
+        .unwrap_or(u64::MAX);
     Sentinel::new(phase.label, label, ms).on_thread_cpu()
 }
 
@@ -758,7 +758,7 @@ pub fn scope_budget(phase: &Phase, env: &Env, run: &Sentinel) -> Sentinel {
         .scope
         .as_deref()
         .and_then(|name| env.limits.ms(name))
-        .unwrap_or(0);
+        .unwrap_or(u64::MAX);
     run.child(phase.label, "", ms)
 }
 
