@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 
-use query_engine::compiler::ast::{Expr, Function, Node, Query, SelectExpr, SqlType, TableRef};
+use query_engine::compiler::ast::{
+    Expr, Function, Node, Query, SelectExpr, SqlType, TableRef, visit,
+};
 use query_engine::compiler::input::{AggFunction, TruncateUnit};
 use query_engine::compiler::passes::codegen::duckdb;
 use strum::{IntoEnumIterator, VariantNames};
@@ -42,117 +44,50 @@ impl Coverage {
         unreached.chain(stale).collect()
     }
 
-    fn insert(&mut self, construct: String) {
-        self.0.insert(construct);
-    }
-
     fn query(&mut self, query: &Query) {
-        for cte in &query.ctes {
-            self.query(&cte.query);
-        }
-        if query.distinct {
-            self.insert("DISTINCT".into());
-        }
-        if !query.union_all.is_empty() {
-            self.insert("UNION ALL".into());
-        }
-        for select in &query.select {
-            self.expr(&select.expr);
-        }
-        self.table(&query.from);
-        for expr in query
-            .where_clause
-            .iter()
-            .chain(&query.group_by)
-            .chain(&query.having)
-            .chain(query.order_by.iter().map(|order| &order.expr))
-            .chain(query.limit_by.iter().flat_map(|(_, keys)| keys))
-        {
-            self.expr(expr);
-        }
-        for arm in &query.union_all {
-            self.query(arm);
-        }
+        let mut found = Vec::new();
+        visit::visit_queries(query, &mut |query| {
+            if query.distinct {
+                found.push("DISTINCT".to_string());
+            }
+            if !query.union_all.is_empty() {
+                found.push("UNION ALL".to_string());
+            }
+            for expression in visit::query_expressions(query) {
+                visit::visit_expressions(expression, &mut |expression| {
+                    found.extend(constructs(expression));
+                    Ok(())
+                })?;
+            }
+            Ok(())
+        })
+        .expect("the coverage walk does not fail");
+        self.0.extend(found);
     }
+}
 
-    fn table(&mut self, table: &TableRef) {
-        match table {
-            TableRef::Scan { .. } | TableRef::Cte { .. } => {}
-            TableRef::Join {
-                left, right, on, ..
-            } => {
-                self.table(left);
-                self.table(right);
-                self.expr(on);
-            }
-            TableRef::Union { queries, .. } => {
-                for query in queries {
-                    self.query(query);
-                }
-            }
-            TableRef::Subquery { query, .. } => self.query(query),
-        }
-    }
-
-    fn expr(&mut self, expr: &Expr) {
-        match expr {
-            Expr::Column { .. } | Expr::Identifier(_) | Expr::Literal(_) | Expr::Star => {}
-            Expr::Param { data_type, .. } => {
-                if matches!(data_type, SqlType::Timestamp { .. }) {
-                    self.insert("timestamp parameter".into());
-                }
-            }
-            Expr::FuncCall { name, args } => {
-                self.insert(format!("function {name}"));
-                for arg in args {
-                    self.expr(arg);
-                }
-            }
-            Expr::EmptyTupleArray(_) => self.insert("empty tuple array".into()),
-            Expr::Aggregate {
-                function,
-                argument,
-                distinct,
-                condition,
-            } => {
-                self.insert(format!("aggregate {function}"));
-                if *distinct {
-                    self.insert("aggregate DISTINCT".into());
-                }
-                if condition.is_some() {
-                    self.insert("aggregate FILTER".into());
-                }
-                for value in argument.iter().chain(condition) {
-                    self.expr(value);
-                }
-            }
-            Expr::TimeBucket { unit, value } => {
-                self.insert(format!("time bucket {}", unit.name()));
-                self.expr(value);
-            }
-            Expr::TextSearch { value, query, .. } => {
-                self.expr(value);
-                self.expr(query);
-            }
-            Expr::Lambda { body, .. } => {
-                self.insert("lambda".into());
-                self.expr(body);
-            }
-            Expr::BinaryOp { left, right, .. } => {
-                self.expr(left);
-                self.expr(right);
-            }
-            Expr::UnaryOp { expr, .. } | Expr::InSubquery { expr, .. } => self.expr(expr),
-            Expr::InSelect { expr, query } => {
-                self.insert("IN subquery".into());
-                self.expr(expr);
-                self.query(query);
-            }
-            Expr::Scalar(query) => {
-                self.insert("scalar subquery".into());
-                self.query(query);
-            }
-        }
+fn constructs(expression: &Expr) -> Vec<String> {
+    match expression {
+        Expr::Param {
+            data_type: SqlType::Timestamp { .. },
+            ..
+        } => vec!["timestamp parameter".into()],
+        Expr::FuncCall { name, .. } => vec![format!("function {name}")],
+        Expr::EmptyTupleArray(_) => vec!["empty tuple array".into()],
+        Expr::Aggregate {
+            function,
+            distinct,
+            condition,
+            ..
+        } => std::iter::once(format!("aggregate {function}"))
+            .chain(distinct.then(|| "aggregate DISTINCT".to_string()))
+            .chain(condition.as_ref().map(|_| "aggregate FILTER".to_string()))
+            .collect(),
+        Expr::TimeBucket { unit, .. } => vec![format!("time bucket {}", unit.name())],
+        Expr::Lambda { .. } => vec!["lambda".into()],
+        Expr::InSelect { .. } => vec!["IN subquery".into()],
+        Expr::Scalar(_) => vec!["scalar subquery".into()],
+        _ => vec![],
     }
 }
 

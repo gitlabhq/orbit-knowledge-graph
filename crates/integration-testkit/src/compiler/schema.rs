@@ -47,11 +47,7 @@ struct SchemaRejection {
 }
 
 pub fn run_schema_dir(directory: &Path, ontology: &ontology::Ontology) {
-    let mut paths = Vec::new();
-    crate::scenario::discover(directory, &mut paths);
-    paths.sort();
-    assert!(!paths.is_empty());
-    let failures: Vec<String> = paths
+    let failures: Vec<String> = super::fixture_paths(directory)
         .iter()
         .flat_map(|path| {
             crate::scenario::read_cases::<SchemaCase>(path)

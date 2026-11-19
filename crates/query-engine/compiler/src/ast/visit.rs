@@ -103,6 +103,31 @@ pub fn visit_expressions<'a>(
     callback(expression)
 }
 
+pub fn query_expressions(query: &Query) -> Vec<&Expr> {
+    fn conditions<'a>(table: &'a TableRef, found: &mut Vec<&'a Expr>) {
+        if let TableRef::Join {
+            left, right, on, ..
+        } = table
+        {
+            conditions(left, found);
+            conditions(right, found);
+            found.push(on);
+        }
+    }
+    let mut expressions: Vec<&Expr> = query
+        .select
+        .iter()
+        .map(|select| &select.expr)
+        .chain(query.where_clause.iter())
+        .chain(query.having.iter())
+        .chain(&query.group_by)
+        .chain(query.order_by.iter().map(|order| &order.expr))
+        .chain(query.limit_by.iter().flat_map(|(_, keys)| keys))
+        .collect();
+    conditions(&query.from, &mut expressions);
+    expressions
+}
+
 pub fn visit_relations<'a>(table: &'a TableRef, callback: &mut impl FnMut(&'a TableRef)) {
     match table {
         TableRef::Join { left, right, .. } => {
