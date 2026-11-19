@@ -19,6 +19,15 @@ functions:
   on_object:
     params: [$SITE]
     cases:
+      - match: '(_ (__object !(__call) !(__object) !(__qualifier) !(__member) !(__ivar)))'
+        value: 'on_named($ROOT, $SITE)'
+      - match: '(_ $O:__object)'
+        value: 'lookup($ROOT, $SITE, $O | type, $O | type | type_node | type)'
+
+  on_named:
+    params: [$SITE]
+    key: ['$ROOT | child("__object") | sym', '$ROOT | sym', '$SITE | role']
+    cases:
       - match: '(_ $O:__object)'
         value: 'lookup($ROOT, $SITE, $O | type, $O | type | type_node | type)'
 
@@ -86,3 +95,31 @@ functions:
         value: $ROOT
       - match: '$P:(_ $ROOT)'
         value: '$P | site'
+
+  returns:
+    cases:
+      - match: '(__def $K:__class|__struct|__impl|__interface|__trait|__enum)'
+        value: $ROOT
+      - match: '(__def $T:__ssa_return_type)'
+        value: '$T | type'
+      - match: '(__def **/(__ssa_return $B:__ssa_branch))'
+        value: '$B | branch_type'
+      - value: '$ROOT | inferred_return'
+
+  branch_type:
+    cases:
+      - match: '(_ $$$A:__ssa_arm)'
+        value: 'lub($A | tail | arm_type)'
+
+  arm_type:
+    cases:
+      - match: '(__ssa_return)'
+        value: none
+      - match: '(__ssa_branch $$$A:__ssa_arm)'
+        when: $A
+        value: 'known($ROOT | branch_type)'
+      - match: '(__ssa_branch)'
+        value: none
+      - match: '(_ $K:__callee)'
+        value: 'known($K | type)'
+      - value: opaque

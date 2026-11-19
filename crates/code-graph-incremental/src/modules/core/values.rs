@@ -87,12 +87,11 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         found
     }
 
-    pub(super) fn call_targets(&mut self, call: Cursor<'t, S>) -> Vals {
+    pub(super) fn call_targets(&mut self, call: Cursor<'t, S>, implicit: bool) -> Vals {
         let Some(callee) = call.child(C::Callee).filter(|c| c.sym_opt().is_some()) else {
             return Vals::new();
         };
         let bound = self.read(callee);
-        let implicit = call.has_tag(self.tags().implicit_self);
         let read_any = !bound.is_empty();
         let named: Vals = bound
             .into_iter()
@@ -112,14 +111,13 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         }
     }
 
-    pub(super) fn unresolved(&mut self, call: Cursor<'t, S>) -> bool {
+    pub(super) fn unresolved(&mut self, call: Cursor<'t, S>, implicit: bool) -> bool {
         let Some(callee) = call.child(C::Callee).filter(|c| c.sym_opt().is_some()) else {
             return false;
         };
         if !is_name_text(self.lang().syms.resolve(callee.sym())) {
             return false;
         }
-        let implicit = call.has_tag(self.tags().implicit_self);
-        self.read(callee).is_empty() && (!implicit || self.call_targets(call).is_empty())
+        self.read(callee).is_empty() && (!implicit || self.call_targets(call, true).is_empty())
     }
 }

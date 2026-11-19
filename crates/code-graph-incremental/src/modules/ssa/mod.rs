@@ -72,7 +72,7 @@ impl Module for Ssa {
 
     fn start<'t, S: Store>(cx: &mut Cx<'_, 't, Self, S>, root: Cursor<'t, S>) {
         let wildcard = cx.lang().syms.intern(WILDCARD);
-        let label = root.tag(cx.tags().scoped).unwrap_or(root.sym());
+        let label = root.sym();
         let s = cx.write();
         s.cur = s.graph.add_block();
         s.graph.seal_block(s.cur);
@@ -100,12 +100,15 @@ static FUNCTIONS: &[Function<Ssa>] = &[
         cx.bind_import(node(cx, a, 0), truthy(&a[1]), truthy(&a[2]));
         yes(true)
     }),
-    function!(Effect, "enter_scope", [one], |cx, a| {
-        cx.scope(node(cx, a, 0), None);
+    function!(Effect, "enter_scope", [one, set, one], |cx, a| {
+        let label = a[1].first().and_then(|&v| cx.text(v));
+        cx.scope(node(cx, a, 0), label, truthy(&a[2]), None);
         yes(true)
     }),
-    function!(Effect, "enter_def", [one], |cx, a| {
-        cx.enter_def(node(cx, a, 0));
+    function!(Effect, "enter_def", [one, one, set], |cx, a| {
+        let label = a[2].first().and_then(|&v| cx.text(v));
+        let scoped = truthy(&a[1]).then_some(label);
+        cx.enter_def(node(cx, a, 0), scoped);
         yes(true)
     }),
     function!(Effect, "fork", [set], |cx, a| {
@@ -318,13 +321,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
         if let Some(slot) = self.field_slot(callee) {
             return Some(self.read_value(slot));
         }
-        let implicit = callee
-            .parent()
-            .is_some_and(|c| c.has_tag(self.tags().implicit_self));
-        callee
-            .sym_opt()
-            .filter(|_| !implicit)
-            .and_then(|sym| self.read_phi(sym))
+        callee.sym_opt().and_then(|sym| self.read_phi(sym))
     }
 }
 

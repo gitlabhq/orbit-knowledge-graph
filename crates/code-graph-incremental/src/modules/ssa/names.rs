@@ -74,21 +74,27 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
             .map(|(binding, _)| binding)
     }
 
-    pub(super) fn scope(&mut self, scope: Cursor<'t, S>, resume: Option<BlockId>) {
-        let tags = self.tags();
-        let label = scope.tag(tags.scoped).unwrap_or(scope.sym());
+    pub(super) fn scope(
+        &mut self,
+        scope: Cursor<'t, S>,
+        label: Option<u32>,
+        hoisted: bool,
+        resume: Option<BlockId>,
+    ) {
+        let label = label.unwrap_or(scope.sym());
         let s = self.write();
         let wildcards = s.wildcards.len();
         s.frames.push(Frame::Scope { wildcards, resume });
         s.scopes.push((label, Vec::new()));
-        if scope.has_tag(tags.hoisted) {
+        if hoisted {
             self.predeclare(scope);
         }
         if label == 0 {
             return;
         }
-        let boundary =
-            move |n: Cursor<'_, S>| (n.is(C::Scope) && n.sym() == label) || n.has_tag(tags.scoped);
+        let boundary = move |n: Cursor<'_, S>| {
+            n.is(C::Def) || n.is(C::Lambda) || (n.is(C::Scope) && n.sym() == label)
+        };
         let mut declarations: Vec<_> = scope
             .descendants_pruned(boundary)
             .filter(|n| n.child_sym(C::Declaration) == Some(label))
@@ -141,7 +147,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
         }
     }
 
-    pub(super) fn enter_def(&mut self, def: Cursor<'t, S>) {
+    pub(super) fn enter_def(&mut self, def: Cursor<'t, S>, scoped: Option<Option<u32>>) {
         if def.child_sym(C::DefName).is_none() {
             return;
         }
@@ -149,8 +155,8 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
         let s = self.write();
         let parent = s.cur;
         s.cur = s.graph.add_sealed_successor(parent);
-        if def.has_tag(self.tags().scoped) {
-            self.scope(def, Some(parent));
+        if let Some(label) = scoped {
+            self.scope(def, label, false, Some(parent));
         }
     }
 

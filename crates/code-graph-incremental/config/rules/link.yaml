@@ -18,15 +18,20 @@ link:
     enter: ['mod.ssa.bind_import($I, %shadows_locals, %inline_modules)']
 
   - group: def
+    match: '(__def #scoped (__defname "/./") $$$S:__supertype)'
+    enter: [define($ROOT), 'inherit($ROOT, $S | type)', 'mod.ssa.enter_def($ROOT, true, $ROOT | tag("scoped"))']
+    emit:
+      defines: { from: enclosing_def, to: $ROOT }
+      extends: { from: $ROOT, to: $ROOT | supers }
+  - group: def
     match: '(__def (__defname "/./") $$$S:__supertype)'
-    enter: [define($ROOT), 'inherit($ROOT, $S | type)', mod.ssa.enter_def($ROOT)]
+    enter: [define($ROOT), 'inherit($ROOT, $S | type)', 'mod.ssa.enter_def($ROOT, false, none)']
     emit:
       defines: { from: enclosing_def, to: $ROOT }
       extends: { from: $ROOT, to: $ROOT | supers }
 
   - group: def_children
-    match: '(__def (__defname "/./"))'
-    when: $ROOT | tag("scoped")
+    match: '(__def #scoped (__defname "/./"))'
     exit: [mod.ssa.leave]
   - group: def_children
     match: '(__def (__defname "/./") $$$D:__decorator)'
@@ -41,8 +46,7 @@ link:
       calls: { from: $D, to: $ROOT | type | is_def }
       imports: { from: $D, to: $ROOT | type | imported, site: $ROOT }
   - group: decorator_children
-    match: '$D:(__def $ROOT:__decorator)'
-    when: $D | tag("scoped")
+    match: '$D:(__def #scoped $ROOT:__decorator)'
   - group: decorator_children
     match: '(__decorator)'
     children: skip
@@ -66,6 +70,23 @@ link:
     match: '(__call (__callee $M:(__member $O:__object (__dispatch (__object)))))'
     when: $O | name | is_contract
     emit: { type_flow: { from: enclosing, to: $M | receiver_calls, site: $ROOT } }
+  - group: call
+    match: '(__call #implicit_self (__callee "/./"))'
+    when: 'targets($ROOT, true)'
+    emit:
+      calls: { from: enclosing, to: 'targets($ROOT, true) | callable', site: $ROOT }
+      imports: { from: enclosing, to: 'targets($ROOT, true) | imported', site: $ROOT }
+      type_flow: { from: enclosing, to: 'targets($ROOT, true) | produced', site: $ROOT }
+  - group: call
+    match: '(__call #implicit_self (__callee %builtins))'
+    when: 'unresolved($ROOT, true)'
+    emit: { imports: { from: enclosing, to: mod.ssa.wildcards | callable_import, site: $ROOT, resolution: reference, resolve: none } }
+  - group: call
+    match: '(__call #implicit_self (__callee "/./"))'
+    when: 'unresolved($ROOT, true)'
+    emit: { imports: { from: enclosing, to: mod.ssa.wildcards | callable_import, site: $ROOT } }
+  - group: call
+    match: '(__call #implicit_self (__callee "/./"))'
   - group: call
     match: '(__call $C:(__callee $M?:__member))'
     when: $C | mod.ssa.pending
@@ -102,30 +123,22 @@ link:
     emit: { calls: { from: enclosing, to: 'lookup(@$I, $ROOT, enclosing | class)', site: $ROOT } }
   - group: call
     match: '(__call (__callee "/./"))'
-    when: $ROOT | targets
+    when: 'targets($ROOT, false)'
     emit:
-      calls: { from: enclosing, to: $ROOT | targets | callable, site: $ROOT }
-      imports: { from: enclosing, to: $ROOT | targets | imported, site: $ROOT }
-      type_flow: { from: enclosing, to: $ROOT | targets | produced, site: $ROOT }
+      calls: { from: enclosing, to: 'targets($ROOT, false) | callable', site: $ROOT }
+      imports: { from: enclosing, to: 'targets($ROOT, false) | imported', site: $ROOT }
+      type_flow: { from: enclosing, to: 'targets($ROOT, false) | produced', site: $ROOT }
   - group: call
     match: '(__call (__callee %builtins))'
-    when: '$ROOT | unresolved | tag("implicit_self")'
-    emit: { imports: { from: enclosing, to: mod.ssa.wildcards | callable_import, site: $ROOT, resolution: reference, resolve: none } }
-  - group: call
-    match: '(__call (__callee "/./"))'
-    when: '$ROOT | unresolved | tag("implicit_self")'
-    emit: { imports: { from: enclosing, to: mod.ssa.wildcards | callable_import, site: $ROOT } }
-  - group: call
-    match: '(__call (__callee %builtins))'
-    when: $ROOT | unresolved
+    when: 'unresolved($ROOT, false)'
     emit: { imports: { from: enclosing, to: mod.ssa.wildcards, site: $ROOT, resolution: reference, resolve: none } }
   - group: call
     match: '(__call (__callee %providers))'
-    when: $ROOT | unresolved
+    when: 'unresolved($ROOT, false)'
     emit: { imports: { from: enclosing, to: mod.ssa.wildcards, site: $ROOT, resolution: reference, resolve: none } }
   - group: call
     match: '(__call (__callee "/./"))'
-    when: $ROOT | unresolved
+    when: 'unresolved($ROOT, false)'
     emit: { imports: { from: enclosing, to: mod.ssa.wildcards, site: $ROOT } }
 
   - group: member
@@ -196,8 +209,7 @@ link:
       - emit: { calls: { from: enclosing, to: $B | name | initialized, site: $ROOT } }
 
   - group: hoist
-    match: '(__scope $$$D:__def)'
-    when: $ROOT | tag("hoisted")
+    match: '(__scope #hoisted $$$D:__def)'
     enter: [define($D)]
 
   - group: revisit
@@ -208,8 +220,16 @@ link:
     exit: [revisit]
 
   - group: flow
+    match: '(__source_file #scoped)'
+    enter: ['mod.ssa.enter_scope($ROOT, $ROOT | tag("scoped"), false)']
+    exit: [mod.ssa.leave]
+  - group: flow
+    match: '(__scope #hoisted)'
+    enter: ['mod.ssa.enter_scope($ROOT, $ROOT | tag("scoped"), true)']
+    exit: [mod.ssa.leave]
+  - group: flow
     match: '(__scope)'
-    enter: [mod.ssa.enter_scope($ROOT)]
+    enter: ['mod.ssa.enter_scope($ROOT, $ROOT | tag("scoped"), false)']
     exit: [mod.ssa.leave]
   - group: flow
     match: '(__lambda)'
@@ -234,8 +254,11 @@ link:
     match: '(__ssa_branch $ROOT:__ssa_arm)'
     exit: ['mod.ssa.yield($ROOT | valued, $ROOT | value_of, $ROOT | source)', mod.ssa.join]
   - group: flow
+    match: '(__ssa_loop $$$H (__binding #lifted (__declaration)))'
+    enter: [mod.ssa.loop_header($ROOT)]
+    exit: [mod.ssa.leave]
+  - group: flow
     match: '(__ssa_loop $$$H $B:(__binding (__declaration)) $$$R)'
-    when: $B | unlifted
     children: [$H, $B, $R]
     between: [mod.ssa.loop_header($ROOT)]
     exit: [mod.ssa.leave]

@@ -5,26 +5,45 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical as C;
 use crate::engine::{
-    Cursor, Cx, Derive, Function, KeyPart, Loc, Module, Store, Val, Vals, of, one, yes,
+    Cursor, Cx, Derive, Function, IndexDecl, KeyPart, Loc, Module, Store, Val, Vals, of, one, yes,
 };
 use crate::modules::{arg, function, node};
-use crate::tree::{Compact, Mutable, Role};
+use crate::tree::{Compact, EdgeKind, Mutable, Role, Tree};
 
 pub struct Core;
 
 #[derive(Default)]
 pub struct State {
-    defs: FxHashMap<u32, Vec<u32>>,
-    supers: FxHashMap<u32, Vec<u32>>,
-    shadowed: FxHashSet<u32>,
+    defs: FxHashMap<u32, Vec<Loc>>,
+    supers: FxHashMap<Loc, Vec<Loc>>,
+    shadowed: FxHashSet<Loc>,
 }
+
+type DefsByName = FxHashMap<u32, Vec<Loc>>;
+
+const NON_CALLABLE: &str = "non_callable";
 
 #[derive(Clone, Copy)]
 enum Ref {
-    Def(u32),
-    Import(u32),
-    Type(u32),
-    Call(u32),
+    Def(Loc),
+    Import(Loc),
+    Type(Loc),
+    Call(Loc),
+}
+
+fn defs_by_name(
+    trees: &[Tree<Compact>],
+    _: &[crate::tree::Edge],
+) -> Box<dyn std::any::Any + Send + Sync> {
+    let mut defs = DefsByName::default();
+    for tree in trees {
+        for def in tree.root().descendants().filter(|d| d.is(C::Def)) {
+            if let Some(name) = def.child_sym(C::DefName) {
+                defs.entry(name).or_default().push(def.into());
+            }
+        }
+    }
+    Box::new(defs)
 }
 
 fn role_code(role: Role) -> u32 {
@@ -74,11 +93,11 @@ const KEY_SYM: KeyPart = KeyPart::Of(
 impl<'t, S: Store> Cx<'_, 't, Core, S> {
     fn view(&self, val: Val) -> Option<Ref> {
         match val {
-            Val::Type(loc) => Some(Ref::Type(loc.node)),
+            Val::Type(loc) => Some(Ref::Type(loc)),
             Val::Node(loc) => Some(match self.jump(loc) {
-                n if n.is(C::Def) => Ref::Def(loc.node),
-                n if n.is(C::Name) => Ref::Import(loc.node),
-                _ => Ref::Call(loc.node),
+                n if n.is(C::Def) => Ref::Def(loc),
+                n if n.is(C::Name) => Ref::Import(loc),
+                _ => Ref::Call(loc),
             }),
             _ => None,
         }
@@ -112,18 +131,42 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         let Some(name) = def.child_sym(C::DefName) else {
             return;
         };
+        let loc = Loc::from(def);
         let known = self
             .state()
             .defs
             .get(&name)
-            .is_some_and(|d| d.contains(&def.index()));
+            .is_some_and(|d| d.contains(&loc));
         if !known {
-            self.write().defs.entry(name).or_default().push(def.index());
+            self.write().defs.entry(name).or_default().push(loc);
         }
     }
 
-    fn inherit(&mut self, def: u32, supers: &[Val]) {
-        let supers: Vec<u32> = supers
+    // A family run sees other files' supertypes only as the extends edges link emitted.
+    fn supers(&mut self, def: Loc) -> Vec<Loc> {
+        let mut supers = self.state().supers.get(&def).cloned().unwrap_or_default();
+        for &s in self.targets(EdgeKind::Extends, def) {
+            if !supers.contains(&s) {
+                supers.push(s);
+            }
+        }
+        supers
+    }
+
+    fn named_defs(&mut self, name: u32) -> Vec<Loc> {
+        let mut defs = self.state().defs.get(&name).cloned().unwrap_or_default();
+        if let Some(index) = self.index::<DefsByName>("defs") {
+            for &d in index.get(&name).into_iter().flatten() {
+                if !defs.contains(&d) {
+                    defs.push(d);
+                }
+            }
+        }
+        defs
+    }
+
+    fn inherit(&mut self, def: Loc, supers: &[Val]) {
+        let supers: Vec<Loc> = supers
             .iter()
             .filter_map(|&v| match self.view(v) {
                 Some(Ref::Def(d)) => Some(d),
@@ -152,7 +195,7 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         let found = self.read(root);
         let named = |v: &Val| !matches!(self.view(*v), Some(Ref::Call(_)) | None);
         if !found.iter().all(named) {
-            self.write().shadowed.insert(call.index());
+            self.write().shadowed.insert(call.into());
         }
     }
 
@@ -163,7 +206,7 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         let binding = class.descendants().find(|n| {
             n.is(C::Binding) && n.child_sym(C::Ivar) == Some(attr) && n.typed().is_some()
         });
-        of(binding.map(|b| self.at(values::producer(b))))
+        of(binding.map(|b| b.jump(b.fi(), values::producer(b))))
     }
 }
 
@@ -173,6 +216,13 @@ impl Module for Core {
 
     fn functions() -> &'static [Function<Self>] {
         FUNCTIONS
+    }
+
+    fn indexes() -> &'static [IndexDecl] {
+        &[IndexDecl {
+            name: "defs",
+            build: defs_by_name,
+        }]
     }
 
     fn start<'t, S: Store>(cx: &mut Cx<'_, 't, Self, S>, root: Cursor<'t, S>) {
@@ -239,12 +289,40 @@ static FUNCTIONS: &[Function<Core>] = &[
         of(found.map(|node| Loc::new(owner.fi() as usize, node)))
     }),
     function!(Flow, "supers", [one], |cx, a| {
-        let def = node(cx, a, 0).index();
-        let supers = cx.state().supers.get(&def).cloned().unwrap_or_default();
-        supers.into_iter().map(|d| cx.node(d)).collect()
+        let def = Loc::from(node(cx, a, 0));
+        of(cx.supers(def))
+    }),
+    function!(
+        Pure,
+        "sym",
+        [one],
+        |cx, a| match a[0].first().and_then(|&v| cx.text(v)) {
+            Some(sym) => one(Val::Sym(sym)),
+            None => Vals::new(),
+        }
+    ),
+    function!(Pure, "role", [one], |cx, a| {
+        let role = role_code(site_role(node(cx, a, 0)));
+        one(Val::Sym(role))
+    }),
+    function!(Pure, "known", [set], |_, a| match a[0].is_empty() {
+        true => one(Val::Opaque),
+        false => a[0].clone(),
+    }),
+    function!(Flow, "lub", [set], @uses ["core"."declared"], |cx, a| {
+        match a[0].contains(&Val::Opaque) {
+            true => Vals::new(),
+            false => cx.lub(&a[0]),
+        }
+    }),
+    function!(Pure, "inferred_return", [one], |cx, a| {
+        match crate::tree::infer_return_type(node(cx, a, 0)) {
+            Some(sym) => one(Val::Sym(sym)),
+            None => Vals::new(),
+        }
     }),
     function!(Pure, "sole", [set, one], |cx, a| {
-        let exclude = node(cx, a, 1).index();
+        let exclude = Loc::from(node(cx, a, 1));
         match a[0].as_slice() {
             [v] if matches!(cx.view(*v), Some(Ref::Def(t) | Ref::Import(t)) if t != exclude) => {
                 a[0].clone()
@@ -253,7 +331,7 @@ static FUNCTIONS: &[Function<Core>] = &[
         }
     }),
     function!(Pure, "type_node", [one], |cx, a| match cx.view(a[0][0]) {
-        Some(Ref::Call(n)) => of(values::declared_type(cx.at(n))),
+        Some(Ref::Call(n)) => of(values::declared_type(cx.jump(n))),
         _ => Vals::new(),
     }),
     function!(Pure, "tail", [one], |cx, a| of(
@@ -267,30 +345,26 @@ static FUNCTIONS: &[Function<Core>] = &[
         .keep(a[0][0], |r, _| matches!(r, Ref::Def(_)))),
     function!(Pure, "is_class", [one], |cx, a| cx
         .keep(a[0][0], |r, cx| {
-            matches!(r, Ref::Def(n) if cx.at(n).is_class())
+            matches!(r, Ref::Def(n) if cx.jump(n).is_class())
         })),
     function!(Pure, "is_contract", [one], |cx, a| cx
         .keep(a[0][0], |r, cx| {
-            matches!(r, Ref::Def(n) if cx.at(n).is_dispatch_contract())
+            matches!(r, Ref::Def(n) if cx.jump(n).is_dispatch_contract())
         })),
     function!(Pure, "initialized", [one], |cx, a| {
         cx.keep(a[0][0], |r, cx| {
-        matches!(r, Ref::Def(n) if cx.at(n).initializer().and_then(Cursor::rhs_callee).is_some())
+        matches!(r, Ref::Def(n) if cx.jump(n).initializer().and_then(Cursor::rhs_callee).is_some())
     })
     }),
     function!(Pure, "typed_calls", [one], |cx, a| cx
         .keep(a[0][0], |r, cx| {
-            matches!(r, Ref::Call(n) if values::declared_type(cx.at(n)).is_some())
+            matches!(r, Ref::Call(n) if values::declared_type(cx.jump(n)).is_some())
         })),
     function!(Pure, "callable_import", [one], |cx, a| {
         let callable = cx.tags().callable;
         cx.keep(a[0][0], |r, cx| {
-            matches!(r, Ref::Import(n) if cx.at(n).parent().is_some_and(|i| i.has_tag(callable)))
+            matches!(r, Ref::Import(n) if cx.jump(n).parent().is_some_and(|i| i.has_tag(callable)))
         })
-    }),
-    function!(Pure, "unlifted", [one], |cx, a| match arg(cx, a, 0) {
-        Some(c) if !c.lifted() => a[0].clone(),
-        _ => Vals::new(),
     }),
     function!(Flow, "value_of", [one], @uses ["core"."read", "core"."ivar"], |cx, a| {
         cx.value_of(node(cx, a, 0))
@@ -304,21 +378,21 @@ static FUNCTIONS: &[Function<Core>] = &[
     function!(Flow, "receiver_calls", [one], @uses ["core"."read"], |cx, a| {
         cx.receiver_calls(node(cx, a, 0))
     }),
-    function!(Flow, "targets", [one], @uses ["core"."read", "core"."declared"], |cx, a| {
-        cx.call_targets(node(cx, a, 0))
+    function!(Flow, "targets", [one, one], @uses ["core"."read", "core"."declared"], |cx, a| {
+        cx.call_targets(node(cx, a, 0), crate::engine::truthy(&a[1]))
     }),
-    function!(Flow, "unresolved", [one], @uses ["core"."read", "core"."declared"], |cx, a| {
+    function!(Flow, "unresolved", [one, one], @uses ["core"."read", "core"."declared"], |cx, a| {
         let call = node(cx, a, 0);
-        match cx.unresolved(call) {
+        match cx.unresolved(call, crate::engine::truthy(&a[1])) {
             true => one(Val::Node(call.into())),
             false => Vals::new(),
         }
     }),
     function!(Flow, "resolution", [one, set], |cx, a| {
         let target = node(cx, a, 0);
-        let shadowed = cx.state().shadowed.contains(&target.index());
+        let shadowed = cx.state().shadowed.contains(&Loc::from(target));
         match shadowed && !target.is(C::Def) && !target.is(C::Name) {
-            true => one(Val::Sym(cx.tags().non_callable)),
+            true => one(Val::Sym(cx.lang().syms.intern(NON_CALLABLE))),
             false => Vals::new(),
         }
     }),
@@ -327,7 +401,7 @@ static FUNCTIONS: &[Function<Core>] = &[
         yes(true)
     }),
     function!(Effect, "inherit", [one, set], |cx, a| {
-        cx.inherit(node(cx, a, 0).index(), &a[1]);
+        cx.inherit(node(cx, a, 0).into(), &a[1]);
         yes(true)
     }),
     function!(Effect, "shadow", [one], @uses ["core"."read"], |cx, a| {
