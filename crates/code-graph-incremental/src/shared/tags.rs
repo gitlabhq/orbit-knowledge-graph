@@ -48,20 +48,8 @@ mod tests {
         for (name, src) in [
             ("modules/ssa/mod.rs", include_str!("../modules/ssa/mod.rs")),
             (
-                "modules/ssa/names.rs",
-                include_str!("../modules/ssa/names.rs"),
-            ),
-            (
-                "modules/ssa/values.rs",
-                include_str!("../modules/ssa/values.rs"),
-            ),
-            (
-                "modules/core/mod.rs",
-                include_str!("../modules/core/mod.rs"),
-            ),
-            (
-                "modules/core/names.rs",
-                include_str!("../modules/core/chain.rs"),
+                "modules/ssa/graph.rs",
+                include_str!("../modules/ssa/graph.rs"),
             ),
             ("tree/semantic.rs", include_str!("../tree/semantic.rs")),
         ] {

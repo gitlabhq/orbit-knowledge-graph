@@ -4,8 +4,8 @@ use std::sync::Arc;
 use super::super::pipeline::IndexingReport;
 use code_graph::v2::pipeline::{FileTimingEntry, LanguageTimings};
 use code_graph::v2::{OnBatch, SinkError};
-use code_graph_incremental::pipeline::FileStats;
-use code_graph_incremental::{Envelope, Error, Scalar, export::ExportConfig, templates};
+use code_graph_incremental::driver::{self, FileStats};
+use code_graph_incremental::{Envelope, Error, Scalar, export::ExportConfig};
 
 use super::super::{
     arrow_converter::{IndexerEnvelope, route_graph},
@@ -15,7 +15,7 @@ use super::{Repository, output::Output};
 
 pub(in crate::modules::code) fn run(
     repository: Repository,
-    options: templates::Options,
+    options: driver::Options,
     envelope: IndexerEnvelope,
     ontology: Arc<ontology::Ontology>,
     tables: Arc<CodeTableNames>,
@@ -35,11 +35,7 @@ pub(in crate::modules::code) fn run(
     let stats = PipelineStats {
         files_discovered: repository.usage().files + dropped,
         bytes_discovered: repository.usage().bytes,
-        files_parsed: code_graph_incremental::pipeline::candidates(
-            &repository,
-            options.limits.max_files,
-        )
-        .count(),
+        files_parsed: driver::candidates(&repository, options.limits.max_files).count(),
         files_skipped: repository
             .files()
             .filter(|file| matches!(file.decision(), orbit_utils::vfs::Decision::List(_)))
@@ -70,7 +66,7 @@ pub(in crate::modules::code) fn run(
     }
     let indexed = std::sync::Mutex::new(stats);
     let sink_failed = std::sync::atomic::AtomicBool::new(false);
-    let report = templates::repository(
+    let report = driver::repository(
         repository,
         options,
         &Envelope::new([
@@ -209,13 +205,12 @@ fn file_timings(files: HashMap<String, FileStats>) -> Vec<FileTimingEntry> {
         .into_iter()
         .map(|(path, stats)| {
             let parse_ms = stats.parse.as_secs_f64() * 1000.0;
-            let resolve_ms = stats.resolve.as_secs_f64() * 1000.0;
             FileTimingEntry {
                 path,
                 size_bytes: stats.bytes,
                 parse_ms,
-                resolve_ms,
-                total_ms: parse_ms + resolve_ms,
+                resolve_ms: 0.0,
+                total_ms: parse_ms,
                 language: <&str>::from(stats.language).to_owned(),
             }
         })

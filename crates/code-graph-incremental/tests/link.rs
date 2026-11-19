@@ -1,13 +1,10 @@
 use std::path::Path;
 
 use code_graph_incremental::canonical::Canonical as C;
-use code_graph_incremental::pipeline::{
-    Canonicalize, DirtyGraph, Each, Insert, Link, Parse, Prepare, Rewrite,
-};
 use code_graph_incremental::tree::{Compact, EdgeKind};
 type Cursor<'a> = code_graph_incremental::tree::Cursor<'a, Compact>;
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, ItemPhase, Limits, Pipeline, State};
+use code_graph_incremental::{Env, Limits, Sentinel, State, driver};
 mod common;
 
 const MAIN: &str = "\
@@ -29,16 +26,10 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
     }
 }
 
-fn link_repo(env: &Env, root: &Path) -> DirtyGraph {
-    let sources = common::walk(root);
-    Pipeline::new(Context::new(env, sources), ())
-        .then(Prepare)
+fn link_repo(env: &Env, root: &Path) -> State {
+    driver::index(env, &common::walk(root), &Sentinel::disabled())
         .unwrap()
-        .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))
-        .unwrap()
-        .then(Insert)
-        .unwrap()
-        .into_value()
+        .0
 }
 
 fn python_env(limits: Limits) -> Env {
@@ -80,20 +71,20 @@ fn linking_a_file_yields_its_local_edges() {
     write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
     let env = python_env(Limits::UNLIMITED);
 
-    let graph = link_repo(&env, repo.path());
+    let state = link_repo(&env, repo.path());
 
-    assert!(graph.state.edges.iter().all(|e| e.from_fi() == e.to_fi()));
+    assert!(state.edges.iter().all(|e| e.from_fi() == e.to_fi()));
     assert_eq!(
-        edges(&env, &graph.state, EdgeKind::Defines),
+        edges(&env, &state, EdgeKind::Defines),
         [pair("Greeter", "greet")]
     );
     assert_eq!(
-        edges(&env, &graph.state, EdgeKind::Calls),
+        edges(&env, &state, EdgeKind::Calls),
         [pair("run", "Greeter"), pair("run", "greet")],
         "g = Greeter(); g.greet() resolves through the local type"
     );
     assert_eq!(
-        edges(&env, &graph.state, EdgeKind::Imports),
+        edges(&env, &state, EdgeKind::Imports),
         [pair("greet", "helper"), pair("run", "os")],
         "each use of an imported name points at the import"
     );
@@ -112,11 +103,10 @@ fn every_file_gets_a_tree_and_unparsed_ones_carry_their_reason() {
     );
     let env = python_env(Limits::UNLIMITED);
 
-    let graph = link_repo(&env, repo.path());
+    let state = link_repo(&env, repo.path());
 
     let reason_key = env.lang.syms.lookup("reason");
-    let mut rows: Vec<(String, usize, Option<&str>)> = graph
-        .state
+    let mut rows: Vec<(String, usize, Option<&str>)> = state
         .trees
         .iter()
         .map(|t| {
@@ -133,7 +123,6 @@ fn every_file_gets_a_tree_and_unparsed_ones_carry_their_reason() {
     );
     assert_eq!(rows[2].0, "main.py");
     assert!(rows[2].1 > 0);
-    assert_eq!(graph.dirty.len(), 1, "only the parsed file needs resolving");
 }
 
 #[test]
@@ -145,10 +134,10 @@ fn a_killed_file_keeps_a_row_tagged_with_the_timeout() {
         ..Limits::UNLIMITED
     });
 
-    let graph = link_repo(&env, repo.path());
+    let state = link_repo(&env, repo.path());
 
     let reason_key = env.lang.syms.lookup("reason");
-    let tree = &graph.state.trees[0];
+    let tree = &state.trees[0];
     assert_eq!(tree.label, "main.py");
     assert_eq!(tree.root().descendants().count(), 0);
     assert_eq!(
@@ -161,7 +150,7 @@ fn a_killed_file_keeps_a_row_tagged_with_the_timeout() {
             .map(|v| env.lang.syms.resolve(v)),
         Some("skip_timeout_walk")
     );
-    assert!(graph.state.edges.is_empty());
+    assert!(state.edges.is_empty());
 }
 
 fn link_nested(source: String, file_link_ms: u64) -> Result<(), String> {
@@ -175,11 +164,8 @@ fn link_one(
     file_link_ms: u64,
 ) -> Result<(), String> {
     let path = path.to_string();
-    use code_graph_incremental::pipeline::SourceFile;
-    use code_graph_incremental::{Sentinel, templates};
-
     std::thread::Builder::new()
-        .stack_size(templates::WORKER_STACK_BYTES)
+        .stack_size(driver::WORKER_STACK_BYTES)
         .spawn(move || {
             let env = Env::with_limits(
                 language,
@@ -189,14 +175,14 @@ fn link_one(
                 },
             )
             .unwrap();
-            let free = Sentinel::disabled();
-            let file = SourceFile::from((path, source));
-            let parsed = Parse.run(&env, &free, file).unwrap();
-            let rewritten = Rewrite.run(&env, &free, parsed).unwrap();
-            let canonical = Canonicalize.run(&env, &free, rewritten).unwrap();
-            Link.run(&env, &free, canonical)
-                .map(|_| ())
-                .map_err(|killed| killed.to_string())
+            let repo = tempfile::tempdir().unwrap();
+            write_all(repo.path(), &[(&path, source.as_bytes())]);
+            let (_, report) =
+                driver::index(&env, &common::walk(repo.path()), &Sentinel::disabled()).unwrap();
+            match report.skipped.first() {
+                None => Ok(()),
+                Some(killed) => Err(killed.to_string()),
+            }
         })
         .unwrap()
         .join()

@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fs::File as OutputFile, path::PathBuf, sync::Arc, time::Instant};
 
 use arrow::{ipc::writer::FileWriter, record_batch::RecordBatch};
-use code_graph_incremental::{Envelope, Limits, Scalar, export::ExportConfig, templates};
+use code_graph_incremental::{Envelope, Limits, Scalar, driver, export::ExportConfig};
 use orbit_utils::{
     vfs::{Vfs, sources::Directory},
     vfs_policies::CodePolicy,
@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         repository.usage().bytes,
         started.elapsed().as_secs_f64()
     );
-    let options = templates::Options {
+    let options = driver::Options {
         limits: Limits::UNLIMITED,
         worker_threads: 0,
         concurrent_families: 2,
@@ -36,10 +36,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         phase_started: Arc::new(|_, _, _| {}),
     };
     let selected_files =
-        code_graph_incremental::pipeline::candidates(&repository, options.limits.max_files).count();
+        code_graph_incremental::driver::candidates(&repository, options.limits.max_files).count();
     let ontology = ontology::Ontology::load_embedded()?;
     let written = std::sync::Mutex::new((BTreeMap::<String, usize>::new(), 0));
-    let report = templates::repository(
+    let report = driver::repository(
         repository,
         options,
         &Envelope::new([

@@ -112,8 +112,7 @@ pub(super) fn split(
 fn manifests(family: SupportLang) -> Vec<String> {
     code_graph_incremental::Env::for_lang(family)
         .map(|env| {
-            env.resolve
-                .config
+            env.project
                 .parse_files
                 .iter()
                 .map(|file| file.name.clone())

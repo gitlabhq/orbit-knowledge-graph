@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use rayon::prelude::*;
 
-pub use repository::{Options, repository};
+pub use repository::{Options, WORKER_STACK_BYTES, repository};
 pub use state::{SNAPSHOT_VERSION, SourceFile, State};
 
 use crate::engine::{self, EdgeIndex, Phase, Walk};

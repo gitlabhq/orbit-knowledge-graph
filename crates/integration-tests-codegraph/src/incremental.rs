@@ -4,11 +4,10 @@
 
 use std::sync::Arc;
 
-use code_graph_incremental::pipeline::{Display, Emit, Export, Resolved};
+use code_graph_incremental::driver::{self, Report};
+use code_graph_incremental::export::{self, ExportPlan};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{
-    Context, Env, Envelope, Killed, Limits, Pipeline, Scalar, State, templates,
-};
+use code_graph_incremental::{Env, Envelope, Killed, Limits, Scalar, Sentinel, State};
 use ontology::Ontology;
 
 struct FixturePolicy;
@@ -100,7 +99,7 @@ fn default_limits() -> Limits {
 
 pub fn run_incremental_suite(yaml: &str) {
     rayon::ThreadPoolBuilder::new()
-        .stack_size(templates::WORKER_STACK_BYTES)
+        .stack_size(driver::WORKER_STACK_BYTES)
         .build()
         .expect("worker pool")
         .install(|| index_and_check(yaml));
@@ -128,9 +127,10 @@ fn index_and_check(yaml: &str) {
         )
         .expect("load fixtures"),
     );
-    let graph =
-        templates::index(Context::new(&env, repository)).expect("suite exceeded the total budget");
+    let run = || Sentinel::new("run", "", env.limits.total_ms);
+    let graph = driver::index(&env, &repository, &run()).expect("suite exceeded the total budget");
     let (mut state, mut failures) = check(
+        &env,
         graph,
         &ontology,
         &suite.tests,
@@ -164,9 +164,10 @@ fn index_and_check(yaml: &str) {
             )
             .expect("load changed fixtures"),
         );
-        let graph = templates::reindex(Context::new(&env, changes), state, step.remove.clone())
+        let run = Sentinel::new("run", "", env.limits.total_ms);
+        let graph = driver::reindex(&env, &changes, state, &step.remove, &run)
             .expect("suite exceeded the total budget");
-        let (next, step_failures) = check(graph, &ontology, &step.tests, &[], &[]);
+        let (next, step_failures) = check(&env, graph, &ontology, &step.tests, &[], &[]);
         state = next;
         failures.extend(step_failures);
     }
@@ -176,13 +177,13 @@ fn index_and_check(yaml: &str) {
 /// Exports the graph into a fresh DuckDB and runs `tests` against it; the
 /// graph comes back for the next step.
 fn check(
-    graph: Pipeline<'_, Resolved>,
+    env: &Env,
+    (state, report): (State, Report),
     ontology: &Arc<Ontology>,
     tests: &[TestCase],
     skipped: &[SkippedFile],
     limited: &[SkippedFile],
 ) -> (State, Vec<Failure>) {
-    let report = &graph.context().report;
     assert_files("skipped", &report.skipped, skipped);
     assert_files("limited", &report.limited, limited);
     let envelope = Envelope::new([
@@ -191,14 +192,22 @@ fn check(
         ("commit_sha", Scalar::Str("test")),
     ]);
     let db = create_test_db().expect("in-memory DuckDB");
-    let displayed = graph
-        .then(Display)
-        .expect("display rules compile")
-        .then(Export { ontology, envelope })
-        .expect("export")
-        .then(Emit(|table: &str, batch| db.insert_batch(table, &batch)))
-        .expect("insert into DuckDB")
-        .into_value();
+    let plan =
+        ExportPlan::from_config(&env.export_config, ontology, &env.lang).expect("export plan");
+    let tables = export::export(
+        &state.trees,
+        &state.edges,
+        &env.lang,
+        &plan,
+        &envelope,
+        true,
+        &|_| true,
+        &Sentinel::disabled(),
+    )
+    .expect("export");
+    for (table, batch) in tables {
+        db.insert_batch(&table, &batch).expect("insert into DuckDB");
+    }
     let suite = TestSuite {
         name: String::new(),
         pipeline: None,
@@ -212,7 +221,7 @@ fn check(
         tests: tests.to_vec(),
         steps: Vec::new(),
     };
-    (displayed.state, run_suite(&suite, &db, ontology, true))
+    (state, run_suite(&suite, &db, ontology, true))
 }
 
 /// Fails unless the files the budgets `kind` (skipped or limited) are the

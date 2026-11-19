@@ -1,8 +1,8 @@
 use anyhow::Result;
 use arrow::array::{BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
+use code_graph_incremental::driver::{FileStats, Report};
 use code_graph_incremental::export::ExportPlan;
-use code_graph_incremental::pipeline::{FileStats, Report};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Env, Envelope, Scalar, State};
 use orbit_arrow::ArrowUtils;
@@ -22,12 +22,9 @@ pub(crate) struct FamilyOutput {
 
 impl FamilyOutput {
     pub(super) fn slowest_lines(&self) -> impl Iterator<Item = String> + '_ {
-        self.slowest_files.iter().map(|file| {
-            format!(
-                "{:<10} parse {:>6.0} ms  resolve {:>6.0} ms  {}",
-                file.language, file.parse_ms, file.resolve_ms, file.path
-            )
-        })
+        self.slowest_files
+            .iter()
+            .map(|file| format!("{:<10} {:>6.0} ms  {}", file.language, file.ms, file.path))
     }
 }
 
@@ -35,8 +32,7 @@ impl FamilyOutput {
 struct SlowFile {
     path: String,
     language: String,
-    parse_ms: f64,
-    resolve_ms: f64,
+    ms: f64,
 }
 
 pub(super) struct Exporter<'a> {
@@ -153,15 +149,14 @@ pub(super) fn family_output(
 
 fn slowest_files(report: &Report, count: usize) -> Vec<SlowFile> {
     let mut files: Vec<(&String, &FileStats)> = report.files.iter().collect();
-    files.sort_by_key(|(_, timing)| std::cmp::Reverse(timing.parse + timing.resolve));
+    files.sort_by_key(|(_, timing)| std::cmp::Reverse(timing.parse));
     files
         .into_iter()
         .take(count)
         .map(|(path, timing)| SlowFile {
             path: path.clone(),
             language: <&str>::from(timing.language).to_owned(),
-            parse_ms: timing.parse.as_secs_f64() * 1000.0,
-            resolve_ms: timing.resolve.as_secs_f64() * 1000.0,
+            ms: timing.parse.as_secs_f64() * 1000.0,
         })
         .collect()
 }

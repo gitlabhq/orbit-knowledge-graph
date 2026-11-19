@@ -5,14 +5,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context as _, Result};
 use arrow::record_batch::RecordBatch;
-use code_graph_incremental::pipeline::{Context, Display, Report};
+use code_graph_incremental::driver::{self, Report};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Env, State, templates};
+use code_graph_incremental::{Env, Sentinel, State};
 use rustc_hash::FxHashSet;
 
-use super::RepositoryBars;
 use super::input;
 use super::output::{self, Exporter, FamilyOutput, Replacement};
+use super::{FamilyBars, RepositoryBars};
 use crate::database::{GraphWriter, manifest};
 use crate::tui;
 use crate::workspace::{self, GitInfo};
@@ -56,17 +56,10 @@ impl Project<'_> {
                 let read_at = std::time::SystemTime::now();
                 let mut env = Env::for_lang(family)?;
                 env.limits.total_ms = self.budget_ms;
-                let context = self.context(&env, paths)?;
-                let (context, displayed) = templates::index(context)?.then(Display)?.finish();
+                let (state, report) = self.indexing(&env, paths)?.index(&env)?;
                 let snapshot = self.snapshot_path(family);
-                staged.push(stage(&env, &displayed.state, &snapshot, None, read_at)?);
-                outputs.push(exporter.write(
-                    family,
-                    &env,
-                    &displayed.state,
-                    &context.report,
-                    self.stats,
-                )?);
+                staged.push(stage(&env, &state, &snapshot, None, read_at)?);
+                outputs.push(exporter.write(family, &env, &state, &report, self.stats)?);
             }
             Ok(outputs)
         });
@@ -99,7 +92,7 @@ impl Project<'_> {
             families: &families,
             saved_files: &saved_files,
             stats: self.stats,
-            context: &|env, paths| self.context(env, paths),
+            indexing: &|env, paths| self.indexing(env, paths),
         };
         let work = reader.work(changes.changed, changes.removed)?;
         let mut names: Vec<&'static str> = families
@@ -208,16 +201,14 @@ impl Project<'_> {
             })
     }
 
-    fn context<'e>(&self, env: &'e Env, paths: Vec<String>) -> Result<Context<'e>> {
+    fn indexing(&self, env: &Env, paths: Vec<String>) -> Result<Indexing> {
         let files = paths.len();
-        let mut context = Context::new(env, input::paths(&self.git.repo_path, paths)?);
         let cancel = self.cancel.clone();
-        context.run = context
-            .run
-            .with_cancellation(Arc::new(move || cancel.load(Ordering::Relaxed)));
-        Ok(match self.progress {
-            Some(bars) => context.observe(bars.family(files)),
-            None => context,
+        Ok(Indexing {
+            repository: input::paths(&self.git.repo_path, paths)?,
+            run: Sentinel::new("run", "", env.limits.total_ms)
+                .with_cancellation(Arc::new(move || cancel.load(Ordering::Relaxed))),
+            bars: self.progress.map(|bars| bars.family(files)),
         })
     }
 
@@ -406,7 +397,28 @@ pub(super) fn saved_files(state_dir: &std::path::Path, families: &[SupportLang])
         .collect()
 }
 
-type ContextFor<'a> = dyn for<'e> Fn(&'e Env, Vec<String>) -> Result<Context<'e>> + 'a;
+/// One family's files read for indexing, the run's deadline, and its progress.
+pub(super) struct Indexing {
+    pub repository: input::Repository,
+    pub run: Sentinel,
+    pub bars: Option<FamilyBars>,
+}
+
+impl Indexing {
+    fn index(self, env: &Env) -> Result<(State, Report)> {
+        let indexed = driver::index(env, &self.repository, &self.run)?;
+        self.bars.inspect(FamilyBars::done);
+        Ok(indexed)
+    }
+
+    fn reindex(self, env: &Env, state: State, removed: &[String]) -> Result<(State, Report)> {
+        let indexed = driver::reindex(env, &self.repository, state, removed, &self.run)?;
+        self.bars.inspect(FamilyBars::done);
+        Ok(indexed)
+    }
+}
+
+type IndexingFor<'a> = dyn Fn(&Env, Vec<String>) -> Result<Indexing> + 'a;
 
 /// How `orbit index` and a refresh read changed files into the saved graph.
 pub(super) struct Reader<'a> {
@@ -417,7 +429,7 @@ pub(super) struct Reader<'a> {
     pub families: &'a [SupportLang],
     pub saved_files: &'a SavedFiles,
     pub stats: bool,
-    pub context: &'a ContextFor<'a>,
+    pub indexing: &'a IndexingFor<'a>,
 }
 
 type FamilyWork = (SupportLang, Vec<String>, Vec<String>);
@@ -512,22 +524,14 @@ impl Reader<'_> {
         let known: FxHashSet<&str> = state.trees.iter().map(|tree| tree.label.as_str()).collect();
         let added = paths.iter().any(|path| !known.contains(path.as_str()));
         drop(known);
-        let resolved = templates::reindex((self.context)(&env, paths)?, state, removed.clone())?;
-        let touched = resolved.value().touched.clone();
-        let (context, displayed) = resolved.then(Display)?.finish();
-        let state = displayed.state;
+        let (state, report) = (self.indexing)(&env, paths)?.reindex(&env, state, &removed)?;
         let labels: Vec<String> = state.trees.iter().map(|tree| tree.label.clone()).collect();
-        let files: FxHashSet<String> = touched
-            .iter()
-            .filter_map(|&index| state.trees.get(index as usize))
-            .map(|tree| tree.label.to_string())
-            .chain(removed)
-            .collect();
+        // Every phase after the per-file ones runs on every tree, so any file's rows can change.
+        let files: FxHashSet<String> = labels.iter().cloned().chain(removed).collect();
         let replacement = output::replacement(self.git, self.ontology, &env, &state, &files)?;
-        let mut staged = stage(&env, &state, &snapshot, Some(&touched), read_at)?;
+        let mut staged = stage(&env, &state, &snapshot, None, read_at)?;
         staged.replacement = Some(replacement);
-        staged.output =
-            output::family_output(family, state.trees.len(), &context.report, self.stats);
+        staged.output = output::family_output(family, state.trees.len(), &report, self.stats);
         Ok((staged, labels, added || state.trees.len() != before))
     }
 

@@ -1,11 +1,42 @@
 use std::path::Path;
 
 use arrow::record_batch::RecordBatch;
-use code_graph_incremental::pipeline::{Display, Emit, Export, Exported};
+use code_graph_incremental::export::{self, ExportPlan};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, Envelope, Limits, Scalar, templates};
+use code_graph_incremental::{Env, Envelope, Error, Limits, Scalar, Sentinel, driver};
 mod common;
 use ontology::Ontology;
+
+struct Exported {
+    tables: Vec<(String, RecordBatch)>,
+}
+
+fn index(env: &Env, root: &Path) -> code_graph_incremental::State {
+    driver::index(env, &common::walk(root), &Sentinel::disabled())
+        .unwrap()
+        .0
+}
+
+fn export_with(
+    env: &Env,
+    repository: &orbit_utils::vfs::Vfs<()>,
+    ontology: &Ontology,
+    envelope: Envelope,
+) -> Result<Exported, Error> {
+    let (state, _) = driver::index(env, repository, &Sentinel::disabled())?;
+    let plan = ExportPlan::from_config(&env.export_config, ontology, &env.lang)?;
+    let tables = export::export(
+        &state.trees,
+        &state.edges,
+        &env.lang,
+        &plan,
+        &envelope,
+        true,
+        &|_| true,
+        &Sentinel::disabled(),
+    )?;
+    Ok(Exported { tables })
+}
 
 const UTILS: &str = "\
 def helper(x):
@@ -79,14 +110,7 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
         .collect();
     config.schemas.insert("gl_file".into(), specs);
     env.export_config = config;
-    let error = templates::index(Context::new(&env, sources.clone()))
-        .unwrap()
-        .then(Display)
-        .unwrap()
-        .then(Export {
-            ontology: &ontology,
-            envelope: envelope(),
-        })
+    let error = export_with(&env, &sources, &ontology, envelope())
         .err()
         .unwrap();
     assert!(error.to_string().contains("version"));
@@ -101,16 +125,7 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
         if let Some(path) = traversal_path {
             values.push(("traversal_path", Scalar::Str(path)));
         }
-        let exported = templates::index(Context::new(&env, sources.clone()))
-            .unwrap()
-            .then(Display)
-            .unwrap()
-            .then(Export {
-                ontology: &ontology,
-                envelope: Envelope::new(values),
-            })
-            .unwrap()
-            .into_value();
+        let exported = export_with(&env, &sources, &ontology, Envelope::new(values)).unwrap();
         let batch = table(&exported, "gl_file");
         assert_eq!(batch.num_rows(), 1);
         let versions = batch
@@ -141,16 +156,7 @@ fn each_pipeline_uses_its_own_export_config() {
             &format!("name: traversal_path, type: Utf8, const: \"{marker}\""),
         );
         env.export_config = orbit_utils::yaml::from_str(&yaml).unwrap();
-        let exported = templates::index(Context::new(&env, sources.clone()))
-            .unwrap()
-            .then(Display)
-            .unwrap()
-            .then(Export {
-                ontology: &ontology,
-                envelope: envelope(),
-            })
-            .unwrap()
-            .into_value();
+        let exported = export_with(&env, &sources, &ontology, envelope()).unwrap();
         assert!(
             exported
                 .tables
@@ -175,14 +181,7 @@ fn custom_export_configs_still_validate_against_the_ontology() {
     let ontology = Ontology::load_embedded().unwrap();
     let yaml = include_str!("../config/export.yaml").replace("name: traversal_path", "name: typo");
     env.export_config = orbit_utils::yaml::from_str(&yaml).unwrap();
-    let error = templates::index(Context::new(&env, common::walk(repo.path())))
-        .unwrap()
-        .then(Display)
-        .unwrap()
-        .then(Export {
-            ontology: &ontology,
-            envelope: envelope(),
-        })
+    let error = export_with(&env, &common::walk(repo.path()), &ontology, envelope())
         .err()
         .expect("unknown columns must fail");
     assert!(error.to_string().contains("traversal_path"));
@@ -191,16 +190,7 @@ fn custom_export_configs_still_validate_against_the_ontology() {
 fn export_repo(root: &Path) -> Exported {
     let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
     let ontology = Ontology::load_embedded().unwrap();
-    templates::index(Context::new(&env, common::walk(root)))
-        .unwrap()
-        .then(Display)
-        .unwrap()
-        .then(Export {
-            ontology: &ontology,
-            envelope: envelope(),
-        })
-        .unwrap()
-        .into_value()
+    export_with(&env, &common::walk(root), &ontology, envelope()).unwrap()
 }
 
 fn table<'a>(exported: &'a Exported, name: &str) -> &'a RecordBatch {
@@ -234,8 +224,8 @@ fn strs(row: &[&str]) -> Vec<String> {
     row.iter().map(|s| s.to_string()).collect()
 }
 
-fn options() -> templates::Options {
-    templates::Options {
+fn options() -> driver::Options {
+    driver::Options {
         limits: Limits::UNLIMITED,
         worker_threads: 0,
         concurrent_families: 2,
@@ -267,9 +257,9 @@ fn families_follow_the_worker_budget_and_the_family_cap() {
         let arrivals = Arc::new(Mutex::new((std::collections::HashSet::new(), Vec::new())));
         let state = Mutex::new((0, 0, 0, Vec::new()));
         let changed = Condvar::new();
-        templates::repository(
+        driver::repository(
             common::walk(repo.path()),
-            templates::Options {
+            driver::Options {
                 worker_threads,
                 concurrent_families: cap,
                 small_family_files,
@@ -338,9 +328,9 @@ fn a_family_panic_ends_the_run_with_a_typed_error() {
     write_all(repo.path(), FAMILIES);
     let ontology = Ontology::load_embedded().unwrap();
     let emitted = std::sync::atomic::AtomicUsize::new(0);
-    let result = templates::repository(
+    let result = driver::repository(
         common::walk(repo.path()),
-        templates::Options {
+        driver::Options {
             concurrent_families: 1,
             ..options()
         },
@@ -369,9 +359,9 @@ fn tables_over_the_batch_byte_budget_split_into_batches() {
     let ontology = Ontology::load_embedded().unwrap();
     let export = |batch_bytes| {
         let tables = std::sync::Mutex::new(std::collections::BTreeMap::<_, Vec<_>>::new());
-        templates::repository(
+        driver::repository(
             common::walk(repo.path()),
-            templates::Options {
+            driver::Options {
                 batch_bytes,
                 ..options()
             },
@@ -430,9 +420,9 @@ fn cross_file_timeout_still_exports_every_family() {
     );
     let ontology = Ontology::load_embedded().unwrap();
     let definitions = std::sync::Mutex::new(Vec::new());
-    let report = templates::repository(
+    let report = driver::repository(
         common::walk(repo.path()),
-        templates::Options {
+        driver::Options {
             limits: Limits {
                 cross_file_resolve_ms: 0,
                 ..Limits::UNLIMITED
@@ -484,16 +474,8 @@ fn definition_coordinates_cover_the_same_span_as_bytes() {
         write_all(repo.path(), &[(path, source.as_bytes())]);
         let env = Env::with_limits(language, Limits::UNLIMITED).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
-        let exported = templates::index(Context::new(&env, common::walk(repo.path())))
-            .unwrap()
-            .then(Display)
-            .unwrap()
-            .then(Export {
-                ontology: &ontology,
-                envelope: envelope(),
-            })
-            .unwrap()
-            .into_value();
+        let exported =
+            export_with(&env, &common::walk(repo.path()), &ontology, envelope()).unwrap();
         let actual: Vec<_> = rows(
             table(&exported, "gl_definition"),
             &[
@@ -674,63 +656,6 @@ fn ids_depend_on_content_not_on_the_run() {
 }
 
 #[test]
-fn emit_hands_every_table_to_the_sink_and_keeps_the_graph() {
-    let repo = tempfile::tempdir().unwrap();
-    write_all(
-        repo.path(),
-        &[("utils.py", UTILS.as_bytes()), ("main.py", MAIN.as_bytes())],
-    );
-    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
-    let ontology = Ontology::load_embedded().unwrap();
-    let mut seen: Vec<(String, usize)> = Vec::new();
-
-    let displayed = templates::index(Context::new(&env, common::walk(repo.path())))
-        .unwrap()
-        .then(Display)
-        .unwrap()
-        .then(Export {
-            ontology: &ontology,
-            envelope: envelope(),
-        })
-        .unwrap()
-        .then(Emit(
-            |table: &str, batch: RecordBatch| -> Result<(), String> {
-                seen.push((table.to_string(), batch.num_rows()));
-                Ok(())
-            },
-        ))
-        .unwrap()
-        .into_value();
-
-    seen.sort();
-    let names: Vec<_> = seen.iter().map(|(t, _)| t.as_str()).collect();
-    assert_eq!(
-        names,
-        [
-            "gl_definition",
-            "gl_directory",
-            "gl_edge",
-            "gl_file",
-            "gl_imported_symbol"
-        ]
-    );
-    let empty: Vec<_> = seen
-        .iter()
-        .filter(|(_, n)| *n == 0)
-        .map(|(t, _)| t.as_str())
-        .collect();
-    assert!(empty.is_empty());
-    assert_eq!(
-        seen.iter()
-            .find(|(table, _)| table == "gl_directory")
-            .unwrap()
-            .1,
-        1
-    );
-    assert_eq!(displayed.state.trees.len(), 2);
-}
-
-#[test]
 fn exporting_deeply_nested_definitions_grows_linearly() {
     use std::time::Instant;
 
@@ -744,22 +669,25 @@ fn exporting_deeply_nested_definitions_grows_linearly() {
         write_all(repo.path(), &[("deep.js", source.as_bytes())]);
         let env = Env::with_limits(SupportLang::JavaScript, Limits::UNLIMITED).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
-        let displayed = templates::index(Context::new(&env, common::walk(repo.path())))
-            .unwrap()
-            .then(Display)
-            .unwrap();
+        let state = index(&env, repo.path());
+        let plan = ExportPlan::from_config(&env.export_config, &ontology, &env.lang).unwrap();
         let started = Instant::now();
-        displayed
-            .then(Export {
-                ontology: &ontology,
-                envelope: envelope(),
-            })
-            .unwrap();
+        export::export(
+            &state.trees,
+            &state.edges,
+            &env.lang,
+            &plan,
+            &envelope(),
+            true,
+            &|_| true,
+            &Sentinel::disabled(),
+        )
+        .unwrap();
         started.elapsed().as_secs_f64() * 1000.0
     }
 
     let pool = rayon::ThreadPoolBuilder::new()
-        .stack_size(templates::WORKER_STACK_BYTES)
+        .stack_size(driver::WORKER_STACK_BYTES)
         .build()
         .unwrap();
     let best = |levels| (0..3).map(|_| export_ms(levels)).fold(f64::MAX, f64::min);
@@ -785,19 +713,13 @@ fn exporting_some_trees_matches_the_full_export_of_those_files() {
         &env.lang,
     )
     .unwrap();
-    let state = templates::index(Context::new(&env, common::walk(repo.path())))
-        .unwrap()
-        .then(Display)
-        .unwrap()
-        .into_value()
-        .state;
+    let state = index(&env, repo.path());
     let main = state
         .trees
         .iter()
         .position(|tree| tree.label == "main.py")
         .unwrap() as u32;
     let export = |only: Option<&rustc_hash::FxHashSet<u32>>| Exported {
-        state: code_graph_incremental::pipeline::State::new(&env),
         tables: code_graph_incremental::export::export_trees(
             &state.trees,
             &state.edges,
