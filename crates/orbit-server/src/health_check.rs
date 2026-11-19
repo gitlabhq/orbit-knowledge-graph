@@ -41,17 +41,17 @@ fn build_clickhouse_instances(config: &AppConfig) -> Vec<ClickHouseInstance> {
     if same_host {
         vec![ClickHouseInstance {
             name: "clickhouse".to_string(),
-            client: config.graph.build_client("graph").read_only(),
+            client: config.graph.build_client("graph"),
         }]
     } else {
         vec![
             ClickHouseInstance {
                 name: "clickhouse-graph".to_string(),
-                client: config.graph.build_client("graph").read_only(),
+                client: config.graph.build_client("graph"),
             },
             ClickHouseInstance {
                 name: "clickhouse-datalake".to_string(),
-                client: config.datalake.build_client("datalake").read_only(),
+                client: config.datalake.build_client("datalake"),
             },
         ]
     }

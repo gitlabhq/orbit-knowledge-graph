@@ -5,39 +5,39 @@ use tokio::time::{sleep, timeout};
 
 use crate::common::TestContext;
 
-const SLOW_QUERY_MARKER: &str = "read_only_client_slow_query";
-
-async fn running_slow_queries(ctx: &TestContext) -> i64 {
+async fn running_queries_marked(ctx: &TestContext, marker: &str) -> i64 {
     let sql = format!(
         "SELECT toInt64(count()) FROM system.processes \
-         WHERE query LIKE '%{SLOW_QUERY_MARKER}%' AND query NOT LIKE '%system.processes%'"
+         WHERE query LIKE '%{marker}%' AND query NOT LIKE '%system.processes%'"
     );
     let batches = ctx.query(&sql).await;
     i64::extract_column(&batches, 0).expect("one column")[0]
 }
 
-async fn wait_for_running_slow_queries(ctx: &TestContext, expected: i64) {
+async fn wait_for_running_queries(ctx: &TestContext, marker: &str, expected: i64) {
     timeout(Duration::from_secs(30), async {
-        while running_slow_queries(ctx).await != expected {
+        while running_queries_marked(ctx, marker).await != expected {
             sleep(Duration::from_millis(200)).await;
         }
     })
     .await
-    .unwrap_or_else(|_| panic!("running slow queries never reached {expected}"));
+    .unwrap_or_else(|_| panic!("running queries never reached {expected}"));
 }
 
 #[tokio::test]
 async fn read_only_client_query_is_cancelled_when_the_caller_drops_it() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client().read_only();
+    let marker = format!("read_only_client_{}", uuid::Uuid::new_v4().simple());
     let sql = format!(
-        "SELECT count() /* {SLOW_QUERY_MARKER} */ FROM numbers(100000000000) WHERE sleepEachRow(0.000001) = 0"
+        "SELECT count() /* {marker} */ FROM numbers(100000000000) WHERE cityHash64(number) % 7 = 0"
     );
 
-    let dropped = timeout(Duration::from_secs(2), client.query(&sql).fetch_arrow()).await;
-    assert!(dropped.is_err(), "the slow query must still be running");
+    let running = tokio::spawn(async move { client.query(&sql).fetch_arrow().await });
+    wait_for_running_queries(&ctx, &marker, 1).await;
+    running.abort();
 
-    wait_for_running_slow_queries(&ctx, 0).await;
+    wait_for_running_queries(&ctx, &marker, 0).await;
 }
 
 #[tokio::test]
