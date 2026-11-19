@@ -49,9 +49,8 @@ function siteLink(target: string, file: string, routes: Map<string, string>): st
   const page = statSync(absolute).isDirectory() ? posix.join(linked, "README.md") : linked;
   const route = routes.get(page);
   const fragment = hash ? `#${hash}` : "";
-  // A section page is served with a trailing slash, so its link skips the redirect.
-  const section = route !== undefined && route !== "" && [...routes.values()].some((other) => other.startsWith(`${route}/`));
-  if (route !== undefined) return `/${route}${section ? "/" : ""}${fragment}`;
+  const hasSubpages = route !== undefined && route !== "" && [...routes.values()].some((other) => other.startsWith(`${route}/`));
+  if (route !== undefined) return `/${route}${hasSubpages ? "/" : ""}${fragment}`;
   return `${IMAGE.test(linked) ? repoRaw : repoBlob}${linked}${fragment}`;
 }
 

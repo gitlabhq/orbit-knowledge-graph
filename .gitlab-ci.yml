@@ -832,7 +832,6 @@ pages:preview:
   variables:
     # Pages serves previews at gitlaborbit.dev/<branch>/; site-kit derives its base path from this.
     SITE_URL: https://gitlaborbit.dev/$CI_COMMIT_REF_SLUG/
-    # Previews copy the whole site, so search engines skip them.
     SITE_NOINDEX: "1"
   pages:
     path_prefix: "$CI_COMMIT_REF_SLUG"
