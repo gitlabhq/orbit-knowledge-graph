@@ -762,6 +762,17 @@ impl<'t, S: Store> Run<'t, S> {
                     }
                 }
             }
+            Op::Project => {
+                if let Some(project) = self.project {
+                    push(
+                        &mut out,
+                        Val::Node(Loc {
+                            fi: project,
+                            node: 0,
+                        }),
+                    );
+                }
+            }
             Op::File => {
                 for at in nodes(&args[0]) {
                     push(&mut out, Val::Node(Loc { fi: at.fi, node: 0 }));

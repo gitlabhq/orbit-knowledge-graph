@@ -38,6 +38,8 @@ pub enum Op {
     /// The targets of edges of a kind made at a node.
     Site(EdgeKind),
     File,
+    /// The project tree's root.
+    Project,
 }
 
 /// A `select` pattern and its key, shared by every phase so trees can keep
@@ -338,6 +340,12 @@ impl<'s> Parser<'s, '_> {
             }
             "first" => return self.first(piped),
             "select" | "select_all" => return self.select(word, piped),
+            "project" => {
+                if !(self.eat("(") && self.eat(")")) {
+                    return Err(self.error("project() takes no arguments"));
+                }
+                return Ok(Expr::Op(Op::Project, Box::new([])));
+            }
             "enclose" | "file" => {
                 let args = self.args(piped)?;
                 if args.len() != 1 {
@@ -467,7 +475,11 @@ impl<'s> Parser<'s, '_> {
         let mut project = false;
         match piped {
             Some(region) => args.push(region),
-            None if self.keyword("project") => project = true,
+            None if !self.rest().trim_start().starts_with("project(")
+                && self.keyword("project") =>
+            {
+                project = true
+            }
             None => args.push(self.expr()?),
         }
         if !project && args.len() == 1 && !self.eat(",") {

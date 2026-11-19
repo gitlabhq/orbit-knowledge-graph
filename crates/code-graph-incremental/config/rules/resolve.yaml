@@ -2,7 +2,9 @@ data:
   import_kinds: [__import, __import_type]
 
 define:
-  files(path): "select_all(project, '(__source_file)' by $ROOT | stem, path) or select_all(project, '(__source_file)' by $ROOT | collapse_index(%index_files), path)"
+  file_at(path): "select_all(project, '(__source_file)' by $ROOT | stem, path) or select_all(project, '(__source_file)' by $ROOT | collapse_index(%index_files), path)"
+  roots(at): "select_all(project(), '(__dir $D:__source_root)' by \"root\", \"root\") | tree_path(\"/\")"
+  files(path): 'file_at(path) or file_at(roots(path) | concat("/", path))'
   modules(ROOT): 'files($ROOT | tag("resolved_source"))'
   submodule(ROOT, N): 'files($ROOT | tag("resolved_source") | concat("/", @$N))'
   exported(module, name): "select(module, '(__def $N:__defname)', name) or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, name) | reexported(name) or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, \"*\") | reexported(name)"
