@@ -445,8 +445,7 @@ pub fn git_working_changes(repo_path: &Path) -> Result<GitChanges> {
     Ok(GitChanges::from_statuses(repo_path, &working))
 }
 
-/// The files a full index reads: tracked and untracked-but-not-ignored. Skip-worktree
-/// files are left out, since `git status` never reports edits to them and an
+/// Skip-worktree files are left out, since `git status` never reports edits to them and an
 /// incremental index would otherwise disagree with a full one. Names that are not
 /// UTF-8 are left out too, since the graph cannot hold them.
 pub fn git_index_files(repo_path: &Path) -> Result<Vec<String>> {

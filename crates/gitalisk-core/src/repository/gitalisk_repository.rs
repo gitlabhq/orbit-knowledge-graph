@@ -426,7 +426,6 @@ impl CoreGitaliskRepository {
         )
     }
 
-    /// Tracked files plus untracked files that no ignore rule excludes.
     /// Untracked nested repositories are left out, and a submodule appears as
     /// the tracked entry for its directory.
     pub fn index_files(&self) -> Result<Vec<IndexedFile>, std::io::Error> {
