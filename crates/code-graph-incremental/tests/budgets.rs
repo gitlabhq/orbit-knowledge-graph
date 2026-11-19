@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use code_graph_incremental::treesitter::SupportLang;
+use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Env, Killed, Limits, Sentinel, driver};
 mod common;
 

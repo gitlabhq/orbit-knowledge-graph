@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
-use code_graph_incremental::treesitter::SupportLang;
+use code_graph_incremental::language::SupportLang;
 use orbit_utils::vfs::{
     Limits, Loading, Options, Source, SourceError, Tag, Vfs,
     sources::{Diff, Directory},

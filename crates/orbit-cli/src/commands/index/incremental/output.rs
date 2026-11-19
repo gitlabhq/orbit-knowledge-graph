@@ -3,7 +3,7 @@ use arrow::array::{BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use code_graph_incremental::driver::{FileStats, Report};
 use code_graph_incremental::export::ExportPlan;
-use code_graph_incremental::treesitter::SupportLang;
+use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Env, Envelope, Scalar, State};
 use orbit_arrow::ArrowUtils;
 use rustc_hash::FxHashSet;

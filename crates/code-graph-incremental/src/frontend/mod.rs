@@ -2,11 +2,12 @@
 //! grammars, and a hand-written reader for markdown.
 
 pub mod markdown;
+pub mod treesitter;
 
 use crate::env::Env;
+use crate::language::SupportLang;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::Tree;
-use crate::treesitter::{self, SupportLang};
 
 /// Parses a file with its language's frontend, under the parse budget.
 pub fn parse(

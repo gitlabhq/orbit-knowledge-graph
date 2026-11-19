@@ -12,9 +12,9 @@ use smallvec::SmallVec;
 use crate::env::Env;
 use crate::file_tree::{ProjectTree, WalkResult};
 use crate::intern::{Interner, Lang};
+use crate::language::SupportLang;
 use crate::sentinel::Limits;
 use crate::tree::{Compact, CompactNode, Edge, Node, Tag, Tree};
-use crate::treesitter::SupportLang;
 
 pub struct SourceFile {
     pub path: String,

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Context as _, Result};
 use arrow::record_batch::RecordBatch;
 use code_graph_incremental::driver::{self, Report};
-use code_graph_incremental::treesitter::SupportLang;
+use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Env, Sentinel, State};
 use rustc_hash::FxHashSet;
 

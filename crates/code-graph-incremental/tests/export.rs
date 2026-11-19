@@ -2,7 +2,7 @@ use std::path::Path;
 
 use arrow::record_batch::RecordBatch;
 use code_graph_incremental::export::{self, ExportPlan};
-use code_graph_incremental::treesitter::SupportLang;
+use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Env, Envelope, Error, Limits, Scalar, Sentinel, driver};
 mod common;
 use ontology::Ontology;

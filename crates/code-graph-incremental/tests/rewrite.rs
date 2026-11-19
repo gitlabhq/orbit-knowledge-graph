@@ -4,7 +4,7 @@ use code_graph_incremental::canonical::{Canonical as C, def_type_of, is_canonica
 use code_graph_incremental::tree::Compact;
 type Tree = code_graph_incremental::tree::Tree<Compact>;
 type Cursor<'a> = code_graph_incremental::tree::Cursor<'a, Compact>;
-use code_graph_incremental::treesitter::SupportLang;
+use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Env, Killed, Limits, Sentinel, driver};
 mod common;
 
