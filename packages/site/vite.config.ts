@@ -28,7 +28,7 @@ export default defineConfig(() => {
       markdown: { project: "gitlab-org/orbit/knowledge-graph", tokenEnv: "ORBIT_MARKDOWN_TOKEN" },
       meta: siteMeta,
       avatars: (route) => !route.startsWith("content/blog/"),
-      image: { url: "https://gitlaborbit.dev/og.png", width: 1200, height: 630, alt: "GitLab Orbit: One context layer for all your agents." },
+      image: { url: "https://gitlaborbit.dev/og.png", width: 1200, height: 630, alt: "GitLab Orbit: The context layer for all your agents." },
       llms: LLMS_NOTES,
     }),
     { plugins: [syncSources()] },

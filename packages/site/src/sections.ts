@@ -1,6 +1,6 @@
 export const HOME = {
   title: "GitLab Orbit",
-  description: "GitLab Orbit is one context layer for all your AI agents: your code, merge requests, pipelines, and vulnerabilities in one graph they can query.",
+  description: "GitLab Orbit is a context layer for all your AI agents: your code, merge requests, pipelines, and vulnerabilities in one graph they can query.",
 };
 
 export type Tab = { route: string; label: string; menu?: { route: string; label: string; description: string; icon?: string }[] };
