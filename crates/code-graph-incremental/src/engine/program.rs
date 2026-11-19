@@ -187,7 +187,8 @@ pub struct Def {
 
 enum DefImpl {
     Expr(Expr),
-    Cases(Vec<(Match, Expr)>),
+    /// Each case: its match (none for `_`, which takes any value) and value.
+    Cases(Vec<(Option<Match>, Option<Expr>, Expr)>),
 }
 
 impl Def {
@@ -208,17 +209,23 @@ impl Def {
                 expr.eval(run, &bound)
             }
             DefImpl::Cases(cases) => {
-                let Some(head) = args[0].first().and_then(|v| v.loc()) else {
-                    return Vals::new();
-                };
-                let c = Cursor::new(run.trees, head.fi, head.node);
-                let mut w = Scratch::<S>::new(self.slots.max(1));
-                for (at, value) in cases {
-                    if !w.matches(run, at, c) {
-                        continue;
+                let head = args[0].first().and_then(|v| v.loc());
+                let mut w = Scratch::<S>::new(self.slots.max(args.len()));
+                for (at, when, value) in cases {
+                    match (at, head) {
+                        (Some(at), Some(head)) => {
+                            if !w.matches(run, at, Cursor::new(run.trees, head.fi, head.node)) {
+                                continue;
+                            }
+                        }
+                        (Some(_), None) => continue,
+                        (None, _) => w.vals[0] = args[0].clone(),
                     }
                     w.vals[1..args.len()].clone_from_slice(&args[1..]);
-                    if !w.holds(run, at) {
+                    if when
+                        .as_ref()
+                        .is_some_and(|e| !super::truthy(&e.eval(run, &w.vals)))
+                    {
                         continue;
                     }
                     if matches!(value, Expr::Empty) {
@@ -694,8 +701,8 @@ impl Def {
     fn calls(&self, f: &mut dyn FnMut(Result<FnId, u16>)) {
         match &self.body {
             DefImpl::Expr(e) => e.calls(f),
-            DefImpl::Cases(cases) => cases.iter().for_each(|(m, e)| {
-                if let Some(w) = &m.when {
+            DefImpl::Cases(cases) => cases.iter().for_each(|(_, when, e)| {
+                if let Some(w) = when {
                     w.calls(f);
                 }
                 e.calls(f);
@@ -891,19 +898,24 @@ impl Loader<'_> {
                 let mut compiled = Vec::new();
                 let mut slots = d.params.len().max(1);
                 for (pattern, when, value) in cases {
-                    let pattern = if pattern == "_" {
-                        "(_)"
-                    } else {
-                        pattern.as_str()
+                    let (m, slots_of) = match pattern.as_str() {
+                        "_" => (None, Slots::params(&d.params)),
+                        pattern => {
+                            let m = self.matcher(pattern, None, lang, &d.params).map_err(at)?;
+                            let slots = m.slots.clone();
+                            (Some(m), slots)
+                        }
                     };
-                    let m = self
-                        .matcher(pattern, when.as_deref(), lang, &d.params)
+                    let cell = RefCell::new(slots_of);
+                    let when = when
+                        .as_deref()
+                        .map(|src| Expr::parse(src, &self.scope(&cell, false, shared)))
+                        .transpose()
                         .map_err(at)?;
-                    let cell = RefCell::new(m.slots.clone());
                     let value =
                         Expr::parse(value, &self.scope(&cell, false, shared)).map_err(at)?;
                     slots = slots.max(cell.borrow().len());
-                    compiled.push((m, value));
+                    compiled.push((m, when, value));
                 }
                 Ok(Def {
                     params: d.params.len(),

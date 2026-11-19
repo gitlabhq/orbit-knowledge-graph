@@ -63,6 +63,13 @@ static FUNCTIONS: &[Function<Text>] = &[
             .filter(|v| v.loc().is_some_and(|l| l.fi != here))
             .collect()
     }),
+    function!(Pure, "in", [set, set], |cx, a| {
+        let texts: Vec<u32> = a[1].iter().filter_map(|&v| cx.text(v)).collect();
+        yes(a[0]
+            .iter()
+            .filter_map(|&v| cx.text(v))
+            .any(|t| texts.contains(&t)))
+    }),
     function!(Pure, "is_file", [set], |_, a| {
         a[0].iter()
             .copied()
