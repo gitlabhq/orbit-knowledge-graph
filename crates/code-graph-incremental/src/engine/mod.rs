@@ -494,6 +494,7 @@ pub struct Run<'t, S: Store = Compact> {
     project: Option<u32>,
     indexes: Option<&'t Indexes<'t>>,
     indexed: Option<&'t Indexed>,
+    declared: &'t [u32],
     fns: &'t [program::Def],
     graph_fi: u32,
     lang: usize,
@@ -522,6 +523,7 @@ impl<'t, S: Store> Run<'t, S> {
         run.max_edges = env.limits.max_file_edges;
         run.lang = rules;
         run.data = phase.data.get(rules).map_or(&[], Vec::as_slice);
+        run.declared = &phase.indexes;
         run.fns = &phase.defs;
         run
     }
@@ -550,6 +552,7 @@ impl<'t, S: Store> Run<'t, S> {
             project: None,
             indexes: None,
             indexed: None,
+            declared: &[],
             fns: &[],
             graph_fi: 0,
             lang: 0,
@@ -1038,6 +1041,11 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
             return &[];
         };
         let name = self.run.lang_ref.syms.intern(name);
+        assert!(
+            self.run.declared.contains(&name),
+            "index {} is not declared by this phase",
+            self.run.lang_ref.syms.resolve(name)
+        );
         indexed.0.get(&(name, key)).map_or(&[], Vec::as_slice)
     }
 

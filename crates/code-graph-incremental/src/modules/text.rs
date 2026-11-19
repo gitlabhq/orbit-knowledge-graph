@@ -56,6 +56,15 @@ static FUNCTIONS: &[Function<Text>] = &[
     on_text!("stem", [one], stem),
     on_text!("collapse_index", [one, set], collapse_index),
     on_text!("map", [one, set], map),
+    function!(Pure, "indexed", [one, set], |cx, a| {
+        let Some(name) = a[0].first().and_then(|&v| text(cx, v)).map(str::to_owned) else {
+            return Vals::new();
+        };
+        a[1].iter()
+            .filter_map(|&k| cx.text(k))
+            .flat_map(|k| cx.indexed(&name, k).iter().map(|&l| Val::Node(l)))
+            .collect()
+    }),
     function!(Pure, "default", [set, set], |cx, a| {
         let present = |at: usize| -> Vals {
             a[at]

@@ -33,6 +33,8 @@ struct PhaseSpec {
     resolve: BTreeMap<String, String>,
     #[serde(default)]
     budget: BudgetSpec,
+    #[serde(default)]
+    indexes: Vec<String>,
 }
 
 /// The budgets of a phase, by `Limits` field name: one per tree, and one for
@@ -276,6 +278,7 @@ pub struct Phase {
     pub(super) links: super::Links,
     pub(super) data: Vec<Vec<Vals>>,
     pub(super) defs: Vec<Def>,
+    pub(super) indexes: Vec<u32>,
     pub rows: Vec<RowShape>,
     body: Body,
     slots: usize,
@@ -517,6 +520,11 @@ impl Phase {
             name: spec.name.clone(),
             label: Box::leak(label.into_boxed_str()),
             defs,
+            indexes: spec
+                .indexes
+                .iter()
+                .map(|n| loader.lang.syms.intern(n))
+                .collect(),
             rows: loader.rows.take(),
             budget: spec.budget.clone(),
             scope: spec.scope.clone(),
@@ -737,7 +745,6 @@ impl Loader<'_> {
             ("emit", spec.emit.is_some()),
             ("tag", spec.tag.is_some()),
             ("row", spec.row.is_some()),
-            ("index", spec.index.is_some()),
         ] {
             if used && !allowed(hook) {
                 return Err(LoadError(format!(
@@ -849,6 +856,12 @@ impl Loader<'_> {
         ];
         if hooks.into_iter().any(|h| h) {
             return Err(LoadError("an index rule has no other hooks".into()));
+        }
+        if let Some(name) = index.keys().find(|n| !self.spec.indexes.contains(n)) {
+            return Err(LoadError(format!(
+                "index {name} is not declared by {}",
+                self.spec.name
+            )));
         }
         let at = self.matcher(spec, lang)?;
         let scope = self.scope(&at.slots, false);
