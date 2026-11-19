@@ -143,88 +143,24 @@ pub(super) fn check_cte_reads(ast: &compiler::Node, main_sql: &str) -> Result<Ct
 }
 
 fn query_cte_reads(query: &compiler::Query, reads: &mut Vec<(String, Option<String>)>) {
-    for cte in &query.ctes {
-        query_cte_reads(&cte.query, reads);
-    }
-    table_cte_reads(&query.from, reads);
-    for select in &query.select {
-        expr_cte_reads(&select.expr, reads);
-    }
-    for expr in query
-        .where_clause
-        .iter()
-        .chain(&query.group_by)
-        .chain(&query.having)
-        .chain(query.order_by.iter().map(|order| &order.expr))
-    {
-        expr_cte_reads(expr, reads);
-    }
-    for arm in &query.union_all {
-        query_cte_reads(arm, reads);
-    }
-}
-
-fn table_cte_reads(table: &compiler::TableRef, reads: &mut Vec<(String, Option<String>)>) {
-    match table {
-        compiler::TableRef::Scan { .. } => {}
-        compiler::TableRef::Cte { name, alias } => reads.push((name.clone(), Some(alias.clone()))),
-        compiler::TableRef::Join {
-            left, right, on, ..
-        } => {
-            table_cte_reads(left, reads);
-            table_cte_reads(right, reads);
-            expr_cte_reads(on, reads);
-        }
-        compiler::TableRef::Union { queries, .. } => {
-            for query in queries {
-                query_cte_reads(query, reads);
+    use compiler::ast::visit;
+    visit::visit_queries(query, &mut |query| {
+        visit::visit_relations(&query.from, &mut |table| {
+            if let compiler::TableRef::Cte { name, alias } = table {
+                reads.push((name.clone(), Some(alias.clone())));
             }
+        });
+        for expression in visit::query_expressions(query) {
+            visit::visit_expressions(expression, &mut |expression| {
+                if let compiler::Expr::InSubquery { cte_name, .. } = expression {
+                    reads.push((cte_name.clone(), None));
+                }
+                Ok(())
+            })?;
         }
-        compiler::TableRef::Subquery { query, .. } => query_cte_reads(query, reads),
-    }
-}
-
-fn expr_cte_reads(expr: &compiler::Expr, reads: &mut Vec<(String, Option<String>)>) {
-    use compiler::Expr;
-    match expr {
-        Expr::InSubquery { expr, cte_name, .. } => {
-            reads.push((cte_name.clone(), None));
-            expr_cte_reads(expr, reads);
-        }
-        Expr::InSelect { expr, query } => {
-            expr_cte_reads(expr, reads);
-            query_cte_reads(query, reads);
-        }
-        Expr::Scalar(query) => query_cte_reads(query, reads),
-        Expr::FuncCall { args, .. } => args.iter().for_each(|arg| expr_cte_reads(arg, reads)),
-        Expr::Aggregate {
-            argument,
-            condition,
-            ..
-        } => {
-            for value in argument.iter().chain(condition) {
-                expr_cte_reads(value, reads);
-            }
-        }
-        Expr::TimeBucket { value, .. } | Expr::Lambda { body: value, .. } => {
-            expr_cte_reads(value, reads)
-        }
-        Expr::TextSearch { value, query, .. } => {
-            expr_cte_reads(value, reads);
-            expr_cte_reads(query, reads);
-        }
-        Expr::BinaryOp { left, right, .. } => {
-            expr_cte_reads(left, reads);
-            expr_cte_reads(right, reads);
-        }
-        Expr::UnaryOp { expr, .. } => expr_cte_reads(expr, reads),
-        Expr::Column { .. }
-        | Expr::Identifier(_)
-        | Expr::Literal(_)
-        | Expr::Param { .. }
-        | Expr::EmptyTupleArray(_)
-        | Expr::Star => {}
-    }
+        Ok(())
+    })
+    .expect("the CTE read walk does not fail");
 }
 
 async fn check_indexes(

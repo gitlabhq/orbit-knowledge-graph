@@ -1470,12 +1470,16 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
     }
 }
 
-fn read_fixtures(directory: &Path) -> Vec<(std::path::PathBuf, Scenario)> {
+fn fixture_paths(directory: &Path) -> Vec<std::path::PathBuf> {
     let mut paths = Vec::new();
     crate::scenario::discover(directory, &mut paths);
     paths.sort();
     assert!(!paths.is_empty());
     paths
+}
+
+fn read_fixtures(directory: &Path) -> Vec<(std::path::PathBuf, Scenario)> {
+    fixture_paths(directory)
         .into_iter()
         .flat_map(|path| {
             crate::scenario::read_cases::<serde_json::Value>(&path)
