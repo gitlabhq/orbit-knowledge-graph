@@ -83,7 +83,7 @@ properties:
     source: definition_type
     nullable: false
     mutable: false
-    description: "Definition kind (e.g., Class, Module, Method, Function, Struct, Enum, Trait, Lambda)."
+    description: "Definition kind (e.g., Class, Module, Method, Function, Struct, Enum, Trait, Lambda). Markdown files use Section, FrontMatter, AgentInstructions and Skill."
     selectivity: low
 
   start_line:
@@ -132,78 +132,78 @@ properties:
     type: string
     source: front_matter_name
     nullable: false
-    description: "Front matter `name` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions definitions."
+    description: "Front matter `name` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions rows; filter on `definition_type` for one row per file."
 
   front_matter_description:
     type: string
     source: front_matter_description
     nullable: false
-    description: "Front matter `description` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions definitions."
+    description: "Front matter `description` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions rows; filter on `definition_type` for one row per file."
 
   front_matter_license:
     type: string
     source: front_matter_license
     nullable: false
-    description: "Front matter `license` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions definitions."
+    description: "Front matter `license` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions rows; filter on `definition_type` for one row per file."
     selectivity: low
 
   front_matter_compatibility:
     type: string
     source: front_matter_compatibility
     nullable: false
-    description: "Front matter `compatibility` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions definitions."
+    description: "Front matter `compatibility` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions rows; filter on `definition_type` for one row per file."
 
   front_matter_allowed_tools:
     type: string
     source: front_matter_allowed_tools
     nullable: false
-    description: "Front matter `allowed-tools` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions definitions."
+    description: "Front matter `allowed-tools` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions rows; filter on `definition_type` for one row per file."
 
   front_matter_metadata:
     type: string
     source: front_matter_metadata
     nullable: false
-    description: "Front matter `metadata` map as compact JSON with sorted keys and scalar values; empty when absent or not a map. Set on FrontMatter, Skill and AgentInstructions definitions."
+    description: "Front matter `metadata` map as compact JSON, keys sorted; empty when absent or not a map. Set on FrontMatter, Skill and AgentInstructions rows; filter on `definition_type` for one row per file."
 
   front_matter_title:
     type: string
     source: front_matter_title
     nullable: false
-    description: "Front matter `title` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions definitions."
+    description: "Front matter `title` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions rows; filter on `definition_type` for one row per file."
 
   front_matter_stage:
     type: string
     source: front_matter_stage
     nullable: false
-    description: "Front matter `stage` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions definitions."
+    description: "Front matter `stage` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions rows; filter on `definition_type` for one row per file."
     selectivity: low
 
   front_matter_group:
     type: string
     source: front_matter_group
     nullable: false
-    description: "Front matter `group` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions definitions."
+    description: "Front matter `group` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions rows; filter on `definition_type` for one row per file."
     selectivity: low
 
   front_matter_info:
     type: string
     source: front_matter_info
     nullable: false
-    description: "Front matter `info` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions definitions."
+    description: "Front matter `info` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions rows; filter on `definition_type` for one row per file."
     selectivity: low
 
   front_matter_version:
     type: string
     source: front_matter_version
     nullable: false
-    description: "Front matter `version` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions definitions."
+    description: "Front matter `version` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions rows; filter on `definition_type` for one row per file."
     selectivity: low
 
   front_matter_category:
     type: string
     source: front_matter_category
     nullable: false
-    description: "Front matter `category` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions definitions."
+    description: "Front matter `category` value; empty when absent or not a scalar. Set on FrontMatter, Skill and AgentInstructions rows; filter on `definition_type` for one row per file."
     selectivity: low
 
   content:
