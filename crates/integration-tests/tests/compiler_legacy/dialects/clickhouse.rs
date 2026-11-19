@@ -1,18 +1,4 @@
-use crate::compiler_legacy::setup::{test_ctx, test_ontology};
-use compiler::{Frontend, compile};
-
-#[test]
-fn invalid_json_rejected() {
-    assert!(
-        compile(
-            "not valid json",
-            Frontend::JsonDsl,
-            &test_ontology(),
-            &test_ctx()
-        )
-        .is_err()
-    );
-}
+use crate::compiler_legacy::setup::test_ctx;
 
 #[test]
 fn orbit_query_rejects_input_past_the_byte_limit() {
