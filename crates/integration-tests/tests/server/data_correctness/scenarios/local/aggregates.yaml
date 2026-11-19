@@ -1,5 +1,14 @@
 config:
   backends: [clickhouse, duckdb]
+  extra_seed:
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 12000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition }
+      - { traversal_path: "1/100/1000/", source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12002, target_kind: Definition }
+      - { traversal_path: "1/100/1000/", source_id: 12000, source_kind: Definition, relationship_kind: CALLS, target_id: 12003, target_kind: Definition }
+    gl_code_edge:
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12000, source_kind: Definition, relationship_kind: CALLS, target_id: 12003, target_kind: Definition }
+    gl_definition:
+      - { id: 12003, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc123, file_path: "crates/compiler/src/lib.rs", fqn: "compiler::emit", name: emit, definition_type: Function, start_line: 32, end_line: 38, start_byte: 320, end_byte: 380, start_char: 4, end_char: 8 }
 
 cases:
   - name: measures_over_rows
@@ -14,8 +23,8 @@ cases:
       row_values:
         - { total: 72, mean: 24.0, low: 10, high: 40 }
 
-  - name: collect_and_distinct_count
-    description: Collecting a property of one definition, and counting distinct file paths of three
+  - name: distinct_file_count
+    description: Counting distinct file paths and all of three definitions
     query:
       json: |
         {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[12000,12001,12002]}],"aggregations":[{"count":"d.file_path","distinct":true,"as":"files"},{"count":"d","as":"definitions"}]}
@@ -39,3 +48,37 @@ cases:
       row_count: 1
       row_values:
         - { definitions: 0, total: null, mean: null, low: null, high: null }
+
+  - name: filtered_counts_per_caller
+    description: Per caller, the relationship-filtered count of callees and the distinct count of their files under the same filter
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","node_ids":[12000,12001]},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"group_by":["a.name"],"aggregations":[{"count":"b","as":"callees"},{"count":"b.file_path","distinct":true,"as":"files"}],"aggregation_sort":"a_name"}
+      gql: |
+        MATCH (a:Definition)-[:CALLS]->(b:Definition) WHERE a.id IN [12000, 12001] RETURN a.name, count(b) AS callees, count(DISTINCT b.file_path) AS files ORDER BY a.name
+    expect:
+      row_count: 2
+      row_values:
+        - { a_name: compile, callees: 2, files: 1 }
+        - { a_name: helper, callees: 1, files: 1 }
+
+  - name: counts_skip_null
+    description: Counting a property skips the null row, and sum and distinct count ignore it
+    config:
+      backends: [duckdb]
+      ontology_overlay: local_nulls
+      extra_seed:
+        gl_definition:
+          - { id: 15101, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/rank.rs, fqn: "rank::a", name: a, definition_type: Function, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5, rank: 2 }
+          - { id: 15102, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/rank.rs, fqn: "rank::b", name: b, definition_type: Function, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5, rank: 2 }
+          - { id: 15103, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/rank.rs, fqn: "rank::c", name: c, definition_type: Function, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5 }
+          - { id: 15104, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/rank.rs, fqn: "rank::d", name: d, definition_type: Function, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5, rank: 9 }
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[15101,15102,15103,15104]}],"aggregations":[{"count":"d","as":"rows"},{"count":"d.rank","as":"ranked"},{"count":"d.rank","distinct":true,"as":"ranks"},{"sum":"d.rank","as":"total"}]}
+      gql: |
+        MATCH (d:Definition) WHERE d.id IN [15101, 15102, 15103, 15104] RETURN count(d) AS rows, count(d.rank) AS ranked, count(DISTINCT d.rank) AS ranks, sum(d.rank) AS total
+    expect:
+      row_count: 1
+      row_values:
+        - { rows: 4, ranked: 3, ranks: 2, total: 13 }

@@ -151,6 +151,7 @@ schema_version_prefix: v1_
 | `property_types` | `Group` has a float `score` and a visible `private_note` that cannot be filtered |
 | `string_edge_source` | A `NOTED` edge from `User` to `Note` in a table whose `source_id` is a string |
 | `local_dates` | The local `Definition` has a `created_at` timestamp |
+| `local_nulls` | The local `Definition` has a nullable `rank` |
 
 Both `query.json` and `query.gql` are required. If a frontend cannot express the
 tested plan, declare its reason under `missing_frontends`. The runner rejects
