@@ -9,7 +9,7 @@ use smallvec::SmallVec;
 
 use crate::constants::{RED_ZONE, STACK_SEGMENT};
 pub use crate::dsl::rules::*;
-pub use ops::{Chain, Members, Types, ancestors, chain, members};
+pub use ops::{Chain, Members, Parts, Types, ancestors, chain, members};
 pub use program::Program;
 
 #[derive(
@@ -132,10 +132,28 @@ pub trait Host {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Memo {
+    None,
+    Pass,
+    Flow,
+}
+
+impl Memo {
+    fn of(f: impl strum::EnumProperty) -> Self {
+        match f.get_str("memo") {
+            Some("pass") => Memo::Pass,
+            Some("flow") => Memo::Flow,
+            _ => Memo::None,
+        }
+    }
+}
+
 /// Memoized calls share one cycle guard: a call already in progress yields
-/// nothing and marks the result in progress as cut, which is never stored.
-pub fn call<H: Host>(h: &mut H, f: H::F, memo: bool, args: &[Val]) -> Val {
-    if !memo {
+/// nothing and marks the result in progress as cut. A pass memo never stores
+/// a cut result; a flow memo lives one epoch, so it stores it to stay linear.
+pub fn call<H: Host>(h: &mut H, f: H::F, memo: Memo, args: &[Val]) -> Val {
+    if memo == Memo::None {
         return h.call(f, args);
     }
     let key = (f, SmallVec::from(args));
@@ -152,7 +170,7 @@ pub fn call<H: Host>(h: &mut H, f: H::F, memo: bool, args: &[Val]) -> Val {
     guard.busy.remove(&key);
     let cut = guard.cut;
     guard.cut |= outer;
-    if !cut {
+    if !cut || memo == Memo::Flow {
         h.memo_put(key, &found);
     }
     found

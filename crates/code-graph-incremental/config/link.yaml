@@ -1,0 +1,53 @@
+- match: '(__import)'
+  do: mod.names.import($ROOT)
+  children: skip
+- match: '(__import_type)'
+  do: mod.names.import($ROOT)
+  children: skip
+
+- match: '(__def $N:__defname)'
+  when: mod.tree.named($N)
+  do: mod.ssa.def($ROOT)
+  children: mod.ssa.body($ROOT)
+  exit: mod.ssa.leave($ROOT)
+- match: '(__def)'
+  children: skip
+
+- match: '(__call)'
+  do: mod.link.call($ROOT)
+  children: mod.tree.without($ROOT, "__import")
+- match: '(__supertype)'
+  children: mod.tree.without($ROOT, "__import")
+- match: '(__member)'
+  do: mod.link.member($ROOT)
+
+- match: '(__binding (__qualifier))'
+  do: mod.ssa.qualified($ROOT)
+  children: skip
+- match: '(__binding)'
+  when: mod.ssa.target($ROOT)
+  do: mod.ssa.bind($ROOT, $WHEN)
+  children: mod.ssa.bind_children($ROOT)
+  exit: mod.ssa.leave($ROOT)
+- match: '(__destructure)'
+  do: mod.ssa.destructure($ROOT)
+  children: mod.tree.without($ROOT, "__binding")
+
+- match: '(__scope)'
+  do: mod.ssa.scope($ROOT)
+  exit: mod.ssa.leave($ROOT)
+- match: '(__lambda)'
+  do: mod.ssa.lambda($ROOT)
+  exit: mod.ssa.leave($ROOT)
+- match: '(__ssa_branch)'
+  do: mod.ssa.branch($ROOT)
+  children: mod.ssa.arms_last($ROOT)
+  exit: mod.ssa.leave($ROOT)
+- match: '(__ssa_arm)'
+  when: mod.ssa.in_branch($ROOT)
+  do: mod.ssa.arm($ROOT)
+  exit: mod.ssa.leave($ROOT)
+- match: '(__ssa_loop)'
+  children: mod.ssa.loop_children($ROOT)
+  then: mod.ssa.begin_loop($ROOT)
+  exit: mod.ssa.leave($ROOT)

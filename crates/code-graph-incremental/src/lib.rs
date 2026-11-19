@@ -5,7 +5,7 @@ pub mod env;
 pub mod export;
 pub mod file_tree;
 pub mod intern;
-pub mod linker;
+pub mod link;
 pub mod markdown;
 pub mod pipeline;
 pub mod resolve;

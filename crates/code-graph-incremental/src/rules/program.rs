@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use smallvec::SmallVec;
 use strum::EnumProperty;
 
-use super::{Func, Host, Loc, Val, call};
+use super::{Func, Host, Loc, Memo, Val, call};
 use crate::canonical::{CANONICAL_BASE, Canonical as C};
 use crate::dsl::matching::matches;
 use crate::dsl::parser::parse;
@@ -37,7 +37,7 @@ enum Builtin {
 }
 
 enum Expr<F> {
-    Call(F, bool, Box<[Expr<F>]>),
+    Call(F, Memo, Box<[Expr<F>]>),
     Builtin(Builtin, Box<[Expr<F>]>),
     Cap(u16),
     Lit(Val),
@@ -480,6 +480,6 @@ impl<'s> Parser<'s> {
                 f.get_str("arity")
             )));
         }
-        Ok(Expr::Call(f, f.get_str("memo").is_some(), args))
+        Ok(Expr::Call(f, Memo::of(f), args))
     }
 }

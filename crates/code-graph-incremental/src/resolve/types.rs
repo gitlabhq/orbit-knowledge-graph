@@ -6,12 +6,13 @@ use super::Ctx;
 use super::imports::call_edge;
 use crate::canonical::Canonical as C;
 use crate::constants::{RED_ZONE, STACK_SEGMENT};
-use crate::rules::{self, Chain, Guard, Host, Key, Loc, Types, Val, ancestors, chain, members};
+use crate::rules::{
+    self, Chain, Guard, Host, Key, Loc, Memo, Parts, Types, Val, ancestors, chain, members,
+};
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Compact, Edge, EdgeKind, Role, infer_return_type, is_name_text, reachable};
 
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
-type Parts<'a> = SmallVec<[Cursor<'a>; 4]>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, strum::EnumString, strum::EnumProperty)]
 pub enum Fun {
@@ -120,7 +121,7 @@ impl<'c, 'a> R<'c, 'a> {
     }
 
     pub(super) fn resolve_chain(&mut self, c: Cursor<'a>) -> Option<Cursor<'a>> {
-        let found = rules::call(self, Fun::Chain, true, &[Val::Node(c.into())]);
+        let found = rules::call(self, Fun::Chain, Memo::Pass, &[Val::Node(c.into())]);
         self.cursor(&found)
     }
 
@@ -340,7 +341,7 @@ impl<'c, 'a> R<'c, 'a> {
                             Val::of(class),
                         ],
                     };
-                    let found = rules::call(self, Fun::SiteClass, true, &key);
+                    let found = rules::call(self, Fun::SiteClass, Memo::Pass, &key);
                     self.cursor(&found).or(class)
                 }
                 _ => class,

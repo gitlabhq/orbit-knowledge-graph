@@ -16,7 +16,7 @@ use super::{
 };
 use crate::env::Env;
 use crate::export::{self, Envelope};
-use crate::linker;
+use crate::link;
 use crate::pattern::{self, EdgeCtx, EdgeIndex};
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Edge, Storage, Tag, Tree};
@@ -406,11 +406,11 @@ impl ItemPhase<Canonical> for Link {
         run: &Sentinel,
         Canonical(tree, cut): Canonical,
     ) -> Result<LinkedFile, Killed> {
-        let (edges, limited) = linker::link(&tree, env, run)?;
+        let edges = link::link(&tree, env, run)?;
         Ok(LinkedFile {
             tree,
             edges,
-            limited: limited.or(cut),
+            limited: cut,
         })
     }
 }
