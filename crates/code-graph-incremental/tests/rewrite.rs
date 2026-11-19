@@ -240,7 +240,11 @@ fn a_gitlab_ci_file_keeps_only_the_first_images_up_to_the_cap() {
 }
 
 #[test]
-fn a_gitlab_ci_file_over_the_rewrite_budget_is_skipped() {
+fn a_gitlab_ci_file_over_the_rewrite_budget_is_skipped_and_reported() {
+    let (items, skipped, _) = gitlab_ci_services(200, Limits::UNLIMITED);
+    assert_eq!(items.len(), 1);
+    assert!(skipped.is_empty());
+
     let (items, skipped, _) = gitlab_ci_services(
         200,
         Limits {
@@ -250,5 +254,8 @@ fn a_gitlab_ci_file_over_the_rewrite_budget_is_skipped() {
     );
 
     assert!(items.is_empty());
-    assert_eq!(skipped.len(), 1);
+    assert_eq!(
+        (skipped[0].label.as_ref(), skipped[0].path.as_str()),
+        ("rewrite", ".gitlab-ci.yml")
+    );
 }

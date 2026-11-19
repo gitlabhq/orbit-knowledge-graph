@@ -1,8 +1,10 @@
 # GitLab CI files (`.gitlab-ci.yml` and fragments): container images only.
 # Handles: `image:` (string or `name:`), `services:` entries (string or
-# `name:`) and `*_IMAGE` variables, each an ImportedSymbol named after the
-# bare image with its tag and digest split out. Nothing else in the file is
-# indexed, and an image reference is kept as written, `$VAR` included.
+# `name:`) and `*_IMAGE` variables (string or `value:`), each an ImportedSymbol
+# named after the bare image with its tag and digest split out. Only the
+# positions GitLab CI defines count: the root, `default:` and a job for `image:`
+# and `services:`, and the root and a job `variables:`. Nothing else in the
+# file is indexed, and an image reference is kept as written, `$VAR` included.
 
 config:
   stdlib: []
@@ -14,8 +16,14 @@ stages:
       - match: '(stream $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
 
+  - name: flags
+    rules:
+      - match: '(plain_scalar (string_scalar "/^(true|false|True|False|TRUE|FALSE|yes|no|on|off|null|Null|NULL|~)$/"))'
+        replace: '(__flag)'
+
   # A quoted scalar keeps its quotes in the source text; every value and key
-  # becomes a scalar node with the bare text.
+  # becomes a scalar node with the bare text. Unquoted booleans, null and
+  # numbers stay out.
   - name: scalars
     rules:
       - match: '(plain_scalar $X:string_scalar)'
@@ -30,24 +38,89 @@ stages:
       - match: '(__scalar "/^$/")'
         replace: '(__empty)'
 
-  - name: images
+  - name: mark-root
     rules:
-      - match: '(block_mapping_pair key: (flow_node (__scalar "image")) value: (flow_node $V:__scalar))'
-        replace: '(__import (__source @$V|regex_replace("@.*$","")|regex_replace(":[^:/]*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":[^:/]*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":[^:/]*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?[^/:]*$","")|regex_replace("^.*:([^:/]*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?",""))))'
-      - match: '(block_mapping_pair key: (flow_node (__scalar "/_IMAGE$/")) value: (flow_node $V:__scalar))'
-        replace: '(__import (__source @$V|regex_replace("@.*$","")|regex_replace(":[^:/]*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":[^:/]*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":[^:/]*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?[^/:]*$","")|regex_replace("^.*:([^:/]*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?",""))))'
-      - match: '(block_mapping_pair key: (flow_node (__scalar "image")) value: (block_node (block_mapping $$$A (block_mapping_pair key: (flow_node (__scalar "name")) value: (flow_node $V:__scalar)) $$$B)))'
-        replace: '(__import (__source @$V|regex_replace("@.*$","")|regex_replace(":[^:/]*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":[^:/]*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":[^:/]*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?[^/:]*$","")|regex_replace("^.*:([^:/]*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?",""))))'
+      - match: '(document (block_node (block_mapping $$$P)))'
+        replace: '(document (block_node (__ci_root $$$P)))'
+
+  # Each root entry is a keyword section, `default:` or a job. Marking runs to
+  # a fixpoint because a marked entry no longer matches its own rule.
+  - name: mark-sections
+    repeat: true
+    rules:
+      - match: '(__ci_root $$$A (block_mapping_pair key: $K:(flow_node (__scalar "default")) value: (block_node (block_mapping $$$P))) $$$B)'
+        replace: '(__ci_root $$$A (block_mapping_pair key: $K value: (block_node (__ci_default $$$P))) $$$B)'
+      - match: '(__ci_root $$$A (block_mapping_pair key: $K:(flow_node (__scalar "variables")) value: (block_node (block_mapping $$$P))) $$$B)'
+        replace: '(__ci_root $$$A (block_mapping_pair key: $K value: (block_node (__ci_vars $$$P))) $$$B)'
+      - match: '(__ci_root $$$A (block_mapping_pair key: $K:(flow_node (__scalar "/^(include|stages|workflow|spec|cache|before_script|after_script|types)$/")) value: (block_node (block_mapping $$$P))) $$$B)'
+        replace: '(__ci_root $$$A (block_mapping_pair key: $K value: (block_node (__ci_other $$$P))) $$$B)'
 
   # One entry per pass, so a long list costs a pass each; the rewrite budget
   # bounds it.
-  - name: services
+  - name: root-images
     repeat: true
     rules:
-      - match: '(block_mapping_pair key: $K:(flow_node (__scalar "services")) value: (block_node (block_sequence $$$A (block_sequence_item (flow_node $V:__scalar)) $$$B)))'
-        replace: '(block_mapping_pair key: $K value: (block_node (block_sequence $$$A (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":[^:/]*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":[^:/]*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":[^:/]*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?[^/:]*$","")|regex_replace("^.*:([^:/]*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$B)))'
-      - match: '(block_mapping_pair key: $K:(flow_node (__scalar "services")) value: (block_node (block_sequence $$$A (block_sequence_item (block_node (block_mapping $$$X (block_mapping_pair key: (flow_node (__scalar "name")) value: (flow_node $V:__scalar)) $$$Y))) $$$B)))'
-        replace: '(block_mapping_pair key: $K value: (block_node (block_sequence $$$A (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":[^:/]*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":[^:/]*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":[^:/]*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?[^/:]*$","")|regex_replace("^.*:([^:/]*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$B)))'
+      - match: '(__ci_root $$$A (block_mapping_pair key: (flow_node (__scalar "image")) value: (flow_node $V:__scalar)) $$$B)'
+        replace: '(__ci_root $$$A (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$B)'
+      - match: '(__ci_root $$$A (block_mapping_pair key: (flow_node (__scalar "image")) value: (block_node (block_mapping $$$X (block_mapping_pair key: (flow_node (__scalar "name")) value: (flow_node $V:__scalar)) $$$Y))) $$$B)'
+        replace: '(__ci_root $$$A (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$B)'
+      - match: '(__ci_root $$$A (block_mapping_pair key: (flow_node (__scalar "image")) value: (flow_node (flow_mapping $$$X (flow_pair key: (flow_node (__scalar "name")) value: (flow_node $V:__scalar)) $$$Y))) $$$B)'
+        replace: '(__ci_root $$$A (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$B)'
+      - match: '(__ci_root $$$A (block_mapping_pair key: $K:(flow_node (__scalar "services")) value: (block_node (block_sequence $$$C (block_sequence_item (flow_node $V:__scalar)) $$$D))) $$$B)'
+        replace: '(__ci_root $$$A (block_mapping_pair key: $K value: (block_node (block_sequence $$$C (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$D))) $$$B)'
+      - match: '(__ci_root $$$A (block_mapping_pair key: $K:(flow_node (__scalar "services")) value: (block_node (block_sequence $$$C (block_sequence_item (block_node (block_mapping $$$X (block_mapping_pair key: (flow_node (__scalar "name")) value: (flow_node $V:__scalar)) $$$Y))) $$$D))) $$$B)'
+        replace: '(__ci_root $$$A (block_mapping_pair key: $K value: (block_node (block_sequence $$$C (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$D))) $$$B)'
+      - match: '(__ci_root $$$A (block_mapping_pair key: $K:(flow_node (__scalar "services")) value: (block_node (block_sequence $$$C (block_sequence_item (flow_node (flow_mapping $$$X (flow_pair key: (flow_node (__scalar "name")) value: (flow_node $V:__scalar)) $$$Y))) $$$D))) $$$B)'
+        replace: '(__ci_root $$$A (block_mapping_pair key: $K value: (block_node (block_sequence $$$C (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$D))) $$$B)'
+      - match: '(__ci_root $$$A (block_mapping_pair key: $K:(flow_node (__scalar "services")) value: (flow_node (flow_sequence $$$C (flow_node $V:__scalar) $$$D))) $$$B)'
+        replace: '(__ci_root $$$A (block_mapping_pair key: $K value: (flow_node (flow_sequence $$$C (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$D))) $$$B)'
+      - match: '(__ci_root $$$A (block_mapping_pair key: $K:(flow_node (__scalar "services")) value: (flow_node (flow_sequence $$$C (flow_node (flow_mapping $$$X (flow_pair key: (flow_node (__scalar "name")) value: (flow_node $V:__scalar)) $$$Y)) $$$D))) $$$B)'
+        replace: '(__ci_root $$$A (block_mapping_pair key: $K value: (flow_node (flow_sequence $$$C (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$D))) $$$B)'
+
+  - name: mark-jobs
+    repeat: true
+    rules:
+      - match: '(__ci_root $$$A (block_mapping_pair key: $K:(flow_node (__scalar)) value: (block_node (block_mapping $$$P))) $$$B)'
+        replace: '(__ci_root $$$A (block_mapping_pair key: $K value: (block_node (__ci_scope $$$P))) $$$B)'
+
+  - name: mark-job-variables
+    repeat: true
+    rules:
+      - match: '(__ci_scope $$$A (block_mapping_pair key: $K:(flow_node (__scalar "variables")) value: (block_node (block_mapping $$$P))) $$$B)'
+        replace: '(__ci_scope $$$A (block_mapping_pair key: $K value: (block_node (__ci_vars $$$P))) $$$B)'
+
+  - name: mark-default
+    rules:
+      - match: '(__ci_default $$$P)'
+        replace: '(__ci_scope $$$P)'
+
+  - name: scope-images
+    repeat: true
+    rules:
+      - match: '(__ci_scope $$$A (block_mapping_pair key: (flow_node (__scalar "image")) value: (flow_node $V:__scalar)) $$$B)'
+        replace: '(__ci_scope $$$A (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$B)'
+      - match: '(__ci_scope $$$A (block_mapping_pair key: (flow_node (__scalar "image")) value: (block_node (block_mapping $$$X (block_mapping_pair key: (flow_node (__scalar "name")) value: (flow_node $V:__scalar)) $$$Y))) $$$B)'
+        replace: '(__ci_scope $$$A (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$B)'
+      - match: '(__ci_scope $$$A (block_mapping_pair key: (flow_node (__scalar "image")) value: (flow_node (flow_mapping $$$X (flow_pair key: (flow_node (__scalar "name")) value: (flow_node $V:__scalar)) $$$Y))) $$$B)'
+        replace: '(__ci_scope $$$A (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$B)'
+      - match: '(__ci_scope $$$A (block_mapping_pair key: $K:(flow_node (__scalar "services")) value: (block_node (block_sequence $$$C (block_sequence_item (flow_node $V:__scalar)) $$$D))) $$$B)'
+        replace: '(__ci_scope $$$A (block_mapping_pair key: $K value: (block_node (block_sequence $$$C (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$D))) $$$B)'
+      - match: '(__ci_scope $$$A (block_mapping_pair key: $K:(flow_node (__scalar "services")) value: (block_node (block_sequence $$$C (block_sequence_item (block_node (block_mapping $$$X (block_mapping_pair key: (flow_node (__scalar "name")) value: (flow_node $V:__scalar)) $$$Y))) $$$D))) $$$B)'
+        replace: '(__ci_scope $$$A (block_mapping_pair key: $K value: (block_node (block_sequence $$$C (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$D))) $$$B)'
+      - match: '(__ci_scope $$$A (block_mapping_pair key: $K:(flow_node (__scalar "services")) value: (block_node (block_sequence $$$C (block_sequence_item (flow_node (flow_mapping $$$X (flow_pair key: (flow_node (__scalar "name")) value: (flow_node $V:__scalar)) $$$Y))) $$$D))) $$$B)'
+        replace: '(__ci_scope $$$A (block_mapping_pair key: $K value: (block_node (block_sequence $$$C (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$D))) $$$B)'
+      - match: '(__ci_scope $$$A (block_mapping_pair key: $K:(flow_node (__scalar "services")) value: (flow_node (flow_sequence $$$C (flow_node $V:__scalar) $$$D))) $$$B)'
+        replace: '(__ci_scope $$$A (block_mapping_pair key: $K value: (flow_node (flow_sequence $$$C (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$D))) $$$B)'
+      - match: '(__ci_scope $$$A (block_mapping_pair key: $K:(flow_node (__scalar "services")) value: (flow_node (flow_sequence $$$C (flow_node (flow_mapping $$$X (flow_pair key: (flow_node (__scalar "name")) value: (flow_node $V:__scalar)) $$$Y)) $$$D))) $$$B)'
+        replace: '(__ci_scope $$$A (block_mapping_pair key: $K value: (flow_node (flow_sequence $$$C (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$D))) $$$B)'
+
+  - name: variable-images
+    repeat: true
+    rules:
+      - match: '(__ci_vars $$$A (block_mapping_pair key: (flow_node (__scalar "/^(IMAGE|.*_IMAGE)$/")) value: (flow_node $V:__scalar)) $$$B)'
+        replace: '(__ci_vars $$$A (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$B)'
+      - match: '(__ci_vars $$$A (block_mapping_pair key: (flow_node (__scalar "/^(IMAGE|.*_IMAGE)$/")) value: (block_node (block_mapping $$$X (block_mapping_pair key: (flow_node (__scalar "value")) value: (flow_node $V:__scalar)) $$$Y))) $$$B)'
+        replace: '(__ci_vars $$$A (__import (__source @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__source_path @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","")) (__name @$V|regex_replace("@.*$","")|regex_replace(":(?:[^:/{}]|\{[^}]*\})*$","") (__ci_image) (__import_tag @$V|regex_replace("@.*$","")|regex_replace("^(?:.*/)?(?:[^:/{}]|\{[^}]*\})*$","")|regex_replace("^.*:((?:[^:/{}]|\{[^}]*\})*)$","$1")) (__import_digest @$V|regex_first("^[^@]*@?","")))) $$$B)'
 
   - name: tag-images
     rules:
@@ -65,7 +138,7 @@ display:
           entity: File
           fqn: '@$M|stem|split_last("/")'
           file_path: '@$M'
-          language: yaml
+          language: '@$M|split_last("/")|regex_replace("(?i)^(\.gitlab-ci[.-].*|.*\.gitlab-ci)\.ya?ml$", "x.yaml")|split_last(".")'
   - name: imports
     rules:
       - match: '(__import)'

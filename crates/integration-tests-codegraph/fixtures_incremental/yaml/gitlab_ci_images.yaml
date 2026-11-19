@@ -63,6 +63,90 @@ fixtures:
       other:
         image: "${REGISTRY}/tools:${TOOLS_VERSION}"
 
+  - path: variable_forms/.gitlab-ci.yml
+    content: |
+      variables:
+        IMAGE: exact:1
+        DESCRIBED_IMAGE:
+          value: described:2
+          description: "an image"
+        MY_IMAGE_TAG: tagvar:1
+        PUSH_IMAGE: "true"
+        SCAN_IMAGE: false
+        FLAG_IMAGE: yes
+        QUOTED_IMAGE: "no"
+        EMPTY_IMAGE:
+        NULL_IMAGE: ~
+      job:
+        variables:
+          JOB_IMAGE: jobvar:3
+
+  - path: flow_forms/.gitlab-ci.yml
+    content: |
+      test:
+        image: { name: "flowmap:2", entrypoint: [""] }
+        services: [ "flowseq:1", { name: "flowseqmap:2", alias: db } ]
+
+  - path: depth/.gitlab-ci.yml
+    content: |
+      include:
+        - component: example.com/group/comp@1.0
+          inputs:
+            image: inputimg:1
+      spec:
+        inputs:
+          image:
+            default: inputdefault:1
+      workflow:
+        rules:
+          - variables:
+              WF_IMAGE: wf:1
+      test:
+        trigger:
+          include:
+            - local: ci/child.yml
+              inputs:
+                image: trigimg:3
+        parallel:
+          matrix:
+            - MATRIX_IMAGE: [mat:1]
+        environment:
+          kubernetes:
+            image: deepimg:1
+        rules:
+          - variables:
+              RULE_IMAGE: rule:1
+        services:
+          - name: svc:4
+            alias: db
+            variables:
+              INNER_IMAGE: inner:9
+
+  - path: braces/.gitlab-ci.yml
+    content: |
+      a:
+        image: ${IMG:-alpine}
+      b:
+        image: ${REG}:${VER}
+      c:
+        image: ${REG}/tools:${VER}@sha256:aa
+
+  - path: names/build.gitlab-ci.yml
+    content: |
+      image: suffixed:1
+
+  - path: names/.gitlab-ci.yml.example
+    content: |
+      image: example:1
+
+  - path: names/.gitlab-ci.yml.template
+    content: |
+      image: template:1
+
+  - path: names/values.json
+    content: |
+      {"image": "json:1"}
+
   - path: ci/other.yml
     content: |
       image: not-indexed:1
@@ -176,3 +260,80 @@ tests:
       RETURN i.file_path AS file
     assert:
       - { row_count: 0 }
+
+  - name: "IMAGE, the value: form and root and job variables count; flags and nulls do not"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = "variable_forms/.gitlab-ci.yml"
+      RETURN i.import_path AS image, i.identifier_name AS name, i.import_tag AS tag, i.import_digest AS digest
+      ORDER BY image, tag
+    assert:
+      - { row_count: 5 }
+      - { row: { image: "described", tag: "2", digest: "" } }
+      - { row: { image: "exact", tag: "1", digest: "" } }
+      - { row: { image: "jobvar", tag: "3", digest: "" } }
+      - { row: { image: "no", tag: "", digest: "" } }
+      - { row: { image: "true", tag: "", digest: "" } }
+
+  - name: "flow image: and services: forms"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = "flow_forms/.gitlab-ci.yml"
+      RETURN i.import_path AS image, i.identifier_name AS name, i.import_tag AS tag, i.import_digest AS digest
+      ORDER BY image, tag
+    assert:
+      - { row_count: 3 }
+      - { row: { image: "flowmap", tag: "2", digest: "" } }
+      - { row: { image: "flowseq", tag: "1", digest: "" } }
+      - { row: { image: "flowseqmap", tag: "2", digest: "" } }
+
+  - name: "only the root, default and a job place images"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = "depth/.gitlab-ci.yml"
+      RETURN i.import_path AS image, i.identifier_name AS name, i.import_tag AS tag, i.import_digest AS digest
+      ORDER BY image, tag
+    assert:
+      - { row_count: 1 }
+      - { row: { image: "svc", tag: "4", digest: "" } }
+
+  - name: "braces are not tag separators"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = "braces/.gitlab-ci.yml"
+      RETURN i.import_path AS image, i.identifier_name AS name, i.import_tag AS tag, i.import_digest AS digest
+      ORDER BY image, tag
+    assert:
+      - { row_count: 3 }
+      - { row: { image: "${IMG:-alpine}", tag: "", digest: "" } }
+      - { row: { image: "${REG}", tag: "${VER}", digest: "" } }
+      - { row: { image: "${REG}/tools", tag: "${VER}", digest: "sha256:aa" } }
+
+  - name: "a name ending in .gitlab-ci.yml is a CI file"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = "names/build.gitlab-ci.yml"
+      RETURN i.import_path AS image, i.identifier_name AS name, i.import_tag AS tag, i.import_digest AS digest
+      ORDER BY image, tag
+    assert:
+      - { row_count: 1 }
+      - { row: { image: "suffixed", tag: "1", digest: "" } }
+
+  - name: "backup, example and template copies stay out"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path IN ["names/.gitlab-ci.yml.example", "names/.gitlab-ci.yml.template"]
+      RETURN i.file_path AS file
+    assert:
+      - { row_count: 0 }
+
+  - name: "only CI files take the yaml language"
+    query: |
+      MATCH (f:File)
+      WHERE f.path IN [".gitlab-ci.yml.bak", "names/build.gitlab-ci.yml", "config/app.yaml", "ci/other.yml", "names/values.json"]
+      RETURN f.path AS path, f.language AS language
+      ORDER BY path
+    assert:
+      - { row_count: 5 }
+      - { row: { path: "names/build.gitlab-ci.yml", language: "yaml" } }
+      - { row: { path: "names/values.json", language: "json" } }

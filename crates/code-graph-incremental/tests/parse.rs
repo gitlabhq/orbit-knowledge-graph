@@ -269,6 +269,8 @@ fn only_gitlab_ci_files_are_yaml() {
         "sub/.gitlab-ci.yml",
         ".gitlab-ci-deploy.yml",
         ".gitlab-ci.deploy.yaml",
+        "build.gitlab-ci.yml",
+        "templates/Docker.gitlab-ci.yaml",
     ] {
         assert_eq!(
             SupportLang::from_path(path),
@@ -281,6 +283,8 @@ fn only_gitlab_ci_files_are_yaml() {
         "docker-compose.yaml",
         ".gitlab/ci/build.yml",
         ".gitlab-ci.yml.bak",
+        ".gitlab-ci.yml.example",
+        ".gitlab-ci.yml.template",
         ".gitlab-ci.md",
         "gitlab-ci.yml",
     ] {
