@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
-use super::{Arg, FnId, Kind, Run, Val, Vals, function, lookup, module_of};
+use super::{Arg, FnId, Kind, Run, Store, Val, Vals, function, lookup, module_of};
 use crate::canonical::Canonical as C;
 use crate::error::LoadError;
 use crate::intern::Lang;
@@ -14,11 +14,12 @@ pub enum Expr {
     Lit(Val),
     Empty,
     Data(u16),
+    Union(Box<[Expr]>),
     Call(FnId, Box<[Expr]>),
 }
 
 pub struct Scope<'a> {
-    pub slots: &'a HashMap<Box<str>, u16>,
+    pub slots: &'a super::pattern::Slots,
     pub modules: &'a [String],
     pub links: &'a super::Links,
     pub lang: &'a Lang,
@@ -41,17 +42,14 @@ impl Expr {
         matches!(self, Expr::Call(id, _) if function(*id).kind == Kind::Effect)
     }
 
-    pub fn eval(&self, cx: &mut Run, caps: &[Vals]) -> Vals {
+    pub fn eval<S: Store>(&self, cx: &mut Run<S>, caps: &[Vals]) -> Vals {
         match self {
             Expr::Cap(slot) => caps[*slot as usize].clone(),
-            Expr::Text(slot) => caps[*slot as usize]
-                .iter()
-                .filter_map(|v| v.loc())
-                .map(|loc| Val::Sym(super::Cursor::new(cx.trees, loc.fi, loc.node).sym()))
-                .collect(),
+            Expr::Text(slot) => caps[*slot as usize].clone(),
             Expr::Lit(val) => SmallVec::from_elem(*val, 1),
             Expr::Empty => Vals::new(),
             Expr::Data(at) => cx.data[usize::from(*at)].clone(),
+            Expr::Union(parts) => parts.iter().flat_map(|p| p.eval(cx, caps)).collect(),
             Expr::Call(id, args) => {
                 let args: SmallVec<[Vals; 3]> = args.iter().map(|a| a.eval(cx, caps)).collect();
                 apply(cx, *id, &args)
@@ -60,7 +58,7 @@ impl Expr {
     }
 }
 
-fn apply(cx: &mut Run, id: FnId, args: &[Vals]) -> Vals {
+fn apply<S: Store>(cx: &mut Run<S>, id: FnId, args: &[Vals]) -> Vals {
     let sig = function(id).sig;
     let spread = sig
         .iter()
@@ -141,7 +139,6 @@ impl<'s> Parser<'s, '_> {
         self.scope
             .slots
             .get(name)
-            .copied()
             .ok_or_else(|| self.error("unknown capture"))
     }
 
@@ -196,7 +193,15 @@ impl<'s> Parser<'s, '_> {
                 (module, self.ident())
             }
             "" => return Err(self.error("expected a capture, literal or function")),
-            name => ("core", name),
+            name => {
+                let module = self
+                    .scope
+                    .modules
+                    .iter()
+                    .find(|m| lookup(m, name).is_some())
+                    .ok_or_else(|| self.error(&format!("no module of this phase has {name}")))?;
+                (module.as_str(), name)
+            }
         };
         let id = lookup(module, name)
             .ok_or_else(|| self.error(&format!("unknown function {module}.{name}")))?;
@@ -221,6 +226,11 @@ impl<'s> Parser<'s, '_> {
                     return Err(self.error("expected , or )"));
                 }
             }
+        }
+        let gathers = f.sig.last() == Some(&Arg::Set) && args.len() > f.sig.len();
+        if gathers {
+            let rest = args.split_off(f.sig.len() - 1);
+            args.push(Expr::Union(rest.into()));
         }
         if args.len() != f.sig.len() {
             return Err(self.error(&format!("{module}.{name} takes {} arguments", f.sig.len())));

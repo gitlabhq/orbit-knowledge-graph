@@ -1,0 +1,11 @@
+data:
+  builtins: []
+  stdlib: []
+  external: []
+  providers: []
+  frameworks: []
+  lookup_from: []
+  parse_files: []
+  merge_same_named_types: false
+  shadows_locals: true
+  inline_modules: false

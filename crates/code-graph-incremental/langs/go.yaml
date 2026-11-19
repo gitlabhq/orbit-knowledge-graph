@@ -12,139 +12,85 @@
 #   var/const declarations get the same treatment: every var/const is a
 #   __def plus an SSA __binding.
 
-config:
-  stdlib:
-      - module: builtin
-        availability: implicit
-        precedence: runtime
-        symbols: [
-          append, cap, clear, close, complex, copy, delete, imag, len, make, max, min,
-          new, panic, print, println, real, recover, bool, byte, complex64, complex128,
-          float32, float64, int, int8, int16, int32, int64, rune, string, uint,
-          uint8, uint16, uint32, uint64, uintptr
-        ]
-      - module: fmt/*
-        precedence: runtime
-        symbols: [Append, Appendf, Appendln, Errorf, Fprint, Fprintf, Fprintln,
-          Fscan, Fscanf, Fscanln, Print, Printf, Println, Scan, Scanf, Scanln,
-          Sprint, Sprintf, Sprintln, Sscan, Sscanf, Sscanln]
-      - module: errors/*
-        precedence: runtime
-        symbols: [As, Is, Join, New, Unwrap]
+import: [canonical, display, shapes]
 
-      - { module: archive, precedence: runtime }
-      - { module: bufio, precedence: runtime }
-      - { module: bytes, precedence: runtime }
-      - { module: cmp, precedence: runtime }
-      - { module: compress, precedence: runtime }
-      - { module: container, precedence: runtime }
-      - { module: context, precedence: runtime }
-      - { module: crypto, precedence: runtime }
-      - { module: database, precedence: runtime }
-      - { module: debug, precedence: runtime }
-      - { module: embed, precedence: runtime }
-      - { module: encoding, precedence: runtime }
-      - { module: expvar, precedence: runtime }
-      - { module: flag, precedence: runtime }
-      - { module: go, precedence: runtime }
-      - { module: hash, precedence: runtime }
-      - { module: html, precedence: runtime }
-      - { module: image, precedence: runtime }
-      - { module: index, precedence: runtime }
-      - { module: io, precedence: runtime }
-      - { module: iter, precedence: runtime }
-      - { module: log, precedence: runtime }
-      - { module: maps, precedence: runtime }
-      - { module: math, precedence: runtime }
-      - { module: mime, precedence: runtime }
-      - { module: net, precedence: runtime }
-      - { module: os, precedence: runtime }
-      - { module: path, precedence: runtime }
-      - { module: plugin, precedence: runtime }
-      - { module: reflect, precedence: runtime }
-      - { module: regexp, precedence: runtime }
-      - { module: runtime, precedence: runtime }
-      - { module: slices, precedence: runtime }
-      - { module: sort, precedence: runtime }
-      - { module: strconv, precedence: runtime }
-      - { module: strings, precedence: runtime }
-      - { module: structs, precedence: runtime }
-      - { module: sync, precedence: runtime }
-      - { module: syscall, precedence: runtime }
-      - { module: testing, precedence: runtime }
-      - { module: text, precedence: runtime }
-      - { module: time, precedence: runtime }
-      - { module: unicode, precedence: runtime }
-      - { module: unique, precedence: runtime }
-      - { module: unsafe, precedence: runtime }
-      - { module: weak, precedence: runtime }
-  resolve:
-    parse_files:
-      - name: "go.mod"
-        format: raw
-        extract: "(?m)^(module)\\s+(\\S+)"
+data:
+  builtins: [
+    append, cap, clear, close, complex, copy, delete, imag, len, make, max, min, new, panic, print,
+    println, real, recover, bool, byte, complex64, complex128, float32, float64, int, int8, int16,
+    int32, int64, rune, string, uint, uint8, uint16, uint32, uint64, uintptr
+  ]
+  external: [
+    builtin, 'fmt/*', 'errors/*', archive, bufio, bytes, cmp, compress, container, context, crypto,
+    database, debug, embed, encoding, expvar, flag, go, hash, html, image, index, io, iter, log,
+    maps, math, mime, net, os, path, plugin, reflect, regexp, runtime, slices, sort, strconv,
+    strings, structs, sync, syscall, testing, text, time, unicode, unique, unsafe, weak
+  ]
+  providers:
+    - [builtin, '%builtins']
+    - [
+        'fmt/*', Append, Appendf, Appendln, Errorf, Fprint, Fprintf, Fprintln, Fscan, Fscanf,
+        Fscanln, Print, Printf, Println, Scan, Scanf, Scanln, Sprint, Sprintf, Sprintln, Sscan,
+        Sscanf, Sscanln
+      ]
+    - ['errors/*', As, Is, Join, New, Unwrap]
+  parse_files:
+    - [go.mod, raw, '(?m)^(module)\s+(\S+)']
+  params: [parameter_declaration, variadic_parameter_declaration]
+  type_specs: [type_spec, type_alias]
 
-stages:
+canonicalize:
   - name: normalize
     rules:
       - match: '(source_file $$$C)'
-        replace: '(__source_file @$ROOT $$$C)'
+        replace: '%source_file($$$C)'
       - match: '(package_clause $P:package_identifier)'
         replace: '(go_pkg (__package @$P) (__module_export (__import (__source @$P) (__source_path "./*") (__name "*"))))'
       - match: '(return_statement $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
-
       # *T and T[...] collapse to the bare type identifier (field is kept)
       - match: '(generic_type type: $T:type_identifier)'
         replace: '(type_identifier @$T)'
       - match: '(pointer_type $T:type_identifier)'
         replace: '(type_identifier @$T)'
-
       # T{...} composite literal: keep the type name, keep the body for nested calls
       - match: '(composite_literal type: $T:type_identifier body: $B)'
         replace: '(__struct_lit @$T $B)'
       - match: '(unary_expression operand: $O:__struct_lit)'
         replace: '$O'
-
       # Parameters: typed → SSA-typed binding; grouped `a, b T` → two bindings
       - match: '(parameter_declaration name: $A:identifier name: $B:identifier type: $T:type_identifier)'
         replace: '(parameter_declaration (__binding @$A (__ssa_typed @$T)) (__binding @$B (__ssa_typed @$T)))'
       - match: '(parameter_declaration name: $N:identifier type: $T:type_identifier)'
         replace: '(__binding @$N (__ssa_typed @$T))'
-      - match: '(parameter_declaration name: $N:identifier)'
+      - match: '(%params name: $N:identifier)'
         replace: '(__binding @$N)'
-      - match: '(variadic_parameter_declaration name: $N:identifier)'
-        replace: '(__binding @$N)'
-
   - name: retag-expressions
     rules:
       # `(f())` carries the value of the call it wraps
       - match: '(parenthesized_expression $V:__call)'
         replace: '$V'
       - match: '(selector_expression operand: $O:__member field: $F)'
-        replace: '(__member @$F (__object $O))'
+        replace: '%member($F, $O)'
       - match: '(selector_expression operand: $O:__call field: $F)'
-        replace: '(__member @$F (__object $O))'
+        replace: '%member($F, $O)'
       - match: '(selector_expression operand: $O field: $F)'
-        replace: '(__member @$F (__object @$O $O))'
-
+        replace: '%member_text($F, $O)'
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F arguments: $A)'
-        replace: '(__call (__callee @$F $F) $A)'
-
+        replace: '%call($F, $A)'
   - name: imports
     rules:
       # alias "path/pkg"
       - match: '(import_spec name: $A:package_identifier path: (interpreted_string_literal $P:interpreted_string_literal_content))'
-        replace: '(__import (__source @$P) (__source_path @$P|regex_replace("$", "/*")) (__name @$P|split_last("/") (__alias @$A)))'
+        replace: '(__import (__source @$P) (__source_path @$P | regex_replace("$", "/*")) (__name @$P | split_last("/") (__alias @$A)))'
       # . "path/pkg" — every exported name of pkg enters scope
       - match: '(import_spec name: (dot) path: (interpreted_string_literal $P:interpreted_string_literal_content))'
-        replace: '(__import (__source @$P) (__source_path @$P|regex_replace("$", "/*")) (__name @$P|split_last("/") (__ssa_hint "*")))'
+        replace: '(__import (__source @$P) (__source_path @$P | regex_replace("$", "/*")) (__name @$P | split_last("/") (__ssa_hint "*")))'
       # "path/pkg" and _ "path/pkg"
       - match: '(import_spec path: (interpreted_string_literal $P:interpreted_string_literal_content))'
-        replace: '(__import (__source @$P) (__source_path @$P|regex_replace("$", "/*")) (__name @$P|split_last("/")))'
-
+        replace: '(__import (__source @$P) (__source_path @$P | regex_replace("$", "/*")) (__name @$P | split_last("/")))'
   - name: classify
     rules:
       # Bindings: x := T{} / x := f() / x := y
@@ -157,10 +103,9 @@ stages:
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))'
         replace: '(__binding @$N (__ssa_typed @$R) (__rhs $R))'
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__call))'
-        replace: '(__binding @$N (__rhs $R))'
+        replace: '%bind_call($N, $R)'
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R))'
-        replace: '(__binding @$N (__rhs @$R $R))'
-
+        replace: '%bind($N, $R)'
       # var/const: a __def for the graph plus a __binding for SSA
       - match: '(var_spec name: $N:identifier type: $T:type_identifier value: (expression_list $V))'
         replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__ssa_typed @$T) (__rhs $V)))'
@@ -169,14 +114,13 @@ stages:
       - match: '(var_spec name: $N:identifier value: (expression_list $V:__struct_lit))'
         replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__ssa_typed @$V) (__rhs $V)))'
       - match: '(var_spec name: $N:identifier value: (expression_list $V:__call))'
-        replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__rhs $V)))'
+        replace: '(var_spec (__def (__defname @$N) (__variable)) %bind_call($N, $V))'
       - match: '(var_spec name: $N:identifier value: (expression_list $V))'
-        replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__rhs @$V $V)))'
+        replace: '(var_spec (__def (__defname @$N) (__variable)) %bind($N, $V))'
       - match: '(var_spec name: $N:identifier)'
         replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N))'
       - match: '(const_spec name: $N:identifier)'
         replace: '(__def (__defname @$N) (__constant))'
-
       # Control flow
       - match: '(if_statement initializer:? $I condition: $COND consequence: $C alternative:? $A)'
         replace: '(__ssa_branch $I $COND (__ssa_arm $C) (__ssa_arm? $A))'
@@ -188,39 +132,32 @@ stages:
         replace: '(__ssa_branch $$$CASES->__ssa_arm)'
       - match: '(for_statement $$$H body: $B)'
         replace: '(__ssa_loop $$$H $B)'
-
       # Interface method signatures
       - match: '(method_elem name: $N parameters: $P result:? $RT:type_identifier)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P)'
-
       # Types
       # Only a named struct type defines fields; an anonymous struct in a value does not
       - match: '(type_spec name: $N type: (struct_type (field_declaration_list $$$F:field_declaration)))'
         replace: '(__def (__defname @$N) (__struct) $$$F->struct_field)'
       - match: '(type_spec name: $N type: (interface_type $$$M))'
         replace: '(__def (__defname @$N) (__interface) $$$M)'
-      - match: '(type_spec name: $N)'
+      - match: '(%type_specs name: $N)'
         replace: '(__def (__defname @$N) (__type_alias))'
-      - match: '(type_alias name: $N)'
-        replace: '(__def (__defname @$N) (__type_alias))'
-
       # Functions
       - match: '(function_declaration name: $N parameters: $P result:? $RT:type_identifier body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
-
       # Receiver methods: wrapped in an __impl named after the receiver type,
       # so method lookup on the struct reaches them via same-name defs.
       - match: '(method_declaration receiver: (parameter_list $R:(__binding $T:__ssa_typed)) name: $N parameters: $P result:? $RT:type_identifier body: $B)'
         replace: '(__def (__defname @$T) (__impl) (__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $R $P $B))'
       - match: '(method_declaration receiver: (parameter_list (parameter_declaration type: $T:type_identifier)) name: $N parameters: $P result:? $RT:type_identifier body: $B)'
         replace: '(__def (__defname @$T) (__impl) (__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P $B))'
-
   - name: ssa-cleanup
     rules:
       # Struct fields: named → field def; embedded → supertype
       - match: '(struct_field name: $N:field_identifier type: (func_type))'
         replace: '(__def (__defname @$N) (__field_def))'
-        tag: { callable: "true" }
+        tag: { callable: 'true' }
       - match: '(struct_field name: $N:field_identifier)'
         replace: '(__def (__defname @$N) (__field_def))'
       - match: '(struct_field type: $T:type_identifier)'
@@ -228,62 +165,27 @@ stages:
       - match: '(__ssa_return (expression_list $V:__struct_lit))'
         replace: '(__ssa_return (__call (__callee @$V) $V))'
       - match: '(__ssa_return (expression_list $V:identifier))'
-        replace: '(__ssa_return (__rhs @$V $V))'
-
+        replace: '%return_value($V)'
   - name: tag-defs
     rules:
       - match: '(block $$$V)'
         replace: '(__scope $$$V)'
-      - match: '(__def (__function))'
-        tag: { callable: "true", scoped: "true" }
-      - match: '(__def (__method))'
-        tag: { callable: "true", scoped: "true" }
-      - match: '(__def (__class))'
-        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
-      - match: '(__def (__lambda))'
-        tag: { callable: "true" }
-      - match: '(__def (__enum_variant))'
-        tag: { callable: "true", value: "true" }
-      - match: '(__def (__struct))'
-        tag: { value: "true", declares_type: "true", scoped: "true" }
-      - match: '(__def (__impl))'
-        tag: { scoped: "true" }
-      - match: '(__def (__trait))'
-        tag: { value: "true", declares_type: "true", scoped: "true" }
-      - match: '(__def (__enum))'
-        tag: { value: "true", declares_type: "true", scoped: "true" }
-      - match: '(__def (__interface))'
-        tag: { value: "true", declares_type: "true" }
-      - match: '(__def (__type_alias))'
-        tag: { value: "true", declares_type: "true" }
-      - match: '(__def (__field_def))'
-        tag: { value: "true" }
+      - use: function_def_tags
+      - use: type_def_tags
+      - use: interface_def_tags
+      - use: alias_field_def_tags
       - match: '(__def (__variable))'
-        tag: { value: "true" }
+        tag: { value: 'true' }
       - match: '(__def (__constant))'
-        tag: { value: "true" }
+        tag: { value: 'true' }
+  - use: tag_file_dir
+  - use: resolve_paths
 
-  - name: tag-file-dir
+project:
+  - name: modules
     rules:
-      - match: '$M:__source_file'
-        tag:
-          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
-
-  - name: resolve-paths
-    rules:
-      - match: '(__import)'
-        tag:
-          resolved_source: '@$ROOT|child_sym("__source_path")'
-      - match: '(__import (__source_path "^."))'
-        tag:
-          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
-
-resolve:
-  stages:
-    - name: modules
-      rules:
-        - match: '(__file "go.mod" (__field "module" $V:__str))'
-          replace: '(__file "go.mod" (__alias @$V|regex_replace("$", "/*") (__str @$ROOT|tree_path("/")|regex_replace("go\.mod$", "*"))))'
+      - match: '(__file "go.mod" (__field "module" $V:__str))'
+        replace: '(__file "go.mod" (__alias @$V | regex_replace("$", "/*") (__str @$ROOT | tree_path("/") | regex_replace("go\.mod$", "*"))))'
 
 display:
   - name: fqn
@@ -291,67 +193,21 @@ display:
       - match: '$M:__source_file'
         tag:
           entity: File
-          fqn: '@$M|child_sym("__package")'
+          fqn: '$M | child_sym("__package")'
           file_path: '@$M'
-          language: '@$M|split_last(".")|map("go:go")'
-
+          language: '@$M | split_last(".") | map("go:go")'
       # Receiver wrapper: no fqn of its own, so methods hang off the package
       - match: '(__def (__impl))'
-        tag:
-          entity: Definition
-          file_path: '@$ROOT|ancestor_tag("file_path")'
-
+        tag: { entity: Definition, file_path: '$ROOT | ancestor_tag("file_path")' }
       - match: '(__def !(__impl))'
         tag:
           entity: Definition
-          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")|keep_last(".", "64", "4096")'
-          file_path: '@$ROOT|ancestor_tag("file_path")'
-  - name: def_type
-    rules:
-      - match: '(__def (__function))'
-        tag: { def_type: Function }
-      - match: '(__def (__method))'
-        tag: { def_type: Method }
-      - match: '(__def (__class))'
-        tag: { def_type: Class }
-      - match: '(__def (__struct))'
-        tag: { def_type: Struct }
-      - match: '(__def (__interface))'
-        tag: { def_type: Interface }
-      - match: '(__def (__enum))'
-        tag: { def_type: Enum }
-      - match: '(__def (__enum_variant))'
-        tag: { def_type: EnumVariant }
-      - match: '(__def (__trait))'
-        tag: { def_type: Trait }
-      - match: '(__def (__impl))'
-        tag: { def_type: Impl }
-      - match: '(__def (__variable))'
-        tag: { def_type: Variable }
-      - match: '(__def (__constant))'
-        tag: { def_type: Constant }
-      - match: '(__def (__static_constant))'
-        tag: { def_type: Static }
-      - match: '(__def (__lambda))'
-        tag: { def_type: Lambda }
-      - match: '(__def (__field_def))'
-        tag: { def_type: Field }
-      - match: '(__def (__property))'
-        tag: { def_type: Property }
-      - match: '(__def (__type_alias))'
-        tag: { def_type: TypeAlias }
+          fqn: '$ROOT | ancestor_tag("fqn") | concat(".", $ROOT | child_sym("__defname")) | keep_last(".", "64", "4096")'
+          file_path: '$ROOT | ancestor_tag("file_path")'
+  - use: def_types
   - name: imports
     rules:
-      - match: '(__import)'
-        tag:
-          entity: ImportedSymbol
-          file_path: '@$ROOT|ancestor_tag("file_path")'
-          source_path: '@$ROOT|child_sym("__source")'
-      - match: '(__name (__alias))'
-        tag:
-          import_type: AliasedImport
-          resolved: '@$ROOT|has_incoming("Imports")'
+      - use: import_entity
+      - use: aliased_import_type
       - match: '(__name)'
-        tag:
-          import_type: Import
-          resolved: '@$ROOT|has_incoming("Imports")'
+        tag: { import_type: Import, resolved: '$ROOT | has_incoming("Imports")' }

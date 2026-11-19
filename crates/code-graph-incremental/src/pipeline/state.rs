@@ -42,13 +42,7 @@ impl State {
             .map(|tree| tree.label.as_str())
             .chain(self.configs.iter().map(|file| file.path.as_str()))
             .collect();
-        ProjectTree::build(
-            &env.lang,
-            &env.resolve.config,
-            &env.resolve.stages,
-            &paths,
-            Some(&self.configs),
-        )
+        ProjectTree::build(env, &paths, Some(&self.configs))
     }
 
     pub fn new(_: &Env) -> Self {

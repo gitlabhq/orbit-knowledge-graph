@@ -22,6 +22,21 @@ pub struct Limits {
 }
 
 impl Limits {
+    /// A budget in milliseconds by its field name, as `pipeline.yaml` names it.
+    pub fn ms(&self, name: &str) -> Option<u64> {
+        Some(match name {
+            "cross_file_resolve_ms" => self.cross_file_resolve_ms,
+            "file_parse_ms" => self.file_parse_ms,
+            "file_rewrite_ms" => self.file_rewrite_ms,
+            "file_link_ms" => self.file_link_ms,
+            "file_resolve_ms" => self.file_resolve_ms,
+            "total_ms" => self.total_ms,
+            _ => return None,
+        })
+    }
+}
+
+impl Limits {
     pub const UNLIMITED: Self = Self {
         max_files: 0,
         cross_file_resolve_ms: u64::MAX,

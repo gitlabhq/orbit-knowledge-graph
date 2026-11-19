@@ -17,7 +17,6 @@ use super::{
 use crate::engine;
 use crate::env::Env;
 use crate::export::{self, Envelope};
-use crate::pattern::{self, EdgeCtx, EdgeIndex};
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Edge, Tag, Tree};
 use crate::treesitter::{self, SupportLang};
@@ -60,8 +59,7 @@ fn workset(
         let path = file.path.as_ref();
         if context
             .env
-            .resolve
-            .config
+            .project
             .parse_files
             .iter()
             .any(|entry| path.rsplit('/').next() == Some(entry.name.as_str()))
@@ -316,15 +314,11 @@ impl ItemPhase<Parsed> for Rewrite {
         run: &Sentinel,
         Parsed(mut tree, cut): Parsed,
     ) -> Result<Rewritten, Killed> {
-        let budget =
-            Sentinel::new("rewrite", &tree.label, env.limits.file_rewrite_ms).on_thread_cpu();
         let root = tree.root;
         if tree.root().kind() == 0 {
             tree.node_mut(root).kind = crate::canonical::Canonical::SourceFile.into();
         }
-        for stage in &env.rules_for(&tree.label).rewrite_stages {
-            pattern::apply_stage(&mut tree, &env.lang, stage, &[run, &budget])?;
-        }
+        engine::rewrite_tree(env.pipeline.phase("canonicalize"), &mut tree, env, run)?;
         if !tree.root().is(crate::canonical::Canonical::SourceFile) {
             tree.node_mut(root).kind = crate::canonical::Canonical::SourceFile.into();
         }
@@ -388,8 +382,7 @@ impl ItemPhase<Canonical> for Link {
         run: &Sentinel,
         Canonical(tree, cut): Canonical,
     ) -> Result<LinkedFile, Killed> {
-        let file = Sentinel::new("link", &tree.label, env.limits.file_link_ms).on_thread_cpu();
-        let edges = engine::run_tree(env.pipeline.phase("link"), &tree, env, run, file)?;
+        let edges = engine::run_tree(env.pipeline.phase("link"), &tree, env, run)?;
         Ok(LinkedFile {
             tree,
             edges,
@@ -593,29 +586,14 @@ impl Phase<Resolved> for Display {
         }: Resolved,
     ) -> Result<Displayed, Error> {
         let env = context.env;
-        let edges = EdgeIndex::new(&state.edges);
-        let mut cut = Vec::new();
-        state.trees = std::mem::take(&mut state.trees)
-            .into_iter()
-            .enumerate()
-            .map(|(fi, tree)| {
-                let rules = &env.rules_for(&tree.label).display_rules;
-                if rules.is_empty() || !touched.contains(&(fi as u32)) {
-                    return Ok(tree);
-                }
-                let ctx = EdgeCtx {
-                    tree_index: fi as u32,
-                    edges: &edges,
-                };
-                let (tree, kept) =
-                    pattern::apply_display(tree, &env.lang, rules, &ctx, &context.run)?;
-                if let Some((key, segments)) = kept {
-                    let label = env.lang.syms.resolve(key).to_string();
-                    cut.push(Killed::limit(label, &tree.label, segments + 1, segments));
-                }
-                Ok(tree)
-            })
-            .collect::<Result<_, Killed>>()?;
+        let phase = env.pipeline.phase("display");
+        let graph = engine::EdgeIndex::new(&state.edges);
+        for (fi, tree) in state.trees.iter_mut().enumerate() {
+            if touched.contains(&(fi as u32)) {
+                engine::tag_tree(phase, tree, fi as u32, env, &graph, &context.run)?;
+            }
+        }
+        let cut: Vec<Killed> = Vec::new();
         context.report.limited.extend(cut);
         Ok(Displayed { state })
     }

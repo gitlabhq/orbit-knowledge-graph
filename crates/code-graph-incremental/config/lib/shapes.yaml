@@ -1,0 +1,11 @@
+macros:
+  member(M, O): '(__member @$M (__object $O))'
+  member_text(M, O): '(__member @$M (__object @$O $O))'
+  call(F, A): '(__call (__callee @$F $F) $A)'
+  bind(N, R): '(__binding @$N (__rhs @$R $R))'
+  bind_call(N, R): '(__binding @$N (__rhs $R))'
+  return_value(V): '(__ssa_return (__rhs @$V $V))'
+  loop(B): '(__ssa_loop $B)'
+  source_file(C): '(__source_file @$ROOT $C)'
+  wildcard_import(P): '(__import (__source @$P) (__source_path @$P) (__name "*"))'
+  typed_param(N, T): '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'

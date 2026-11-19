@@ -2,105 +2,67 @@
 # Handles: import/export, class/function/interface/enum/type defs,
 # member access, calls, this.x, control flow, bindings.
 
-config:
-  stdlib: [
-    { availability: implicit, symbols: [AggregateError, Array, ArrayBuffer, BigInt, BigInt64Array,
-      BigUint64Array, Boolean, DataView, Date, Error, EvalError,
-      FinalizationRegistry, Float32Array, Float64Array, Function, Int8Array,
-      Int16Array, Int32Array, Map, Number, Object, Promise, Proxy, RangeError,
-      ReferenceError, RegExp, Set, SharedArrayBuffer, String, Symbol,
-      SyntaxError, TypeError, URIError, Uint8Array, Uint8ClampedArray,
-      Uint16Array, Uint32Array, WeakMap, WeakRef, WeakSet, atob, btoa,
-      clearImmediate, clearInterval, clearTimeout, decodeURI, decodeURIComponent,
-      encodeURI, encodeURIComponent, eval, isFinite, isNaN, parseFloat,
-      parseInt, queueMicrotask, require, setImmediate, setInterval,
-      setTimeout, structuredClone] },
-      { module: util, precedence: runtime, symbols: [callbackify, debuglog,
-          deprecate, format, formatWithOptions, inspect, isDeepStrictEqual,
-          parseArgs, promisify, stripVTControlCharacters, styleText] },
-      { module: 'node:util', precedence: runtime, symbols: [callbackify, debuglog,
-          deprecate, format, formatWithOptions, inspect, isDeepStrictEqual,
-          parseArgs, promisify, stripVTControlCharacters, styleText] },
-      { module: fs, precedence: runtime, symbols: [access, appendFile, chmod,
-          chown, close, copyFile, cp, existsSync, fstat, link, lstat, mkdir,
-          mkdtemp, open, read, readdir, readFile, readFileSync, readlink,
-          realpath, rename, rm, rmdir, stat, symlink, truncate, unlink,
-          watch, watchFile, write, writeFile, writeFileSync] },
-      { module: 'node:fs', precedence: runtime, symbols: [access, appendFile, chmod,
-          chown, close, copyFile, cp, existsSync, fstat, link, lstat, mkdir,
-          mkdtemp, open, read, readdir, readFile, readFileSync, readlink,
-          realpath, rename, rm, rmdir, stat, symlink, truncate, unlink,
-          watch, watchFile, write, writeFile, writeFileSync] },
-      { module: assert, precedence: runtime }, { module: async_hooks, precedence: runtime },
-      { module: buffer, precedence: runtime }, { module: child_process, precedence: runtime },
-      { module: cluster, precedence: runtime }, { module: console, precedence: runtime },
-      { module: constants, precedence: runtime }, { module: crypto, precedence: runtime },
-      { module: dgram, precedence: runtime }, { module: diagnostics_channel, precedence: runtime },
-      { module: dns, precedence: runtime }, { module: domain, precedence: runtime },
-      { module: events, precedence: runtime }, { module: http, precedence: runtime },
-      { module: http2, precedence: runtime }, { module: https, precedence: runtime },
-      { module: inspector, precedence: runtime }, { module: module, precedence: runtime },
-      { module: net, precedence: runtime }, { module: os, precedence: runtime },
-      { module: path, precedence: runtime }, { module: perf_hooks, precedence: runtime },
-      { module: process, precedence: runtime }, { module: punycode, precedence: runtime },
-      { module: querystring, precedence: runtime }, { module: readline, precedence: runtime },
-      { module: repl, precedence: runtime }, { module: stream, precedence: runtime },
-      { module: string_decoder, precedence: runtime }, { module: sys, precedence: runtime },
-      { module: timers, precedence: runtime }, { module: tls, precedence: runtime },
-      { module: trace_events, precedence: runtime }, { module: tty, precedence: runtime },
-      { module: url, precedence: runtime }, { module: v8, precedence: runtime },
-      { module: vm, precedence: runtime }, { module: wasi, precedence: runtime },
-      { module: worker_threads, precedence: runtime }, { module: zlib, precedence: runtime },
-      { module: 'node:assert', precedence: runtime }, { module: 'node:async_hooks', precedence: runtime },
-      { module: 'node:buffer', precedence: runtime }, { module: 'node:child_process', precedence: runtime },
-      { module: 'node:cluster', precedence: runtime }, { module: 'node:console', precedence: runtime },
-      { module: 'node:constants', precedence: runtime }, { module: 'node:crypto', precedence: runtime },
-      { module: 'node:dgram', precedence: runtime }, { module: 'node:diagnostics_channel', precedence: runtime },
-      { module: 'node:dns', precedence: runtime }, { module: 'node:domain', precedence: runtime },
-      { module: 'node:events', precedence: runtime }, { module: 'node:http', precedence: runtime },
-      { module: 'node:http2', precedence: runtime }, { module: 'node:https', precedence: runtime },
-      { module: 'node:inspector', precedence: runtime }, { module: 'node:ffi', precedence: runtime },
-      { module: 'node:module', precedence: runtime }, { module: 'node:net', precedence: runtime },
-      { module: 'node:os', precedence: runtime }, { module: 'node:path', precedence: runtime },
-      { module: 'node:perf_hooks', precedence: runtime }, { module: 'node:process', precedence: runtime },
-      { module: 'node:punycode', precedence: runtime }, { module: 'node:querystring', precedence: runtime },
-      { module: 'node:readline', precedence: runtime }, { module: 'node:repl', precedence: runtime },
-      { module: 'node:sea', precedence: runtime }, { module: 'node:sqlite', precedence: runtime },
-      { module: 'node:stream', precedence: runtime }, { module: 'node:string_decoder', precedence: runtime },
-      { module: 'node:sys', precedence: runtime }, { module: 'node:test', precedence: runtime },
-      { module: 'node:timers', precedence: runtime }, { module: 'node:tls', precedence: runtime },
-      { module: 'node:trace_events', precedence: runtime }, { module: 'node:tty', precedence: runtime },
-      { module: 'node:url', precedence: runtime }, { module: 'node:v8', precedence: runtime },
-      { module: 'node:vm', precedence: runtime }, { module: 'node:wasi', precedence: runtime },
-      { module: 'node:worker_threads', precedence: runtime }, { module: 'node:zlib', precedence: runtime }
-  ]
-  resolve:
-    parse_files:
-      - name: "tsconfig.json"
-        format: json
-      - name: "jsconfig.json"
-        format: json
-      - name: "package.json"
-        format: json
-      - name: "webpack.config.js"
-        format: raw
-        extract: "['\"]?([@~a-zA-Z_$][@~a-zA-Z0-9_$/-]*)['\"]?\\s*:\\s*path\\.(?:join|resolve)\\(__dirname,\\s*['\"]([^'\"]+)['\"]"
-    lookup_from:
-      - __source_root
+import: [canonical, display, shapes, statements]
 
-stages:
+data:
+  util_symbols: [
+    callbackify, debuglog, deprecate, format, formatWithOptions, inspect, isDeepStrictEqual,
+    parseArgs, promisify, stripVTControlCharacters, styleText
+  ]
+  fs_symbols: [
+    access, appendFile, chmod, chown, close, copyFile, cp, existsSync, fstat, link, lstat, mkdir,
+    mkdtemp, open, read, readdir, readFile, readFileSync, readlink, realpath, rename, rm, rmdir,
+    stat, symlink, truncate, unlink, watch, watchFile, write, writeFile, writeFileSync
+  ]
+  builtins: [
+    AggregateError, Array, ArrayBuffer, BigInt, BigInt64Array, BigUint64Array, Boolean, DataView,
+    Date, Error, EvalError, FinalizationRegistry, Float32Array, Float64Array, Function, Int8Array,
+    Int16Array, Int32Array, Map, Number, Object, Promise, Proxy, RangeError, ReferenceError,
+    RegExp, Set, SharedArrayBuffer, String, Symbol, SyntaxError, TypeError, URIError, Uint8Array,
+    Uint8ClampedArray, Uint16Array, Uint32Array, WeakMap, WeakRef, WeakSet, atob, btoa,
+    clearImmediate, clearInterval, clearTimeout, decodeURI, decodeURIComponent, encodeURI,
+    encodeURIComponent, eval, isFinite, isNaN, parseFloat, parseInt, queueMicrotask, require,
+    setImmediate, setInterval, setTimeout, structuredClone
+  ]
+  external: [
+    util, 'node:util', fs, 'node:fs', assert, async_hooks, buffer, child_process, cluster, console,
+    constants, crypto, dgram, diagnostics_channel, dns, domain, events, http, http2, https,
+    inspector, module, net, os, path, perf_hooks, process, punycode, querystring, readline, repl,
+    stream, string_decoder, sys, timers, tls, trace_events, tty, url, v8, vm, wasi, worker_threads,
+    zlib, 'node:assert', 'node:async_hooks', 'node:buffer', 'node:child_process', 'node:cluster',
+    'node:console', 'node:constants', 'node:crypto', 'node:dgram', 'node:diagnostics_channel',
+    'node:dns', 'node:domain', 'node:events', 'node:http', 'node:http2', 'node:https',
+    'node:inspector', 'node:ffi', 'node:module', 'node:net', 'node:os', 'node:path',
+    'node:perf_hooks', 'node:process', 'node:punycode', 'node:querystring', 'node:readline',
+    'node:repl', 'node:sea', 'node:sqlite', 'node:stream', 'node:string_decoder', 'node:sys',
+    'node:test', 'node:timers', 'node:tls', 'node:trace_events', 'node:tty', 'node:url', 'node:v8',
+    'node:vm', 'node:wasi', 'node:worker_threads', 'node:zlib'
+  ]
+  providers:
+    - [util, '%util_symbols']
+    - ['node:util', '%util_symbols']
+    - [fs, '%fs_symbols']
+    - ['node:fs', '%fs_symbols']
+  lookup_from: [__source_root]
+  parse_files:
+    - [tsconfig.json, json]
+    - [jsconfig.json, json]
+    - [package.json, json]
+    - [
+        webpack.config.js, raw,
+        '[''"]?([@~a-zA-Z_$][@~a-zA-Z0-9_$/-]*)[''"]?\s*:\s*path\.(?:join|resolve)\(__dirname,\s*[''"]([^''"]+)[''"]'
+      ]
+  call_wrappers: [
+    await_expression, as_expression, non_null_expression, parenthesized_expression,
+    satisfies_expression
+  ]
+  loops: [for_statement, for_in_statement, while_statement, do_statement]
+
+canonicalize:
   - name: normalize
     rules:
       # `await f()`, `f() as T`, `f()!`, `(f())` and `f() satisfies T` carry the value of the call they wrap
-      - match: '(await_expression $V:call_expression)'
-        replace: '$V'
-      - match: '(as_expression $V:call_expression)'
-        replace: '$V'
-      - match: '(non_null_expression $V:call_expression)'
-        replace: '$V'
-      - match: '(parenthesized_expression $V:call_expression)'
-        replace: '$V'
-      - match: '(satisfies_expression $V:call_expression)'
+      - match: '(%call_wrappers $V:call_expression)'
         replace: '$V'
       # <div> is an intrinsic element, not a component call
       - match: '(jsx_self_closing_element name: (identifier "/^[a-z]/") $$$A)'
@@ -108,90 +70,75 @@ stages:
       - match: '(jsx_opening_element name: (identifier "/^[a-z]/") $$$A)'
         replace: '(jsx_intrinsic_open $$$A)'
       - match: '(program $$$C)'
-        replace: '(__source_file @$ROOT $$$C)'
-
+        replace: '%source_file($$$C)'
       # Constructor parameter property (only when accessibility_modifier present)
       - match: '(required_parameter **/(accessibility_modifier) pattern: $N type: (type_annotation $T:type_identifier))'
         replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))))'
       - match: '(required_parameter **/(accessibility_modifier) pattern: $N)'
         replace: '(__def (__defname @$N) (__property))'
-
       # Regular typed parameter → binding with SSA type hint
       - match: '(required_parameter pattern: $N type: (type_annotation $T:type_identifier))'
         replace: '(__binding @$N $N (__declaration) (__ssa_typed @$T))'
       - match: '(required_parameter pattern: $N)'
         replace: '(__binding @$N $N (__declaration))'
-
       - match: '(return_statement $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
-
       # Distinguish import type from import before rewriting
       - match: '(import_statement (type) $$$REST)'
         replace: '(import_type_statement $$$REST)'
-
       # this.x → __ivar
       - match: '(member_expression object: (this) property: $P)'
         replace: '(__ivar @$P)'
-
       # Superclass: extends clause → __supertype
       - match: '(extends_clause value: $V)'
         replace: '(__supertype @$V $V)'
-
       # implements clause → individual __supertype nodes
       - match: '(implements_clause $$$TYPES:type_identifier $$$REST)'
         replace: '(implements_clause $$$REST $$$TYPES=>__supertype)'
-
       # Import alias: capture real name as sym, alias as child
       - match: '(import_specifier (type) name: $N alias: $A)'
         replace: '(import_specifier @$N (__alias @$A))'
-        tag: { type_only: "true" }
+        tag: { type_only: 'true' }
       - match: '(import_specifier (type) name: $N)'
         replace: '(import_specifier @$N)'
-        tag: { type_only: "true" }
+        tag: { type_only: 'true' }
       - match: '(import_specifier name: $N alias: $A)'
         replace: '(import_specifier @$N (__alias @$A))'
       - match: '(import_specifier name: $N)'
         replace: '(import_specifier @$N)'
-
       # Export specifier alias
       - match: '(export_specifier name: $N alias: $A)'
         replace: '(export_specifier @$N (__alias @$A))'
       - match: '(export_specifier name: $N)'
         replace: '(export_specifier @$N)'
-
   - name: retag-refs
     rules:
       - match: '(object $$$V)'
         replace: '(__obj $$$V)'
       - match: '(member_expression object: $O:call_expression property: $M)'
-        replace: '(__member @$M (__object $O))'
+        replace: '%member($M, $O)'
       - match: '(member_expression object: $O:__ivar property: $M)'
-        replace: '(__member @$M (__object $O))'
+        replace: '%member($M, $O)'
       - match: '(member_expression object: $O property: $M)'
-        replace: '(__member @$M (__object @$O $O))'
-
+        replace: '%member_text($M, $O)'
   - name: retag-calls
     rules:
       # <Comp … /> and <Comp>…</Comp> call the component
       - match: '(jsx_self_closing_element name: $N:__member $$$A)'
         replace: '(__call (__callee $N) $$$A)'
       - match: '(jsx_self_closing_element name: $N:identifier $$$A)'
-        replace: '(__call (__callee @$N $N) $$$A)'
+        replace: '%call($N, $$$A)'
       - match: '(jsx_element open_tag: (jsx_opening_element name: $N:__member $$$A) $$$C)'
         replace: '(__call (__callee $N) $$$A $$$C)'
       - match: '(jsx_element open_tag: (jsx_opening_element name: $N:identifier $$$A) $$$C)'
         replace: '(__call (__callee @$N $N) $$$A $$$C)'
-      - match: '(call_expression function: $F:__ivar arguments: $A)'
-        replace: '(__call (__callee $F) $A)'
-      - match: '(call_expression function: $F:__member arguments: $A)'
-        replace: '(__call (__callee $F) $A)'
+      - use: canonical_callee_calls
       - match: '(call_expression function: $F arguments: $A)'
-        replace: '(__call (__callee @$F $F) $A)'
+        replace: '%call($F, $A)'
       - match: '(new_expression constructor: $C:__member arguments: $A)'
         replace: '(__call (__callee $C) $A)'
       - match: '(new_expression constructor: $C arguments: $A)'
-        replace: '(__call (__callee @$C $C) $A)'
-
+        replace: '%call($C, $A)'
   - name: imports
     rules:
       - match: '(export_statement (default) value: $N:identifier)'
@@ -203,33 +150,26 @@ stages:
         replace: '(__import_type (__source @$S) (__source_path @$S) (__name "*" (__alias @$N)))'
       - match: '(import_type_statement (import_clause $N:identifier) source: (string $S:string_fragment))'
         replace: '(__import_type (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
-
       # import defaultExport, { named } from './source' — combined default + named (before individual rules)
       - match: '(import_statement (import_clause $N:identifier $$$REST (named_imports $$$SPECS:import_specifier)) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)) $$$SPECS->__name)'
-
       # import { a, b } from './source'
       - match: '(import_statement (import_clause (named_imports $$$SPECS:import_specifier)) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) $$$SPECS->__name)'
-
       # import * as ns from './source'
       - match: '(import_statement (import_clause (namespace_import $N:identifier)) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name "*" (__alias @$N)))'
-
       # import defaultExport from './source'
       - match: '(import_statement (import_clause $N:identifier) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
-
       # const { a, b: c } = require('./source') — CJS destructured require; aliases finish in cjs-entries
       - match: '(variable_declarator name: (object_pattern $$$E:shorthand_property_identifier_pattern|pair_pattern) value: (__call (__callee "require") (arguments (string $S:string_fragment))))'
         replace: '(__import (__source @$S) (__source_path @$S) $$$E->cjs_entry)'
-
       # const x = require('./source') — CJS namespace require
       - match: '(variable_declarator name: $N:identifier value: (__call (__callee "require") (arguments (string $S:string_fragment))))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
-        tag: { import_type: CjsRequire }
         tag_on: __name
-
+        tag: { import_type: CjsRequire }
       # exports.f = function f() {} / module.exports.f = ... → an exported function def
       - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "exports") right: (function_expression name: $N body: $B)))'
         replace: '(__def (__defname @$N) (__function) $B)'
@@ -252,41 +192,34 @@ stages:
         replace: '(__def (__defname @$N) (__default_export "default") (__function) $B)'
       - match: '(expression_statement (assignment_expression left: (__member "exports" (__object "module")) right: $N:identifier))'
         replace: '(__module_export @$N (__default_export "default"))'
-
       # export { A, B } from './source' — named re-export with source (before star)
       - match: '(export_statement (export_clause $$$SPECS:export_specifier) source: (string $S:string_fragment))'
         replace: '(__module_export (__import (__source @$S) (__source_path @$S) $$$SPECS->__name))'
-
       # export * from './source' — star re-export (no export_clause)
       - match: '(export_statement (namespace_export $N:identifier) source: (string $S:string_fragment))'
         replace: '(__module_export (__import (__source @$S) (__source_path @$S) (__name "*" (__alias @$N))))'
       - match: '(export_statement source: (string $S:string_fragment))'
-        replace: '(__module_export (__import (__source @$S) (__source_path @$S) (__name "*")))'
-
+        replace: '(__module_export %wildcard_import($S))'
       # export { A, B } — local re-export (no source)
       - match: '(export_statement (export_clause $$$SPECS:export_specifier))'
         replace: '(__module_export $$$SPECS->__name)'
-
-
-
   - name: binding-owners
     rules:
       - match: '(lexical_declaration $$$V)'
         replace: '(variable_owner "block" $$$V)'
       - match: '(variable_declaration $$$V)'
         replace: '(variable_owner "function" $$$V)'
-
   - name: classify
     rules:
       # Bindings
       - match: '(variable_declarator name: $N value: $V:arrow_function)'
-        replace: '(__def (__defname @$N) (__declaration @$ROOT|ancestor_sym("variable_owner")) (__function) $V)'
+        replace: '(__def (__defname @$N) (__declaration @$ROOT | ancestor_sym("variable_owner")) (__function) $V)'
       - match: '(variable_declarator name: $N value: $V:identifier)'
-        replace: '(__binding @$N $N (__declaration @$ROOT|ancestor_sym("variable_owner")) (__rhs @$V $V))'
+        replace: '(__binding @$N $N (__declaration @$ROOT | ancestor_sym("variable_owner")) (__rhs @$V $V))'
       - match: '(variable_declarator name: $N value: $V)'
-        replace: '(__binding @$N $N (__declaration @$ROOT|ancestor_sym("variable_owner")) (__rhs $V))'
+        replace: '(__binding @$N $N (__declaration @$ROOT | ancestor_sym("variable_owner")) (__rhs $V))'
       - match: '(variable_declarator name: $N)'
-        replace: '(__binding @$N (__declaration @$ROOT|ancestor_sym("variable_owner")))'
+        replace: '(__binding @$N (__declaration @$ROOT | ancestor_sym("variable_owner")))'
       - match: '(assignment_expression left: $N right: $R:__call)'
         replace: '(__binding @$N $N (__rhs $R))'
       - match: '(assignment_expression left: $N right: $R)'
@@ -295,12 +228,11 @@ stages:
         replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))))'
       - match: '(public_field_definition name: $N type: (type_annotation (function_type)) value:? $V)'
         replace: '(__def (__defname @$N) (__property) $V)'
-        tag: { callable: "true" }
+        tag: { callable: 'true' }
       - match: '(public_field_definition name: $N value: $V)'
         replace: '(__def (__defname @$N $N) (__property) $V)'
       - match: '(public_field_definition name: $N)'
         replace: '(__def (__defname @$N $N) (__property))'
-
       # Control flow
       - match: '(if_statement condition: $COND consequence: $C alternative:? $A)'
         replace: '(__ssa_branch $COND (__ssa_arm $C) (__ssa_arm? $A))'
@@ -310,7 +242,6 @@ stages:
         replace: '(__ssa_branch $COND (__ssa_arm $C) (__ssa_arm $A))'
       - match: '(try_statement body: $B $$$ALTS:catch_clause|finally_clause)'
         replace: '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm)'
-
       # Loops
       - match: '(for_in_statement (let) left: $N:identifier right: $V body: $B)'
         replace: '(__scope "block" (__ssa_loop $V (__binding @$N (__declaration "block")) $B))'
@@ -318,15 +249,8 @@ stages:
         replace: '(__scope "block" (__ssa_loop $V (__binding @$N (__declaration "block")) $B))'
       - match: '(for_in_statement (var) left: $N:identifier right: $V body: $B)'
         replace: '(__ssa_loop $V (__binding @$N (__declaration "function") (__rhs)) $B)'
-      - match: '(for_statement body: $B)'
-        replace: '(__ssa_loop $B)'
-      - match: '(for_in_statement body: $B)'
-        replace: '(__ssa_loop $B)'
-      - match: '(while_statement body: $B)'
-        replace: '(__ssa_loop $B)'
-      - match: '(do_statement body: $B)'
-        replace: '(__ssa_loop $B)'
-
+      - match: '(%loops body: $B)'
+        replace: '%loop($B)'
       # Abstract method signatures (no body)
       - match: '(abstract_method_signature name: $N)'
         replace: '(__def (__defname @$N) (__method))'
@@ -341,18 +265,18 @@ stages:
       - match: '(method_definition name: (computed_property_name) body: $B)'
         replace: '(__ssa_hint $B)'
       - match: '(method_definition **/(static) name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
-        replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $$$P $B)'
+        replace: '(__def (__defname @$N | regex_replace("^#", "")) (__method) $$$P $B)'
         tag: { flavor: static }
       - match: '(method_definition **/(static) name: $N body: $B)'
-        replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $B)'
+        replace: '(__def (__defname @$N | regex_replace("^#", "")) (__method) $B)'
         tag: { flavor: static }
       - match: '(method_definition **/(get) name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
-        replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $$$P $B)'
-        tag: { value: "true" }
+        replace: '(__def (__defname @$N | regex_replace("^#", "")) (__method) $$$P $B)'
+        tag: { value: 'true' }
       - match: '(method_definition name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
-        replace: '(__def (__defname @$N|regex_replace("^#","") $N) (__method) $$$P $B)'
+        replace: '(__def (__defname @$N | regex_replace("^#", "") $N) (__method) $$$P $B)'
       - match: '(method_definition name: $N body: $B)'
-        replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $B)'
+        replace: '(__def (__defname @$N | regex_replace("^#", "")) (__method) $B)'
       - match: '(generator_function_declaration name: $N body: $B)'
         replace: '(__def (__defname @$N) (__function) $B)'
         tag: { flavor: generator }
@@ -362,20 +286,17 @@ stages:
         replace: '(__def (__defname @$N) (__type_alias))'
       - match: '(enum_declaration name: $N body: $B)'
         replace: '(__def (__defname @$N) (__enum) $B)'
-
       # Classes (last — body contains already-canonical methods)
       - match: '(class_declaration name: $N body: $B $$$ANN:__supertype)'
         replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
       - match: '(abstract_class_declaration name: $N body: $B $$$ANN:__supertype)'
         replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
         tag: { flavor: abstract }
-
   - name: lexical-scopes
     rules:
       - match: '(statement_block $$$V)'
         replace: '(__scope "block" $$$V)'
-        tag: { hoisted: "true" }
-
+        tag: { hoisted: 'true' }
   - name: cjs-entries
     rules:
       - match: '(cjs_entry key: $K value: $V)'
@@ -384,57 +305,40 @@ stages:
       - match: '(cjs_entry)'
         replace: '(__name @$ROOT)'
         tag: { import_type: CjsRequire }
-
   - name: exports
     rules:
       # export default function/class → mark the def as default export
       - match: '(export_statement **/(default) (__def $$$CHILDREN))'
         replace: '(export_statement (__def (__default_export "default") $$$CHILDREN))'
-
       # export const X = ... → promote binding to Variable def
       - match: '(export_statement (variable_owner $B:__binding))'
         replace: '(export_statement (__def (__defname @$B $B) (__variable)))'
-
-  - name: ssa-cleanup
-    rules:
-      - match: '(__ssa_return $V:identifier)'
-        replace: '(__ssa_return (__rhs @$V $V))'
-
+  - use: ssa_cleanup
   - name: tag-defs
     rules:
       - match: '(__def (__variable) (number))'
-        tag: { non_callable: "true" }
+        tag: { non_callable: 'true' }
       - match: '(__def (__function))'
-        tag: { callable: "true", scoped: "function" }
+        tag: { callable: 'true', scoped: function }
       - match: '(__def (__method))'
-        tag: { callable: "true", scoped: "function" }
-      - match: '(__def (__class))'
-        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
-      - match: '(__def (__lambda))'
-        tag: { callable: "true" }
+        tag: { callable: 'true', scoped: function }
+      - use: class_lambda_def_tags
       - match: '(__def (__enum_variant))'
-        tag: { callable: "true", value: "true" }
+        tag: { callable: 'true', value: 'true' }
       - match: '(__def (__enum))'
-        tag: { value: "true", declares_type: "true", scoped: "true" }
-      - match: '(__def (__interface))'
-        tag: { value: "true", declares_type: "true" }
+        tag: { value: 'true', declares_type: 'true', scoped: 'true' }
+      - use: interface_def_tags
       - match: '(__def (__type_alias))'
-        tag: { value: "true", declares_type: "true" }
+        tag: { value: 'true', declares_type: 'true' }
       - match: '(__def (__property))'
-        tag: { value: "true" }
+        tag: { value: 'true' }
       - match: '(__def (__property) (arrow_function))'
-        tag: { callable: "true", scoped: "function" }
+        tag: { callable: 'true', scoped: function }
       - match: '(__def (__property) (function_expression))'
-        tag: { callable: "true" }
+        tag: { callable: 'true' }
       - match: '(__def (__variable))'
-        tag: { value: "true" }
-
-  - name: tag-file-dir
-    rules:
-      - match: '$M:__source_file'
-        tag:
-          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
-
+        tag: { value: 'true' }
+  - use: tag_file_dir
   - name: resolve-paths
     rules:
       - match: '(__import (__source_path "/^[^./:][^:]*$/"))'
@@ -442,55 +346,50 @@ stages:
       - match: '(__import_type (__source_path "/^[^./:][^:]*$/"))'
         tag: { alias_scope: bare_import }
       - match: '(__import)'
-        tag:
-          resolved_source: '@$ROOT|child_sym("__source_path")'
+        tag: { resolved_source: '$ROOT | child_sym("__source_path")' }
       - match: '(__import (__source_path "^."))'
         tag:
-          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1")|regex_replace("/$", "")|regex_replace("^/", "")'
+          resolved_source: '$ROOT | ancestor_tag("file_dir") | concat("/", $ROOT | child_sym("__source_path")) | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1") | regex_replace("/$", "") | regex_replace("^/", "")'
       - match: '(__import_type)'
-        tag:
-          resolved_source: '@$ROOT|child_sym("__source_path")'
+        tag: { resolved_source: '$ROOT | child_sym("__source_path")' }
       - match: '(__import_type (__source_path "^."))'
         tag:
-          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1")|regex_replace("/$", "")|regex_replace("^/", "")'
+          resolved_source: '$ROOT | ancestor_tag("file_dir") | concat("/", $ROOT | child_sym("__source_path")) | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1") | regex_replace("/$", "") | regex_replace("^/", "")'
 
-resolve:
-  stages:
-    - name: config
-      rules:
-        # tsconfig paths: each entry becomes an alias, first target wins
-        - match: '(__field "paths" (__obj $$$E:__field))'
-          replace: '(__field "paths" (__obj $$$E->path_alias))'
-        # webpack resolve.alias pairs extracted from the config
-        - match: '(__file "webpack.config.js" $$$F:__field)'
-          replace: '(__file "webpack.config.js" $$$F->__alias)'
-        # tsconfig baseUrl → source root
-        - match: '(__file "/^(ts|js)config\.json$/" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" $V:__str) $$$REST))) $$$OUTER)'
-          replace: '(__file @$ROOT (__source_root @$V|strip_prefix("./") $V (__scope "bare_import")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
-
-    - name: aliases
-      rules:
-        - match: '(__alias $V:__str)'
-          replace: '(__alias @$ROOT (__str @$ROOT|concat("/", "tree_path:/", "child_sym:__str")|regex_replace("(^|/)webpack\.config\.js/[^/]+/", "$1")|regex_replace("(^|/)\./", "$1")|regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1")|regex_replace("^/", "")))'
-        - match: '(path_alias (__arr $V:__str $$$REST))'
-          replace: '(__alias @$ROOT (__str @$V|strip_prefix("./") $V))'
-
-    - name: packages
-      rules:
-        - match: '(__dir (__file "package.json" (__obj (__field "main" $M:__str))))'
-          append: ['(__source_path @$M)']
-        - match: '(__dir (__file "package.json"))'
-          append: ['(__package_root)']
-    - name: package-entrypoints
-      rules:
-        - match: '(__source_path)'
-          replace: '(__source_path @$ROOT|tree_path("/")|regex_replace("(^|/)\./", "$1")|regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1"))'
-    - name: index_dirs
-      rules:
-        - match: '(__dir (__file "index.ts"))'
-          append: ['(__source_root)']
-        - match: '(__dir (__file "index.js"))'
-          append: ['(__source_root)']
+project:
+  - name: config
+    rules:
+      # tsconfig paths: each entry becomes an alias, first target wins
+      - match: '(__field "paths" (__obj $$$E:__field))'
+        replace: '(__field "paths" (__obj $$$E->path_alias))'
+      # webpack resolve.alias pairs extracted from the config
+      - match: '(__file "webpack.config.js" $$$F:__field)'
+        replace: '(__file "webpack.config.js" $$$F->__alias)'
+      # tsconfig baseUrl → source root
+      - match: '(__file "/^(ts|js)config\.json$/" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" $V:__str) $$$REST))) $$$OUTER)'
+        replace: '(__file @$ROOT (__source_root @$V | strip("./") $V (__scope "bare_import")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
+  - name: aliases
+    rules:
+      - match: '(__alias $V:__str)'
+        replace: '(__alias @$ROOT (__str @$ROOT | tree_path("/") | concat("/", $ROOT | child_sym("__str")) | regex_replace("(^|/)webpack\.config\.js/[^/]+/", "$1") | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1") | regex_replace("^/", "")))'
+      - match: '(path_alias (__arr $V:__str $$$REST))'
+        replace: '(__alias @$ROOT (__str @$V | strip("./") $V))'
+  - name: packages
+    rules:
+      - match: '(__dir (__file "package.json" (__obj (__field "main" $M:__str))))'
+        append: ['(__source_path @$M)']
+      - match: '(__dir (__file "package.json"))'
+        append: ['(__package_root)']
+  - name: package-entrypoints
+    rules:
+      - match: '(__source_path)'
+        replace: '(__source_path @$ROOT | tree_path("/") | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1"))'
+  - name: index_dirs
+    rules:
+      - match: '(__dir (__file "index.ts"))'
+        append: ['(__source_root)']
+      - match: '(__dir (__file "index.js"))'
+        append: ['(__source_root)']
 
 display:
   - name: fqn
@@ -499,77 +398,43 @@ display:
         tag:
           entity: File
           file_path: '@$M'
-          language: '@$M|split_last(".")|map("ts:typescript", "tsx:tsx", "js:javascript", "jsx:javascript", "mjs:javascript", "cjs:javascript")'
-
-      - match: '(__def)'
-        tag:
-          entity: Definition
-          fqn: '@$ROOT|concat("::", "ancestor_tag:fqn", "child_sym:__defname")|keep_last("::", "64", "4096")'
-          file_path: '@$ROOT|ancestor_tag("file_path")'
+          language: '@$M | split_last(".") | map("ts:typescript", "tsx:tsx", "js:javascript", "jsx:javascript", "mjs:javascript", "cjs:javascript")'
+      - use: def_fqn_colons
   - name: def_type
     rules:
       - match: '(__def)'
-        tag: { definition_span: "true" }
+        tag: { definition_span: 'true' }
       - match: '(__def (__function))'
         tag: { def_type: Function }
       - match: '(__def (__method))'
-        tag: { def_type: '@$ROOT|tag("flavor")|map("static:StaticMethod", "abstract:Method", "generator:Method")|default("Method")' }
-      - match: '(__def (__class))'
-        tag: { def_type: Class }
-      - match: '(__def (__struct))'
-        tag: { def_type: Struct }
-      - match: '(__def (__interface))'
-        tag: { def_type: Interface }
-      - match: '(__def (__enum))'
-        tag: { def_type: Enum }
-      - match: '(__def (__enum_variant))'
-        tag: { def_type: EnumVariant }
-      - match: '(__def (__trait))'
-        tag: { def_type: Trait }
-      - match: '(__def (__impl))'
-        tag: { def_type: Impl }
-      - match: '(__def (__variable))'
-        tag: { def_type: Variable }
-      - match: '(__def (__constant))'
-        tag: { def_type: Constant }
-      - match: '(__def (__lambda))'
-        tag: { def_type: Lambda }
-      - match: '(__def (__field_def))'
-        tag: { def_type: Field }
-      - match: '(__def (__property))'
-        tag: { def_type: Property }
-      - match: '(__def (__type_alias))'
-        tag: { def_type: TypeAlias }
+        tag:
+          def_type: '$ROOT | tag("flavor") | map("static:StaticMethod", "abstract:Method", "generator:Method") | default("Method")'
+      - use: type_def_types
   - name: module_exports
     rules:
       - match: '(__module_export)'
-        tag:
-          file_path: '@$ROOT|ancestor_tag("file_path")'
+        tag: { file_path: '$ROOT | ancestor_tag("file_path")' }
   - name: imports
     rules:
-      - match: '(__import)'
-        tag:
-          entity: ImportedSymbol
-          file_path: '@$ROOT|ancestor_tag("file_path")'
-          source_path: '@$ROOT|child_sym("__source")'
+      - use: import_entity
       - match: '(__import_type)'
         tag:
           entity: ImportedSymbol
-          file_path: '@$ROOT|ancestor_tag("file_path")'
-          source_path: '@$ROOT|child_sym("__source")'
+          file_path: '$ROOT | ancestor_tag("file_path")'
+          source_path: '$ROOT | child_sym("__source")'
       - match: '(__name "*" (__alias))'
         tag:
-          import_type: '@$ROOT|tag("import_type")|default("NamespaceImport")'
-          resolved: '@$ROOT|has_incoming("Imports")'
+          import_type: '$ROOT | tag("import_type") | default("NamespaceImport")'
+          resolved: '$ROOT | has_incoming("Imports")'
       - match: '(__name "*")'
         tag:
-          import_type: '@$ROOT|tag("import_type")|default("WildcardImport")'
-          resolved: '@$ROOT|has_incoming("Imports")'
+          import_type: '$ROOT | tag("import_type") | default("WildcardImport")'
+          resolved: '$ROOT | has_incoming("Imports")'
       - match: '(__name "default")'
         tag:
-          import_type: '@$ROOT|tag("import_type")|default("DefaultImport")'
-          resolved: '@$ROOT|has_incoming("Imports")'
+          import_type: '$ROOT | tag("import_type") | default("DefaultImport")'
+          resolved: '$ROOT | has_incoming("Imports")'
       - match: '(__name)'
         tag:
-          import_type: '@$ROOT|tag("import_type")|default("NamedImport")'
-          resolved: '@$ROOT|has_incoming("Imports")'
+          import_type: '$ROOT | tag("import_type") | default("NamedImport")'
+          resolved: '$ROOT | has_incoming("Imports")'

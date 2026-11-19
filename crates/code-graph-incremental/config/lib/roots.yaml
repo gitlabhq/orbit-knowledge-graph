@@ -1,0 +1,4 @@
+rulesets:
+  src_root:
+    - match: '(__dir "src" $$$REST)'
+      replace: '(__dir "src" (__source_root) $$$REST)'

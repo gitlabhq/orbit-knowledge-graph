@@ -1,113 +1,94 @@
 # Python rewrite rules — complete language definition.
 # Stamps all synthetics needed by SSA and resolver.
 
-config:
-  stdlib: [
-      { module: sys, precedence: runtime },
-      { module: builtins, availability: implicit, precedence: runtime, symbols: [
-      __import__, abs, aiter, all, anext, any, ascii, bin, bool, breakpoint, bytearray,
-      bytes, callable, chr, classmethod, compile, complex, delattr, dict, dir, divmod,
-      enumerate, eval, exec, filter, float, format, frozenset, getattr, globals,
-      hasattr, hash, help, hex, id, input, int, isinstance, issubclass, iter, len,
-      list, locals, map, max, memoryview, min, next, object, oct, open, ord, pow,
-      print, property, range, repr, reversed, round, set, setattr, slice, sorted,
-      staticmethod, str, sum, super, tuple, type, vars, zip,
-      BaseException, BaseExceptionGroup, Exception, ExceptionGroup, ArithmeticError,
-      AssertionError, AttributeError, BlockingIOError, BrokenPipeError, BufferError,
-      ChildProcessError, ConnectionAbortedError, ConnectionError,
-      ConnectionRefusedError, ConnectionResetError, EOFError, FileExistsError,
-      FileNotFoundError, FloatingPointError, GeneratorExit, ImportError,
-      IndentationError, IndexError, InterruptedError, IsADirectoryError, KeyError,
-      KeyboardInterrupt, LookupError, MemoryError, ModuleNotFoundError, NameError,
-      NotADirectoryError, NotImplementedError, OSError, OverflowError,
-      PermissionError, ProcessLookupError, RecursionError, ReferenceError,
-      RuntimeError, StopAsyncIteration, StopIteration, SyntaxError, SystemError,
-      SystemExit, TabError, TimeoutError, TypeError, UnboundLocalError,
-      UnicodeDecodeError, UnicodeEncodeError, UnicodeError, UnicodeTranslateError,
-      ValueError, ZeroDivisionError, Warning, UserWarning, DeprecationWarning,
-      PendingDeprecationWarning, SyntaxWarning, RuntimeWarning, FutureWarning,
-      ImportWarning, UnicodeWarning, BytesWarning, ResourceWarning, EncodingWarning
-      ] },
-      { module: abc }, { module: argparse }, { module: ast }, { module: asyncio },
-      { module: base64 }, { module: bisect }, { module: calendar }, { module: collections },
-      { module: concurrent }, { module: configparser }, { module: contextlib },
-      { module: contextvars }, { module: copy }, { module: csv }, { module: ctypes },
-      { module: dataclasses }, { module: datetime }, { module: decimal },
-      { module: difflib }, { module: email }, { module: enum }, { module: errno },
-      { module: fnmatch }, { module: fractions }, { module: ftplib },
-      { module: functools }, { module: gc }, { module: glob }, { module: gzip },
-      { module: hashlib }, { module: heapq }, { module: hmac }, { module: html },
-      { module: http }, { module: importlib }, { module: inspect }, { module: io },
-      { module: ipaddress }, { module: itertools }, { module: json }, { module: logging },
-      { module: math, symbols: [acos, acosh, asin, asinh, atan, atan2, atanh,
-          cbrt, ceil, comb, copysign, cos, cosh, degrees, dist, erf, erfc, exp,
-          exp2, expm1, fabs, factorial, floor, fmod, frexp, fsum, gamma, gcd,
-          hypot, isclose, isfinite, isinf, isnan, isqrt, lcm, ldexp, lgamma,
-          log, log10, log1p, log2, modf, nextafter, perm, pow, prod, radians,
-          remainder, sin, sinh, sqrt, sumprod, tan, tanh, trunc, ulp] },
-      { module: mimetypes }, { module: multiprocessing }, { module: numbers },
-      { module: operator }, { module: os }, { module: pathlib }, { module: pdb },
-      { module: pickle }, { module: pkgutil }, { module: platform }, { module: pprint },
-      { module: queue }, { module: random }, { module: re }, { module: secrets },
-      { module: select }, { module: selectors }, { module: shelve }, { module: shlex },
-      { module: shutil }, { module: signal }, { module: socket }, { module: socketserver },
-      { module: sqlite3 }, { module: ssl }, { module: stat }, { module: statistics },
-      { module: string }, { module: struct }, { module: subprocess }, { module: sysconfig },
-      { module: tarfile }, { module: tempfile }, { module: textwrap }, { module: threading },
-      { module: time, precedence: runtime }, { module: timeit }, { module: tkinter },
-      { module: tomllib }, { module: traceback }, { module: types }, { module: typing },
-      { module: unicodedata }, { module: unittest }, { module: urllib }, { module: uuid },
-      { module: venv }, { module: warnings }, { module: weakref }, { module: xml },
-      { module: xmlrpc }, { module: zipfile }, { module: zlib }, { module: zoneinfo }
-    ]
-  resolve:
-    lookup_from:
-      - __source_root
+import: [canonical, display, roots, shapes]
 
-stages:
+data:
+  builtins: [
+    __import__, abs, aiter, all, anext, any, ascii, bin, bool, breakpoint, bytearray, bytes,
+    callable, chr, classmethod, compile, complex, delattr, dict, dir, divmod, enumerate, eval,
+    exec, filter, float, format, frozenset, getattr, globals, hasattr, hash, help, hex, id, input,
+    int, isinstance, issubclass, iter, len, list, locals, map, max, memoryview, min, next, object,
+    oct, open, ord, pow, print, property, range, repr, reversed, round, set, setattr, slice,
+    sorted, staticmethod, str, sum, super, tuple, type, vars, zip, BaseException,
+    BaseExceptionGroup, Exception, ExceptionGroup, ArithmeticError, AssertionError, AttributeError,
+    BlockingIOError, BrokenPipeError, BufferError, ChildProcessError, ConnectionAbortedError,
+    ConnectionError, ConnectionRefusedError, ConnectionResetError, EOFError, FileExistsError,
+    FileNotFoundError, FloatingPointError, GeneratorExit, ImportError, IndentationError,
+    IndexError, InterruptedError, IsADirectoryError, KeyError, KeyboardInterrupt, LookupError,
+    MemoryError, ModuleNotFoundError, NameError, NotADirectoryError, NotImplementedError, OSError,
+    OverflowError, PermissionError, ProcessLookupError, RecursionError, ReferenceError,
+    RuntimeError, StopAsyncIteration, StopIteration, SyntaxError, SystemError, SystemExit,
+    TabError, TimeoutError, TypeError, UnboundLocalError, UnicodeDecodeError, UnicodeEncodeError,
+    UnicodeError, UnicodeTranslateError, ValueError, ZeroDivisionError, Warning, UserWarning,
+    DeprecationWarning, PendingDeprecationWarning, SyntaxWarning, RuntimeWarning, FutureWarning,
+    ImportWarning, UnicodeWarning, BytesWarning, ResourceWarning, EncodingWarning
+  ]
+  stdlib: [
+    abc, argparse, ast, asyncio, base64, bisect, calendar, collections, concurrent, configparser,
+    contextlib, contextvars, copy, csv, ctypes, dataclasses, datetime, decimal, difflib, email,
+    enum, errno, fnmatch, fractions, ftplib, functools, gc, glob, gzip, hashlib, heapq, hmac, html,
+    http, importlib, inspect, io, ipaddress, itertools, json, logging, math, mimetypes,
+    multiprocessing, numbers, operator, os, pathlib, pdb, pickle, pkgutil, platform, pprint, queue,
+    random, re, secrets, select, selectors, shelve, shlex, shutil, signal, socket, socketserver,
+    sqlite3, ssl, stat, statistics, string, struct, subprocess, sysconfig, tarfile, tempfile,
+    textwrap, threading, timeit, tkinter, tomllib, traceback, types, typing, unicodedata, unittest,
+    urllib, uuid, venv, warnings, weakref, xml, xmlrpc, zipfile, zlib, zoneinfo
+  ]
+  external: [sys, builtins, time]
+  providers:
+    - [builtins, '%builtins']
+    - [
+        math, acos, acosh, asin, asinh, atan, atan2, atanh, cbrt, ceil, comb, copysign, cos, cosh,
+        degrees, dist, erf, erfc, exp, exp2, expm1, fabs, factorial, floor, fmod, frexp, fsum,
+        gamma, gcd, hypot, isclose, isfinite, isinf, isnan, isqrt, lcm, ldexp, lgamma, log, log10,
+        log1p, log2, modf, nextafter, perm, pow, prod, radians, remainder, sin, sinh, sqrt,
+        sumprod, tan, tanh, trunc, ulp
+      ]
+  lookup_from: [__source_root]
+  project_dirs: [__root, __dir]
+  call_wrappers: [await, parenthesized_expression]
+  loops: [for_statement, while_statement]
+  comprehensions: [list_comprehension, set_comprehension, dictionary_comprehension, generator_expression]
+
+canonicalize:
   - name: normalize
     rules:
       - match: '(module $$$C)'
-        replace: '(__source_file @$ROOT $$$C)'
+        replace: '%source_file($$$C)'
       - match: '(return_statement $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
       - match: '(lambda $$$C)'
         replace: '(__lambda $$$C)'
-
       # Hoist decorators onto the inner def/class
       - match: '(decorator $N:identifier)'
         replace: '(__decorator @$N)'
       - match: '(decorated_definition $$$DECOS:__decorator definition: $D)'
         replace: '$D { $$$DECOS }'
-
       # Superclass list → __supertype children on the class
       - match: '(class_definition name: $N superclasses: (argument_list $$$SUPERS:identifier|attribute|call) $$$REST)'
         replace: '(class_definition $N $$$SUPERS=>__supertype $$$REST)'
-
       # self.x / cls.x → __ivar
       - match: '(attribute object: (identifier "self") attribute: $A)'
         replace: '(__ivar @$A)'
       - match: '(attribute object: (identifier "cls") attribute: $A)'
         replace: '(__ivar @$A)'
-
       # Aliased import: capture real name as sym, alias as child
       - match: '(aliased_import name: $N alias: $A)'
         replace: '(aliased_import @$N $N (__alias @$A))'
       - match: '(aliased_import name: $N)'
         replace: '(aliased_import @$N)'
-
   - name: retag-refs
     rules:
       # self.x.method → __member "method" (__object __ivar)
       - match: '(attribute object: $O:__ivar attribute: $M)'
-        replace: '(__member @$M (__object $O))'
+        replace: '%member($M, $O)'
       # a.b.c → __member "c" (__object (__member "b" (__object "a")))
       - match: '(attribute object: $O:__member attribute: $M)'
-        replace: '(__member @$M (__object $O))'
+        replace: '%member($M, $O)'
       # a.b → __member "b" (__object "a")
       - match: '(attribute object: $O attribute: $M)'
-        replace: '(__member @$M (__object @$O $O))'
-
+        replace: '%member_text($M, $O)'
   - name: retag-calls
     rules:
       - match: '(call function: $F:__ivar arguments: $A)'
@@ -115,35 +96,27 @@ stages:
       - match: '(call function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       # `await f()` and `(f())` carry the value of the call they wrap
-      - match: '(await $V:__call)'
-        replace: '$V'
-      - match: '(parenthesized_expression $V:__call)'
+      - match: '(%call_wrappers $V:__call)'
         replace: '$V'
       - match: '(call function: $F arguments: $A)'
-        replace: '(__call (__callee @$F $F) $A)'
-
+        replace: '%call($F, $A)'
   - name: imports
     rules:
       # from X import * (must precede named-import rule due to first-match-wins)
       - match: '(import_from_statement module_name: $M $W:wildcard_import)'
         replace: '(__import (__source @$M $M) (__source_path @$M) (__name @$W $W))'
-
       # from X import a, b  /  from X import a as b  /  mixed
       - match: '(import_from_statement module_name: $M $$$NAMES:dotted_name|aliased_import)'
         replace: '(__import (__source @$M $M) (__source_path @$M) $$$NAMES->__name)'
-
       # import X / import X.Y.Z
       - match: '(import_statement name: $N:dotted_name)'
-        replace: '(__import (__source @$N $N) (__source_path @$N) (__name @$N (__ssa_hint @$N|split_first("."))))'
-
+        replace: '(__import (__source @$N $N) (__source_path @$N) (__name @$N (__ssa_hint @$N | split_first("."))))'
       # import X as Y — rekind capture to __name, keeping __alias subtree
       - match: '(import_statement name: $N:aliased_import)'
         replace: '(__import (__source @$N) (__source_path @$N) @$N->__name)'
-
       # from __future__ import X
       - match: '(future_import_statement $$$NAMES:dotted_name)'
         replace: '(__import (__source "__future__") (__source_path "__future__") $$$NAMES=>__name)'
-
   - name: classify
     rules:
       - match: '(global_statement $$$N:identifier)'
@@ -168,10 +141,9 @@ stages:
       - match: '(typed_parameter $C:identifier)'
         replace: '(__binding @$C)'
       - match: '(default_parameter name: $N:identifier value: $V)'
-        replace: '(__binding @$N (__rhs @$V $V))'
+        replace: '%bind($N, $V)'
       - match: '(lambda_parameters $$$P:identifier|__binding)'
         replace: '(lambda_parameters $$$P->__binding)'
-
       # Bindings — RHS wrapped in __rhs for canonical containment
       - match: '(assignment left: $N:__ivar right: $R:__call)'
         replace: '(__binding $N (__rhs $R))'
@@ -192,10 +164,9 @@ stages:
       - match: '(augmented_assignment left: $N right: $R)'
         replace: '(__binding @$N $N (__rhs @$R $R))'
       - match: '(named_expression name: $N value: $V:__call)'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '%bind_call($N, $V)'
       - match: '(named_expression name: $N value: $V)'
-        replace: '(__binding @$N (__rhs @$V $V))'
-
+        replace: '%bind($N, $V)'
       # Branches
       - match: '(if_statement condition: $COND consequence: $C $$$ALTS:elif_clause|else_clause)'
         replace: '(__ssa_branch $COND (__ssa_arm $C) $$$ALTS->__ssa_arm)'
@@ -205,7 +176,6 @@ stages:
         replace: '(__ssa_branch $S $$$CASES->__ssa_arm)'
       - match: '(conditional_expression $A:_*_named $COND:_*_named $B:_*_named)'
         replace: '(__ssa_branch $COND (__ssa_arm $A) (__ssa_arm $B))'
-
       # Loops
       - match: '(for_statement left: $N:identifier right: (tuple $$$E) body: $B)'
         replace: '(__ssa_loop (__arr $$$E) (__binding @$N (__declaration "function")) $B)'
@@ -215,34 +185,22 @@ stages:
         replace: '(__ssa_loop (__arr $$$E) (__binding @$N (__declaration "function")) $B)'
       - match: '(for_statement left: $N:identifier right: $V body: $B)'
         replace: '(__ssa_loop $V (__binding @$N (__declaration "function")) $B)'
-      - match: '(for_statement body: $B)'
-        replace: '(__ssa_loop $B)'
-      - match: '(while_statement body: $B)'
-        replace: '(__ssa_loop $B)'
-      - match: '(list_comprehension $$$BODY)'
-        replace: '(__ssa_loop $$$BODY)'
-      - match: '(set_comprehension $$$BODY)'
-        replace: '(__ssa_loop $$$BODY)'
-      - match: '(dictionary_comprehension $$$BODY)'
-        replace: '(__ssa_loop $$$BODY)'
-      - match: '(generator_expression $$$BODY)'
-        replace: '(__ssa_loop $$$BODY)'
-
+      - match: '(%loops body: $B)'
+        replace: '%loop($B)'
+      - match: '(%comprehensions $$$BODY)'
+        replace: '%loop($$$BODY)'
       # Methods — has self parameter (before generic function rule)
       - match: '(function_definition name: $N **/(identifier "self") parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R $R) $$$ANN $$$P $B)'
         tag: { flavor: self_method }
-
       # Functions — no self parameter
       - match: '(function_definition name: $N parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R $R) $$$ANN $$$P $B)'
-
       # Classes — variadic before body captures __supertype/__decorator
       - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B **/(__def (__defname "__call__")))'
         replace: '(__def (__defname @$N) (__class) (__callable "__call__") $$$ANN $B)'
       - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B)'
         replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
-
   - name: ssa-cleanup
     rules:
       - match: '(global_name)'
@@ -250,62 +208,51 @@ stages:
       - match: '(nonlocal_name)'
         replace: '(__binding @$ROOT (__declaration "function") (__alias "function"))'
       - match: '(__ssa_return $V:identifier)'
-        replace: '(__ssa_return (__rhs @$V $V))'
-
+        replace: '%return_value($V)'
   - name: tag-defs
     rules:
       - match: '(__source_file)'
-        tag: { scoped: "module" }
+        tag: { scoped: module }
       - match: '(__def (__function))'
-        tag: { callable: "true", value: "true", scoped: "function" }
+        tag: { callable: 'true', value: 'true', scoped: function }
       - match: '(__def (__method))'
-        tag: { callable: "true", value: "true", scoped: "function" }
+        tag: { callable: 'true', value: 'true', scoped: function }
       - match: '(__def (__class))'
-        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
+        tag: { callable: 'true', value: 'true', declares_type: 'true', scoped: 'true' }
       - match: '(__def (__lambda))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: 'true', scoped: 'true' }
       - match: '(__def (__enum_variant))'
-        tag: { callable: "true", value: "true" }
+        tag: { callable: 'true', value: 'true' }
       - match: '(__def (__field_def))'
-        tag: { value: "true" }
-
-  - name: tag-file-dir
-    rules:
-      - match: '$M:__source_file'
-        tag:
-          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
-
+        tag: { value: 'true' }
+  - use: tag_file_dir
   - name: tag-source-path
     rules:
       - match: '(__import)'
         tag:
-          source_rel: '@$ROOT|child_sym("__source_path")|regex_loop("(\w)\.(\w)", "$1/$2")|regex_loop("^((?:~/)*)\.", "$1~/")|regex_first("~/", "./")|regex_replace("~/", "../")|regex_loop("^\./\.\./", "../")'
-
+          source_rel: '$ROOT | child_sym("__source_path") | regex_loop("(\w)\.(\w)", "$1/$2") | regex_loop("^((?:~/)*)\.", "$1~/") | regex_first("~/", "./") | regex_replace("~/", "../") | regex_loop("^\./\.\./", "../")'
   - name: resolve-paths
     rules:
       - match: '(__import)'
-        tag:
-          resolved_source: '@$ROOT|tag("source_rel")'
+        tag: { resolved_source: '$ROOT | tag("source_rel")' }
       - match: '(__import (__source_path "^."))'
         tag:
-          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "tag:source_rel")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
+          resolved_source: '$ROOT | ancestor_tag("file_dir") | concat("/", $ROOT | tag("source_rel")) | regex_replace("(^|/)\./", "$1") | regex_loop("[^/]+/\.\./", "") | regex_replace("/$", "") | regex_replace("^/", "")'
 
-resolve:
-  stages:
-    - name: packages
-      rules:
-        - match: '(__dir (__file "__init__.py") $$$REST)'
-          replace: '(__dir (__package) (__file "__init__.py") $$$REST)'
-        - match: '(__dir (__file "__init__.pyi") $$$REST)'
-          replace: '(__dir (__package) (__file "__init__.pyi") $$$REST)'
-    - name: roots
-      climb:
-        while: __package
-        mark: __source_root
-    - name: src_dirs
-      rules:
-         - match: '(__dir "src" $$$REST)'
-           replace: '(__dir "src" (__source_root) $$$REST)'
+project:
+  - name: packages
+    rules:
+      - match: '(__dir (__file "__init__.py") $$$REST)'
+        replace: '(__dir (__package) (__file "__init__.py") $$$REST)'
+      - match: '(__dir (__file "__init__.pyi") $$$REST)'
+        replace: '(__dir (__package) (__file "__init__.pyi") $$$REST)'
+  - name: roots
+    rules:
+      - match: '(%project_dirs !(__package) !(__source_root) (__dir (__package)))'
+        append: ['(__source_root)']
+  - name: src_dirs
+    rules:
+      - use: src_root
 
 display:
   - name: fqn
@@ -313,68 +260,28 @@ display:
       - match: '$M:__source_file'
         tag:
           entity: File
-          fqn: '@$M|stem|collapse_index("__init__")|replace("/", ".")'
+          fqn: '@$M | stem | collapse_index("__init__") | replace("/", ".")'
           file_path: '@$M'
-          language: '@$M|split_last(".")|map("py:python", "pyi:python")'
-
-      - match: '(__def)'
-        tag:
-          entity: Definition
-          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")|keep_last(".", "64", "4096")'
-          file_path: '@$ROOT|ancestor_tag("file_path")'
+          language: '@$M | split_last(".") | map("py:python", "pyi:python")'
+      - use: def_fqn_dotted
   - name: def_type
     rules:
-      - match: '(__def (__function))'
-        tag: { def_type: Function }
-      - match: '(__def (__method))'
-        tag: { def_type: Method }
-      - match: '(__def (__class))'
-        tag: { def_type: Class }
-      - match: '(__def (__struct))'
-        tag: { def_type: Struct }
-      - match: '(__def (__interface))'
-        tag: { def_type: Interface }
-      - match: '(__def (__enum))'
-        tag: { def_type: Enum }
-      - match: '(__def (__enum_variant))'
-        tag: { def_type: EnumVariant }
-      - match: '(__def (__trait))'
-        tag: { def_type: Trait }
-      - match: '(__def (__impl))'
-        tag: { def_type: Impl }
-      - match: '(__def (__variable))'
-        tag: { def_type: Variable }
-      - match: '(__def (__constant))'
-        tag: { def_type: Constant }
-      - match: '(__def (__lambda))'
-        tag: { def_type: Lambda }
-      - match: '(__def (__field_def))'
-        tag: { def_type: Field }
-      - match: '(__def (__property))'
-        tag: { def_type: Property }
-      - match: '(__def (__type_alias))'
-        tag: { def_type: TypeAlias }
+      - use: function_def_types
+      - use: type_def_types
   - name: imports
     rules:
       - match: '(__import)'
         tag:
           entity: ImportedSymbol
-          file_path: '@$ROOT|ancestor_tag("file_path")'
-          source_path: '@$ROOT|tag("resolved_source")|replace("/", ".")'
+          file_path: '$ROOT | ancestor_tag("file_path")'
+          source_path: '$ROOT | tag("resolved_source") | replace("/", ".")'
       - match: '(__name "*")'
-        tag:
-          import_type: WildcardImport
-          resolved: '@$ROOT|has_incoming("Imports")'
-      - match: '(__name (__alias))'
-        tag:
-          import_type: AliasedImport
-          resolved: '@$ROOT|has_incoming("Imports")'
+        tag: { import_type: WildcardImport, resolved: '$ROOT | has_incoming("Imports")' }
+      - use: aliased_import_type
       # `import os`: the name repeats the module, so the whole module is imported.
       - match: '(__import $S:__source $$$A $N:__name $$$B)'
-        where: '$N == $S'
+        when: '@$N | eq(@$S)'
         tag_on: __name
-        tag:
-          import_type: Import
+        tag: { import_type: Import }
       - match: '(__name)'
-        tag:
-          resolved: '@$ROOT|has_incoming("Imports")'
+        tag: { resolved: '$ROOT | has_incoming("Imports")' }

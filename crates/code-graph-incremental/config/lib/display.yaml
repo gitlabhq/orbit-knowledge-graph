@@ -1,0 +1,149 @@
+rulesets:
+  def_types:
+    - name: def_type
+      rules:
+        - match: '(__def (__function))'
+          tag: { def_type: Function }
+        - match: '(__def (__method))'
+          tag: { def_type: Method }
+        - match: '(__def (__class))'
+          tag: { def_type: Class }
+        - match: '(__def (__struct))'
+          tag: { def_type: Struct }
+        - match: '(__def (__interface))'
+          tag: { def_type: Interface }
+        - match: '(__def (__enum))'
+          tag: { def_type: Enum }
+        - match: '(__def (__enum_variant))'
+          tag: { def_type: EnumVariant }
+        - match: '(__def (__trait))'
+          tag: { def_type: Trait }
+        - match: '(__def (__impl))'
+          tag: { def_type: Impl }
+        - match: '(__def (__variable))'
+          tag: { def_type: Variable }
+        - match: '(__def (__constant))'
+          tag: { def_type: Constant }
+        - match: '(__def (__static_constant))'
+          tag: { def_type: Static }
+        - match: '(__def (__lambda))'
+          tag: { def_type: Lambda }
+        - match: '(__def (__field_def))'
+          tag: { def_type: Field }
+        - match: '(__def (__property))'
+          tag: { def_type: Property }
+        - match: '(__def (__type_alias))'
+          tag: { def_type: TypeAlias }
+
+  display_wildcard_imports:
+    - name: imports
+      rules:
+        - match: '(__import)'
+          tag:
+            entity: ImportedSymbol
+            file_path: '$ROOT | ancestor_tag("file_path")'
+            source_path: '$ROOT | child_sym("__source")'
+        - match: '(__name "*")'
+          tag: { import_type: WildcardImport, resolved: '$ROOT | has_incoming("Imports")' }
+        - match: '(__name (__alias))'
+          tag: { import_type: AliasedImport, resolved: '$ROOT | has_incoming("Imports")' }
+        - match: '(__name)'
+          tag: { resolved: '$ROOT | has_incoming("Imports")' }
+
+  display_imports:
+    - name: imports
+      rules:
+        - match: '(__import)'
+          tag:
+            entity: ImportedSymbol
+            file_path: '$ROOT | ancestor_tag("file_path")'
+            source_path: '$ROOT | child_sym("__source")'
+        - match: '(__name)'
+          tag: { resolved: '$ROOT | has_incoming("Imports")' }
+
+  def_fqn_dotted_except_impl:
+    - match: '(__def !(__impl))'
+      tag:
+        entity: Definition
+        fqn: '$ROOT | ancestor_tag("fqn") | concat(".", $ROOT | child_sym("__defname")) | keep_last(".", "64", "4096")'
+        file_path: '$ROOT | ancestor_tag("file_path")'
+    - match: '(__def (__impl))'
+      tag: { entity: Definition, file_path: '$ROOT | ancestor_tag("file_path")' }
+
+  type_def_types:
+    - match: '(__def (__class))'
+      tag: { def_type: Class }
+    - match: '(__def (__struct))'
+      tag: { def_type: Struct }
+    - match: '(__def (__interface))'
+      tag: { def_type: Interface }
+    - match: '(__def (__enum))'
+      tag: { def_type: Enum }
+    - match: '(__def (__enum_variant))'
+      tag: { def_type: EnumVariant }
+    - match: '(__def (__trait))'
+      tag: { def_type: Trait }
+    - match: '(__def (__impl))'
+      tag: { def_type: Impl }
+    - match: '(__def (__variable))'
+      tag: { def_type: Variable }
+    - match: '(__def (__constant))'
+      tag: { def_type: Constant }
+    - match: '(__def (__lambda))'
+      tag: { def_type: Lambda }
+    - match: '(__def (__field_def))'
+      tag: { def_type: Field }
+    - match: '(__def (__property))'
+      tag: { def_type: Property }
+    - match: '(__def (__type_alias))'
+      tag: { def_type: TypeAlias }
+
+  import_entity:
+    - match: '(__import)'
+      tag:
+        entity: ImportedSymbol
+        file_path: '$ROOT | ancestor_tag("file_path")'
+        source_path: '$ROOT | child_sym("__source")'
+
+  aliased_import_type:
+    - match: '(__name (__alias))'
+      tag: { import_type: AliasedImport, resolved: '$ROOT | has_incoming("Imports")' }
+
+  def_fqn_colons_except_impl:
+    - match: '(__def !(__impl))'
+      tag:
+        entity: Definition
+        fqn: '$ROOT | ancestor_tag("fqn") | concat("::", $ROOT | child_sym("__defname")) | keep_last("::", "64", "4096")'
+        file_path: '$ROOT | ancestor_tag("file_path")'
+    - match: '(__def (__impl))'
+      tag: { entity: Definition, file_path: '$ROOT | ancestor_tag("file_path")' }
+
+  def_fqn_dotted:
+    - match: '(__def)'
+      tag:
+        entity: Definition
+        fqn: '$ROOT | ancestor_tag("fqn") | concat(".", $ROOT | child_sym("__defname")) | keep_last(".", "64", "4096")'
+        file_path: '$ROOT | ancestor_tag("file_path")'
+
+  def_fqn_colons:
+    - match: '(__def)'
+      tag:
+        entity: Definition
+        fqn: '$ROOT | ancestor_tag("fqn") | concat("::", $ROOT | child_sym("__defname")) | keep_last("::", "64", "4096")'
+        file_path: '$ROOT | ancestor_tag("file_path")'
+
+  value_def_types:
+    - match: '(__def (__variable))'
+      tag: { def_type: Variable }
+    - match: '(__def (__constant))'
+      tag: { def_type: Constant }
+    - match: '(__def (__static_constant))'
+      tag: { def_type: Static }
+    - match: '(__def (__lambda))'
+      tag: { def_type: Lambda }
+
+  function_def_types:
+    - match: '(__def (__function))'
+      tag: { def_type: Function }
+    - match: '(__def (__method))'
+      tag: { def_type: Method }

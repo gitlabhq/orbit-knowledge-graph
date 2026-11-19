@@ -1,7 +1,3 @@
-data:
-  shadows_locals: true
-  inline_modules: false
-
 link:
   - group: imports
     match: '(__import)'

@@ -1,5 +1,6 @@
 mod expr;
-pub(crate) mod matching;
+pub mod lang;
+pub mod pattern;
 mod program;
 
 use std::any::Any;
@@ -14,11 +15,43 @@ use crate::env::Env;
 use crate::modules;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
-use crate::tree::{Compact, Edge};
+use crate::tree::{Compact, Edge, EdgeKind, Mutable, Node, Storage};
 pub use program::{Phase, Pipeline, resolution};
 
-pub type Tree = crate::tree::Tree<Compact>;
-pub type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
+pub type Tree<S = Compact> = crate::tree::Tree<S>;
+pub type Cursor<'a, S = Compact> = crate::tree::Cursor<'a, S>;
+
+/// A tree storage the engine runs over. Each module function is compiled
+/// once per storage, so a call dispatches statically.
+pub trait Store: Storage<Node = Node> + Sized + 'static {
+    fn call<M: Module>(f: &Function<M>) -> Call<M, Self>;
+    fn hooks(r: &Registration) -> &Hooks<Self>;
+    fn derive(d: &Derive) -> fn(Cursor<'_, Self>) -> u32;
+}
+
+impl Store for Compact {
+    fn call<M: Module>(f: &Function<M>) -> Call<M, Self> {
+        f.call.compact
+    }
+    fn hooks(r: &Registration) -> &Hooks<Self> {
+        &r.compact
+    }
+    fn derive(d: &Derive) -> fn(Cursor<'_, Self>) -> u32 {
+        d.compact
+    }
+}
+
+impl Store for Mutable {
+    fn call<M: Module>(f: &Function<M>) -> Call<M, Self> {
+        f.call.mutable
+    }
+    fn hooks(r: &Registration) -> &Hooks<Self> {
+        &r.mutable
+    }
+    fn derive(d: &Derive) -> fn(Cursor<'_, Self>) -> u32 {
+        d.mutable
+    }
+}
 
 #[derive(
     Clone,
@@ -112,18 +145,29 @@ pub enum Arg {
 #[derive(Clone, Copy)]
 pub enum KeyPart {
     Arg(u8),
-    Of(u8, fn(Cursor) -> u32),
+    Of(u8, Derive),
+}
+
+#[derive(Clone, Copy)]
+pub struct Derive {
+    pub compact: fn(Cursor<'_, Compact>) -> u32,
+    pub mutable: fn(Cursor<'_, Mutable>) -> u32,
 }
 
 pub trait Module: Sized + 'static {
     const NAME: &'static str;
     type State: Default + 'static;
     fn functions() -> &'static [Function<Self>];
-    fn start<'t>(_cx: &mut Cx<'_, 't, Self>, _root: Cursor<'t>) {}
-    fn finish(_cx: &mut Cx<'_, '_, Self>) {}
+    fn start<'t, S: Store>(_cx: &mut Cx<'_, 't, Self, S>, _root: Cursor<'t, S>) {}
+    fn finish<S: Store>(_cx: &mut Cx<'_, '_, Self, S>) {}
 }
 
-pub type Call<M> = for<'r, 't> fn(&mut Cx<'r, 't, M>, &[Vals]) -> Vals;
+pub type Call<M, S> = for<'r, 't> fn(&mut Cx<'r, 't, M, S>, &[Vals]) -> Vals;
+
+pub struct Calls<M: Module> {
+    pub compact: Call<M, Compact>,
+    pub mutable: Call<M, Mutable>,
+}
 
 pub struct Function<M: Module> {
     pub name: &'static str,
@@ -135,16 +179,21 @@ pub struct Function<M: Module> {
     pub uses: &'static [(&'static str, &'static str)],
     /// Required, not implemented: each phase binds a provider to it.
     pub required: bool,
-    pub call: Call<M>,
+    pub call: Calls<M>,
+}
+
+pub struct Hooks<S: Store> {
+    invoke: fn(&mut Run<S>, u8, u16, &[Vals]) -> Vals,
+    start: fn(&mut Run<S>, u8, u32),
+    finish: fn(&mut Run<S>, u8),
 }
 
 pub struct Registration {
     name: &'static str,
     state: fn() -> Box<dyn Any>,
     describe: fn(u8) -> Vec<Entry>,
-    invoke: fn(&mut Run, u8, u16, &[Vals]) -> Vals,
-    start: fn(&mut Run, u8, u32),
-    finish: fn(&mut Run, u8),
+    compact: Hooks<Compact>,
+    mutable: Hooks<Mutable>,
 }
 
 pub const fn register<M: Module>() -> Registration {
@@ -152,9 +201,16 @@ pub const fn register<M: Module>() -> Registration {
         name: M::NAME,
         state: new_state::<M>,
         describe: describe::<M>,
-        invoke: invoke::<M>,
-        start: start::<M>,
-        finish: finish::<M>,
+        compact: Hooks {
+            invoke: invoke::<M, Compact>,
+            start: start::<M, Compact>,
+            finish: finish::<M, Compact>,
+        },
+        mutable: Hooks {
+            invoke: invoke::<M, Mutable>,
+            start: start::<M, Mutable>,
+            finish: finish::<M, Mutable>,
+        },
     }
 }
 
@@ -179,17 +235,17 @@ fn describe<M: Module>(slot: u8) -> Vec<Entry> {
         .collect()
 }
 
-fn invoke<M: Module>(run: &mut Run, slot: u8, index: u16, args: &[Vals]) -> Vals {
-    (M::functions()[usize::from(index)].call)(&mut Cx::new(run, slot), args)
+fn invoke<M: Module, S: Store>(run: &mut Run<S>, slot: u8, index: u16, args: &[Vals]) -> Vals {
+    (S::call(&M::functions()[usize::from(index)]))(&mut Cx::new(run, slot), args)
 }
 
-fn start<M: Module>(run: &mut Run, slot: u8, root: u32) {
+fn start<M: Module, S: Store>(run: &mut Run<S>, slot: u8, root: u32) {
     let mut cx = Cx::new(run, slot);
     let root = cx.at(root);
     M::start(&mut cx, root);
 }
 
-fn finish<M: Module>(run: &mut Run, slot: u8) {
+fn finish<M: Module, S: Store>(run: &mut Run<S>, slot: u8) {
     M::finish(&mut Cx::new(run, slot));
 }
 
@@ -339,16 +395,18 @@ struct Table {
 
 /// One phase run over one tree: navigation, the budget, the edges written,
 /// one state slot per module, and the memo.
-pub struct Run<'t> {
-    trees: &'t [Tree],
+pub struct Run<'t, S: Store = Compact> {
+    trees: &'t [Tree<S>],
     fi: u32,
-    env: &'t Env,
+    pub(crate) lang_ref: &'t crate::intern::Lang,
     tags: ReservedTags,
     links: &'t Links,
     budget: &'t Sentinel,
-    file: Sentinel,
+    file: &'t Sentinel,
     killed: Option<Killed>,
     max_edges: usize,
+    graph: Option<&'t EdgeIndex>,
+    graph_fi: u32,
     lang: usize,
     data: &'t [Vals],
     edges: Vec<Edge>,
@@ -360,29 +418,48 @@ pub struct Run<'t> {
     cut: bool,
 }
 
-impl<'t> Run<'t> {
+impl<'t, S: Store> Run<'t, S> {
     fn new(
-        trees: &'t [Tree],
+        trees: &'t [Tree<S>],
         fi: u32,
         env: &'t Env,
         links: &'t Links,
         data: &'t [Vec<Vals>],
         budget: &'t Sentinel,
-        file: Sentinel,
+        file: &'t Sentinel,
     ) -> Self {
-        let lang = env.rules_index(&trees[fi as usize].label);
+        let rules = env.rules_index(&trees[fi as usize].label);
+        let mut run = Self::detached(trees, fi, &env.lang, links, budget, file);
+        run.max_edges = env.limits.max_file_edges;
+        run.lang = rules;
+        run.data = data.get(rules).map_or(&[], Vec::as_slice);
+        run
+    }
+
+    /// A run with no language rules, data or edge cap, for evaluating
+    /// expressions outside a phase walk.
+    pub fn detached(
+        trees: &'t [Tree<S>],
+        fi: u32,
+        lang: &'t crate::intern::Lang,
+        links: &'t Links,
+        budget: &'t Sentinel,
+        file: &'t Sentinel,
+    ) -> Self {
         Self {
             trees,
             fi,
-            env,
+            lang_ref: lang,
             links,
-            tags: ReservedTags::new(&env.lang),
+            tags: ReservedTags::new(lang),
             budget,
             file,
             killed: None,
-            max_edges: env.limits.max_file_edges,
-            lang,
-            data: data.get(lang).map_or(&[], Vec::as_slice),
+            max_edges: 0,
+            graph: None,
+            graph_fi: 0,
+            lang: 0,
+            data: &[],
             edges: Vec::new(),
             defs: Vec::new(),
             states: modules::ALL.iter().map(|m| (m.state)()).collect(),
@@ -405,6 +482,11 @@ impl<'t> Run<'t> {
                 cap,
             )),
         }
+    }
+
+    /// A node's text as a symbol: its own symbol, or its source text.
+    pub(crate) fn sym_at(&self, loc: Loc) -> u32 {
+        self.trees[loc.fi as usize].sym_at(loc.node, self.lang_ref)
     }
 
     fn step(&mut self) -> bool {
@@ -446,7 +528,8 @@ impl<'t> Run<'t> {
                 KeyPart::Arg(at) => arg(&mut key, usize::from(at)),
                 KeyPart::Of(at, derive) => {
                     let loc = args[usize::from(at)].first().and_then(|v| v.loc());
-                    let derived = loc.map(|l| derive(Cursor::new(self.trees, l.fi, l.node)));
+                    let derived =
+                        loc.map(|l| S::derive(&derive)(Cursor::new(self.trees, l.fi, l.node)));
                     key.push(Val::Sym(derived.unwrap_or(u32::MAX)));
                 }
             }
@@ -478,7 +561,7 @@ impl<'t> Run<'t> {
         let links = self.links;
         let (id, deps) = (links.to[usize::from(id.0)], links.deps[usize::from(id.0)]);
         let f = function(id);
-        let invoke = modules::ALL[usize::from(f.slot)].invoke;
+        let invoke = S::hooks(&modules::ALL[usize::from(f.slot)]).invoke;
         let reading = std::mem::replace(&mut self.reading, deps);
         if f.kind == Kind::Effect {
             self.reading = u8::MAX;
@@ -552,13 +635,13 @@ fn stamp(epochs: &[u64; WALK + 1], mut deps: u8) -> u64 {
 
 /// Runs a tree phase over one file: each module of the phase starts, the walk
 /// runs, then each module finishes in reverse order.
-pub fn run_tree(
+pub fn run_tree<S: Store>(
     phase: &Phase,
-    tree: &Tree,
+    tree: &Tree<S>,
     env: &Env,
     budget: &Sentinel,
-    file: Sentinel,
 ) -> Result<Vec<Edge>, Killed> {
+    let file = &tree_budget(phase, env, &tree.label);
     let mut run = Run::new(
         std::slice::from_ref(tree),
         0,
@@ -570,14 +653,14 @@ pub fn run_tree(
     );
     let root = tree.root();
     for &slot in &phase.modules {
-        (modules::ALL[usize::from(slot)].start)(&mut run, slot, root.index());
+        (S::hooks(&modules::ALL[usize::from(slot)]).start)(&mut run, slot, root.index());
     }
     let late = phase.flow(&mut run, root);
     for &slot in phase.modules.iter().rev() {
         if let Some(killed) = run.killed.take() {
             return Err(killed);
         }
-        (modules::ALL[usize::from(slot)].finish)(&mut run, slot);
+        (S::hooks(&modules::ALL[usize::from(slot)]).finish)(&mut run, slot);
     }
     phase.revisit(&mut run, root, late);
     match run.killed.take() {
@@ -586,16 +669,96 @@ pub fn run_tree(
     }
 }
 
+/// The phase's per-tree budget, on thread CPU time; unbounded when the phase
+/// declares none.
+fn tree_budget(phase: &Phase, env: &Env, label: &str) -> Sentinel {
+    let ms = phase
+        .budget
+        .tree
+        .as_deref()
+        .and_then(|name| env.limits.ms(name))
+        .unwrap_or(0);
+    Sentinel::new(phase.label, label, ms).on_thread_cpu()
+}
+
+/// A phase's per-scope budget, a child of `run`.
+pub fn scope_budget(phase: &Phase, env: &Env, run: &Sentinel) -> Sentinel {
+    let ms = phase
+        .budget
+        .scope
+        .as_deref()
+        .and_then(|name| env.limits.ms(name))
+        .unwrap_or(0);
+    run.child(phase.label, "", ms)
+}
+
+/// Applies a rewrite phase to one tree in place.
+pub fn rewrite_tree(
+    phase: &Phase,
+    tree: &mut Tree<Mutable>,
+    env: &Env,
+    budget: &Sentinel,
+) -> Result<(), Killed> {
+    let file = tree_budget(phase, env, &tree.label);
+    phase.rewrite(tree, env, budget, &file)
+}
+
+/// Applies a rewrite phase to one tree with the rules at index `rules`.
+pub fn rewrite_tree_with(
+    phase: &Phase,
+    tree: &mut Tree<Mutable>,
+    env: &Env,
+    rules: usize,
+    budget: &Sentinel,
+) -> Result<(), Killed> {
+    let file = tree_budget(phase, env, &tree.label);
+    phase.rewrite_with(tree, env, rules, budget, &file)
+}
+
+/// Sets the tags of a tag-only phase on one tree.
+pub fn tag_tree<S: Store>(
+    phase: &Phase,
+    tree: &mut Tree<S>,
+    fi: u32,
+    env: &Env,
+    graph: &EdgeIndex,
+    budget: &Sentinel,
+) -> Result<(), Killed> {
+    let file = tree_budget(phase, env, &tree.label);
+    phase.tag(tree, fi, env, graph, budget, &file)
+}
+
+/// Which nodes of the graph have an edge of each kind, by direction.
+pub struct EdgeIndex {
+    incoming: FxHashSet<(EdgeKind, u32, u32)>,
+    outgoing: FxHashSet<(EdgeKind, u32, u32)>,
+}
+
+impl EdgeIndex {
+    pub fn new(edges: &[Edge]) -> Self {
+        Self {
+            incoming: edges
+                .iter()
+                .map(|e| (e.kind, e.to_tree, e.to_node))
+                .collect(),
+            outgoing: edges
+                .iter()
+                .map(|e| (e.kind, e.from_tree, e.from_node))
+                .collect(),
+        }
+    }
+}
+
 /// The only surface a module sees: navigation, its own state, calls through
 /// the engine, edges, and the budget.
-pub struct Cx<'r, 't, M: Module> {
-    run: &'r mut Run<'t>,
+pub struct Cx<'r, 't, M: Module, S: Store = Compact> {
+    run: &'r mut Run<'t, S>,
     slot: u8,
     module: PhantomData<fn() -> M>,
 }
 
-impl<'r, 't, M: Module> Cx<'r, 't, M> {
-    fn new(run: &'r mut Run<'t>, slot: u8) -> Self {
+impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
+    fn new(run: &'r mut Run<'t, S>, slot: u8) -> Self {
         Self {
             run,
             slot,
@@ -607,15 +770,15 @@ impl<'r, 't, M: Module> Cx<'r, 't, M> {
         self.run.fi
     }
 
-    pub fn tree(&self) -> &'t Tree {
+    pub fn tree(&self) -> &'t Tree<S> {
         &self.run.trees[self.run.fi as usize]
     }
 
-    pub fn at(&self, node: u32) -> Cursor<'t> {
+    pub fn at(&self, node: u32) -> Cursor<'t, S> {
         Cursor::new(self.run.trees, self.run.fi, node)
     }
 
-    pub fn jump(&self, loc: Loc) -> Cursor<'t> {
+    pub fn jump(&self, loc: Loc) -> Cursor<'t, S> {
         Cursor::new(self.run.trees, loc.fi, loc.node)
     }
 
@@ -626,12 +789,30 @@ impl<'r, 't, M: Module> Cx<'r, 't, M> {
         }
     }
 
-    pub fn env(&self) -> &'t Env {
-        self.run.env
+    pub fn lang(&self) -> &'t crate::intern::Lang {
+        self.run.lang_ref
     }
 
     pub fn tags(&self) -> ReservedTags {
         self.run.tags
+    }
+
+    /// A value's text: a symbol as is, or a node's own text.
+    pub fn text(&self, val: Val) -> Option<u32> {
+        match val {
+            Val::Sym(sym) => Some(sym),
+            Val::Node(loc) | Val::Type(loc) => Some(self.run.sym_at(loc)).filter(|&s| s != 0),
+            _ => None,
+        }
+    }
+
+    /// Whether `node` of this tree has an edge of `kind` in the phase's graph.
+    pub fn has_edge(&self, kind: EdgeKind, incoming: bool, node: u32) -> bool {
+        let key = (kind, self.run.graph_fi, node);
+        self.run.graph.is_some_and(|g| match incoming {
+            true => g.incoming.contains(&key),
+            false => g.outgoing.contains(&key),
+        })
     }
 
     pub fn state(&mut self) -> &mut M::State {

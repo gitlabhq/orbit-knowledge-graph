@@ -11,72 +11,64 @@
 # - Concepts are displayed as Interface; the canonical alphabet has no
 #   Namespace or Concept kind.
 
-config:
-  stdlib: [
-      { module: cstdio, symbols: [clearerr, fclose, feof, ferror, fflush, fgetc,
-          fgetpos, fgets, fopen, fprintf, fputc, fputs, fread, freopen, fscanf,
-          fseek, fsetpos, ftell, fwrite, getc, getchar, perror, printf, putc,
-          putchar, puts, remove, rename, rewind, scanf, setbuf, setvbuf,
-          snprintf, sprintf, sscanf, tmpfile, tmpnam, ungetc, vfprintf,
-          vfscanf, vprintf, vscanf, vsnprintf, vsprintf, vsscanf] },
-      { module: cstdlib, symbols: [abort, abs, atexit, atof, atoi, atol, atoll,
-          at_quick_exit, aligned_alloc, bsearch, calloc, div, exit, free, getenv,
-          labs, ldiv, llabs, lldiv, malloc, mblen, mbstowcs, mbtowc, qsort,
-          quick_exit, rand, realloc, srand, strtod, strtof, strtol, strtold,
-          strtoll, strtoul, strtoull, system, wcstombs, wctomb, _Exit] },
-      { module: cstring, symbols: [memchr, memcmp, memcpy, memmove, memset,
-          strcat, strchr, strcmp, strcoll, strcpy, strcspn, strerror, strlen,
-          strncat, strncmp, strncpy, strpbrk, strrchr, strspn, strstr, strtok, strxfrm] },
-      { module: cassert, symbols: [assert] },
-      { module: cmath, symbols: [abs, acos, asin, atan, atan2, ceil, cos, cosh,
-          exp, exp2, expm1, fabs, floor, fmod, frexp, hypot, ldexp, log, log10,
-          log1p, log2, modf, pow, remainder, round, sin, sinh, sqrt, tan, tanh, trunc] },
-      { module: cctype, symbols: [isalnum, isalpha, isblank, iscntrl, isdigit,
-          isgraph, islower, isprint, ispunct, isspace, isupper, isxdigit, tolower, toupper] },
-      { module: algorithm }, { module: any }, { module: array }, { module: atomic },
-      { module: barrier }, { module: bit }, { module: bitset }, { module: cerrno },
-      { module: cfenv }, { module: cfloat }, { module: charconv }, { module: chrono },
-      { module: cinttypes }, { module: climits }, { module: clocale }, { module: codecvt },
-      { module: compare }, { module: complex }, { module: concepts },
-      { module: condition_variable }, { module: coroutine }, { module: csetjmp },
-      { module: csignal }, { module: cstdarg }, { module: cstddef }, { module: cstdint },
-      { module: ctime }, { module: cuchar }, { module: cwchar }, { module: cwctype },
-      { module: deque }, { module: exception }, { module: execution }, { module: expected },
-      { module: filesystem }, { module: format }, { module: forward_list },
-      { module: fstream }, { module: functional }, { module: future },
-      { module: initializer_list }, { module: iomanip }, { module: ios },
-      { module: iosfwd }, { module: iostream }, { module: istream }, { module: iterator },
-      { module: latch }, { module: limits }, { module: list }, { module: locale },
-      { module: map }, { module: memory }, { module: memory_resource },
-      { module: mutex }, { module: new }, { module: numbers }, { module: numeric },
-      { module: optional }, { module: ostream }, { module: print }, { module: queue },
-      { module: random }, { module: ranges }, { module: ratio }, { module: regex },
-      { module: scoped_allocator }, { module: semaphore }, { module: set },
-      { module: shared_mutex }, { module: source_location }, { module: span },
-      { module: sstream }, { module: stack }, { module: stacktrace }, { module: stdexcept },
-      { module: stop_token }, { module: streambuf }, { module: string },
-      { module: string_view }, { module: syncstream }, { module: system_error },
-      { module: thread }, { module: tuple }, { module: type_traits }, { module: typeindex },
-      { module: typeinfo }, { module: unordered_map }, { module: unordered_set },
-      { module: utility }, { module: valarray }, { module: variant },
-      { module: vector }, { module: version }
-    ]
-  resolve:
-    lookup_from:
-      - __source_root
+import: [c_family, canonical, display, roots, shapes, statements]
 
-stages:
+data:
+  stdlib: [
+    cstdio, cstdlib, cstring, cassert, cmath, cctype, algorithm, any, array, atomic, barrier, bit,
+    bitset, cerrno, cfenv, cfloat, charconv, chrono, cinttypes, climits, clocale, codecvt, compare,
+    complex, concepts, condition_variable, coroutine, csetjmp, csignal, cstdarg, cstddef, cstdint,
+    ctime, cuchar, cwchar, cwctype, deque, exception, execution, expected, filesystem, format,
+    forward_list, fstream, functional, future, initializer_list, iomanip, ios, iosfwd, iostream,
+    istream, iterator, latch, limits, list, locale, map, memory, memory_resource, mutex, new,
+    numbers, numeric, optional, ostream, print, queue, random, ranges, ratio, regex,
+    scoped_allocator, semaphore, set, shared_mutex, source_location, span, sstream, stack,
+    stacktrace, stdexcept, stop_token, streambuf, string, string_view, syncstream, system_error,
+    thread, tuple, type_traits, typeindex, typeinfo, unordered_map, unordered_set, utility,
+    valarray, variant, vector, version
+  ]
+  providers:
+    - [
+        cstdio, clearerr, fclose, feof, ferror, fflush, fgetc, fgetpos, fgets, fopen, fprintf,
+        fputc, fputs, fread, freopen, fscanf, fseek, fsetpos, ftell, fwrite, getc, getchar, perror,
+        printf, putc, putchar, puts, remove, rename, rewind, scanf, setbuf, setvbuf, snprintf,
+        sprintf, sscanf, tmpfile, tmpnam, ungetc, vfprintf, vfscanf, vprintf, vscanf, vsnprintf,
+        vsprintf, vsscanf
+      ]
+    - [
+        cstdlib, abort, abs, atexit, atof, atoi, atol, atoll, at_quick_exit, aligned_alloc,
+        bsearch, calloc, div, exit, free, getenv, labs, ldiv, llabs, lldiv, malloc, mblen,
+        mbstowcs, mbtowc, qsort, quick_exit, rand, realloc, srand, strtod, strtof, strtol, strtold,
+        strtoll, strtoul, strtoull, system, wcstombs, wctomb, _Exit
+      ]
+    - [
+        cstring, memchr, memcmp, memcpy, memmove, memset, strcat, strchr, strcmp, strcoll, strcpy,
+        strcspn, strerror, strlen, strncat, strncmp, strncpy, strpbrk, strrchr, strspn, strstr,
+        strtok, strxfrm
+      ]
+    - [cassert, assert]
+    - [
+        cmath, abs, acos, asin, atan, atan2, ceil, cos, cosh, exp, exp2, expm1, fabs, floor, fmod,
+        frexp, hypot, ldexp, log, log10, log1p, log2, modf, pow, remainder, round, sin, sinh, sqrt,
+        tan, tanh, trunc
+      ]
+    - [
+        cctype, isalnum, isalpha, isblank, iscntrl, isdigit, isgraph, islower, isprint, ispunct,
+        isspace, isupper, isxdigit, tolower, toupper
+      ]
+  lookup_from: [__source_root]
+
+canonicalize:
   - name: imports
     rules:
       - match: '(preproc_include path: $S:string_literal)'
-        replace: '(__import (__source @$S $S) (__source_path @$S|regex_replace("^.", "")|regex_replace(".$", "")|prepend("./")) (__name "*"))'
+        replace: '(__import (__source @$S $S) (__source_path @$S | regex_replace("^.", "") | regex_replace(".$", "") | prepend("./")) (__name "*"))'
       - match: '(preproc_include path: $S:system_lib_string)'
-        replace: '(__import (__source @$S|strip=<|strip_suffix(">")) (__source_path @$S|strip=<|strip_suffix(">")) (__name "*"))'
-
+        replace: '(__import (__source @$S | strip("<") | strip_suffix(">")) (__source_path @$S | strip("<") | strip_suffix(">")) (__name "*"))'
   - name: normalize
     rules:
       - match: '(translation_unit $$$C)'
-        replace: '(__source_file @$ROOT $$$C)'
+        replace: '%source_file($$$C)'
       - match: '(return_statement $$$V)'
         replace: '(__ssa_return $$$V)'
       - match: '(field_expression argument: (this) field: $F:field_identifier)'
@@ -86,11 +78,11 @@ stages:
       - match: '(template_type name: $T:type_identifier)'
         replace: '(type_identifier @$T)'
       - match: '(parameter_declaration type: $T:type_identifier declarator: $N:identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
+        replace: '%typed_param($N, $T)'
       - match: '(parameter_declaration type: $T:type_identifier declarator: (reference_declarator $N:identifier))'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
+        replace: '%typed_param($N, $T)'
       - match: '(parameter_declaration type: $T:type_identifier declarator: (pointer_declarator declarator: $N:identifier))'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
+        replace: '%typed_param($N, $T)'
       - match: '(parameter_declaration declarator: $N:identifier)'
         replace: '(__binding @$N)'
       - match: '(parameter_declaration declarator: (pointer_declarator declarator: $N:identifier))'
@@ -99,38 +91,32 @@ stages:
         replace: '(__binding @$N)'
       - match: '(enumerator name: $N:identifier)'
         replace: '(__def (__defname @$N) (__enum_variant))'
-
   - name: retag-refs
     rules:
       - match: '(field_expression argument: $O:__ivar field: $F:field_identifier)'
-        replace: '(__member @$F (__object $O))'
+        replace: '%member($F, $O)'
       - match: '(field_expression argument: $O:__member field: $F:field_identifier)'
-        replace: '(__member @$F (__object $O))'
+        replace: '%member($F, $O)'
       - match: '(field_expression argument: $O field: (template_method name: $F:field_identifier))'
-        replace: '(__member @$F (__object @$O $O))'
+        replace: '%member_text($F, $O)'
       - match: '(field_expression argument: $O field: $F:field_identifier)'
-        replace: '(__member @$F (__object @$O $O))'
-
+        replace: '%member_text($F, $O)'
   - name: retag-calls
     rules:
-      - match: '(call_expression function: $F:__ivar arguments: $A)'
-        replace: '(__call (__callee $F) $A)'
-      - match: '(call_expression function: $F:__member arguments: $A)'
-        replace: '(__call (__callee $F) $A)'
+      - use: canonical_callee_calls
       # a::b::f() and a::b::c::f(): the scope nests to the right, so each depth is its own rule
       - match: '(call_expression function: (qualified_identifier scope: $S:namespace_identifier name: (qualified_identifier scope: $T:namespace_identifier name: (qualified_identifier scope: $U:namespace_identifier name: $N:identifier))) arguments: $A)'
-        replace: '(__call (__callee (__member @$N (__object (__member @$U (__object (__member @$T (__object @$S $S))))))) $A)'
+        replace: '(__call (__callee (__member @$N (__object (__member @$U (__object %member_text($T, $S)))))) $A)'
       - match: '(call_expression function: (qualified_identifier scope: $S:namespace_identifier name: (qualified_identifier scope: $T:namespace_identifier name: $N:identifier)) arguments: $A)'
-        replace: '(__call (__callee (__member @$N (__object (__member @$T (__object @$S $S))))) $A)'
+        replace: '(__call (__callee (__member @$N (__object %member_text($T, $S)))) $A)'
       - match: '(call_expression function: (qualified_identifier scope: $S:namespace_identifier name: $N:identifier) arguments: $A)'
-        replace: '(__call (__callee (__member @$N (__object @$S $S))) $A)'
+        replace: '(__call (__callee %member_text($N, $S)) $A)'
       - match: '(call_expression function: (template_function name: $N:identifier) arguments: $A)'
-        replace: '(__call (__callee @$N $N) $A)'
+        replace: '%call($N, $A)'
       - match: '(call_expression function: $F:identifier arguments: $A)'
-        replace: '(__call (__callee @$F $F) $A)'
+        replace: '%call($F, $A)'
       - match: '(new_expression type: $T:type_identifier arguments:? $A)'
-        replace: '(__call (__callee @$T $T) $A)'
-
+        replace: '%call($T, $A)'
   - name: classify
     rules:
       - match: '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: (parenthesized_declarator (ms_call_modifier) $N:identifier) parameters: $P) body: $B)'
@@ -144,9 +130,9 @@ stages:
       - match: '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: $Q:qualified_identifier parameters: $P) body: $B)'
         replace: '(__def (__defname @$Q $Q) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition declarator: $Q:qualified_identifier body: $B)'
-        replace: '(__def (__defname @$Q|regex_replace("\s*\(\s*\)\s*(const)?\s*$", "")|regex_replace("\s*/\*[^*]*\*/\s*$", "") $Q) (__function) $B)'
+        replace: '(__def (__defname @$Q | regex_replace("\s*\(\s*\)\s*(const)?\s*$", "") | regex_replace("\s*/\*[^*]*\*/\s*$", "") $Q) (__function) $B)'
       - match: '(function_definition declarator: $C:operator_cast body: $B)'
-        replace: '(__def (__defname @$C|regex_replace("\s*\(\s*\)\s*(const)?\s*$", "")|regex_replace("\s*/\*[^*]*\*/\s*$", "") $C) (__function) $B)'
+        replace: '(__def (__defname @$C | regex_replace("\s*\(\s*\)\s*(const)?\s*$", "") | regex_replace("\s*/\*[^*]*\*/\s*$", "") $C) (__function) $B)'
       - match: '(declaration declarator: (function_declarator declarator: $N:identifier))'
         replace: '(__defname @$N)'
         tag: { exports: '@$N' }
@@ -189,11 +175,11 @@ stages:
       - match: '(declaration type: $T:type_identifier declarator: (function_declarator declarator: $N:identifier parameters: $A))'
         replace: '(__binding @$N (__declaration) (__ssa_typed @$T) $A)'
       - match: '(declaration type: $T:qualified_identifier declarator: (function_declarator declarator: $N:identifier parameters: $A))'
-        replace: '(__binding @$N (__declaration) (__ssa_typed @$T|split_last("::")) $A)'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T | split_last("::")) $A)'
       - match: '(declaration type: $T:qualified_identifier declarator: (init_declarator declarator: $N:identifier value: $V:__call))'
-        replace: '(__binding @$N (__declaration) (__ssa_typed @$T|split_last("::") $T) (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T | split_last("::") $T) (__rhs $V))'
       - match: '(declaration type: $T:qualified_identifier declarator: $N:identifier)'
-        replace: '(__binding @$N (__declaration) (__ssa_typed @$T|split_last("::") $T))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T | split_last("::") $T))'
       - match: '(declaration type: $T:type_identifier declarator: (init_declarator declarator: $N:identifier value: $V:__call))'
         replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V))'
       - match: '(declaration type: $T:type_identifier declarator: (init_declarator declarator: $N:identifier value: $V))'
@@ -204,30 +190,7 @@ stages:
         replace: '(__binding @$N (__declaration) (__ssa_typed @$T))'
       - match: '(declaration type: $T:type_identifier declarator: (pointer_declarator declarator: $N:identifier))'
         replace: '(__binding @$N (__declaration) (__ssa_typed @$T))'
-      - match: '(declaration declarator: (init_declarator declarator: $N:identifier value: $V:__call))'
-        replace: '(__binding @$N (__declaration) (__rhs $V))'
-      - match: '(declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V:__call))'
-        replace: '(__binding @$N (__declaration) (__rhs $V))'
-      - match: '(declaration declarator: (init_declarator declarator: $N:identifier value: $V))'
-        replace: '(__binding @$N (__declaration) (__rhs @$V $V))'
-      - match: '(declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V))'
-        replace: '(__binding @$N (__declaration) (__rhs @$V $V))'
-      - match: '(assignment_expression left: $N:identifier right: $R:__call)'
-        replace: '(__binding @$N (__rhs $R))'
-      - match: '(assignment_expression left: $N:identifier right: $R)'
-        replace: '(__binding @$N (__rhs @$R $R))'
-      - match: '(if_statement condition: $C consequence: $Q alternative:? $A)'
-        replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
-      - match: '(switch_statement condition: $C body: $B)'
-        replace: '(__ssa_branch $C $B)'
-      - match: '(conditional_expression condition: $C consequence: $Q alternative: $A)'
-        replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm $A))'
-      - match: '(for_statement $$$H body: $B)'
-        replace: '(__ssa_loop $$$H $B)'
-      - match: '(while_statement condition: $C body: $B)'
-        replace: '(__ssa_loop $C $B)'
-      - match: '(do_statement body: $B condition: $C)'
-        replace: '(__ssa_loop $B $C)'
+      - use: c_statements
       - match: '(for_range_loop type:? $T:type_identifier declarator: $N:identifier right: $V body: $B)'
         replace: '(__scope (__ssa_loop $V (__binding @$N (__declaration) (__ssa_typed? @$T)) $B))'
       - match: '(for_range_loop declarator: $N:identifier right: $V body: $B)'
@@ -251,64 +214,29 @@ stages:
         replace: '(__def (__defname @$N) (__interface))'
       - match: '(namespace_definition name: $N body: $B)'
         replace: '(__def (__defname @$N $N) (__class) $B)'
-
   - name: ssa-cleanup
     rules:
       - match: '(compound_statement $$$B)'
         replace: '(__scope $$$B)'
       - match: '(__ssa_return $V:identifier)'
-        replace: '(__ssa_return (__rhs @$V $V))'
-
+        replace: '%return_value($V)'
   - name: tag-defs
     rules:
-      - match: '(__def (__function))'
-        tag: { callable: "true", scoped: "true" }
-      - match: '(__def (__method))'
-        tag: { callable: "true", scoped: "true" }
-      - match: '(__def (__class))'
-        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
-      - match: '(__def (__lambda))'
-        tag: { callable: "true" }
-      - match: '(__def (__enum_variant))'
-        tag: { callable: "true", value: "true" }
-      - match: '(__def (__struct))'
-        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
-      - match: '(__def (__impl))'
-        tag: { scoped: "true" }
-      - match: '(__def (__trait))'
-        tag: { value: "true", declares_type: "true", scoped: "true" }
-      - match: '(__def (__enum))'
-        tag: { value: "true", declares_type: "true", scoped: "true" }
-      - match: '(__def (__interface))'
-        tag: { value: "true", declares_type: "true" }
-      - match: '(__def (__type_alias))'
-        tag: { value: "true", declares_type: "true" }
-      - match: '(__def (__field_def))'
-        tag: { value: "true" }
+      - use: function_def_tags
+      - use: class_lambda_def_tags
+      - use: callable_struct_def_tags
+      - use: trait_def_tags
+      - use: interface_def_tags
+      - use: alias_field_def_tags
+  - use: tag_file_dir
+  - use: resolve_paths
 
-  - name: tag-file-dir
+project:
+  - name: roots
     rules:
-      - match: '$M:__source_file'
-        tag:
-          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
-
-  - name: resolve-paths
-    rules:
-      - match: '(__import)'
-        tag:
-          resolved_source: '@$ROOT|child_sym("__source_path")'
-      - match: '(__import (__source_path "^."))'
-        tag:
-          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
-
-resolve:
-  stages:
-    - name: roots
-      rules:
-        - match: '(__dir "src" $$$REST)'
-          replace: '(__dir "src" (__source_root) $$$REST)'
-        - match: '(__dir "include" $$$REST)'
-          replace: '(__dir "include" (__source_root) $$$REST)'
+      - use: src_root
+      - match: '(__dir "include" $$$REST)'
+        replace: '(__dir "include" (__source_root) $$$REST)'
 
 display:
   - name: fqn
@@ -316,70 +244,12 @@ display:
       - match: '$M:__source_file'
         tag:
           entity: File
-          fqn: '@$M|stem|split_last("/")'
+          fqn: '@$M | stem | split_last("/")'
           file_path: '@$M'
-          language: '@$M|split_last(".")|map("cpp:cpp", "cc:cpp", "cxx:cpp", "hpp:cpp", "hh:cpp", "hxx:cpp")'
+          language: '@$M | split_last(".") | map("cpp:cpp", "cc:cpp", "cxx:cpp", "hpp:cpp", "hh:cpp", "hxx:cpp")'
       - match: '(__def (__impl))'
         tag:
-          fqn: '@$ROOT|concat("::", "ancestor_tag:fqn", "child_sym:__defname")|keep_last("::", "64", "4096")'
-      - match: '(__def !(__impl))'
-        tag:
-          entity: Definition
-          fqn: '@$ROOT|concat("::", "ancestor_tag:fqn", "child_sym:__defname")|keep_last("::", "64", "4096")'
-          file_path: '@$ROOT|ancestor_tag("file_path")'
-      - match: '(__def (__impl))'
-        tag:
-          entity: Definition
-          file_path: '@$ROOT|ancestor_tag("file_path")'
-  - name: def_type
-    rules:
-      - match: '(__def (__function))'
-        tag: { def_type: Function }
-      - match: '(__def (__method))'
-        tag: { def_type: Method }
-      - match: '(__def (__class))'
-        tag: { def_type: Class }
-      - match: '(__def (__struct))'
-        tag: { def_type: Struct }
-      - match: '(__def (__interface))'
-        tag: { def_type: Interface }
-      - match: '(__def (__enum))'
-        tag: { def_type: Enum }
-      - match: '(__def (__enum_variant))'
-        tag: { def_type: EnumVariant }
-      - match: '(__def (__trait))'
-        tag: { def_type: Trait }
-      - match: '(__def (__impl))'
-        tag: { def_type: Impl }
-      - match: '(__def (__variable))'
-        tag: { def_type: Variable }
-      - match: '(__def (__constant))'
-        tag: { def_type: Constant }
-      - match: '(__def (__static_constant))'
-        tag: { def_type: Static }
-      - match: '(__def (__lambda))'
-        tag: { def_type: Lambda }
-      - match: '(__def (__field_def))'
-        tag: { def_type: Field }
-      - match: '(__def (__property))'
-        tag: { def_type: Property }
-      - match: '(__def (__type_alias))'
-        tag: { def_type: TypeAlias }
-  - name: imports
-    rules:
-      - match: '(__import)'
-        tag:
-          entity: ImportedSymbol
-          file_path: '@$ROOT|ancestor_tag("file_path")'
-          source_path: '@$ROOT|child_sym("__source")'
-      - match: '(__name "*")'
-        tag:
-          import_type: WildcardImport
-          resolved: '@$ROOT|has_incoming("Imports")'
-      - match: '(__name (__alias))'
-        tag:
-          import_type: AliasedImport
-          resolved: '@$ROOT|has_incoming("Imports")'
-      - match: '(__name)'
-        tag:
-          resolved: '@$ROOT|has_incoming("Imports")'
+          fqn: '$ROOT | ancestor_tag("fqn") | concat("::", $ROOT | child_sym("__defname")) | keep_last("::", "64", "4096")'
+      - use: def_fqn_colons_except_impl
+  - use: def_types
+  - use: display_wildcard_imports

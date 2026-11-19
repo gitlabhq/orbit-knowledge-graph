@@ -1,23 +1,20 @@
-stages:
+import: [shapes]
+
+canonicalize:
   - name: normalize
     rules:
       - match: '(document $$$C)'
-        replace: '(__source_file @$ROOT $$$C)'
-
+        replace: '%source_file($$$C)'
   - name: classify
     rules:
       - match: '(section $N:heading $K:section_key $$$C)'
         replace: '(__def (__defname @$N) (__section) (__fqn_segment @$K) $$$C)'
       - match: '(front_matter $N:name $K:segment $$$C)'
         replace: '(__def (__defname @$N) (__front_matter) (__fqn_segment @$K) $$$C)'
-
   - name: tag-defs
     rules:
       - match: '(__def (__section))'
-        tag: { scoped: "true", definition_span: "true" }
-
-resolve:
-  stages: []
+        tag: { scoped: 'true', definition_span: 'true' }
 
 display:
   - name: fqn
@@ -25,14 +22,14 @@ display:
       - match: '$M:__source_file'
         tag:
           entity: File
-          fqn: '@$M|stem|split_last("/")|replace("\", "\\")|replace("#", "\#")'
+          fqn: '@$M | stem | split_last("/") | replace("\", "\\") | replace("#", "\#")'
           file_path: '@$M'
           language: markdown
       - match: '(__def)'
         tag:
           entity: Definition
-          fqn: '@$ROOT|concat("#", "ancestor_tag:fqn", "child_sym:__fqn_segment")'
-          file_path: '@$ROOT|ancestor_tag("file_path")'
+          fqn: '$ROOT | ancestor_tag("fqn") | concat("#", $ROOT | child_sym("__fqn_segment"))'
+          file_path: '$ROOT | ancestor_tag("file_path")'
   - name: def_type
     rules:
       - match: '(__def (__section))'
