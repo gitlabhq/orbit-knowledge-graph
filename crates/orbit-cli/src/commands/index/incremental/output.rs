@@ -2,7 +2,7 @@ use anyhow::Result;
 use arrow::array::{BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use code_graph_incremental::driver::{FileStats, Report};
-use code_graph_incremental::export::ExportPlan;
+use code_graph_incremental::export::{Scope, Tables};
 use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Env, Envelope, Scalar, State};
 use orbit_arrow::ArrowUtils;
@@ -64,19 +64,16 @@ impl<'a> Exporter<'a> {
         &mut self,
         family: SupportLang,
         env: &Env,
-        state: &State,
+        state: &mut State,
         report: &Report,
         stats: bool,
     ) -> Result<FamilyOutput> {
-        let plan = ExportPlan::from_config(&env.export_config, self.ontology, &env.lang)?;
         let tables = code_graph_incremental::export::export(
-            &state.trees,
-            &state.edges,
-            &env.lang,
-            &plan,
+            env,
+            state,
+            &Tables::load(env, self.ontology)?,
             &envelope(self.git),
-            true,
-            &|_| true,
+            &Scope::all(),
             &code_graph_incremental::Sentinel::disabled(),
         )?;
         self.insert(tables)?;
@@ -182,11 +179,11 @@ pub(super) fn replacement(
     git: &GitInfo,
     ontology: &ontology::Ontology,
     env: &Env,
-    state: &State,
+    state: &mut State,
     files: &FxHashSet<String>,
 ) -> Result<Replacement> {
     let envelope = envelope(git);
-    let plan = ExportPlan::from_config(&env.export_config, ontology, &env.lang)?;
+    let tables = Tables::load(env, ontology)?;
     let edge_table = ontology
         .local_edge_table_name()
         .ok_or_else(|| anyhow::anyhow!("local_db.edge_table.name must be configured"))?;
@@ -202,15 +199,17 @@ pub(super) fn replacement(
         .filter(|(_, tree)| files.contains(tree.label.as_str()))
         .map(|(index, _)| index as u32)
         .collect();
-    for (table, batch) in code_graph_incremental::export::export_trees(
-        &state.trees,
-        &state.edges,
-        &env.lang,
-        &plan,
+    let scope = Scope {
+        include_directories: false,
+        owns_file: &|_| true,
+        only: Some(&only),
+    };
+    for (table, batch) in code_graph_incremental::export::export(
+        env,
+        state,
+        &tables,
         &envelope,
-        false,
-        &|_| true,
-        Some(&only),
+        &scope,
         &code_graph_incremental::Sentinel::disabled(),
     )? {
         if table == edge_table {
@@ -273,7 +272,6 @@ pub(super) fn directory_rows(
 ) -> Result<Vec<(String, RecordBatch)>> {
     Ok(code_graph_incremental::export::export_directories(
         paths,
-        code_graph_incremental::export::ExportConfig::embedded(),
         ontology,
         &envelope(git),
     )?)

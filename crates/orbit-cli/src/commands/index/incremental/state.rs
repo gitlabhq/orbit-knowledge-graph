@@ -56,10 +56,10 @@ impl Project<'_> {
                 let read_at = std::time::SystemTime::now();
                 let mut env = Env::for_lang(family)?;
                 env.limits.total_ms = self.budget_ms;
-                let (state, report) = self.indexing(&env, paths)?.index(&env)?;
+                let (mut state, report) = self.indexing(&env, paths)?.index(&env)?;
                 let snapshot = self.snapshot_path(family);
                 staged.push(stage(&env, &state, &snapshot, None, read_at)?);
-                outputs.push(exporter.write(family, &env, &state, &report, self.stats)?);
+                outputs.push(exporter.write(family, &env, &mut state, &report, self.stats)?);
             }
             Ok(outputs)
         });
@@ -524,11 +524,11 @@ impl Reader<'_> {
         let known: FxHashSet<&str> = state.trees.iter().map(|tree| tree.label.as_str()).collect();
         let added = paths.iter().any(|path| !known.contains(path.as_str()));
         drop(known);
-        let (state, report) = (self.indexing)(&env, paths)?.reindex(&env, state, &removed)?;
+        let (mut state, report) = (self.indexing)(&env, paths)?.reindex(&env, state, &removed)?;
         let labels: Vec<String> = state.trees.iter().map(|tree| tree.label.clone()).collect();
         // Every phase after the per-file ones runs on every tree, so any file's rows can change.
         let files: FxHashSet<String> = labels.iter().cloned().chain(removed).collect();
-        let replacement = output::replacement(self.git, self.ontology, &env, &state, &files)?;
+        let replacement = output::replacement(self.git, self.ontology, &env, &mut state, &files)?;
         let mut staged = stage(&env, &state, &snapshot, None, read_at)?;
         staged.replacement = Some(replacement);
         staged.output = output::family_output(family, state.trees.len(), &report, self.stats);

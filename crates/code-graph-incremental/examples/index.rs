@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ("commit_sha", Scalar::Str("working-tree")),
         ]),
         &ontology,
-        ExportConfig::embedded(),
+        &ExportConfig::default(),
         |batches: Vec<(String, RecordBatch)>| -> Result<(), Box<dyn std::error::Error>> {
             let mut written = written.lock().map_err(|error| error.to_string())?;
             let (counts, batch_number) = &mut *written;

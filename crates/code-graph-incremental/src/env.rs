@@ -75,7 +75,7 @@ impl Env {
         let pipeline = crate::engine::Pipeline::load(&lang, &sources)?;
         let project = project(&pipeline, &lang, sources.len())?;
         Ok(Self {
-            export_config: crate::export::ExportConfig::embedded().clone(),
+            export_config: crate::export::ExportConfig::default(),
             pipeline,
             project,
             lang,

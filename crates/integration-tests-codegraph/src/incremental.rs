@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use code_graph_incremental::driver::{self, Report};
-use code_graph_incremental::export::{self, ExportPlan};
+use code_graph_incremental::export::{self, Scope, Tables};
 use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Env, Envelope, Killed, Limits, Scalar, Sentinel, State};
 use ontology::Ontology;
@@ -178,7 +178,7 @@ fn index_and_check(yaml: &str) {
 /// graph comes back for the next step.
 fn check(
     env: &Env,
-    (state, report): (State, Report),
+    (mut state, report): (State, Report),
     ontology: &Arc<Ontology>,
     tests: &[TestCase],
     skipped: &[SkippedFile],
@@ -192,16 +192,13 @@ fn check(
         ("commit_sha", Scalar::Str("test")),
     ]);
     let db = create_test_db().expect("in-memory DuckDB");
-    let plan =
-        ExportPlan::from_config(&env.export_config, ontology, &env.lang).expect("export plan");
+    let plan = Tables::load(env, ontology).expect("export rules");
     let tables = export::export(
-        &state.trees,
-        &state.edges,
-        &env.lang,
+        env,
+        &mut state,
         &plan,
         &envelope,
-        true,
-        &|_| true,
+        &Scope::all(),
         &Sentinel::disabled(),
     )
     .expect("export");
