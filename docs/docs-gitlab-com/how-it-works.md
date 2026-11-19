@@ -97,5 +97,6 @@ After 30 days, GitLab deletes all graph data of the group.
 
 ## Related topics
 
-- [GitLab Orbit roadmap](https://gitlab-org.gitlab.io/orbit/knowledge-graph/)
+- [GitLab Orbit roadmap](https://gitlaborbit.dev/next)
+- [How GitLab Orbit is built](https://gitlaborbit.dev/engineering/architecture/)
 - [Troubleshooting](troubleshooting.md)
