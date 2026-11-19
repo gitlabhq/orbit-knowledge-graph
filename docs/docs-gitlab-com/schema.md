@@ -83,7 +83,7 @@ Most languages also get imports and cross-file calls.
 | JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, `.json` | None |
 | Kotlin | `.kt`, `.kts` | None |
 | Lua | `.lua` | Cross-file calls on module tables loaded with `require` only. No cross-file calls to global functions. |
-| Markdown | `.md`, `.markdown` | Headings become sections, and front matter becomes a definition. Relative links become imports of the linked file, or of its section when the anchor matches. External, same-page, and broken links add nothing. No calls. |
+| Markdown | `.md`, `.markdown` | Headings become sections, and front matter becomes a definition. Relative links become imports of the linked file, or of its section when the anchor matches. External links, same-page links, and links to missing files add nothing. No calls. |
 | PHP | `.php`, `.phtml`, `.php3`, `.php4`, `.php5`, `.php7`, `.phps` | None |
 | Python | `.py` | None |
 | Ruby | `.rb`, `.rbw`, `.rake`, `.gemspec` | None |
