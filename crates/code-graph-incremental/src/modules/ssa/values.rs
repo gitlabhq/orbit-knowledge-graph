@@ -6,7 +6,7 @@ use smallvec::{SmallVec, smallvec};
 
 use super::{Deferred, Key, Ssa, Value, to_vals};
 use crate::canonical::Canonical as C;
-use crate::engine::{Cursor, Cx, Loc, Val, one};
+use crate::engine::{Cursor, Cx, Loc, Val, one, resolution};
 use crate::tree::{Edge, EdgeKind, is_name_text};
 
 fn member_of(node: Cursor<'_>) -> Option<Cursor<'_>> {
@@ -344,9 +344,17 @@ impl<'t> Cx<'_, 't, Ssa> {
                     }
                 }
             }
+            let sites = one(Val::Node(Loc { fi: 0, node: site }));
             for (kind, to) in edges {
+                let args = [one(Val::Node(to)), sites.clone()];
+                let found = self.call(crate::fn_id!("core", "resolution"), &args);
+                let resolved = match found.first() {
+                    Some(&Val::Sym(name)) => resolution(self.env().lang.syms.resolve(name)),
+                    _ => None,
+                };
                 self.emit(Edge {
                     site: Some(site),
+                    call_resolution: resolved.unwrap_or_default(),
                     ..Edge::local(from, to.node, kind)
                 });
             }

@@ -51,7 +51,7 @@ link:
     enter:
       - mod.ssa.bind_import($ROOT | child_all("__import"))
       - shadow($ROOT)
-      - emit: { type_flow: { from: enclosing, to: $M | receiver_calls, site: $ROOT } }
+      - emit: { type_flow: { from: enclosing, to: $M | receiver_calls, site: $ROOT, resolve: resolution } }
     children: $ROOT | without("__import")
   - match: '(__call $C:__callee)'
     when: $C | mod.ssa.phi
@@ -59,20 +59,21 @@ link:
       - mod.ssa.bind_import($ROOT | child_all("__import"))
       - shadow($ROOT)
       - emit:
-          type_flow: { from: enclosing, to: $C | member_of | receiver_calls, site: $ROOT }
+          type_flow: { from: enclosing, to: $C | member_of | receiver_calls, site: $ROOT, resolve: resolution }
       - mod.ssa.defer($ROOT)
     children: $ROOT | without("__import")
   - match: '(__call (__callee $M:(__member $O:__object)))'
     enter:
       - mod.ssa.bind_import($ROOT | child_all("__import"))
       - shadow($ROOT)
-      - emit: { type_flow: { from: enclosing, to: $M | receiver_calls, site: $ROOT } }
+      - shadow($O | value_call)
+      - emit: { type_flow: { from: enclosing, to: $M | receiver_calls, site: $ROOT, resolve: resolution } }
       - emit: { calls: { from: enclosing, to: $O | type | member($M), site: $ROOT } }
       - emit:
           calls: { from: enclosing, to: $O | type | unmatched($M) | callable, site: $ROOT }
-          imports: { from: enclosing, to: $O | type | unmatched($M) | imported, site: $ROOT }
-          type_flow: { from: enclosing, to: $O | type | unmatched($M) | produced, site: $ROOT }
-      - emit: { type_flow: { from: enclosing, to: $O | chain_head | type | typed_calls, site: $ROOT } }
+          imports: { from: enclosing, to: $O | type | unmatched($M) | imported, site: $ROOT, resolve: resolution }
+          type_flow: { from: enclosing, to: $O | type | unmatched($M) | produced, site: $ROOT, resolve: resolution }
+      - emit: { type_flow: { from: enclosing, to: $O | chain_head | type | typed_calls, site: $ROOT, resolve: resolution } }
       - mod.ssa.defer($ROOT)
     children: $ROOT | without("__import")
   - match: '(__call (__callee (__member)))'
@@ -87,8 +88,8 @@ link:
     enter: [mod.ssa.bind_import($ROOT | child_all("__import")), shadow($ROOT)]
     emit:
       calls: { from: enclosing, to: $ROOT | callee_targets | callable, site: $ROOT }
-      imports: { from: enclosing, to: $ROOT | callee_targets | imported, site: $ROOT }
-      type_flow: { from: enclosing, to: $ROOT | callee_targets | produced, site: $ROOT }
+      imports: { from: enclosing, to: $ROOT | callee_targets | imported, site: $ROOT, resolve: resolution }
+      type_flow: { from: enclosing, to: $ROOT | callee_targets | produced, site: $ROOT, resolve: resolution }
     children: $ROOT | without("__import")
   - match: '(__call)'
     enter: [mod.ssa.bind_import($ROOT | child_all("__import")), shadow($ROOT)]
@@ -103,12 +104,12 @@ link:
       - emit:
           calls: { from: enclosing, to: $O | type | unmatched($ROOT) | callable, resolution: reference }
           imports: { from: enclosing, to: $O | type | unmatched($ROOT) | imported, site: $ROOT | binding_site, resolution: reference }
-          type_flow: { from: enclosing, to: $O | type | unmatched($ROOT) | produced, resolution: reference }
+          type_flow: { from: enclosing, to: $O | type | unmatched($ROOT) | produced, resolution: reference, resolve: resolution }
 
   - match: '(__decorator)'
     emit:
       calls: { from: $ROOT | parent, to: $ROOT | type | is_def }
-      imports: { from: $ROOT | parent, to: $ROOT | type | imported, site: $ROOT }
+      imports: { from: $ROOT | parent, to: $ROOT | type | imported, site: $ROOT, resolve: resolution }
     children: '$ROOT | if_true($ROOT | parent | tagged("scoped")) | children'
 
   - match: '(__binding (__qualifier))'
@@ -143,7 +144,7 @@ link:
           imports: { from: enclosing, to: $ROOT | bare_rhs | name | imported, site: $ROOT, resolution: reference }
           calls: { from: enclosing, to: $ROOT | bare_rhs | name | initialized, site: $ROOT }
       - emit:
-          type_flow: { from: enclosing, to: '$ROOT | if_true($ROOT | bare_rhs | name | imported)', site: $ROOT }
+          type_flow: { from: enclosing, to: '$ROOT | if_true($ROOT | bare_rhs | name | imported)', site: $ROOT, resolve: resolution }
       - >-
         mod.ssa.bind($ROOT,
           or($ROOT | if_true(or($ROOT | child("__ssa_typed"),
@@ -178,3 +179,4 @@ link:
     children: [$ROOT | loop_head, $ROOT | loop_body]
     between: [mod.ssa.loop_header($ROOT)]
     exit: [mod.ssa.leave()]
+

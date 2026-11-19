@@ -7,26 +7,20 @@ use crate::canonical::Canonical as C;
 use crate::engine::{Cursor, Cx, Function, KeyPart, Module, Val, Vals, of, one, truthy, yes};
 use crate::modules::{arg, function, node};
 use crate::resolve::CLASS_LIKE;
-use crate::tree::{CallResolution, EdgeKind, Role};
+use crate::tree::Role;
 
 pub struct Core;
 
+const NON_CALLABLE: &str = "non_callable";
+const REFERENCE: &str = "reference";
+
 /// What the link scope knows about types: defs by name, each def's
-/// supertypes, the calls whose callee a local shadows, and member indexes.
+/// supertypes, and the calls whose callee a local shadows.
+#[derive(Default)]
 pub struct State {
     defs: FxHashMap<u32, Vec<u32>>,
     supers: FxHashMap<u32, Vec<u32>>,
     shadowed: FxHashSet<u32>,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            defs: FxHashMap::default(),
-            supers: FxHashMap::default(),
-            shadowed: FxHashSet::default(),
-        }
-    }
 }
 
 enum Ref {
@@ -186,8 +180,7 @@ impl<'t> Cx<'_, 't, Core> {
         }
         let found = self.read(root);
         if !found.iter().all(|&v| self.is_name(v)) {
-            // No epoch bump: only `finish` reads this set.
-            self.state().shadowed.insert(c.index());
+            self.write().shadowed.insert(c.index());
         }
     }
 
@@ -260,43 +253,6 @@ impl Module for Core {
             .filter(|d| d.is(C::Def) && d.child(C::Declaration).is_none())
         {
             cx.define(def);
-        }
-    }
-
-    fn finish(cx: &mut Cx<'_, '_, Self>) {
-        let (tree, wildcard) = (
-            cx.tree(),
-            cx.env().lang.syms.lookup(crate::constants::WILDCARD),
-        );
-        let config = &cx.env().rules_for(&tree.label).config.link;
-        let provided = |site: Option<u32>, to: u32| {
-            let Some(name) = site.and_then(|site| tree.cursor(site).child_sym(C::Callee)) else {
-                return false;
-            };
-            let source = tree
-                .cursor(to)
-                .parent()
-                .and_then(|import| import.child_sym(C::SourcePath));
-            config.builtins.contains(&name)
-                || source.is_some_and(|source| {
-                    config
-                        .providers
-                        .iter()
-                        .any(|(module, symbols)| *module == source && symbols.contains(&name))
-                })
-        };
-        let shadowed = std::mem::take(&mut cx.state().shadowed);
-        for edge in cx.edges_since(0) {
-            if edge.kind == EdgeKind::TypeFlow && shadowed.contains(&edge.to_node) {
-                edge.call_resolution = CallResolution::NonCallable;
-            }
-            let target = tree.cursor(edge.to_node);
-            if edge.kind == EdgeKind::Imports
-                && (target.sym() == wildcard || target.child_sym(C::SsaHint) == Some(wildcard))
-                && provided(edge.site, edge.to_node)
-            {
-                edge.call_resolution = CallResolution::Reference;
-            }
         }
     }
 }
@@ -451,6 +407,9 @@ static FUNCTIONS: &[Function<Core>] = &[
             .filter(|c| c.value_child(C::Member).is_some())
             .map(|c| c.chain_root()))
     }),
+    function!(Pure, "value_call", [one], |cx, a| of(
+        arg(cx, a, 0).and_then(|c| c.value_child(C::Call))
+    )),
     function!(Pure, "member_of", [one], |cx, a| of(
         arg(cx, a, 0).and_then(|c| c.child(C::Member))
     )),
@@ -628,6 +587,36 @@ static FUNCTIONS: &[Function<Core>] = &[
         let mut found = cx.callee_targets(node(cx, a, 0));
         found.retain(|v| *v != Val::Opaque);
         found
+    }),
+    function!(Flow, "resolution", [one, set], |cx, a| {
+        let target = node(cx, a, 0);
+        let syms = &cx.env().lang.syms;
+        if !target.is(C::Def) && !target.is(C::Name) {
+            return match cx.state().shadowed.contains(&target.index()) {
+                true => one(Val::Sym(syms.intern(NON_CALLABLE))),
+                false => Vals::new(),
+            };
+        }
+        let wildcard = syms.lookup(crate::constants::WILDCARD);
+        let wild = target.sym() == wildcard || target.child_sym(C::SsaHint) == Some(wildcard);
+        let callee = arg(cx, a, 1).and_then(|site| site.child_sym(C::Callee));
+        let (Some(name), true) = (callee, wild) else {
+            return Vals::new();
+        };
+        let link = &cx.env().rules_for(&cx.tree().label).config.link;
+        let source = target
+            .parent()
+            .and_then(|import| import.child_sym(C::SourcePath));
+        let provided = link.builtins.contains(&name)
+            || source.is_some_and(|source| {
+                link.providers
+                    .iter()
+                    .any(|(module, symbols)| *module == source && symbols.contains(&name))
+            });
+        match provided {
+            true => one(Val::Sym(syms.intern(REFERENCE))),
+            false => Vals::new(),
+        }
     }),
     function!(Effect, "define", [one], |cx, a| {
         cx.define(node(cx, a, 0));

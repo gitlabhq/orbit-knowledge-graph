@@ -75,6 +75,16 @@ struct Emit {
     to: Expr,
     site: Option<Expr>,
     resolution: CallResolution,
+    resolve: Option<FnId>,
+}
+
+pub fn resolution(name: &str) -> Option<CallResolution> {
+    match name {
+        "reference" => Some(CallResolution::Reference),
+        "callable" => Some(CallResolution::Callable),
+        "non_callable" => Some(CallResolution::NonCallable),
+        _ => None,
+    }
 }
 
 enum Action {
@@ -341,16 +351,33 @@ impl Emit {
                 .transpose()
         };
         for name in fields.keys() {
-            if !["from", "to", "site", "resolution"].contains(&name.as_str()) {
+            if !["from", "to", "site", "resolution", "resolve"].contains(&name.as_str()) {
                 return Err(LoadError(format!("emit {kind}: unknown field {name}")));
             }
         }
         let resolution = match fields.get("resolution").map(String::as_str) {
             None => CallResolution::Unknown,
-            Some("reference") => CallResolution::Reference,
-            Some("callable") => CallResolution::Callable,
-            Some("non_callable") => CallResolution::NonCallable,
-            Some(other) => return Err(LoadError(format!("unknown resolution {other}"))),
+            Some(name) => {
+                resolution(name).ok_or_else(|| LoadError(format!("unknown resolution {name}")))?
+            }
+        };
+        let resolve = match fields.get("resolve") {
+            None => None,
+            Some(name) => {
+                let (module, f) = name
+                    .strip_prefix("mod.")
+                    .and_then(|n| n.split_once('.'))
+                    .unwrap_or(("core", name));
+                let id = super::lookup(module, f)
+                    .ok_or_else(|| LoadError(format!("emit {kind}: unknown resolve {name}")))?;
+                let id = scope.links.to(id);
+                if super::function(id).sig != [super::Arg::One, super::Arg::Set] {
+                    return Err(LoadError(format!(
+                        "emit {kind}: resolve {name} takes (target, site)"
+                    )));
+                }
+                Some(id)
+            }
         };
         Ok(Emit {
             kind: edge,
@@ -358,21 +385,31 @@ impl Emit {
             to: field("to")?.ok_or_else(|| LoadError(format!("emit {kind} needs to")))?,
             site: field("site")?,
             resolution,
+            resolve,
         })
     }
 
     fn run(&self, run: &mut Run, caps: &[Vals]) {
-        let site = self.site.as_ref().map(|s| s.eval(run, caps));
-        let site = site
-            .and_then(|s| s.first().and_then(|v| v.loc()))
-            .map(|l| l.node);
+        let sites = self
+            .site
+            .as_ref()
+            .map(|s| s.eval(run, caps))
+            .unwrap_or_default();
+        let site = sites.first().and_then(|v| v.loc()).map(|l| l.node);
         let from = self.from.eval(run, caps);
         let to = self.to.eval(run, caps);
         for from in from.iter().filter_map(|v| v.loc()) {
-            for to in to.iter().filter_map(|v| v.loc()) {
+            for (&target, to) in to.iter().filter_map(|v| Some((v, v.loc()?))) {
+                let resolved = self.resolve.and_then(|f| {
+                    let found = run.call(f, &[SmallVec::from_elem(target, 1), sites.clone()]);
+                    match found.first() {
+                        Some(&Val::Sym(name)) => resolution(run.env.lang.syms.resolve(name)),
+                        _ => None,
+                    }
+                });
                 run.edges.push(Edge {
                     site,
-                    call_resolution: self.resolution,
+                    call_resolution: resolved.unwrap_or(self.resolution),
                     ..Edge::new(from.fi, from.node, to.fi, to.node, self.kind)
                 });
             }
