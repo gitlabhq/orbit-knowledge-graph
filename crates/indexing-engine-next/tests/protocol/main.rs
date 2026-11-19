@@ -1,13 +1,13 @@
-mod world;
+mod cluster;
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use cluster::{Coverage, random_run, write_runs_module};
 use indexing_engine_next::protocol::{
     Claim, HolderId, Lease, LeaseEntry, LeaseRules, Publish, Renewal, Revision, TaskId,
     decide_submit,
 };
 use uuid::Uuid;
-use world::{Coverage, walk, write_runs_module};
 
 const RUNS: u64 = 300;
 const STEPS: usize = 60;
@@ -129,7 +129,7 @@ fn a_submit_that_finds_a_marker_publishes_that_task_again() {
 #[test]
 fn random_runs_with_stalls_and_crashes_keep_one_pending_task_and_lose_no_submit() {
     for seed in 0..RUNS {
-        walk(seed, STEPS);
+        random_run(seed, STEPS);
     }
 }
 
@@ -137,7 +137,7 @@ fn random_runs_with_stalls_and_crashes_keep_one_pending_task_and_lose_no_submit(
 fn random_runs_reach_the_path_of_each_fix() {
     let mut coverage = Coverage::default();
     for seed in 0..RUNS {
-        coverage += walk(seed, STEPS).coverage;
+        coverage += random_run(seed, STEPS).coverage;
     }
 
     assert!(coverage.fence_rejections > 0, "{coverage:?}");
@@ -149,7 +149,7 @@ fn random_runs_reach_the_path_of_each_fix() {
 
 #[test]
 fn random_runs_are_written_for_the_tlc_check_against_the_spec() {
-    let runs: Vec<_> = (0..RUNS).map(|seed| walk(seed, STEPS)).collect();
+    let runs: Vec<_> = (0..RUNS).map(|seed| random_run(seed, STEPS)).collect();
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("indexing-engine-next-spec");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("LeaseDedupeRuns.tla"), write_runs_module(&runs)).unwrap();

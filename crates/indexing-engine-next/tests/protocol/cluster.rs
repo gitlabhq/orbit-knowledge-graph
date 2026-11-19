@@ -8,7 +8,7 @@ use indexing_engine_next::protocol::{
     Claim, Hold, HolderId, Lease, LeaseRules, Publish, Renewal, TaskId, decide_submit,
 };
 use indexing_engine_next::testkit::simulator::{
-    FaultBudget, SimulatedClock, SimulatedKeyValue, SimulatedStore, SimulatedStream, StoreWrite,
+    FaultBudget, SimulatedBroker, SimulatedClock, SimulatedKeyValue, SimulatedStore, StoreWrite,
 };
 use rand::rngs::Xoshiro256PlusPlus;
 use rand::{RngExt, SeedableRng};
@@ -89,32 +89,32 @@ impl std::ops::AddAssign for Coverage {
     }
 }
 
-pub struct Walk {
+pub struct RandomRun {
     pub states: Vec<String>,
     pub coverage: Coverage,
 }
 
-pub fn walk(seed: u64, max_steps: usize) -> Walk {
+pub fn random_run(seed: u64, max_steps: usize) -> RandomRun {
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-    let mut world = World::init(&mut rng);
-    let mut states = vec![world.to_tla()];
+    let mut cluster = Cluster::init(&mut rng);
+    let mut states = vec![cluster.to_tla()];
 
     for step in 1..=max_steps {
-        let actions = world.enabled_actions();
+        let actions = cluster.enabled_actions();
         if actions.is_empty() {
             break;
         }
         let action = actions[rng.random_range(0..actions.len())];
-        world.apply(action);
-        if let Err(broken) = world.check_invariants() {
+        cluster.apply(action);
+        if let Err(broken) = cluster.check_invariants() {
             panic!("seed {seed}, step {step}, {action:?}: {broken}");
         }
-        states.push(world.to_tla());
+        states.push(cluster.to_tla());
     }
 
-    Walk {
+    RandomRun {
         states,
-        coverage: world.coverage,
+        coverage: cluster.coverage,
     }
 }
 
@@ -175,13 +175,13 @@ struct Holder {
     last_hold: LastHold,
 }
 
-struct World {
+struct Cluster {
     rules: LeaseRules,
     clock: SimulatedClock,
     holders: Vec<Holder>,
     lease: SimulatedKeyValue<Lease>,
     marker: SimulatedKeyValue<TaskId>,
-    stream: SimulatedStream,
+    broker: SimulatedBroker,
     store: SimulatedStore,
     faults: FaultBudget,
     next_id: u64,
@@ -191,7 +191,7 @@ struct World {
     coverage: Coverage,
 }
 
-impl World {
+impl Cluster {
     fn init(rng: &mut Xoshiro256PlusPlus) -> Self {
         let holders = (1..=HOLDERS)
             .map(|n| Holder {
@@ -214,7 +214,7 @@ impl World {
             holders,
             lease: SimulatedKeyValue::default(),
             marker: SimulatedKeyValue::default(),
-            stream: SimulatedStream::new(ACKNOWLEDGE_WAIT),
+            broker: SimulatedBroker::new(ACKNOWLEDGE_WAIT),
             store: SimulatedStore::default(),
             faults: FaultBudget::new(MAX_STALLS, MAX_CRASHES),
             next_id: 1,
@@ -256,8 +256,8 @@ impl World {
             }
         }
         actions.extend(
-            self.stream
-                .expired_copies(self.clock.ticks())
+            self.broker
+                .expired_messages(self.clock.ticks())
                 .map(Action::Redeliver),
         );
         for h in 0..HOLDERS {
@@ -274,7 +274,7 @@ impl World {
         if awake {
             match &holder.step {
                 Step::Idle => {
-                    actions.extend(self.stream.ready_copies().map(|c| Action::Deliver(h, c)))
+                    actions.extend(self.broker.ready_messages().map(|c| Action::Deliver(h, c)))
                 }
                 Step::Leasing(claim) => {
                     if claim
@@ -316,7 +316,7 @@ impl World {
                 self.faults.take_crash();
                 self.publishing = None;
             }
-            Action::Redeliver(c) => self.stream.redeliver(c),
+            Action::Redeliver(c) => self.broker.redeliver(c),
             Action::Deliver(h, c) => self.deliver(h, c),
             Action::AcquireLease(h) => self.acquire_lease(h),
             Action::StartTask(h) => self.start_task(h),
@@ -361,12 +361,12 @@ impl World {
         let Some(task) = self.publishing.take() else {
             return;
         };
-        self.stream.publish(task);
+        self.broker.publish(task);
         self.covers.push(task);
     }
 
     fn deliver(&mut self, h: usize, c: usize) {
-        let task = self.stream.deliver(c, h, self.clock.ticks());
+        let task = self.broker.deliver(c, h, self.clock.ticks());
         let holder = &mut self.holders[h];
         holder.step = Step::Leasing(Claim::deliver(holder.id.clone(), task));
         holder.held = Some(c);
@@ -420,7 +420,7 @@ impl World {
                     hold.renewed(&self.rules, &lease, written, local_now);
                 }
                 if let Some(c) = self.holders[h].held {
-                    self.stream.acknowledge_progress(c, h, self.clock.ticks());
+                    self.broker.acknowledge_progress(c, h, self.clock.ticks());
                 }
             }
             Renewal::Lost => {
@@ -454,7 +454,7 @@ impl World {
 
     fn finish(&mut self, h: usize) {
         if let Some(c) = self.holders[h].held {
-            self.stream.acknowledge(c);
+            self.broker.acknowledge(c);
         }
         let release = self
             .holds(h)
@@ -488,7 +488,7 @@ impl World {
     fn check_invariants(&self) -> Result<(), String> {
         let marker = self.marker.get().copied();
         let pending: Vec<TaskId> = self
-            .stream
+            .broker
             .live_tasks()
             .filter(|task| !self.started.contains(task))
             .collect();
@@ -500,7 +500,7 @@ impl World {
 
         let lost = self.covers.iter().find(|task| {
             !self.started.contains(task)
-                && !self.stream.has_live_copy(**task)
+                && !self.broker.has_live_message(**task)
                 && self.publishing != Some(**task)
         });
         if let Some(task) = lost {

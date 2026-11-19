@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use indexing_engine_next::protocol::{Fence, Revision, TaskId};
 use indexing_engine_next::testkit::simulator::{
-    CopyState, RevisionConflict, SimulatedClock, SimulatedKeyValue, SimulatedStore,
-    SimulatedStream, StoreWrite,
+    MessageState, RevisionConflict, SimulatedBroker, SimulatedClock, SimulatedKeyValue,
+    SimulatedStore, StoreWrite,
 };
 use uuid::Uuid;
 
@@ -26,33 +26,33 @@ fn a_key_value_write_with_a_stale_revision_is_a_conflict() {
 }
 
 #[test]
-fn a_publish_of_a_task_with_a_live_copy_adds_no_copy() {
-    let mut stream = SimulatedStream::new(2);
-    stream.publish(task(1));
-    stream.publish(task(1));
-    assert_eq!(stream.copies().len(), 1);
+fn a_publish_of_a_task_with_a_live_message_adds_no_message() {
+    let mut broker = SimulatedBroker::new(2);
+    broker.publish(task(1));
+    broker.publish(task(1));
+    assert_eq!(broker.messages().len(), 1);
 
-    stream.acknowledge(0);
-    stream.publish(task(1));
-    assert_eq!(stream.copies().len(), 2);
+    broker.acknowledge(0);
+    broker.publish(task(1));
+    assert_eq!(broker.messages().len(), 2);
 }
 
 #[test]
-fn a_copy_comes_back_after_the_acknowledge_wait_unless_its_consumer_acks_progress() {
-    let mut stream = SimulatedStream::new(2);
-    stream.publish(task(1));
-    stream.deliver(0, 0, 10);
+fn a_message_comes_back_after_the_acknowledge_wait_unless_its_consumer_acknowledges_progress() {
+    let mut broker = SimulatedBroker::new(2);
+    broker.publish(task(1));
+    broker.deliver(0, 0, 10);
 
-    assert_eq!(stream.expired_copies(11).count(), 0);
-    stream.acknowledge_progress(0, 1, 11);
-    assert_eq!(stream.expired_copies(12).collect::<Vec<_>>(), [0]);
+    assert_eq!(broker.expired_messages(11).count(), 0);
+    broker.acknowledge_progress(0, 1, 11);
+    assert_eq!(broker.expired_messages(12).collect::<Vec<_>>(), [0]);
 
-    stream.acknowledge_progress(0, 0, 11);
-    assert_eq!(stream.expired_copies(12).count(), 0);
+    broker.acknowledge_progress(0, 0, 11);
+    assert_eq!(broker.expired_messages(12).count(), 0);
 
-    stream.redeliver(0);
-    assert_eq!(stream.copies()[0].state, CopyState::Ready);
-    assert_eq!(stream.copies()[0].consumer, None);
+    broker.redeliver(0);
+    assert_eq!(broker.messages()[0].state, MessageState::Ready);
+    assert_eq!(broker.messages()[0].consumer, None);
 }
 
 #[test]
