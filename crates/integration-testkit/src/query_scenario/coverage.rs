@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use query_engine::compiler::ast::{Expr, Function, Node, Query, SelectExpr, SqlType, TableRef};
 use query_engine::compiler::input::{AggFunction, TruncateUnit};
 use query_engine::compiler::passes::codegen::duckdb;
-use strum::IntoEnumIterator;
+use strum::{IntoEnumIterator, VariantNames};
 
 #[derive(Default)]
 pub(super) struct Coverage(BTreeSet<String>);
@@ -151,7 +151,6 @@ impl Coverage {
     }
 }
 
-/// Constructs the DuckDB code generator renders that no DuckDB pipeline emits today.
 const EXCLUDED: &[(&str, &str)] = &[
     ("function ToJson", "hydration-only"),
     ("function Object", "hydration-only"),
@@ -202,7 +201,11 @@ fn renderable() -> Vec<String> {
     functions
         .map(|function| format!("function {function}"))
         .chain(aggregates.map(|function| format!("aggregate {function}")))
-        .chain(TruncateUnit::iter().map(|unit| format!("time bucket {}", unit.name())))
+        .chain(
+            TruncateUnit::VARIANTS
+                .iter()
+                .map(|unit| format!("time bucket {unit}")),
+        )
         .chain(
             [
                 "UNION ALL",

@@ -18,7 +18,6 @@ use super::{
 use crate::scenario::seed::{group_by_columns, values_insert};
 use crate::scenario::{Seed, discover};
 
-/// Returns the DuckDB coverage problems: renderable constructs no scenario reached and stale exclusions.
 pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) -> Vec<String> {
     let root = Path::new(root);
     let ontology = Arc::new(crate::load_unprefixed_ontology());

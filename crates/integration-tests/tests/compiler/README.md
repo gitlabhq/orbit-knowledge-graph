@@ -42,7 +42,7 @@ Common targets have aliases, declared in one table in
 | `emitted` | `response_policy.node` on ClickHouse, `paginate.node` on DuckDB |
 | `final_ast` | `security.node` |
 | `hydration` | `hydrate_plan.hydration_plan` |
-| `result_context` | `result_contract.result_ctx` |
+| `result_context` | `result_contract.result_ctx` on ClickHouse |
 | `settings` | `settings.query_config` |
 | `sql`, `parameterized_sql`, `params`, `indexes` | `codegen.output` on ClickHouse |
 
