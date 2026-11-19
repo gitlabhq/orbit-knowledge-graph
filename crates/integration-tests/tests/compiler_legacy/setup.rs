@@ -1,10 +1,5 @@
-use compiler::SecurityContext;
 use ontology::{DataType, Ontology};
 use std::sync::Arc;
-
-pub fn test_ctx() -> SecurityContext {
-    SecurityContext::new(1, vec!["1/".into()]).unwrap()
-}
 
 pub fn test_ontology() -> Arc<Ontology> {
     Arc::new(
@@ -42,8 +37,4 @@ pub fn test_ontology() -> Arc<Ontology> {
                 ],
             ),
     )
-}
-
-pub fn embedded_ontology() -> Arc<Ontology> {
-    Arc::new(Ontology::load_embedded().expect("Failed to load embedded ontology"))
 }
