@@ -1,10 +1,8 @@
 use orbit_utils::markdown::{self, FRONT_MATTER_FIELDS, FRONT_MATTER_NAME, LineIndex};
-use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical;
-use crate::edge::{Edge, EdgeKind};
 use crate::intern::Lang;
-use crate::tree::{Compact, Node, Tree};
+use crate::tree::{Node, Tree};
 
 pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
     let lines = LineIndex::new(source);
@@ -108,68 +106,4 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
         }
     }
     tree
-}
-
-pub fn link_edges(trees: &[Tree<Compact>], lang: &Lang) -> Vec<Edge> {
-    let links: Vec<_> = trees
-        .iter()
-        .enumerate()
-        .flat_map(|(from_fi, tree)| {
-            tree.root()
-                .children()
-                .filter(|node| node.is(Canonical::Link))
-                .map(move |link| (from_fi, link))
-        })
-        .collect();
-    if links.is_empty() {
-        return Vec::new();
-    }
-    let tree_by_label: FxHashMap<&str, usize> = trees
-        .iter()
-        .enumerate()
-        .map(|(fi, tree)| (tree.label.as_str(), fi))
-        .collect();
-    let mut sections_by_anchor: FxHashMap<usize, FxHashMap<u32, u32>> = FxHashMap::default();
-    let mut seen = FxHashSet::default();
-    let mut edges = Vec::new();
-    for (from_fi, link) in links {
-        let Some(&to_fi) = tree_by_label.get(lang.syms.resolve(link.sym())) else {
-            continue;
-        };
-        let section = link
-            .child_sym_of_kind(Canonical::Anchor.into())
-            .and_then(|anchor| {
-                sections_by_anchor
-                    .entry(to_fi)
-                    .or_insert_with(|| section_anchors(&trees[to_fi]))
-                    .get(&anchor)
-                    .copied()
-            });
-        let to_node = section.unwrap_or_else(|| trees[to_fi].root().index());
-        let edge = Edge::new(
-            from_fi as u32,
-            trees[from_fi].root().index(),
-            to_fi as u32,
-            to_node,
-            EdgeKind::Links,
-        );
-        if seen.insert(edge) {
-            edges.push(edge);
-        }
-    }
-    edges
-}
-
-fn section_anchors(tree: &Tree<Compact>) -> FxHashMap<u32, u32> {
-    let mut by_anchor = FxHashMap::default();
-    for anchor in tree
-        .root()
-        .descendants()
-        .filter(|node| node.is(Canonical::Anchor))
-    {
-        if let Some(section) = anchor.parent().filter(|parent| parent.is(Canonical::Def)) {
-            by_anchor.entry(anchor.sym()).or_insert(section.index());
-        }
-    }
-    by_anchor
 }

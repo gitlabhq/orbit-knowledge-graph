@@ -16,7 +16,7 @@ use crate::modules;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{Compact, Edge, EdgeKind, Mutable, Node, Storage};
-pub use program::{Phase, Pipeline, resolution};
+pub use program::{Phase, Pipeline, Walk, resolution};
 
 pub type Tree<S = Compact> = crate::tree::Tree<S>;
 pub type Cursor<'a, S = Compact> = crate::tree::Cursor<'a, S>;

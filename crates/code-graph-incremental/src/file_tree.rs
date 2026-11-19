@@ -3,9 +3,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical as C;
 use crate::constants::PATH_SEP;
+use crate::driver::SourceFile;
 use crate::env::{Env, ParseFormat, Project};
 use crate::intern::Lang;
-use crate::pipeline::SourceFile;
 use crate::tree::{Cursor, Node, Tag, Tree};
 
 pub struct WalkResult {

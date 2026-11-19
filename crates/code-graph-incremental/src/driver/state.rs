@@ -52,6 +52,62 @@ impl State {
             configs: Vec::new(),
         }
     }
+
+    /// Adds a tree with its own edges, which name it as tree 0.
+    pub(crate) fn push(&mut self, tree: Tree<Compact>, edges: Vec<Edge>) {
+        let fi = u32::try_from(self.trees.len()).expect("file index exceeds u32");
+        self.trees.push(tree);
+        self.edges.extend(edges.into_iter().map(|e| e.in_file(fi)));
+    }
+
+    /// Keeps the trees whose label `keep` accepts, and the edges between them.
+    pub(crate) fn retain(&mut self, keep: impl Fn(&str) -> bool) {
+        let mut to: Vec<Option<u32>> = Vec::with_capacity(self.trees.len());
+        let mut next = 0u32;
+        for tree in &self.trees {
+            to.push(keep(&tree.label).then(|| {
+                next += 1;
+                next - 1
+            }));
+        }
+        self.trees.retain(|tree| keep(&tree.label));
+        self.edges = std::mem::take(&mut self.edges)
+            .into_iter()
+            .filter_map(|e| {
+                Some(Edge {
+                    from_tree: to[e.from_fi()]?,
+                    to_tree: to[e.to_fi()]?,
+                    ..e
+                })
+            })
+            .collect();
+        self.configs.retain(|c| keep(&c.path));
+    }
+
+    /// Sets on each tree the tags the project phase put on its file and the
+    /// directories above it.
+    pub(crate) fn project(&mut self, env: &Env) {
+        let walk = self.project_tree(env);
+        let by_path: FxHashMap<&str, usize> = self
+            .trees
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (t.label.as_str(), i))
+            .collect();
+        let tags: Vec<(usize, Vec<Tag>)> = walk
+            .file_tags
+            .iter()
+            .filter_map(|(path, tags)| Some((*by_path.get(path.as_str())?, tags.clone())))
+            .collect();
+        for tree in &mut self.trees {
+            tree.clear_tags(0, &walk.tag_keys);
+        }
+        for (i, tags) in tags {
+            for tag in tags {
+                self.trees[i].set_tag(0, tag.key, tag.val);
+            }
+        }
+    }
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

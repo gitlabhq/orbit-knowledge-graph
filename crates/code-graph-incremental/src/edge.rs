@@ -65,6 +65,15 @@ pub struct Edge {
 }
 
 impl Edge {
+    /// The edge with both ends in tree `fi`.
+    pub fn in_file(self, fi: u32) -> Self {
+        Self {
+            from_tree: fi,
+            to_tree: fi,
+            ..self
+        }
+    }
+
     pub fn new(from_tree: u32, from_node: u32, to_tree: u32, to_node: u32, kind: EdgeKind) -> Self {
         Self {
             from_tree,

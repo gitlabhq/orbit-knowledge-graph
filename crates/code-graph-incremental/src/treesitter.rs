@@ -464,11 +464,6 @@ pub fn parse_with_sentinel(
     max_depth: usize,
 ) -> Result<(Tree, Option<Killed>), Killed> {
     sentinel.check()?;
-    if support_lang == SupportLang::Markdown {
-        let tree = crate::markdown::parse(source, lang, label);
-        sentinel.check()?;
-        return Ok((tree, None));
-    }
     CACHE.with(|cache| {
         let mut c = cache.borrow_mut();
         c.ensure(support_lang, lang);

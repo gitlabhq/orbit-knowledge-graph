@@ -2,10 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::pipeline::{
-    Canonicalize, Context, Display, Each, Insert, ItemPhase, Link, Parse, Pipeline, Prepare,
-    ReindexInput, Remap, Report, Resolve, Resolved, Rewrite, State,
-};
+use super::Report;
 use crate::sentinel::Sentinel;
 use crate::treesitter::SupportLang;
 use crate::{Env, Envelope, Error, Limits, LoadError};
@@ -25,38 +22,6 @@ pub struct Options {
     pub cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
     pub family_finished: Arc<dyn Fn() + Send + Sync>,
     pub phase_started: PhaseHook,
-}
-
-struct PhaseStarted {
-    family: &'static str,
-    files: usize,
-    hook: PhaseHook,
-}
-
-impl crate::pipeline::Observer for PhaseStarted {
-    fn started(&mut self, phase: &str) {
-        (self.hook)(self.family, phase, self.files);
-    }
-}
-
-pub fn index<'e>(context: Context<'e>) -> Result<Pipeline<'e, Resolved>, Error> {
-    Pipeline::new(context, ())
-        .then(Prepare)?
-        .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))?
-        .then(Insert)?
-        .then(Resolve)
-}
-
-pub fn reindex<'e>(
-    context: Context<'e>,
-    state: State,
-    removed: Vec<String>,
-) -> Result<Pipeline<'e, Resolved>, Error> {
-    Pipeline::new(context, ReindexInput { state, removed })
-        .then(Remap)?
-        .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))?
-        .then(Insert)?
-        .then(Resolve)
 }
 
 pub fn repository<E: std::fmt::Display>(
@@ -85,7 +50,7 @@ pub fn repository<E: std::fmt::Display>(
         run.check()?;
         Ok(())
     };
-    let selected: FxHashSet<_> = crate::pipeline::candidates(&repository, limits.max_files)
+    let selected: FxHashSet<_> = super::candidates(&repository, limits.max_files)
         .map(|file| file.path.to_string())
         .collect();
     let mut families = BTreeMap::new();
@@ -169,15 +134,8 @@ pub fn repository<E: std::fmt::Display>(
                             let (report, batches) = {
                                 let mut env = Env::with_limits(language, limits)?;
                                 env.export_config = export_config.clone();
-                                let mut context =
-                                    Context::new(&env, repository.clone()).observe(PhaseStarted {
-                                        family,
-                                        files: file_count,
-                                        hook: phase_started.clone(),
-                                    });
-                                context.run = run.clone();
-                                let (context, graph) = index(context)?.then(Display)?.finish();
-                                let mut report = context.report;
+                                phase_started(family, "index", file_count);
+                                let (graph, mut report) = super::index(&env, repository, run)?;
                                 report.unread_files.retain(|path| owns(family, path));
                                 run.check()?;
                                 let mut plan = crate::export::ExportPlan::from_config(
@@ -188,8 +146,8 @@ pub fn repository<E: std::fmt::Display>(
                                 plan.batch_bytes = options.batch_bytes;
                                 phase_started(family, "export", file_count);
                                 let batches = crate::export::export(
-                                    &graph.state.trees,
-                                    &graph.state.edges,
+                                    &graph.trees,
+                                    &graph.edges,
                                     &env.lang,
                                     &plan,
                                     envelope,
@@ -221,7 +179,6 @@ pub fn repository<E: std::fmt::Display>(
             result.limited.extend(report.limited);
             result.unread_files.extend(report.unread_files);
             result.files.extend(report.files);
-            result.phases.extend(report.phases);
             (options.family_finished)();
         }
         Ok(())
