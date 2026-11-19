@@ -17,7 +17,7 @@ tests/
   common/               # shared helpers
   canary/               # TestContext canary
   compiler/             # compiler fixtures in compiler/fixtures/
-  compiler_legacy/      # Rust compiler, dialect, and named query tests that move to compiler fixtures
+  duckdb/               # DuckDB codegen, security, and transform tests in the local binary
   indexer/              # indexer tests; indexer scenarios in indexer/scenarios/
   server/               # server tests; query scenarios in server/data_correctness/scenarios/
   fixtures/             # CLI fixtures
@@ -57,7 +57,7 @@ To run specific suites or tests directly:
 ```shell
 # Local tests (no Docker needed)
 cargo nextest run --test local                                           # all local tests
-cargo nextest run --test local -E 'test(compiler_legacy::)'              # legacy compiler tests only
+cargo nextest run --test local -E 'test(duckdb::)'                       # DuckDB tests only
 cargo nextest run --test local -E 'test(querying_pipeline::)'            # querying pipeline only
 cargo nextest run --test compiler                                        # compiler fixtures
 
@@ -139,8 +139,8 @@ the module name (e.g. `querying_pipeline` lives under `server/`), use a
 `#[path]` attribute:
 
 ```rust
-// local.rs — compiler_legacy/ is at the tests/ root, so standard resolution works:
-mod compiler_legacy;
+// local.rs — duckdb/ is at the tests/ root, so standard resolution works:
+mod duckdb;
 
 // querying_pipeline/ lives under server/, so we need an explicit path:
 #[path = "server/querying_pipeline/mod.rs"]
