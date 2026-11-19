@@ -944,6 +944,7 @@ engine-spec-check:
         - specs/indexing-engine-next/**/*
         - crates/indexing-engine-next/src/protocol/**/*
         - crates/indexing-engine-next/tests/protocol/**/*
+        - crates/indexing-engine-next/src/testkit/simulator/**/*
   tags:
     - ${RUNNER_LARGE}
   needs: []

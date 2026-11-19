@@ -1,21 +1,27 @@
+mod tla;
+
 use std::collections::BTreeSet;
-use std::fmt::{self, Write};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::fmt;
+use std::time::{Duration, SystemTime};
 
 use indexing_engine_next::protocol::{
-    Claim, Hold, HolderId, Lease, LeaseEntry, LeaseRules, Publish, Renewal, Revision, TaskId,
-    decide_submit,
+    Claim, Hold, HolderId, Lease, LeaseRules, Publish, Renewal, TaskId, decide_submit,
+};
+use indexing_engine_next::testkit::simulator::{
+    FaultBudget, SimulatedClock, SimulatedKeyValue, SimulatedStore, SimulatedStream, StoreWrite,
 };
 use rand::rngs::Xoshiro256PlusPlus;
 use rand::{RngExt, SeedableRng};
 use uuid::Uuid;
 
+pub use tla::write_runs_module;
+
 const UNIT: Duration = Duration::from_secs(20);
-const PODS: usize = 3;
+const HOLDERS: usize = 3;
 const OFFSETS: [u64; 2] = [0, 1];
 const TTL: u32 = 3;
 const SKEW_MARGIN: u32 = 1;
-const ACK_WAIT: u64 = 2;
+const ACKNOWLEDGE_WAIT: u64 = 2;
 const MAX_TIME: u64 = 12;
 const MAX_EVENTS: usize = 3;
 const MAX_STALLS: u32 = 2;
@@ -131,6 +137,15 @@ impl Step {
         }
     }
 
+    fn hold_mut(&mut self) -> Option<&mut Hold> {
+        match self {
+            Step::Leased(hold) | Step::Running(hold) | Step::Writing(hold) | Step::Done(hold) => {
+                Some(hold)
+            }
+            Step::Idle | Step::Leasing(_) => None,
+        }
+    }
+
     fn name(&self) -> &'static str {
         match self {
             Step::Idle => "idle",
@@ -151,52 +166,37 @@ struct LastHold {
     renew_at: u64,
 }
 
-struct Pod {
+struct Holder {
     id: HolderId,
-    offset: u64,
+    skew: u64,
     stalled: bool,
     step: Step,
     held: Option<usize>,
     last_hold: LastHold,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CopyState {
-    Ready,
-    Inflight,
-    Acked,
-}
-
-struct Copy {
-    task: TaskId,
-    state: CopyState,
-    deadline: u64,
-    pod: Option<usize>,
-}
-
 struct World {
     rules: LeaseRules,
-    now: u64,
-    pods: Vec<Pod>,
-    lease: LeaseEntry,
-    marker: Option<TaskId>,
+    clock: SimulatedClock,
+    holders: Vec<Holder>,
+    lease: SimulatedKeyValue<Lease>,
+    marker: SimulatedKeyValue<TaskId>,
+    stream: SimulatedStream,
+    store: SimulatedStore,
+    faults: FaultBudget,
     next_id: u64,
-    copies: Vec<Copy>,
     publishing: Option<TaskId>,
     covers: Vec<TaskId>,
     started: BTreeSet<TaskId>,
-    stalls_left: u32,
-    crashes_left: u32,
-    store_fence: u64,
     coverage: Coverage,
 }
 
 impl World {
     fn init(rng: &mut Xoshiro256PlusPlus) -> Self {
-        let pods = (1..=PODS)
-            .map(|n| Pod {
+        let holders = (1..=HOLDERS)
+            .map(|n| Holder {
                 id: HolderId::new(format!("p{n}")),
-                offset: OFFSETS[rng.random_range(0..OFFSETS.len())],
+                skew: OFFSETS[rng.random_range(0..OFFSETS.len())],
                 stalled: false,
                 step: Step::Idle,
                 held: None,
@@ -210,53 +210,40 @@ impl World {
                 renew_every: UNIT,
                 skew_margin: UNIT * SKEW_MARGIN,
             },
-            now: 0,
-            pods,
-            lease: LeaseEntry {
-                lease: None,
-                revision: Revision(0),
-            },
-            marker: None,
+            clock: SimulatedClock::new(UNIT),
+            holders,
+            lease: SimulatedKeyValue::default(),
+            marker: SimulatedKeyValue::default(),
+            stream: SimulatedStream::new(ACKNOWLEDGE_WAIT),
+            store: SimulatedStore::default(),
+            faults: FaultBudget::new(MAX_STALLS, MAX_CRASHES),
             next_id: 1,
-            copies: Vec::new(),
             publishing: None,
             covers: Vec::new(),
             started: BTreeSet::new(),
-            stalls_left: MAX_STALLS,
-            crashes_left: MAX_CRASHES,
-            store_fence: 0,
             coverage: Coverage::default(),
         }
     }
 
-    fn local_now(&self, pod: usize) -> SystemTime {
-        at(self.now + self.pods[pod].offset)
+    fn local_now(&self, h: usize) -> SystemTime {
+        self.clock.local_now(self.holders[h].skew)
     }
 
-    fn is_awake(&self, pod: usize) -> bool {
-        !self.pods[pod].stalled
+    fn holds(&self, h: usize) -> Option<&Hold> {
+        self.holders[h].step.hold()
     }
 
-    fn holds(&self, pod: usize) -> Option<&Hold> {
-        self.pods[pod].step.hold()
-    }
-
-    fn is_renew_due(&self, pod: usize) -> bool {
-        self.holds(pod)
-            .is_some_and(|hold| hold.is_renew_due(self.local_now(pod)))
-    }
-
-    fn has_live_copy(&self, task: TaskId) -> bool {
-        self.copies
-            .iter()
-            .any(|copy| copy.task == task && copy.state != CopyState::Acked)
+    fn is_renew_due(&self, h: usize) -> bool {
+        self.holds(h)
+            .is_some_and(|hold| hold.is_renew_due(self.local_now(h)))
     }
 
     fn enabled_actions(&self) -> Vec<Action> {
         let mut actions = Vec::new();
-        let renewals_on_time = (0..PODS).all(|p| !self.is_awake(p) || !self.is_renew_due(p));
+        let renewals_on_time =
+            (0..HOLDERS).all(|h| self.holders[h].stalled || !self.is_renew_due(h));
 
-        if self.now < MAX_TIME && renewals_on_time {
+        if self.clock.ticks() < MAX_TIME && renewals_on_time {
             actions.push(Action::Tick);
         }
         if self.publishing.is_none() && self.covers.len() < MAX_EVENTS {
@@ -264,108 +251,102 @@ impl World {
         }
         if self.publishing.is_some() {
             actions.push(Action::Publish);
-            if self.crashes_left > 0 {
+            if self.faults.can_crash() {
                 actions.push(Action::PlannerCrash);
             }
         }
-        for (c, copy) in self.copies.iter().enumerate() {
-            if copy.state == CopyState::Inflight && self.now >= copy.deadline {
-                actions.push(Action::Redeliver(c));
-            }
-        }
-        for p in 0..PODS {
-            self.push_pod_actions(p, &mut actions);
+        actions.extend(
+            self.stream
+                .expired_copies(self.clock.ticks())
+                .map(Action::Redeliver),
+        );
+        for h in 0..HOLDERS {
+            self.push_holder_actions(h, &mut actions);
         }
 
         actions
     }
 
-    fn push_pod_actions(&self, p: usize, actions: &mut Vec<Action>) {
-        let pod = &self.pods[p];
-        let awake = !pod.stalled;
+    fn push_holder_actions(&self, h: usize, actions: &mut Vec<Action>) {
+        let holder = &self.holders[h];
+        let awake = !holder.stalled;
 
         if awake {
-            match &pod.step {
+            match &holder.step {
                 Step::Idle => {
-                    for (c, copy) in self.copies.iter().enumerate() {
-                        if copy.state == CopyState::Ready {
-                            actions.push(Action::Deliver(p, c));
-                        }
-                    }
+                    actions.extend(self.stream.ready_copies().map(|c| Action::Deliver(h, c)))
                 }
                 Step::Leasing(claim) => {
                     if claim
-                        .acquire_lease(&self.rules, &self.lease, self.local_now(p))
+                        .acquire_lease(&self.rules, &self.lease.entry(), self.local_now(h))
                         .is_some()
                     {
-                        actions.push(Action::AcquireLease(p));
+                        actions.push(Action::AcquireLease(h));
                     }
                 }
-                Step::Leased(_) => actions.push(Action::StartTask(p)),
-                Step::Running(_) => actions.push(Action::BeginWrite(p)),
-                Step::Writing(_) => actions.push(Action::CommitWrite(p)),
-                Step::Done(_) => actions.push(Action::Finish(p)),
+                Step::Leased(_) => actions.push(Action::StartTask(h)),
+                Step::Running(_) => actions.push(Action::BeginWrite(h)),
+                Step::Writing(_) => actions.push(Action::CommitWrite(h)),
+                Step::Done(_) => actions.push(Action::Finish(h)),
             }
         }
-        if awake && self.is_renew_due(p) {
-            actions.push(Action::Renew(p));
-            if self.crashes_left > 0 {
-                actions.push(Action::RenewFails(p));
+        if awake && self.is_renew_due(h) {
+            actions.push(Action::Renew(h));
+            if self.faults.can_crash() {
+                actions.push(Action::RenewFails(h));
             }
         }
-        if awake && pod.step.hold().is_some() && self.stalls_left > 0 {
-            actions.push(Action::Stall(p));
+        if awake && holder.step.hold().is_some() && self.faults.can_stall() {
+            actions.push(Action::Stall(h));
         }
-        if pod.stalled {
-            actions.push(Action::Resume(p));
+        if holder.stalled {
+            actions.push(Action::Resume(h));
         }
-        if !matches!(pod.step, Step::Idle) && self.crashes_left > 0 {
-            actions.push(Action::Crash(p));
+        if !matches!(holder.step, Step::Idle) && self.faults.can_crash() {
+            actions.push(Action::Crash(h));
         }
     }
 
     fn apply(&mut self, action: Action) {
         match action {
-            Action::Tick => self.now += 1,
+            Action::Tick => self.clock.advance(),
             Action::Submit => self.submit(),
             Action::Publish => self.publish(),
             Action::PlannerCrash => {
-                self.crashes_left -= 1;
+                self.faults.take_crash();
                 self.publishing = None;
             }
-            Action::Redeliver(c) => {
-                self.copies[c].state = CopyState::Ready;
-                self.copies[c].pod = None;
+            Action::Redeliver(c) => self.stream.redeliver(c),
+            Action::Deliver(h, c) => self.deliver(h, c),
+            Action::AcquireLease(h) => self.acquire_lease(h),
+            Action::StartTask(h) => self.start_task(h),
+            Action::Renew(h) => self.renew(h),
+            Action::RenewFails(h) => {
+                self.faults.take_crash();
+                self.drop_run(h);
             }
-            Action::Deliver(p, c) => self.deliver(p, c),
-            Action::AcquireLease(p) => self.acquire_lease(p),
-            Action::StartTask(p) => self.start_task(p),
-            Action::Renew(p) => self.renew(p),
-            Action::RenewFails(p) => {
-                self.crashes_left -= 1;
-                self.drop_run(p);
+            Action::BeginWrite(h) => self.advance(h),
+            Action::CommitWrite(h) => self.commit_write(h),
+            Action::Finish(h) => self.finish(h),
+            Action::Stall(h) => {
+                self.faults.take_stall();
+                self.holders[h].stalled = true;
             }
-            Action::BeginWrite(p) => self.advance(p),
-            Action::CommitWrite(p) => self.commit_write(p),
-            Action::Finish(p) => self.finish(p),
-            Action::Stall(p) => {
-                self.stalls_left -= 1;
-                self.pods[p].stalled = true;
-            }
-            Action::Resume(p) => self.pods[p].stalled = false,
-            Action::Crash(p) => {
-                self.crashes_left -= 1;
-                self.drop_run(p);
-                self.pods[p].stalled = false;
+            Action::Resume(h) => self.holders[h].stalled = false,
+            Action::Crash(h) => {
+                self.faults.take_crash();
+                self.drop_run(h);
+                self.holders[h].stalled = false;
             }
         }
         self.remember_holds();
     }
 
     fn submit(&mut self) {
-        match decide_submit(self.marker, task_id(self.next_id)) {
+        match decide_submit(self.marker.get().copied(), task_id(self.next_id)) {
             Publish::New(task) => {
-                self.marker = Some(task);
+                let created = self.marker.put(self.marker.revision(), Some(task));
+                assert!(created.is_ok(), "a submit is atomic in the spec");
                 self.next_id += 1;
                 self.publishing = Some(task);
             }
@@ -380,164 +361,146 @@ impl World {
         let Some(task) = self.publishing.take() else {
             return;
         };
-        if !self.has_live_copy(task) {
-            self.copies.push(Copy {
-                task,
-                state: CopyState::Ready,
-                deadline: 0,
-                pod: None,
-            });
-        }
+        self.stream.publish(task);
         self.covers.push(task);
     }
 
-    fn deliver(&mut self, p: usize, c: usize) {
-        let copy = &mut self.copies[c];
-        copy.state = CopyState::Inflight;
-        copy.pod = Some(p);
-        copy.deadline = self.now + ACK_WAIT;
-
-        let pod = &mut self.pods[p];
-        pod.step = Step::Leasing(Claim::deliver(pod.id.clone(), copy.task));
-        pod.held = Some(c);
+    fn deliver(&mut self, h: usize, c: usize) {
+        let task = self.stream.deliver(c, h, self.clock.ticks());
+        let holder = &mut self.holders[h];
+        holder.step = Step::Leasing(Claim::deliver(holder.id.clone(), task));
+        holder.held = Some(c);
     }
 
-    fn acquire_lease(&mut self, p: usize) {
-        let local_now = self.local_now(p);
-        let Step::Leasing(claim) = std::mem::replace(&mut self.pods[p].step, Step::Idle) else {
+    fn acquire_lease(&mut self, h: usize) {
+        let local_now = self.local_now(h);
+        let Step::Leasing(claim) = std::mem::replace(&mut self.holders[h].step, Step::Idle) else {
             return;
         };
-        let Some(lease) = claim.acquire_lease(&self.rules, &self.lease, local_now) else {
+        let entry = self.lease.entry();
+        let Some(lease) = claim.acquire_lease(&self.rules, &entry, local_now) else {
             return;
         };
-        let written = self.write_lease(Some(lease.clone()));
-        self.pods[p].step = Step::Leased(claim.hold(&self.rules, &lease, written, local_now));
+        let Ok(written) = self.lease.put(entry.revision, Some(lease.clone())) else {
+            return;
+        };
+        self.holders[h].step = Step::Leased(claim.hold(&self.rules, &lease, written, local_now));
     }
 
-    fn start_task(&mut self, p: usize) {
-        let Step::Leased(hold) = std::mem::replace(&mut self.pods[p].step, Step::Idle) else {
+    fn start_task(&mut self, h: usize) {
+        let Step::Leased(hold) = std::mem::replace(&mut self.holders[h].step, Step::Idle) else {
             return;
         };
         self.started.insert(hold.task());
-        if hold.start_clears_marker(self.marker) {
-            self.marker = None;
-        } else if self.marker.is_some() {
+        let marker = self.marker.get().copied();
+        if hold.start_clears_marker(marker) {
+            let cleared = self.marker.put(self.marker.revision(), None);
+            assert!(cleared.is_ok(), "a start is atomic in the spec");
+        } else if marker.is_some() {
             self.coverage.foreign_markers_kept += 1;
         }
-        self.pods[p].step = Step::Running(hold);
+        self.holders[h].step = Step::Running(hold);
     }
 
-    fn renew(&mut self, p: usize) {
-        let local_now = self.local_now(p);
+    fn renew(&mut self, h: usize) {
+        let local_now = self.local_now(h);
+        let entry = self.lease.entry();
         let Some(renewal) = self
-            .holds(p)
-            .map(|hold| hold.renew(&self.rules, &self.lease, local_now))
+            .holds(h)
+            .map(|hold| hold.renew(&self.rules, &entry, local_now))
         else {
             return;
         };
         match renewal {
             Renewal::Extend(lease) => {
-                let written = self.write_lease(Some(lease.clone()));
-                if let Some(hold) = hold_mut(&mut self.pods[p].step) {
+                let Ok(written) = self.lease.put(entry.revision, Some(lease.clone())) else {
+                    return;
+                };
+                if let Some(hold) = self.holders[h].step.hold_mut() {
                     hold.renewed(&self.rules, &lease, written, local_now);
                 }
-                self.extend_ack_wait(p);
+                if let Some(c) = self.holders[h].held {
+                    self.stream.acknowledge_progress(c, h, self.clock.ticks());
+                }
             }
             Renewal::Lost => {
                 self.coverage.lost_renewals += 1;
-                self.drop_run(p);
+                self.drop_run(h);
             }
         }
     }
 
-    fn extend_ack_wait(&mut self, p: usize) {
-        let Some(c) = self.pods[p].held else {
-            return;
-        };
-        let copy = &mut self.copies[c];
-        if copy.state == CopyState::Inflight && copy.pod == Some(p) {
-            copy.deadline = self.now + ACK_WAIT;
-        }
-    }
-
-    fn advance(&mut self, p: usize) {
-        let step = std::mem::replace(&mut self.pods[p].step, Step::Idle);
-        self.pods[p].step = match step {
+    fn advance(&mut self, h: usize) {
+        let step = std::mem::replace(&mut self.holders[h].step, Step::Idle);
+        self.holders[h].step = match step {
             Step::Running(hold) => Step::Writing(hold),
             Step::Writing(hold) => Step::Done(hold),
             other => other,
         };
     }
 
-    fn commit_write(&mut self, p: usize) {
-        let Some(fence) = self.holds(p).map(|hold| hold.fence().0) else {
+    fn commit_write(&mut self, h: usize) {
+        let Some(fence) = self.holds(h).map(Hold::fence) else {
             return;
         };
-        if fence < self.store_fence {
-            self.coverage.fence_rejections += 1;
-            self.drop_run(p);
-        } else {
-            self.store_fence = self.store_fence.max(fence);
-            self.advance(p);
+        match self.store.write(fence) {
+            StoreWrite::Kept => self.advance(h),
+            StoreWrite::Rejected => {
+                self.coverage.fence_rejections += 1;
+                self.drop_run(h);
+            }
         }
     }
 
-    fn finish(&mut self, p: usize) {
-        if let Some(c) = self.pods[p].held {
-            self.copies[c].state = CopyState::Acked;
+    fn finish(&mut self, h: usize) {
+        if let Some(c) = self.holders[h].held {
+            self.stream.acknowledge(c);
         }
-        let release = self.holds(p).and_then(|hold| hold.release(&self.lease));
+        let release = self
+            .holds(h)
+            .and_then(|hold| hold.release(&self.lease.entry()));
         if let Some(expected) = release
-            && expected == self.lease.revision
+            && self.lease.put(expected, None).is_ok()
         {
             self.coverage.releases += 1;
-            self.write_lease(None);
         }
-        self.drop_run(p);
+        self.drop_run(h);
     }
 
-    fn write_lease(&mut self, lease: Option<Lease>) -> Revision {
-        let written = Revision(self.lease.revision.0 + 1);
-        self.lease = LeaseEntry {
-            lease,
-            revision: written,
-        };
-        written
-    }
-
-    fn drop_run(&mut self, p: usize) {
-        self.pods[p].step = Step::Idle;
-        self.pods[p].held = None;
+    fn drop_run(&mut self, h: usize) {
+        self.holders[h].step = Step::Idle;
+        self.holders[h].held = None;
     }
 
     fn remember_holds(&mut self) {
-        for pod in &mut self.pods {
-            if let Some(hold) = pod.step.hold() {
-                pod.last_hold = LastHold {
+        for holder in &mut self.holders {
+            if let Some(hold) = holder.step.hold() {
+                holder.last_hold = LastHold {
                     token: hold.fence().0,
                     seen: hold.seen_revision().0,
-                    expiry: units(hold.expires_at()),
-                    renew_at: units(hold.renew_at()),
+                    expiry: self.clock.ticks_at(hold.expires_at()),
+                    renew_at: self.clock.ticks_at(hold.renew_at()),
                 };
             }
         }
     }
 
     fn check_invariants(&self) -> Result<(), String> {
+        let marker = self.marker.get().copied();
         let pending: Vec<TaskId> = self
+            .stream
             .live_tasks()
             .filter(|task| !self.started.contains(task))
             .collect();
-        if pending.iter().any(|task| Some(*task) != self.marker) {
+        if pending.iter().any(|task| Some(*task) != marker) {
             return Err(format!(
-                "AtMostOnePending: pending {pending:?}, marker {:?}",
-                self.marker
+                "AtMostOnePending: pending {pending:?}, marker {marker:?}"
             ));
         }
 
         let lost = self.covers.iter().find(|task| {
             !self.started.contains(task)
-                && !self.has_live_copy(**task)
+                && !self.stream.has_live_copy(**task)
                 && self.publishing != Some(**task)
         });
         if let Some(task) = lost {
@@ -547,174 +510,11 @@ impl World {
         Ok(())
     }
 
-    fn live_tasks(&self) -> impl Iterator<Item = TaskId> + '_ {
-        self.copies
-            .iter()
-            .filter(|copy| copy.state != CopyState::Acked)
-            .map(|copy| copy.task)
-    }
-
     fn to_tla(&self) -> String {
-        Tla(self).to_string()
+        tla::Tla(self).to_string()
     }
-}
-
-fn hold_mut(step: &mut Step) -> Option<&mut Hold> {
-    match step {
-        Step::Leased(hold) | Step::Running(hold) | Step::Writing(hold) | Step::Done(hold) => {
-            Some(hold)
-        }
-        Step::Idle | Step::Leasing(_) => None,
-    }
-}
-
-fn at(units: u64) -> SystemTime {
-    UNIX_EPOCH + UNIT * u32::try_from(units).expect("a test time fits in u32 units")
-}
-
-fn units(time: SystemTime) -> u64 {
-    let since_epoch = time
-        .duration_since(UNIX_EPOCH)
-        .expect("a test time is after the epoch");
-    since_epoch.as_secs() / UNIT.as_secs()
 }
 
 fn task_id(spec_id: u64) -> TaskId {
     TaskId::new(Uuid::from_u128(spec_id.into()))
-}
-
-fn spec_id(task: TaskId) -> u128 {
-    task.as_uuid().as_u128()
-}
-
-struct Tla<'a>(&'a World);
-
-impl Tla<'_> {
-    fn per_pod(&self, f: &mut fmt::Formatter<'_>, value: impl Fn(&Pod) -> String) -> fmt::Result {
-        let entries: Vec<String> = self
-            .0
-            .pods
-            .iter()
-            .map(|pod| format!("{} :> {}", pod.id.as_str(), value(pod)))
-            .collect();
-        write!(f, "({})", entries.join(" @@ "))
-    }
-}
-
-impl fmt::Display for Tla<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let world = self.0;
-        let pod_name = |p: Option<usize>| p.map_or("NoPod".to_string(), |p| format!("p{}", p + 1));
-        let marker_id = |task: Option<TaskId>| task.map_or(0, spec_id);
-
-        write!(f, "[now |-> {}, offset |-> ", world.now)?;
-        self.per_pod(f, |pod| pod.offset.to_string())?;
-
-        let (holder, expires_at) = match &world.lease.lease {
-            Some(lease) => (lease.holder.as_str().to_string(), units(lease.expires_at)),
-            None => ("NoPod".to_string(), 0),
-        };
-        write!(
-            f,
-            ", lease |-> [holder |-> {holder}, expiresAt |-> {expires_at}, rev |-> {}]",
-            world.lease.revision.0
-        )?;
-        write!(
-            f,
-            ", marker |-> {}, nextId |-> {}",
-            marker_id(world.marker),
-            world.next_id
-        )?;
-
-        let copies: Vec<String> = world
-            .copies
-            .iter()
-            .map(|copy| {
-                let state = match copy.state {
-                    CopyState::Ready => "ready",
-                    CopyState::Inflight => "inflight",
-                    CopyState::Acked => "acked",
-                };
-                format!(
-                    "[id |-> {}, state |-> \"{state}\", deadline |-> {}, pod |-> {}]",
-                    spec_id(copy.task),
-                    copy.deadline,
-                    pod_name(copy.pod)
-                )
-            })
-            .collect();
-        write!(f, ", copies |-> <<{}>>", copies.join(", "))?;
-
-        let planner = match world.publishing {
-            Some(task) => format!("[phase |-> \"publishing\", id |-> {}]", spec_id(task)),
-            None => "[phase |-> \"idle\", id |-> 0]".to_string(),
-        };
-        let mut cover: Vec<String> = world
-            .covers
-            .iter()
-            .map(|t| spec_id(*t).to_string())
-            .collect();
-        cover.resize(MAX_EVENTS, "0".to_string());
-        let started: Vec<String> = world
-            .started
-            .iter()
-            .map(|t| spec_id(*t).to_string())
-            .collect();
-        write!(
-            f,
-            ", planner |-> {planner}, submitted |-> {}, cover |-> <<{}>>, started |-> {{{}}}",
-            world.covers.len(),
-            cover.join(", "),
-            started.join(", ")
-        )?;
-
-        f.write_str(", pc |-> ")?;
-        self.per_pod(f, |pod| format!("\"{}\"", pod.step.name()))?;
-        f.write_str(", held |-> ")?;
-        self.per_pod(f, |pod| pod.held.map_or(0, |c| c + 1).to_string())?;
-        f.write_str(", token |-> ")?;
-        self.per_pod(f, |pod| pod.last_hold.token.to_string())?;
-        f.write_str(", seenRev |-> ")?;
-        self.per_pod(f, |pod| pod.last_hold.seen.to_string())?;
-        f.write_str(", expiry |-> ")?;
-        self.per_pod(f, |pod| pod.last_hold.expiry.to_string())?;
-        f.write_str(", renewAt |-> ")?;
-        self.per_pod(f, |pod| pod.last_hold.renew_at.to_string())?;
-        f.write_str(", stalled |-> ")?;
-        self.per_pod(f, |pod| tla_bool(pod.stalled).to_string())?;
-
-        let enabled: Vec<String> = world
-            .enabled_actions()
-            .iter()
-            .map(|action| format!("\"{action}\""))
-            .collect();
-        write!(
-            f,
-            ", stallsLeft |-> {}, crashesLeft |-> {}, storeFence |-> {}, staleWrite |-> FALSE, enabled |-> {{{}}}]",
-            world.stalls_left,
-            world.crashes_left,
-            world.store_fence,
-            enabled.join(", ")
-        )
-    }
-}
-
-fn tla_bool(value: bool) -> &'static str {
-    if value { "TRUE" } else { "FALSE" }
-}
-
-pub fn write_runs_module(runs: &[Walk]) -> String {
-    let mut module = String::new();
-    module.push_str(
-        "---------------------------- MODULE LeaseDedupeRuns ----------------------------\n",
-    );
-    module.push_str("EXTENDS LeaseDedupe\n\nCONSTANTS p1, p2, p3\n\nRuns == <<\n");
-    for (n, run) in runs.iter().enumerate() {
-        let separator = if n + 1 == runs.len() { "" } else { "," };
-        let _ = writeln!(module, "<<\n{}\n>>{separator}", run.states.join(",\n"));
-    }
-    module.push_str(
-        ">>\n=============================================================================\n",
-    );
-    module
 }
