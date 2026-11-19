@@ -316,6 +316,9 @@ Crash(p) ==
     /\ UNCHANGED <<token, seenRev, expiry, renewAt, plannerVars, storeVars>>
     /\ UNCHANGED natsVars
 
+\* why: a wipe loses the message of every task that isn't done, started or not. The recovery campaign of ADR 023 replans those keys.
+IsDone(id) == \E c \in DOMAIN copies : copies[c].id = id /\ copies[c].state = "acked"
+
 LoseCopy(c) == IF copies[c].state \in LiveStates THEN [copies[c] EXCEPT !.state = "lost"] ELSE copies[c]
 
 NatsWipe ==
@@ -324,7 +327,7 @@ NatsWipe ==
     /\ lease' = [holder |-> NoPod, expiresAt |-> 0, rev |-> 0]
     /\ marker' = NoMarker
     /\ copies' = [c \in DOMAIN copies |-> LoseCopy(c)]
-    /\ lostInWipe' = lostInWipe \cup {id \in 1..(nextId - 1) : id \notin started}
+    /\ lostInWipe' = lostInWipe \cup {id \in 1..(nextId - 1) : ~IsDone(id)}
     /\ natsGeneration' = IF FenceHasGeneration THEN 0 ELSE natsGeneration
     /\ UNCHANGED <<now, offset, nextId, planner, submitted, cover, started, stallsLeft, crashesLeft>>
     /\ UNCHANGED <<duplicatesLeft, lossesLeft, podVars, storeVars>>

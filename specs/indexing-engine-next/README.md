@@ -2,9 +2,9 @@
 
 ## Summary
 
-This folder holds a TLA+ spec of the lease and dedupe protocol of ADR 023. TLC checks every order of events in the spec, with pod faults and NATS faults. A second check proves that the Rust code has the same state graph as the spec in 4 small clusters.
+This folder holds a TLA+ spec of the lease and dedupe protocol of ADR 023. TLC checks every order of events in the spec, with pod faults and NATS faults. It also checks that every acked submit ends done once faults stop. A second check proves that the Rust code has the same state graph as the spec in 4 small clusters.
 
-So far, TLC found 7 ways to break the rules. Four fixes close all but 2, and we keep those 2 open on purpose. The code matches the spec in 3 million states and 6.7 million steps.
+So far, TLC found 7 ways to break the rules and one gap in the recovery after a wipe. Four fixes close all but 2, and we keep those 2 open on purpose. The code matches the spec in 2.8 million states and 6 million steps.
 
 ## What we built
 
@@ -16,9 +16,9 @@ So far, TLC found 7 ways to break the rules. Four fixes close all but 2, and we 
               ▼                     ▼                      ▼
    ┌────────────────────┐ ┌───────────────────┐ ┌─────────────────────────┐
    │ model check        │ │ counterexamples   │ │ code check              │
-   │ every order of     │ │ 7 configs that    │ │ the code and the spec   │
+   │ every order of     │ │ 8 configs that    │ │ the code and the spec   │
    │ events, up to 45M  │ │ must break a rule │ │ have the same graph in  │
-   │ states             │ │                   │ │ 4 small clusters        │
+   │ states, + liveness │ │                   │ │ 4 small clusters        │
    └────────────────────┘ └───────────────────┘ └────────────▲────────────┘
                                                              │
                      ┌───────────────────────────────────────┴───┐
@@ -34,7 +34,8 @@ So far, TLC found 7 ways to break the rules. Four fixes close all but 2, and we 
 |---|---|
 | `LeaseDedupe.tla` | The spec: the state, the actions and the rules |
 | `LeaseDedupe.cfg`, `LeaseDedupe_ThreePods.cfg` | The model checks with 2 and 3 pods |
-| `counterexamples/` | 7 configs that must break a rule |
+| `LeaseDedupeLiveness.tla`, `liveness/` | The liveness check and its 4 configs |
+| `counterexamples/`, `liveness/counterexamples/` | 8 configs that must break a rule |
 | `code-check/` | The 4 small clusters of the code check |
 | `src/protocol/` in the crate | The rules as code with no IO. The NATS lane loop of 1b calls it. |
 | `src/testkit/simulator/` in the crate | A simulated clock, key-value store, broker and database |
@@ -56,6 +57,7 @@ A proof of the spec says nothing about our code, though. So the code check ties 
 | Check | What it proves |
 |---|---|
 | Model check | The rules hold in every reachable state of the spec, with 2 or 3 pods |
+| Liveness check | Once faults stop, every acked submit ends done and every pod ends idle |
 | Counterexamples | Each known race still breaks a rule, so the checks can fail |
 | Code check | In 4 small clusters, the code and the spec have the same initial states, states and steps |
 | Unit tests | Each rule of the protocol code, including one case that the model can't show |
@@ -67,7 +69,8 @@ What it doesn't prove:
 - The NATS behaviors are assumptions. A probe against a local NATS 2.12.4 confirmed the 11 that the spec uses. The integration tests of 1b will check them in CI.
 - A wipe and a duplicate together give 11M states or more, too many to compare as graphs.
 - Each pod has one slot, so the model can't show one pod with two runs of a key. A unit test covers the holder check for that case.
-- The model checks safety only. It doesn't check that every task runs in the end.
+- The liveness check needs faults to stop at some point. A cluster that keeps failing forever makes no progress, and no protocol can fix that.
+- The recovery campaign, the sweeps and the reconcilers aren't in the spec. The spec hands their work to them and stops there.
 
 ## How it works
 
@@ -76,6 +79,10 @@ What it doesn't prove:
 The model has one key and 2 or 3 pods with one slot each. One time unit is 20 s. The lease lasts 3 units, a pod renews it every unit, and the skew margin and the ack wait are 1 and 2 units. Each pod has a clock offset of 0 or 1.
 
 A wipe empties the key-value store and the broker. The database survives it. After a wipe, a recovery reads the generation from the database, adds 1, and writes it to the key-value store.
+
+### The liveness check
+
+The spec bounds time, so a lease could stay open forever once time stops. `LeaseDedupeLiveness.tla` adds one step. Faults stop, and the clock jumps past every expiry and every ack wait. From then on, each engine step that stays possible happens in the end. TLC then checks that every acked submit ends done, or lost in a wipe and handed to the recovery campaign.
 
 ### The code check
 
@@ -109,6 +116,20 @@ TLC checks these rules in every state:
 | `AtMostOnePending` | Only the task in the marker waits in the queue |
 | `EverySubmitCovered` | Every acked submit has a task that started, a live message, or a publish in progress |
 
+The liveness check adds 2 properties:
+
+| Property | Meaning |
+|---|---|
+| `EverySubmitIsDone` | Every acked submit ends done, or lost in a wipe and handed to the recovery campaign |
+| `PodsEndIdle` | Every pod ends idle |
+
+| Liveness config | Faults before they stop | States |
+|---|---|---|
+| `Liveness` | 1 stall, 1 crash | 149,282 |
+| `Liveness_TwoTasks` | 2 tasks, 1 crash | 1,930,008 |
+| `Liveness_NatsWipe` | 1 stall, 1 crash, 1 wipe | 848,760 |
+| `Liveness_Duplicate` | 1 crash, 1 duplicate | 3,104,500 |
+
 ### Faults
 
 | Fault | What happens |
@@ -131,7 +152,7 @@ All 4 clusters have 2 pods:
 |---|---|---|---|
 | `no_nats_faults` | 1 stall, 1 crash | 95,156 | 198,844 |
 | `two_tasks` | 2 tasks, 1 crash | 865,748 | 1,551,818 |
-| `nats_wipe` | 1 stall, 1 crash, 1 wipe | 1,073,592 | 2,686,400 |
+| `nats_wipe` | 1 stall, 1 crash, 1 wipe | 829,510 | 2,019,408 |
 | `duplicate` | 1 stall, 1 crash, 1 duplicate | 1,023,506 | 2,250,220 |
 
 ### Counterexamples
@@ -147,19 +168,21 @@ Each config switches one fix off, or adds one fault, and must break a rule:
 | `AsWritten_LostSubmit` | `EverySubmitCovered` | The planner crashes after the marker and before the publish. Every later submit of the key is dropped. |
 | `NatsWipe_FenceWithoutGeneration` | `NoRejectedCurrentHolder` | A wipe restarts the revisions, so the database rejects the writes of the new holder. |
 | `NatsLosesMessage` | `EverySubmitCovered` | NATS loses an acked message, and nothing brings it back. |
+| `liveness/counterexamples/AsWritten_LostSubmit` | `EverySubmitIsDone` | Without F3, a stranded marker swallows a submit, and its task never runs. |
 
 ## Run it
 
 | Command | What it does | Time on a laptop |
 |---|---|---|
 | `mise run spec:engine` | Model-checks the spec with both configs | about 3 min |
+| `mise run spec:engine:liveness` | Checks that every acked submit ends done | about 4 min |
 | `mise run spec:engine:counterexample` | Checks that each counterexample still breaks a rule | about 25 s |
 | `mise run spec:engine:code` | Compares the code and the spec in all 4 clusters | about 6 min |
 | `cargo test -p indexing-engine-next --test protocol` | Runs the rule tests and the invariants of the first cluster | about 10 s |
 
 `ENGINE_SPEC_CLUSTER=two_tasks mise run spec:engine:code` checks one cluster. The mise tasks download a pinned `tla2tools.jar` into `target/` and install the Java version that they pin.
 
-In CI, the jobs live in `.gitlab/ci/indexing-engine-spec.yml`. The model check and the counterexamples run when the spec changes. The code check runs one job for each cluster, in parallel, when the spec, the protocol code or the simulator changes. The slowest job takes about 6 min.
+In CI, the jobs live in `.gitlab/ci/indexing-engine-spec.yml`. The model check, the liveness check and the counterexamples run when the spec changes. The code check runs one job for each cluster, in parallel, when the spec, the protocol code or the simulator changes. The slowest job takes about 6 min.
 
 ## When you change something
 
@@ -188,6 +211,8 @@ wipe sends revisions back to 1      →  F4  fence = (generation, revision)
 2. F2, a marker that the task owns. The marker holds the task ID, and a start clears it only if it still holds that ID.
 3. F3, a republish. A submit that finds a marker publishes that task again, with the task ID as the message ID.
 4. F4, a generation in the fence. No pod takes a lease until the recovery wrote the new generation.
+
+The liveness check found one more gap. A task that started before a wipe loses its message. If its pod then crashes, nothing runs it again. So a wipe hands every task that isn't done to the recovery campaign, not only the pending ones. The recovery campaign of ADR 023 must replan those keys.
 
 Two cases stay open on purpose:
 

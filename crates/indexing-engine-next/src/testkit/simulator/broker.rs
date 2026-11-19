@@ -46,6 +46,12 @@ impl SimulatedBroker {
             .any(|message| message.task == task && message.is_live())
     }
 
+    pub fn is_done(&self, task: TaskId) -> bool {
+        self.messages
+            .iter()
+            .any(|message| message.task == task && message.state == MessageState::Acknowledged)
+    }
+
     pub fn live_tasks(&self) -> impl Iterator<Item = TaskId> + '_ {
         self.messages
             .iter()

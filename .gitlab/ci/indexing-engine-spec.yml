@@ -25,6 +25,17 @@ engine-spec-model-check:
   script:
     - mise run spec:engine
 
+engine-spec-liveness:
+  extends: .indexing-engine-spec
+  tags:
+    - ${RUNNER_LARGE}
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes: *indexing-engine-spec-changes
+  script:
+    - mise run spec:engine:liveness
+
 engine-spec-counterexamples:
   extends: .indexing-engine-spec
   rules:

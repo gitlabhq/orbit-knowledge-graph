@@ -465,6 +465,18 @@ for config in specs/indexing-engine-next/*.cfg; do
 done
 """
 
+[tasks."spec:engine:liveness"]
+description = "Check with TLC that every acked submit of the indexing engine spec ends done once faults stop"
+tools = { java = "temurin-21.0.13+9.0.LTS" }
+depends = ["spec:engine:tools"]
+shell = "bash -c"
+run = """
+set -euo pipefail
+for config in specs/indexing-engine-next/liveness/*.cfg; do
+  java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-liveness -config "$config" specs/indexing-engine-next/LeaseDedupeLiveness.tla
+done
+"""
+
 [tasks."spec:engine:counterexample"]
 description = "Check that TLC still finds each counterexample against the rules as ADR 023 writes them"
 tools = { java = "temurin-21.0.13+9.0.LTS" }
@@ -476,6 +488,11 @@ for config in specs/indexing-engine-next/counterexamples/*.cfg; do
   java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states -config "$config" specs/indexing-engine-next/LeaseDedupe.tla > /dev/null
   [ $? -eq 12 ] || { echo "$config: expected an invariant violation (TLC exit 12)"; exit 1; }
   echo "$config: violation found, as expected"
+done
+for config in specs/indexing-engine-next/liveness/counterexamples/*.cfg; do
+  java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states -config "$config" specs/indexing-engine-next/LeaseDedupeLiveness.tla > /dev/null
+  [ $? -eq 13 ] || { echo "$config: expected a liveness violation (TLC exit 13)"; exit 1; }
+  echo "$config: liveness violation found, as expected"
 done
 """
 

@@ -563,11 +563,11 @@ impl Cluster {
         self.marker.wipe();
         self.generation.wipe();
         self.broker.wipe();
-        let unstarted: Vec<TaskId> = (1..self.next_id)
+        let unfinished: Vec<TaskId> = (1..self.next_id)
             .map(task_id)
-            .filter(|task| !self.started.contains(task))
+            .filter(|task| !self.broker.is_done(*task))
             .collect();
-        self.lost_in_wipe.extend(unstarted);
+        self.lost_in_wipe.extend(unfinished);
     }
 
     fn recover_nats(&mut self) {
