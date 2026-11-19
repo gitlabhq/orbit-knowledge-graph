@@ -65,7 +65,7 @@ rulesets:
     - match: '(__def !(__impl))'
       tag:
         entity: Definition
-        fqn: '$ROOT | ancestor_tag("fqn") | concat(".", $ROOT | child_sym("__defname")) | keep_last(".", "64", "4096")'
+        fqn: '$ROOT | ancestor_tag("fqn") | concat(".", $ROOT | child_sym("__defname")) | keep_last(".", 64, 4096)'
         file_path: '$ROOT | ancestor_tag("file_path")'
     - match: '(__def (__impl))'
       tag: { entity: Definition, file_path: '$ROOT | ancestor_tag("file_path")' }
@@ -113,7 +113,7 @@ rulesets:
     - match: '(__def !(__impl))'
       tag:
         entity: Definition
-        fqn: '$ROOT | ancestor_tag("fqn") | concat("::", $ROOT | child_sym("__defname")) | keep_last("::", "64", "4096")'
+        fqn: '$ROOT | ancestor_tag("fqn") | concat("::", $ROOT | child_sym("__defname")) | keep_last("::", 64, 4096)'
         file_path: '$ROOT | ancestor_tag("file_path")'
     - match: '(__def (__impl))'
       tag: { entity: Definition, file_path: '$ROOT | ancestor_tag("file_path")' }
@@ -122,14 +122,14 @@ rulesets:
     - match: '(__def)'
       tag:
         entity: Definition
-        fqn: '$ROOT | ancestor_tag("fqn") | concat(".", $ROOT | child_sym("__defname")) | keep_last(".", "64", "4096")'
+        fqn: '$ROOT | ancestor_tag("fqn") | concat(".", $ROOT | child_sym("__defname")) | keep_last(".", 64, 4096)'
         file_path: '$ROOT | ancestor_tag("file_path")'
 
   def_fqn_colons:
     - match: '(__def)'
       tag:
         entity: Definition
-        fqn: '$ROOT | ancestor_tag("fqn") | concat("::", $ROOT | child_sym("__defname")) | keep_last("::", "64", "4096")'
+        fqn: '$ROOT | ancestor_tag("fqn") | concat("::", $ROOT | child_sym("__defname")) | keep_last("::", 64, 4096)'
         file_path: '$ROOT | ancestor_tag("file_path")'
 
   value_def_types:

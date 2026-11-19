@@ -1326,6 +1326,14 @@ mod tests {
                 "strip_prefix" => "strip",
                 other => other,
             };
+            let args: Vec<&str> = args
+                .iter()
+                .enumerate()
+                .map(|(i, a)| match name == "keep_last" && i > 0 {
+                    true => a.trim_matches('"'),
+                    false => a.as_str(),
+                })
+                .collect();
             match args.is_empty() {
                 true => name.to_string(),
                 false => format!("{name}({})", args.join(", ")),

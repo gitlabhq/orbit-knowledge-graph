@@ -10,7 +10,7 @@ use arrow::record_batch::RecordBatch;
 use orbit_arrow::{BatchBuilder, ColumnType};
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
-use crate::dsl::types::Tf;
+use crate::engine::export::Evaluator;
 use crate::error::{Error, LoadError};
 use crate::file_tree::ProjectTree;
 use crate::intern::Lang;
@@ -137,12 +137,16 @@ impl<'a> Forest<'a> {
     fn new(trees: &'a [Tree], lang: &Lang) -> Self {
         let labels: Vec<&str> = trees.iter().map(|t| t.label.as_str()).collect();
         let project = ProjectTree::directory_tree(lang, &labels);
-        let path = Tf::TreePath("/".into());
-        let mut by_path: FxHashMap<&str, u32> = FxHashMap::default();
+        let mut by_path: FxHashMap<String, u32> = FxHashMap::default();
         for node in project.root().descendants() {
             if node.children().next().is_none() {
-                let sym = path.apply_sym(&project, lang, project.to_id(node.index()), None);
-                by_path.insert(lang.syms.resolve(sym), node.index());
+                let mut path: Vec<&str> = std::iter::once(node)
+                    .chain(node.ancestors())
+                    .filter(|a| a.parent().is_some())
+                    .map(|a| project.text_at(a.index(), lang))
+                    .collect();
+                path.reverse();
+                by_path.insert(path.join("/"), node.index());
             }
         }
         let stand_in = labels.iter().map(|l| by_path.get(*l).copied()).collect();
@@ -195,23 +199,22 @@ impl<'a> Forest<'a> {
 /// The node a row describes and, under `expand:`, the child it was expanded
 /// from; without an expansion the node stands in for both.
 struct Row<'a> {
-    tree: &'a Tree,
     node: Cursor<'a>,
     expanded: Cursor<'a>,
 }
 
 impl<'a> Row<'a> {
-    fn value(&self, column: &'a EntityColumn, lang: &'a Lang) -> Scalar<'a> {
+    fn value(&self, column: &'a EntityColumn, lang: &'a Lang, eval: &mut Evaluator) -> Scalar<'a> {
         let node = match column.on {
             On::Node => self.node,
             On::Expanded => self.expanded,
         };
         match &column.source {
             Source::Const(value) => Scalar::Str(value),
-            Source::Transform(tf) => {
-                let sym = tf.apply_at(self.tree, lang, node.index(), None);
-                Scalar::Str(lang.syms.resolve(sym))
-            }
+            Source::Expr(expr) => Scalar::Str(
+                lang.syms
+                    .resolve(eval.text(expr, node.index()).unwrap_or(0)),
+            ),
             Source::Position(p, span) => Scalar::Int(position(measured(node, span), *p)),
         }
     }
@@ -371,6 +374,7 @@ fn write_entity(
     let b = &mut builder;
     for (ti, tree) in forest.all().filter(|(ti, _)| wanted(*ti)) {
         run.check()?;
+        let mut eval = Evaluator::new(tree, lang, run);
         let root = tree.root();
         let nodes = std::iter::once(root)
             .chain(root.descendants())
@@ -392,19 +396,16 @@ fn write_entity(
                 expansions.push(node);
             }
             for expanded in expansions {
-                let row = Row {
-                    tree,
-                    node,
-                    expanded,
-                };
+                let row = Row { node, expanded };
                 let parts: Vec<String> = entity
                     .id_parts
                     .iter()
                     .map(|part| match part {
                         IdPart::Span => row.span(),
-                        IdPart::Column(i) => {
-                            row.value(&entity.columns[*i], lang).text().into_owned()
-                        }
+                        IdPart::Column(i) => row
+                            .value(&entity.columns[*i], lang, &mut eval)
+                            .text()
+                            .into_owned(),
                     })
                     .collect();
                 let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
@@ -423,7 +424,7 @@ fn write_entity(
                     value.write(b, &column.name, column.col_type)?;
                 }
                 for column in &entity.columns {
-                    row.value(column, lang)
+                    row.value(column, lang, &mut eval)
                         .write(b, &column.name, column.col_type)?;
                 }
                 if let Some(batch) = b.take_if_over(plan.batch_bytes)? {

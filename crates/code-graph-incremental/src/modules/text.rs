@@ -8,7 +8,7 @@ use smallvec::SmallVec;
 use crate::engine::{Cursor, Cx, Function, Module, Store, Val, Vals, one, yes};
 use crate::intern::Lang;
 use crate::modules::function;
-use crate::tree::{Node, Storage};
+use crate::tree::{EdgeKind, Node, Storage};
 
 pub struct Text;
 
@@ -56,16 +56,17 @@ static FUNCTIONS: &[Function<Text>] = &[
     on_text!("stem", [one], stem),
     on_text!("collapse_index", [one, set], collapse_index),
     on_text!("map", [one, set], map),
-    function!(Pure, "default", [set, one], |cx, a| {
-        let o = opts(cx, a);
-        let texts: Vals = a[0]
-            .iter()
-            .filter(|&&v| text(cx, v).is_some_and(|s| !s.is_empty()))
-            .copied()
-            .collect();
-        match texts.is_empty() {
-            true => sym(o.lang, o.lit(1)),
-            false => texts,
+    function!(Pure, "default", [set, set], |cx, a| {
+        let present = |at: usize| -> Vals {
+            a[at]
+                .iter()
+                .filter(|&&v| text(cx, v).is_some_and(|s| !s.is_empty()))
+                .copied()
+                .collect()
+        };
+        match present(0) {
+            found if found.is_empty() => present(1),
+            found => found,
         }
     }),
     function!(Pure, "concat", [set, one, set], |cx, a| {
@@ -83,6 +84,12 @@ static FUNCTIONS: &[Function<Text>] = &[
     function!(Pure, "ne", [set, set], |cx, a| {
         yes(a[0].first().and_then(|&v| text(cx, v)) != a[1].first().and_then(|&v| text(cx, v)))
     }),
+    function!(Pure, "has_incoming", [one, one], |cx, a| has_edge(
+        cx, a, true
+    )),
+    function!(Pure, "has_outgoing", [one, one], |cx, a| has_edge(
+        cx, a, false
+    )),
     on_node!("field", [one, one], field),
     on_node!("child", [one, one], child),
     on_node!("field_child", [one, one, one], field_child),
@@ -159,13 +166,17 @@ fn opts<'t: 's, 's, S: Store>(cx: &Cx<'_, 't, Text, S>, args: &'s [Vals]) -> Opt
 fn text<'t, S: Store>(cx: &Cx<'_, 't, Text, S>, v: Val) -> Option<&'t str> {
     let lang = cx.lang();
     match v {
-        Val::Node(loc) | Val::Type(loc) => {
-            let c = cx.jump(loc);
-            Some(c.tree().text_at(c.index(), lang))
-        }
+        Val::Node(_) | Val::Type(_) => Some(cx.text(v).map_or("", |s| lang.syms.resolve(s))),
         Val::Opaque => None,
         v => Some(lit(lang, v)),
     }
+}
+
+fn has_edge<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals], incoming: bool) -> Vals {
+    let (Some(loc), Ok(kind)) = (a[0][0].loc(), opts(cx, a).lit(1).parse::<EdgeKind>()) else {
+        return Vals::new();
+    };
+    yes(cx.has_edge(kind, incoming, loc.node))
 }
 
 fn sym(lang: &Lang, s: &str) -> Vals {

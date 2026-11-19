@@ -119,55 +119,64 @@ impl T {
 
 #[test]
 fn every_rule_file_pattern_and_template_parses() {
-    use crate::engine::lang::{DataSpec, PhaseRules, load};
+    use crate::engine::lang::{DataSpec, LangFile, PhaseRules, RuleSpec, load};
+    fn texts(spec: &DataSpec, out: &mut Vec<String>) {
+        match spec {
+            DataSpec::Bool(b) => out.push(b.to_string()),
+            DataSpec::Num(n) => out.push(n.to_string()),
+            DataSpec::Str(s) => out.push(s.clone()),
+            DataSpec::List(items) => items.iter().for_each(|i| texts(i, out)),
+        }
+    }
     let yamls: Vec<_> = crate::treesitter::all_languages()
         .map(|(id, _)| crate::treesitter::lang_yaml(id))
         .collect();
     let files = load(&yamls).unwrap_or_else(|e| panic!("{e}"));
-    let (mut patterns, mut templates, mut texts) = (0, 0, 0);
+    let (mut patterns, mut templates, mut exprs) = (0, 0, 0);
     let mut errors = Vec::new();
     let all = std::iter::once(&files.shared).chain(files.langs.iter().flatten());
     for file in all {
-        let data = |name: &str| match file.data.get(name).or(files.shared.data.get(name)) {
-            Some(DataSpec::List(items)) => Some(
-                items
-                    .iter()
-                    .filter_map(|i| match i {
-                        DataSpec::Str(s) => Some(s.clone()),
-                        _ => None,
-                    })
-                    .collect(),
-            ),
-            Some(DataSpec::Str(s)) => Some(vec![s.clone()]),
-            _ => None,
+        let data = |name: &str| {
+            let spec: &LangFile = file;
+            let found = spec
+                .data
+                .get(name)
+                .or_else(|| files.shared.data.get(name))?;
+            let mut out = Vec::new();
+            texts(found, &mut out);
+            Some(out)
         };
-        let rules = file.phases.values().flat_map(|p| match p {
-            PhaseRules::Rules(rules) => rules.iter().collect::<Vec<_>>(),
-            PhaseRules::Stages(stages) => stages.iter().flat_map(|s| &s.rules).collect(),
-        });
+        let rules: Vec<&RuleSpec> = file
+            .phases
+            .values()
+            .flat_map(|phase| match phase {
+                PhaseRules::Rules(rules) => rules.iter().collect::<Vec<_>>(),
+                PhaseRules::Stages(stages) => stages.iter().flat_map(|s| &s.rules).collect(),
+            })
+            .collect();
         for rule in rules {
             let lang = Lang::new();
             let mut slots = Slots::new();
             patterns += 1;
             if let Err(e) = parse_pattern(&rule.pattern, &mut slots, &lang, &data) {
-                errors.push(format!("{}: {e}", rule.pattern));
+                errors.push(e.0);
                 continue;
             }
             if let Some(unique) = rule.unique.as_deref().filter(|u| u.starts_with('(')) {
                 patterns += 1;
                 if let Err(e) = parse_pattern(unique, &mut Slots::new(), &lang, &data) {
-                    errors.push(format!("{unique}: {e}"));
+                    errors.push(e.0);
                 }
             }
             for t in rule.replace.iter().chain(rule.append.iter().flatten()) {
                 templates += 1;
                 let mut text = |expr: &str| -> Result<(), LoadError> {
                     assert!(expr.starts_with("@$"), "{expr}");
-                    texts += 1;
+                    exprs += 1;
                     Ok(())
                 };
                 if let Err(e) = parse_template(t, &slots, &lang, &mut text) {
-                    errors.push(format!("{t}: {e}"));
+                    errors.push(e.0);
                 }
             }
         }
@@ -179,8 +188,8 @@ fn every_rule_file_pattern_and_template_parses() {
         errors.join("\n")
     );
     assert!(
-        patterns > 1500 && templates > 1000 && texts > 500,
-        "{patterns} {templates} {texts}"
+        patterns > 2000 && templates > 1200 && exprs > 1500,
+        "{patterns} {templates} {exprs}"
     );
 }
 

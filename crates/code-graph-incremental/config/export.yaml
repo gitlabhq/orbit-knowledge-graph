@@ -10,11 +10,10 @@
 # reaches its file, then its directories.
 #
 # A column is filled by one of:
-#   from: <transforms>   the rule-file transform language, run on the row's
-#                        node: tag("k"), ancestor_tag("k"), child_sym("kind"),
-#                        ancestor_sym("kind"), tree_path(sep), split_last(sep),
-#                        or(a, b), default(v), regex_*, ... Omitted: the
-#                        node's own text.
+#   from: <expression>   an engine expression over mod.text, with `$ROOT`
+#                        bound to the row's node: `$ROOT | tag("k")`,
+#                        `$ROOT | tree_path("/") | default(".")`, ... Omitted:
+#                        the node's own text.
 #   const: <text>        a literal
 #   position: <which>    start_line | end_line | start_byte | end_byte |
 #                        start_col | end_col
@@ -47,46 +46,46 @@ entities:
     source: __dir|__root
     id: { seed: dir, columns: [path] }
     columns:
-      - { name: path, type: Utf8, from: tree_path("/")|default(".") }
-      - { name: name, type: Utf8, from: default(".") }
+      - { name: path, type: Utf8, from: '$ROOT | tree_path("/") | default(".")' }
+      - { name: name, type: Utf8, from: '$ROOT | default(".")' }
 
   File:
     source: __source_file
     id: { seed: file, columns: [path] }
     columns:
       - { name: path, type: Utf8 }
-      - { name: name, type: Utf8, from: split_last("/") }
-      - { name: extension, type: Utf8, from: split_last("/")|split_last(".") }
-      - { name: language, type: Utf8, from: tag("language") }
+      - { name: name, type: Utf8, from: '$ROOT | split_last("/")' }
+      - { name: extension, type: Utf8, from: '$ROOT | split_last("/") | split_last(".")' }
+      - { name: language, type: Utf8, from: '$ROOT | tag("language")' }
       - { name: size_bytes, type: Int64, position: end_byte }
-      - { name: reason, type: Utf8, from: tag("reason") }
+      - { name: reason, type: Utf8, from: '$ROOT | tag("reason")' }
 
   Definition:
     source: __def
     id: { seed: def, columns: [file_path, fqn, span] }
     columns:
-      - { name: file_path, type: Utf8, from: ancestor_tag("file_path") }
-      - { name: fqn, type: Utf8, from: tag("fqn") }
-      - { name: name, type: Utf8, from: child_sym("__defname") }
-      - { name: definition_type, type: Utf8, from: tag("def_type") }
+      - { name: file_path, type: Utf8, from: '$ROOT | ancestor_tag("file_path")' }
+      - { name: fqn, type: Utf8, from: '$ROOT | tag("fqn")' }
+      - { name: name, type: Utf8, from: '$ROOT | child_sym("__defname")' }
+      - { name: definition_type, type: Utf8, from: '$ROOT | tag("def_type")' }
       - { name: start_line, type: Int64, position: start_line, span: [tag:definition_span, __defname] }
       - { name: end_line, type: Int64, position: end_line, span: [tag:definition_span, __defname] }
       - { name: start_byte, type: Int64, position: start_byte, span: [tag:definition_span, __defname] }
       - { name: end_byte, type: Int64, position: end_byte, span: [tag:definition_span, __defname] }
       - { name: start_char, type: Int64, position: start_col, span: [tag:definition_span, __defname] }
       - { name: end_char, type: Int64, position: end_col, span: [tag:definition_span, __defname] }
-      - { name: front_matter_name, type: Utf8, from: child_sym("__front_matter_name") }
-      - { name: front_matter_description, type: Utf8, from: child_sym("__front_matter_description") }
-      - { name: front_matter_license, type: Utf8, from: child_sym("__front_matter_license") }
-      - { name: front_matter_compatibility, type: Utf8, from: child_sym("__front_matter_compatibility") }
-      - { name: front_matter_allowed_tools, type: Utf8, from: child_sym("__front_matter_allowed_tools") }
-      - { name: front_matter_metadata, type: Utf8, from: child_sym("__front_matter_metadata") }
-      - { name: front_matter_title, type: Utf8, from: child_sym("__front_matter_title") }
-      - { name: front_matter_stage, type: Utf8, from: child_sym("__front_matter_stage") }
-      - { name: front_matter_group, type: Utf8, from: child_sym("__front_matter_group") }
-      - { name: front_matter_info, type: Utf8, from: child_sym("__front_matter_info") }
-      - { name: front_matter_version, type: Utf8, from: child_sym("__front_matter_version") }
-      - { name: front_matter_category, type: Utf8, from: child_sym("__front_matter_category") }
+      - { name: front_matter_name, type: Utf8, from: '$ROOT | child_sym("__front_matter_name")' }
+      - { name: front_matter_description, type: Utf8, from: '$ROOT | child_sym("__front_matter_description")' }
+      - { name: front_matter_license, type: Utf8, from: '$ROOT | child_sym("__front_matter_license")' }
+      - { name: front_matter_compatibility, type: Utf8, from: '$ROOT | child_sym("__front_matter_compatibility")' }
+      - { name: front_matter_allowed_tools, type: Utf8, from: '$ROOT | child_sym("__front_matter_allowed_tools")' }
+      - { name: front_matter_metadata, type: Utf8, from: '$ROOT | child_sym("__front_matter_metadata")' }
+      - { name: front_matter_title, type: Utf8, from: '$ROOT | child_sym("__front_matter_title")' }
+      - { name: front_matter_stage, type: Utf8, from: '$ROOT | child_sym("__front_matter_stage")' }
+      - { name: front_matter_group, type: Utf8, from: '$ROOT | child_sym("__front_matter_group")' }
+      - { name: front_matter_info, type: Utf8, from: '$ROOT | child_sym("__front_matter_info")' }
+      - { name: front_matter_version, type: Utf8, from: '$ROOT | child_sym("__front_matter_version")' }
+      - { name: front_matter_category, type: Utf8, from: '$ROOT | child_sym("__front_matter_category")' }
 
   ImportedSymbol:
     source: __import|__import_type
@@ -94,14 +93,14 @@ entities:
     expand: __name
     id: { seed: import, columns: [file_path, import_path, identifier_name, identifier_alias, span] }
     columns:
-      - { name: file_path, type: Utf8, from: ancestor_tag("file_path") }
+      - { name: file_path, type: Utf8, from: '$ROOT | ancestor_tag("file_path")' }
       - name: import_type
         type: Utf8
         on: expanded
-        from: or("tag:import_type", "ancestor_tag:import_type")|default("NamedImport")
-      - { name: import_path, type: Utf8, from: tag("source_path") }
+        from: '$ROOT | tag("import_type") | default($ROOT | ancestor_tag("import_type")) | default("NamedImport")'
+      - { name: import_path, type: Utf8, from: '$ROOT | tag("source_path")' }
       - { name: identifier_name, type: Utf8, on: expanded }
-      - { name: identifier_alias, type: Utf8, on: expanded, from: ancestor_sym("__alias") }
+      - { name: identifier_alias, type: Utf8, on: expanded, from: '$ROOT | ancestor_sym("__alias")' }
       - { name: start_line, type: Int64, position: start_line }
       - { name: end_line, type: Int64, position: end_line }
       - { name: start_byte, type: Int64, position: start_byte }

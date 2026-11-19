@@ -249,7 +249,7 @@ display:
           language: '@$M | split_last(".") | map("cpp:cpp", "cc:cpp", "cxx:cpp", "hpp:cpp", "hh:cpp", "hxx:cpp")'
       - match: '(__def (__impl))'
         tag:
-          fqn: '$ROOT | ancestor_tag("fqn") | concat("::", $ROOT | child_sym("__defname")) | keep_last("::", "64", "4096")'
+          fqn: '$ROOT | ancestor_tag("fqn") | concat("::", $ROOT | child_sym("__defname")) | keep_last("::", 64, 4096)'
       - use: def_fqn_colons_except_impl
   - use: def_types
   - use: display_wildcard_imports

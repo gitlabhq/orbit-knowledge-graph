@@ -459,7 +459,7 @@ display:
           module_path: '$M | tag("source_root_rel") | regex_replace("\.rs$", "") | regex_replace("(^|/)(mod|lib|main)$", "") | replace("/", "::")'
       - match: '$M:__source_file'
         tag:
-          fqn: '$M | tag("crate") | concat("::", $M | tag("module_path")) | keep_last("::", "64", "4096")'
+          fqn: '$M | tag("crate") | concat("::", $M | tag("module_path")) | keep_last("::", 64, 4096)'
       - use: def_fqn_colons
   - name: def_type
     rules:

@@ -1,3 +1,4 @@
+pub mod export;
 mod expr;
 pub mod lang;
 pub mod pattern;

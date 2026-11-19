@@ -75,9 +75,6 @@ impl Tree {
     pub fn sym_of(&self, id: NodeId, lang: &Lang) -> u32 {
         self.sym_at(Self::to_raw(id), lang)
     }
-    pub(crate) fn to_id(&self, raw: u32) -> NodeId {
-        self.storage.id(raw)
-    }
     pub(crate) fn to_raw(id: NodeId) -> u32 {
         Mutable::<Node>::index(id)
     }

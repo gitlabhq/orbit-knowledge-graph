@@ -1,12 +1,11 @@
 //! `export.yaml` parsed and checked against the ontology. Every table,
-//! column, node kind, tag and transform is named there; the walker in
+//! column, node kind, tag and expression is named there; the walker in
 //! `mod.rs` only follows the result.
 
 use ontology::{DataType, Ontology};
 use orbit_arrow::{ColumnSpec, ColumnType};
 
-use crate::dsl::parser::parse_pipeline;
-use crate::dsl::types::{Ctx, Tf};
+use crate::engine::export::NodeExpr;
 use crate::error::LoadError;
 use crate::intern::Lang;
 use crate::tree::EdgeKind;
@@ -121,7 +120,7 @@ pub(super) enum SpanCandidate {
 
 /// Where a row column's value comes from.
 pub(super) enum Source {
-    Transform(Tf),
+    Expr(NodeExpr),
     Const(String),
     Position(Position, Vec<SpanCandidate>),
 }
@@ -540,13 +539,10 @@ fn compile_source(entity: &str, column: &ColumnYaml, lang: &Lang) -> Result<Sour
         return Ok(Source::Const(value.clone()));
     }
     let Some(position) = column.position.as_deref() else {
-        let tf = match &column.from {
-            Some(pipe) => parse_pipeline(&mut Ctx::new(lang), pipe).map_err(|e| {
-                LoadError::new(format!("export.yaml: {entity}.{}: {e}", column.name))
-            })?,
-            None => Tf::Id,
-        };
-        return Ok(Source::Transform(tf));
+        let src = column.from.as_deref().unwrap_or("$ROOT");
+        let expr = NodeExpr::parse(src, lang)
+            .map_err(|e| LoadError::new(format!("export.yaml: {entity}.{}: {e}", column.name)))?;
+        return Ok(Source::Expr(expr));
     };
     let span = column
         .span
