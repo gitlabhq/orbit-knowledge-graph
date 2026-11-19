@@ -11,7 +11,7 @@ link:
     enter:
       - emit: { imports: { from: $N | impl_name, to: $N | impl_name | reference, resolution: reference } }
       - define($ROOT)
-      - mod.ssa.bind_imports($ROOT | child_all("__supertype") | named)
+      - mod.ssa.bind_import($ROOT | child_all("__supertype") | named | child_all("__import"))
       - inherit($ROOT, $ROOT | child_all("__supertype") | type)
       - mod.ssa.enter_def($ROOT)
     emit:
@@ -24,39 +24,39 @@ link:
     enter:
       - emit: { imports: { from: $N | impl_name, to: $N | impl_name | reference, resolution: reference } }
       - define($ROOT)
-      - mod.ssa.bind_imports($ROOT | child_all("__supertype") | named)
+      - mod.ssa.bind_import($ROOT | child_all("__supertype") | named | child_all("__import"))
       - inherit($ROOT, $ROOT | child_all("__supertype") | type)
       - mod.ssa.enter_def($ROOT)
     emit:
       defines: { from: enclosing_def, to: $ROOT }
       extends: { from: $ROOT, to: $ROOT | supers }
-    children: skip
+    children: $ROOT | child_all("__decorator")
   - match: '(__def)'
     children: skip
 
   - match: '(__call $C:__callee (__property))'
     when: $C | type | is_class
-    enter: [mod.ssa.bind_imports($ROOT)]
+    enter: [mod.ssa.bind_import($ROOT | child_all("__import"))]
     children: $ROOT | without("__import")
   - match: '(__call (__callee $M:__member))'
     when: $M | child("__dispatch") | lacks("__object")
     enter:
-      - mod.ssa.bind_imports($ROOT)
+      - mod.ssa.bind_import($ROOT | child_all("__import"))
       - shadow($ROOT)
-      - emit: { imports: { from: $M | child("__object"), to: $M | child("__object") | reference, resolution: reference } }
-      - emit: { imports: { from: $M | child("__dispatch"), to: $M | child("__dispatch") | reference, resolution: reference } }
+      - emit: { imports: { from: $M | child("__object"), to: $M | child("__object") | reference, site: $ROOT | binding_site, resolution: reference } }
+      - emit: { imports: { from: $M | child("__dispatch"), to: $M | child("__dispatch") | reference, site: $ROOT | binding_site, resolution: reference } }
     children: $ROOT | without("__import")
   - match: '(__call (__callee $M:__member))'
     when: [$M | child("__dispatch") | child("__object"), $M | child("__object") | name | is_contract]
     enter:
-      - mod.ssa.bind_imports($ROOT)
+      - mod.ssa.bind_import($ROOT | child_all("__import"))
       - shadow($ROOT)
       - emit: { type_flow: { from: enclosing, to: $M | receiver_calls, site: $ROOT } }
     children: $ROOT | without("__import")
   - match: '(__call $C:__callee)'
     when: $C | mod.ssa.phi
     enter:
-      - mod.ssa.bind_imports($ROOT)
+      - mod.ssa.bind_import($ROOT | child_all("__import"))
       - shadow($ROOT)
       - emit:
           type_flow: { from: enclosing, to: $C | member_of | receiver_calls, site: $ROOT }
@@ -64,7 +64,7 @@ link:
     children: $ROOT | without("__import")
   - match: '(__call (__callee $M:(__member $O:__object)))'
     enter:
-      - mod.ssa.bind_imports($ROOT)
+      - mod.ssa.bind_import($ROOT | child_all("__import"))
       - shadow($ROOT)
       - emit: { type_flow: { from: enclosing, to: $M | receiver_calls, site: $ROOT } }
       - emit: { calls: { from: enclosing, to: $O | type | member($M), site: $ROOT } }
@@ -73,25 +73,25 @@ link:
           imports: { from: enclosing, to: $O | type | unmatched($M) | imported, site: $ROOT }
           type_flow: { from: enclosing, to: $O | type | unmatched($M) | produced, site: $ROOT }
       - emit: { type_flow: { from: enclosing, to: $O | chain_head | type | typed_calls, site: $ROOT } }
-      - mod.ssa.defer_receiver($ROOT)
+      - mod.ssa.defer($ROOT)
     children: $ROOT | without("__import")
   - match: '(__call (__callee (__member)))'
-    enter: [mod.ssa.bind_imports($ROOT), shadow($ROOT)]
+    enter: [mod.ssa.bind_import($ROOT | child_all("__import")), shadow($ROOT)]
     children: $ROOT | without("__import")
   - match: '(__call (__callee $I:__ivar))'
-    enter: [mod.ssa.bind_imports($ROOT), shadow($ROOT)]
+    enter: [mod.ssa.bind_import($ROOT | child_all("__import")), shadow($ROOT)]
     emit: { calls: { from: enclosing, to: 'enclosing | class | members(@$I, $ROOT)', site: $ROOT } }
     children: $ROOT | without("__import")
   - match: '(__call $C:__callee)'
     when: $C | named
-    enter: [mod.ssa.bind_imports($ROOT), shadow($ROOT)]
+    enter: [mod.ssa.bind_import($ROOT | child_all("__import")), shadow($ROOT)]
     emit:
       calls: { from: enclosing, to: $ROOT | callee_targets | callable, site: $ROOT }
       imports: { from: enclosing, to: $ROOT | callee_targets | imported, site: $ROOT }
       type_flow: { from: enclosing, to: $ROOT | callee_targets | produced, site: $ROOT }
     children: $ROOT | without("__import")
   - match: '(__call)'
-    enter: [mod.ssa.bind_imports($ROOT), shadow($ROOT)]
+    enter: [mod.ssa.bind_import($ROOT | child_all("__import")), shadow($ROOT)]
     children: $ROOT | without("__import")
 
   - match: '(__supertype)'
@@ -102,42 +102,79 @@ link:
       - emit: { calls: { from: enclosing, to: $O | type | member($ROOT), resolution: reference } }
       - emit:
           calls: { from: enclosing, to: $O | type | unmatched($ROOT) | callable, resolution: reference }
-          imports: { from: enclosing, to: $O | type | unmatched($ROOT) | imported, resolution: reference }
+          imports: { from: enclosing, to: $O | type | unmatched($ROOT) | imported, site: $ROOT | binding_site, resolution: reference }
           type_flow: { from: enclosing, to: $O | type | unmatched($ROOT) | produced, resolution: reference }
 
+  - match: '(__decorator)'
+    emit:
+      calls: { from: $ROOT | parent, to: $ROOT | type | is_def }
+      imports: { from: $ROOT | parent, to: $ROOT | type | imported, site: $ROOT }
+    children: '$ROOT | if_true($ROOT | parent | tagged("scoped")) | children'
+
   - match: '(__binding (__qualifier))'
-    enter: [mod.ssa.declare_static($ROOT)]
+    enter: [mod.ssa.bind_static($ROOT)]
     children: skip
   - match: '(__binding)'
-    when: $ROOT | mod.ssa.target
-    enter: ['mod.ssa.bind($ROOT, $ROOT | mod.ssa.target)']
-    children: $ROOT | mod.ssa.rhs_order
+    when: [$ROOT | parent | is("__destructure"), $ROOT | named]
+    enter: [mod.ssa.declare($ROOT), 'mod.ssa.bind($ROOT, $ROOT, $ROOT | rhs_tail)']
+    children: skip
+  - match: '(__binding)'
+    when: $ROOT | parent | is("__destructure")
+    children: skip
+  - match: '(__binding)'
+    when: [$ROOT | mod.ssa.slot, $ROOT | lacks("__rhs"), $ROOT | loop_elements]
+    enter:
+      - 'mod.ssa.bind($ROOT, $ROOT | loop_elements, $ROOT | rhs_tail)'
+      - mod.ssa.declare($ROOT | is_declaration)
+    children: skip
+  - match: '(__binding)'
+    when: [$ROOT | mod.ssa.slot, $ROOT | lacks("__rhs"), $ROOT | child("__declaration") | named]
+    enter: ['mod.ssa.bind($ROOT, $ROOT | if_true($ROOT | parent | is("__ssa_loop")) | opaque, $ROOT | rhs_tail)']
+    children: skip
+  - match: '(__binding)'
+    when: [$ROOT | mod.ssa.slot, $ROOT | child("__rhs") | child("__ssa_branch")]
+    children: $ROOT | rhs_order
+    exit: [mod.ssa.declare($ROOT | is_declaration)]
+  - match: '(__binding)'
+    when: $ROOT | mod.ssa.slot
+    children: $ROOT | rhs_order
     exit:
       - emit:
           imports: { from: enclosing, to: $ROOT | bare_rhs | name | imported, site: $ROOT, resolution: reference }
           calls: { from: enclosing, to: $ROOT | bare_rhs | name | initialized, site: $ROOT }
       - emit:
-          type_flow: { from: enclosing, to: '$ROOT | if_any($ROOT | bare_rhs | name | imported)', site: $ROOT }
-      - mod.ssa.leave()
-  - match: '(__destructure)'
-    enter: [mod.ssa.destructure($ROOT)]
-    children: $ROOT | without("__binding")
+          type_flow: { from: enclosing, to: '$ROOT | if_true($ROOT | bare_rhs | name | imported)', site: $ROOT }
+      - >-
+        mod.ssa.bind($ROOT,
+          or($ROOT | if_true(or($ROOT | child("__ssa_typed"),
+                             or($ROOT | bare_rhs | read | imported,
+                                $ROOT | rhs_tail | is("__member") | if_true(not($ROOT | rhs_tail | slot))))),
+             or($ROOT | rhs_tail | value_of, $ROOT | if_true(not($ROOT | rhs_tail)) | opaque)),
+          or($ROOT | rhs_tail | record, $ROOT | rhs_tail))
+      - mod.ssa.declare($ROOT | is_declaration)
 
   - match: '(__scope)'
-    enter: [mod.ssa.enter_scope($ROOT)]
+    enter:
+      - define($ROOT | if_true($ROOT | tagged("hoisted")) | child_all("__def"))
+      - mod.ssa.enter_scope($ROOT)
     exit: [mod.ssa.leave()]
   - match: '(__lambda)'
-    enter: [mod.ssa.fork_lambda()]
+    enter: [mod.ssa.fork($ROOT | sink)]
     exit: [mod.ssa.leave()]
   - match: '(__ssa_branch)'
-    enter: [mod.ssa.fork($ROOT)]
     children: [$ROOT | without("__ssa_arm"), $ROOT | child_all("__ssa_arm")]
+    between: [mod.ssa.fork($ROOT | sink)]
     exit: [mod.ssa.leave()]
   - match: '(__ssa_arm)'
-    when: $ROOT | mod.ssa.in_fork
-    enter: [mod.ssa.arm($ROOT)]
-    exit: [mod.ssa.leave()]
+    when: $ROOT | parent | is("__ssa_branch")
+    exit:
+      - >-
+        mod.ssa.bind($ROOT | sink | if_true(or($ROOT | tail | value_of | not_opaque,
+                                               $ROOT | tail | if_true(not($ROOT | tail | value_of)) | read | not_opaque)),
+          $ROOT | tail | value_of | not_opaque,
+          or($ROOT | tail | record, $ROOT | tail))
+      - mod.ssa.join()
   - match: '(__ssa_loop)'
-    children: [$ROOT | mod.ssa.loop_head, $ROOT | mod.ssa.loop_body]
+    children: [$ROOT | loop_head, $ROOT | loop_body]
     between: [mod.ssa.loop_header($ROOT)]
     exit: [mod.ssa.leave()]

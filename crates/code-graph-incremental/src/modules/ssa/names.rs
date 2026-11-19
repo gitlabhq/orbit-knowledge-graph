@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
-use super::{BindingKey, BlockId, Frame, Ssa, Value};
+use super::{BlockId, Frame, Key, Ssa, Value, to_vals};
 use crate::canonical::Canonical as C;
 use crate::constants::PATH_SEP;
-use crate::engine::{Cursor, Cx, Val};
+use crate::engine::{Cursor, Cx, Vals};
 
 fn child_def<'t>(module: Cursor<'t>, name: u32) -> Option<Cursor<'t>> {
     module
@@ -12,8 +12,8 @@ fn child_def<'t>(module: Cursor<'t>, name: u32) -> Option<Cursor<'t>> {
 }
 
 impl<'t> Cx<'_, 't, Ssa> {
-    pub(super) fn key(&mut self, key: BindingKey) -> u32 {
-        if key == BindingKey::Name(0) {
+    pub(super) fn key(&mut self, key: Key) -> u32 {
+        if key == Key::Name(0) {
             return 0;
         }
         let keys = &mut self.state().keys;
@@ -21,14 +21,10 @@ impl<'t> Cx<'_, 't, Ssa> {
         *keys.entry(key).or_insert(next)
     }
 
-    pub(super) fn binding_key(&mut self, node: Cursor<'_>, name: u32) -> u32 {
-        self.key(BindingKey::Declaration(node.index(), name))
-    }
-
     pub(super) fn binding(&mut self, name: u32) -> u32 {
         match self.state().visible.get(&name) {
             Some(&(binding, _)) => binding,
-            None => self.key(BindingKey::Name(name)),
+            None => self.key(Key::Name(name)),
         }
     }
 
@@ -43,7 +39,7 @@ impl<'t> Cx<'_, 't, Ssa> {
             .map(|(binding, _)| binding)
     }
 
-    pub(super) fn bind(&mut self, name: u32, binding: u32) {
+    fn bind_name(&mut self, name: u32, binding: u32) {
         let s = self.write();
         let Some(depth) = s.scopes.len().checked_sub(1) else {
             return;
@@ -65,24 +61,25 @@ impl<'t> Cx<'_, 't, Ssa> {
         }
     }
 
-    pub(super) fn declare_binding(&mut self, node: Cursor<'_>, name: u32) -> u32 {
+    /// Makes `name` mean a new variable for `node` in the innermost scope, or
+    /// the variable of the outer scope a declaration names.
+    pub(super) fn declare(&mut self, node: Cursor<'_>, name: u32) -> u32 {
         let binding = match node.child_sym(C::Declaration) {
             Some(_) => self.binding(name),
-            None => self.binding_key(node, name),
+            None => self.key(Key::Declaration(node.index(), name)),
         };
-        self.bind(name, binding);
+        self.bind_name(name, binding);
         binding
     }
 
-    pub(super) fn declare_static(&mut self, node: Cursor<'_>, name: u32, value: Value) -> u32 {
-        let binding = self.declare_binding(node, name);
+    pub(super) fn declare_static(&mut self, node: Cursor<'_>, name: u32, value: Value) {
+        let binding = self.declare(node, name);
         let s = self.write();
         s.graph.write_variable(binding, s.cur, value.clone());
         s.statics.insert(binding, value);
-        binding
     }
 
-    pub(super) fn lookup_static(&mut self, sym: u32) -> Option<Value> {
+    fn lookup_static(&mut self, sym: u32) -> Option<Value> {
         let s = self.state();
         let (binding, depth) = *s.visible.get(&sym)?;
         if let Some(value) = s.statics.get(&binding) {
@@ -99,16 +96,12 @@ impl<'t> Cx<'_, 't, Ssa> {
     }
 
     pub(super) fn scope(&mut self, scope: Cursor<'t>, block: Option<BlockId>) {
+        let tags = self.tags();
+        let label = scope.tag(tags.scoped).unwrap_or(scope.sym());
         let s = self.write();
         let wildcards = s.wildcards.len();
         s.frames.push(Frame::Scope { wildcards, block });
-        self.enter_scope(scope);
-    }
-
-    fn enter_scope(&mut self, scope: Cursor<'t>) {
-        let tags = self.tags();
-        let label = scope.tag(tags.scoped).unwrap_or(scope.sym());
-        self.write().scopes.push((label, Vec::new()));
+        s.scopes.push((label, Vec::new()));
         if scope.has_tag(tags.hoisted) {
             self.predeclare(scope);
         }
@@ -127,8 +120,8 @@ impl<'t> Cx<'_, 't, Ssa> {
             let name = declaration
                 .child_sym(C::DefName)
                 .unwrap_or(declaration.sym());
-            let key = self.binding_key(declaration, name);
-            let unbound = self.key(BindingKey::Name(name));
+            let key = self.key(Key::Declaration(declaration.index(), name));
+            let unbound = self.key(Key::Name(name));
             let s = self.state();
             let depth = s.scopes.len() - 1;
             if s.visible.get(&name).is_some_and(|&(_, at)| at == depth) {
@@ -140,11 +133,11 @@ impl<'t> Cx<'_, 't, Ssa> {
                     .rposition(|(label, _)| *label == owner);
                 if let Some(at) = owner {
                     let bound = self.bound_at(name, at).unwrap_or(unbound);
-                    self.bind(name, bound);
+                    self.bind_name(name, bound);
                 }
                 continue;
             }
-            self.bind(name, key);
+            self.bind_name(name, key);
             let s = self.write();
             s.graph.write_variable(key, s.cur, Value::Opaque);
         }
@@ -156,21 +149,12 @@ impl<'t> Cx<'_, 't, Ssa> {
             .filter(|d| d.is(C::Def) && d.child(C::Declaration).is_none())
         {
             if let Some(name) = d.child_sym(C::DefName) {
-                self.register(d);
-                self.declare(d, name);
+                self.declare_def(d, name);
             }
         }
     }
 
-    pub(super) fn register(&mut self, def: Cursor<'_>) {
-        let s = self.write();
-        if s.registered.insert(def.index()) && def.child_sym(C::DefName).is_some() {
-            s.declared.push(def.index());
-            self.call1(crate::fn_id!("core", "define"), Val::Node(def.into()));
-        }
-    }
-
-    fn declare(&mut self, c: Cursor<'t>, name: u32) {
+    fn declare_def(&mut self, c: Cursor<'t>, name: u32) {
         for sym in std::iter::once(name).chain(c.children_of(C::Alias).map(|a| a.sym())) {
             if sym == name && c.has(C::ImplBlock) && !self.lookup(name).is_empty() {
                 continue;
@@ -183,8 +167,7 @@ impl<'t> Cx<'_, 't, Ssa> {
         let Some(name) = c.child_sym(C::DefName) else {
             return;
         };
-        self.register(c);
-        self.declare(c, name);
+        self.declare_def(c, name);
         let s = self.write();
         let parent = s.cur;
         s.cur = s.graph.add_sealed_successor(parent);
@@ -196,15 +179,14 @@ impl<'t> Cx<'_, 't, Ssa> {
     pub(super) fn bind_import(&mut self, c: Cursor<'t>) {
         let module = self.inline_module(c);
         let type_only = self.tags().type_only;
-        let shadow_locals = self.link_config().imports_shadow_locals;
+        let link = &self.env().rules_for(&self.tree().label).config.link;
         for n in c.names() {
-            let sym = n.sym();
             let local = n
                 .child_sym(C::Alias)
                 .or(n.child_sym(C::SsaHint))
-                .unwrap_or(sym);
+                .unwrap_or(n.sym());
             if c.is(C::ImportType) || n.has_tag(type_only) {
-                let binding = self.declare_binding(n, local);
+                let binding = self.declare(n, local);
                 let s = self.write();
                 s.graph.write_variable(binding, s.cur, Value::Opaque);
                 continue;
@@ -214,7 +196,7 @@ impl<'t> Cx<'_, 't, Ssa> {
             {
                 continue;
             }
-            if !shadow_locals
+            if !link.imports_shadow_locals
                 && self
                     .lookup(local)
                     .iter()
@@ -225,35 +207,36 @@ impl<'t> Cx<'_, 't, Ssa> {
             if local == self.state().wildcard {
                 Rc::make_mut(&mut self.write().wildcards).push(n.index());
             }
-            let binding = self.declare_static(n, local, Value::ImportRef(n.index()));
+            self.declare_static(n, local, Value::ImportRef(n.index()));
+            let binding = self.binding(local);
             for alias in [C::Alias, C::SsaHint]
                 .into_iter()
                 .filter_map(|kind| n.child_sym(kind))
             {
-                self.bind(alias, binding);
+                self.bind_name(alias, binding);
             }
         }
     }
 
-    pub(super) fn inline_module(&mut self, import: Cursor<'t>) -> Option<Cursor<'t>> {
-        if !self.link_config().inline_modules {
+    fn inline_module(&mut self, import: Cursor<'t>) -> Option<Cursor<'t>> {
+        let env = self.env();
+        if !env.rules_for(&self.tree().label).config.link.inline_modules {
             return None;
         }
-        let syms = &self.env().lang.syms;
-        let path = syms.resolve(import.child_sym(C::SourcePath)?);
+        let path = env.lang.syms.resolve(import.child_sym(C::SourcePath)?);
         let mut segments = path.split(PATH_SEP).filter(|s| !s.is_empty());
         let Some(first) = segments.next() else {
             return Some(self.tree().root());
         };
         let mut module = self
-            .lookup(syms.lookup(first))
+            .lookup(env.lang.syms.lookup(first))
             .into_iter()
             .find_map(|r| match r {
                 Value::LocalDef(d) => Some(self.at(d)),
                 _ => None,
             })?;
         for segment in segments {
-            module = child_def(module, syms.lookup(segment))?;
+            module = child_def(module, env.lang.syms.lookup(segment))?;
         }
         Some(module)
     }
@@ -270,13 +253,22 @@ impl<'t> Cx<'_, 't, Ssa> {
                 .into_iter()
                 .collect(),
         };
+        let at = name.index();
         for &(bind_as, node) in &targets {
-            self.register(self.at(node));
             self.declare_static(name, bind_as, Value::LocalDef(node));
+            let s = self.state();
+            if !s.loops.is_empty() {
+                let positions = s.assigned.entry(bind_as).or_default();
+                if let Err(slot) = positions.binary_search(&at) {
+                    positions.insert(slot, at);
+                }
+            }
         }
         !targets.is_empty()
     }
 
+    /// The block to read `sym` from: the preheader of the innermost loop that
+    /// assigns it nowhere, so a read never sees an unfinished loop phi.
     pub(super) fn name_block(&mut self, sym: u32) -> BlockId {
         let s = self.state();
         let assigned = s.assigned.get(&sym).map_or(&[][..], Vec::as_slice);
@@ -313,5 +305,16 @@ impl<'t> Cx<'_, 't, Ssa> {
             }
         }
         Vec::new()
+    }
+
+    pub(super) fn read(&mut self, c: Cursor<'t>) -> Vals {
+        if c.has(C::Qualifier) {
+            return to_vals(&self.lookup_static(c.sym()));
+        }
+        if let Some(slot) = self.field_slot(c) {
+            let value = self.read_value(slot);
+            return to_vals(&self.state().graph.resolve_value(&value));
+        }
+        to_vals(&self.lookup(c.sym()))
     }
 }

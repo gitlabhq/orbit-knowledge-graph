@@ -44,16 +44,15 @@ impl<'t> Chain<'t> for Cx<'_, 't, Core> {
 
     fn name(&mut self, c: Cursor<'t>) -> Vals {
         if c.has(C::Qualifier) {
-            let r = self.ssa(crate::fn_id!("ssa", "read_static"), c);
-            return r;
+            return self.read(c);
         }
         let ivar = c.value_child(C::Ivar);
         let mut bound = match ivar {
             Some(_) => Vals::new(),
-            None => self.ssa(crate::fn_id!("ssa", "read"), c),
+            None => self.read(c),
         };
         if bound.is_empty() {
-            bound = self.ssa(crate::fn_id!("core", "ivar"), ivar.unwrap_or(c));
+            bound = self.ivar(ivar.unwrap_or(c));
         }
         bound
             .into_iter()
@@ -90,7 +89,7 @@ impl<'t> Chain<'t> for Cx<'_, 't, Core> {
 
 impl<'t> Cx<'_, 't, Core> {
     pub(super) fn is_class_ref(&mut self, c: Cursor<'t>) -> bool {
-        let found = self.ssa(crate::fn_id!("core", "type"), c);
+        let found = self.type_of(c);
         found
             .iter()
             .any(|v| matches!(self.view(*v), Some(Ref::Def(n)) if self.at(n).is_class()))
@@ -103,11 +102,11 @@ impl<'t> Cx<'_, 't, Core> {
         object: Cursor<'t>,
     ) -> Vals {
         let mut targets = Vals::new();
-        for r in self.ssa(crate::fn_id!("core", "type"), object) {
+        for r in self.type_of(object) {
             match self.view(r) {
                 Some(Ref::Type(node)) => targets.push(Val::Node(self.loc(node))),
                 Some(Ref::Call(n)) if let Some(ty) = binding_type(self.at(n)) => {
-                    targets.extend(self.ssa(crate::fn_id!("core", "type"), ty));
+                    targets.extend(self.type_of(ty));
                     targets.push(r);
                 }
                 _ => targets.push(r),
@@ -134,7 +133,7 @@ impl<'t> Cx<'_, 't, Core> {
             }
             Some(Ref::Call(n)) if let Some(ty) = binding_type(self.at(n)) => {
                 let mut out = Vals::new();
-                for t in self.ssa(crate::fn_id!("core", "type"), ty) {
+                for t in self.type_of(ty) {
                     let args = [one(t), one(Val::Node(member.into()))];
                     for found in self.call(crate::fn_id!("core", "member"), &args) {
                         if !out.contains(&found) {
@@ -163,7 +162,7 @@ impl<'t> Cx<'_, 't, Core> {
     }
 
     pub(super) fn reference(&mut self, reference: Cursor<'t>) -> Vals {
-        let found = self.ssa(crate::fn_id!("core", "type"), reference);
+        let found = self.type_of(reference);
         let parent = reference.parent().map_or(reference.index(), Cursor::index);
         match found.as_slice() {
             [v] if matches!(self.view(*v), Some(Ref::Def(t) | Ref::Import(t)) if t != parent) => {
@@ -217,8 +216,8 @@ impl<'t> Cx<'_, 't, Core> {
     }
 
     fn implicit_targets(&mut self, callee: Cursor<'t>, site: Cursor<'t>) -> Vals {
-        if !self.ssa(crate::fn_id!("ssa", "defined"), callee).is_empty() {
-            let bound = self.ssa(crate::fn_id!("ssa", "read"), callee);
+        let bound = self.read(callee);
+        {
             if !bound.is_empty() {
                 let named: Vals = bound
                     .into_iter()
@@ -241,7 +240,7 @@ impl<'t> Cx<'_, 't, Core> {
 
     fn name_targets(&mut self, callee: Cursor<'t>, site: Cursor<'t>, callable_only: bool) -> Vals {
         let targets: Vals = self
-            .ssa(crate::fn_id!("ssa", "read"), callee)
+            .read(callee)
             .into_iter()
             .map(|r| self.member_for(r, site))
             .collect();
@@ -249,7 +248,7 @@ impl<'t> Cx<'_, 't, Core> {
             return targets;
         }
         let callable = self.tags().callable;
-        let mut wild = self.call(crate::fn_id!("ssa", "wildcards"), &[]);
+        let mut wild = self.call(crate::fn_id!("core", "wildcards"), &[]);
         wild.retain(|v| {
             !callable_only
                 || v.loc()

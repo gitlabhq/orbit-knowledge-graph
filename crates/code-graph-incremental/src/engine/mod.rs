@@ -99,6 +99,9 @@ pub enum Kind {
     Pure,
     Flow,
     Effect,
+    /// Declared here, provided per phase by the function `pipeline.yaml` binds
+    /// to it.
+    Abstract,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -254,6 +257,7 @@ pub struct Run<'t> {
     fi: u32,
     env: &'t Env,
     tags: ReservedTags,
+    binds: &'t [(FnId, FnId)],
     budget: &'t Sentinel,
     file: Sentinel,
     killed: Option<Killed>,
@@ -268,11 +272,19 @@ pub struct Run<'t> {
 }
 
 impl<'t> Run<'t> {
-    fn new(trees: &'t [Tree], fi: u32, env: &'t Env, budget: &'t Sentinel, file: Sentinel) -> Self {
+    fn new(
+        trees: &'t [Tree],
+        fi: u32,
+        env: &'t Env,
+        binds: &'t [(FnId, FnId)],
+        budget: &'t Sentinel,
+        file: Sentinel,
+    ) -> Self {
         Self {
             trees,
             fi,
             env,
+            binds,
             tags: ReservedTags::new(&env.lang),
             budget,
             file,
@@ -361,6 +373,7 @@ impl<'t> Run<'t> {
     /// never stored; one that read state lives until that state changes, which
     /// keeps self-referential chains (`n = n.next()`) linear.
     fn call(&mut self, id: FnId, args: &[Vals]) -> Vals {
+        let id = provider(self.binds, id);
         let f = function(id);
         let invoke = modules::ALL[usize::from(f.slot)].invoke;
         if f.kind == Kind::Effect {
@@ -412,6 +425,19 @@ impl<'t> Run<'t> {
     }
 }
 
+fn provider(binds: &[(FnId, FnId)], id: FnId) -> FnId {
+    binds
+        .iter()
+        .find_map(|&(of, to)| (of == id).then_some(to))
+        .unwrap_or(id)
+}
+
+pub fn abstracts(module: &str) -> impl Iterator<Item = FnId> + '_ {
+    (0..TABLE.len() as u16)
+        .map(FnId)
+        .filter(move |&id| function(id).kind == Kind::Abstract && module_of(id) == module)
+}
+
 fn stamp(epochs: &[u64; WALK + 1], mut reads: u8) -> u64 {
     let mut sum = 0;
     while reads != 0 {
@@ -430,7 +456,14 @@ pub fn run_tree(
     budget: &Sentinel,
     file: Sentinel,
 ) -> Result<Vec<Edge>, Killed> {
-    let mut run = Run::new(std::slice::from_ref(tree), 0, env, budget, file);
+    let mut run = Run::new(
+        std::slice::from_ref(tree),
+        0,
+        env,
+        &phase.binds,
+        budget,
+        file,
+    );
     let root = tree.root();
     for &slot in &phase.modules {
         (modules::ALL[usize::from(slot)].start)(&mut run, slot, root.index());

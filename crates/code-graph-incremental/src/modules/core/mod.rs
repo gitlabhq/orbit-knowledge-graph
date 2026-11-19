@@ -4,7 +4,7 @@ pub mod ops;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical as C;
-use crate::engine::{Cursor, Cx, Function, Module, Val, Vals, of, truthy, yes};
+use crate::engine::{Cursor, Cx, Function, Module, Val, Vals, of, one, truthy, yes};
 use crate::modules::{arg, function, node};
 use crate::resolve::CLASS_LIKE;
 use crate::tree::{CallResolution, EdgeKind, Role};
@@ -18,7 +18,6 @@ pub struct State {
     defs: FxHashMap<u32, Vec<u32>>,
     supers: FxHashMap<u32, Vec<u32>>,
     shadowed: FxHashSet<u32>,
-    ivars: FxHashMap<u32, FxHashMap<u32, u32>>,
     members: Members,
 }
 
@@ -28,7 +27,6 @@ impl Default for State {
             defs: FxHashMap::default(),
             supers: FxHashMap::default(),
             shadowed: FxHashSet::default(),
-            ivars: FxHashMap::default(),
             members: Members::new(1),
         }
     }
@@ -111,8 +109,12 @@ impl<'t> Cx<'_, 't, Core> {
         )
     }
 
-    fn ssa(&mut self, id: crate::engine::FnId, c: Cursor) -> Vals {
-        self.call1(id, Val::Node(c.into()))
+    fn read(&mut self, c: Cursor) -> Vals {
+        self.call1(crate::fn_id!("core", "read"), Val::Node(c.into()))
+    }
+
+    fn type_of(&mut self, c: Cursor) -> Vals {
+        self.call1(crate::fn_id!("core", "type"), Val::Node(c.into()))
     }
 
     fn enclosing_class(&mut self) -> Option<Cursor<'t>> {
@@ -120,22 +122,14 @@ impl<'t> Cx<'_, 't, Core> {
         enclosing_class(self.at(enclosing))
     }
 
-    fn ivar(&mut self, attr: u32) -> Option<Cursor<'t>> {
-        let class = self.enclosing_class()?;
-        let at = move |node| class.jump(class.fi(), node);
-        let index = self.state().ivars.entry(class.index()).or_insert_with(|| {
-            let mut index = FxHashMap::default();
-            for n in class.descendants() {
-                if n.is(C::Binding)
-                    && let Some(iv) = n.child_sym(C::Ivar)
-                    && n.typed().is_some()
-                {
-                    index.entry(iv).or_insert(n.index());
-                }
-            }
-            index
-        });
-        index.get(&attr).map(|&n| at(n))
+    /// The producer of the typed binding of instance variable `c` in the
+    /// enclosing class.
+    fn ivar(&mut self, c: Cursor<'t>) -> Vals {
+        let Some(class) = self.enclosing_class() else {
+            return Vals::new();
+        };
+        let args = [one(Val::Node(class.into())), one(Val::Sym(c.sym()))];
+        self.call(crate::fn_id!("core", "ivar_binding"), &args)
     }
 
     fn define(&mut self, def: Cursor<'_>) {
@@ -163,7 +157,7 @@ impl<'t> Cx<'_, 't, Core> {
         if callee.has(C::Ivar) || root.is(C::Call) || root.value_child(C::Call).is_some() {
             return;
         }
-        let found = self.ssa(crate::fn_id!("ssa", "read"), root);
+        let found = self.read(root);
         if !found.iter().all(|&v| self.is_name(v)) {
             // No epoch bump: only `finish` reads this set.
             self.state().shadowed.insert(c.index());
@@ -185,12 +179,65 @@ impl<'t> Cx<'_, 't, Core> {
     }
 }
 
+fn unbound(_: &mut Cx<'_, '_, Core>, _: &[Vals]) -> Vals {
+    unreachable!("the engine calls the function a phase binds instead")
+}
+
+fn loop_head(c: Cursor<'_>) -> usize {
+    c.children()
+        .position(|node| node.is(C::Binding) && node.has(C::Declaration) && !node.lifted())
+        .unwrap_or(0)
+}
+
+/// The branch whose value `c` gives: the branch of an arm, or the branch
+/// an arm ends in through nodes that stand for their last child.
+fn sink_step(c: Cursor<'_>) -> Result<Cursor<'_>, Option<Cursor<'_>>> {
+    if c.is(C::SsaArm) {
+        let tail = c.tail_expr();
+        if tail.is(C::SsaBranch) || tail.is(C::SsaReturn) {
+            return Err(None);
+        }
+        return c.parent().filter(|p| p.is(C::SsaBranch)).ok_or(None);
+    }
+    if !c.is(C::SsaBranch) {
+        return Err(None);
+    }
+    let first = c.parent().ok_or(None)?;
+    if first.is(C::Rhs) {
+        let direct = first
+            .child(C::SsaBranch)
+            .is_some_and(|b| b.index() == c.index());
+        return Err(first.parent().filter(|b| direct && b.is(C::Binding)));
+    }
+    let (mut up, mut below) = (first, c);
+    while !up.is(C::SsaArm) {
+        let tail = up.last_named().filter(|t| up.stands_for(*t));
+        if tail.is_none_or(|t| t.index() != below.index()) {
+            return Err(None);
+        }
+        (below, up) = (up, up.parent().ok_or(None)?);
+    }
+    match up.tail_expr().index() == c.index() {
+        true => up.parent().filter(|p| p.is(C::SsaBranch)).ok_or(None),
+        false => Err(None),
+    }
+}
+
 impl Module for Core {
     const NAME: &'static str = "core";
     type State = State;
 
     fn functions() -> &'static [Function<Self>] {
         FUNCTIONS
+    }
+
+    fn start<'t>(cx: &mut Cx<'_, 't, Self>, root: Cursor<'t>) {
+        for def in root
+            .children()
+            .filter(|d| d.is(C::Def) && d.child(C::Declaration).is_none())
+        {
+            cx.define(def);
+        }
     }
 
     fn finish(cx: &mut Cx<'_, '_, Self>) {
@@ -264,9 +311,106 @@ static FUNCTIONS: &[Function<Core>] = &[
         keep(arg(cx, a, 0), |c| c.has_tag(tag))
     }),
     function!(Pure, "not", [set], |_, a| yes(!truthy(&a[0]))),
-    function!(Pure, "if_any", [set, set], |_, a| match a[1].is_empty() {
-        true => Vals::new(),
+    function!(Pure, "if_true", [set, set], |_, a| match truthy(&a[1]) {
+        true => a[0].clone(),
+        false => Vals::new(),
+    }),
+    function!(Pure, "or", [set, set], |_, a| match a[0].is_empty() {
+        true => a[1].clone(),
         false => a[0].clone(),
+    }),
+    function!(Pure, "opaque", [set], |_, a| match a[0].is_empty() {
+        true => Vals::new(),
+        false => one(Val::Opaque),
+    }),
+    function!(Pure, "not_opaque", [set], |_, a| {
+        a[0].iter().copied().filter(|v| *v != Val::Opaque).collect()
+    }),
+    function!(Pure, "is", [one, one], |cx, a| {
+        let k = kind(a, 1);
+        keep(arg(cx, a, 0), |c| c.kind() == k)
+    }),
+    function!(Pure, "is_def", [one], |cx, a| match a[0][0] {
+        Val::Node(loc) if cx.jump(loc).is(C::Def) => a[0].clone(),
+        _ => Vals::new(),
+    }),
+    function!(Pure, "is_declaration", [one], |cx, a| keep(
+        arg(cx, a, 0),
+        |c| { c.has(C::Declaration) && c.child_sym(C::Declaration).is_none() }
+    )),
+    function!(Pure, "parent", [one], |cx, a| of(
+        arg(cx, a, 0).and_then(|c| c.parent())
+    )),
+    function!(Pure, "children", [one], |cx, a| of(arg(cx, a, 0)
+        .into_iter()
+        .flat_map(|c| c.children()))),
+    function!(Pure, "tail", [one], |cx, a| of(
+        arg(cx, a, 0).map(Cursor::tail_expr)
+    )),
+    function!(Pure, "rhs_tail", [one], |cx, a| of(arg(cx, a, 0)
+        .and_then(|c| c.child(C::Rhs))
+        .map(Cursor::tail_expr))),
+    function!(Pure, "rhs_order", [one], |cx, a| {
+        let c = node(cx, a, 0);
+        let Some(rhs) = c.child(C::Rhs) else {
+            return Vals::new();
+        };
+        let calls = c
+            .children()
+            .take_while(|child| !child.is(C::Rhs))
+            .filter(|child| child.is(C::Call));
+        match rhs.child(C::SsaBranch) {
+            Some(branch) => {
+                let effects = rhs.children().filter(|child| child.is(C::SideEffect));
+                of(std::iter::once(branch).chain(effects).chain(calls))
+            }
+            None => of(rhs.children().chain(calls)),
+        }
+    }),
+    function!(
+        Pure,
+        "sink",
+        [one],
+        |cx, a| match sink_step(node(cx, a, 0)) {
+            Ok(next) => cx.call1(crate::fn_id!("core", "sink"), Val::Node(next.into())),
+            Err(binding) => of(binding),
+        }
+    ),
+    function!(Pure, "loop_elements", [one], |cx, a| {
+        let c = node(cx, a, 0);
+        let iterable = c
+            .parent()
+            .filter(|parent| parent.is(C::SsaLoop))
+            .and_then(|parent| {
+                parent
+                    .children()
+                    .take_while(|node| node.index() != c.index())
+                    .find(|node| node.is(C::Arr))
+            });
+        of(iterable
+            .into_iter()
+            .flat_map(|array| array.children())
+            .filter(|element| element.is(C::Call)))
+    }),
+    function!(Pure, "loop_head", [one], |cx, a| {
+        let c = node(cx, a, 0);
+        of(c.children().take(loop_head(c)))
+    }),
+    function!(Pure, "loop_body", [one], |cx, a| {
+        let c = node(cx, a, 0);
+        of(c.children().skip(loop_head(c)))
+    }),
+    function!(Pure, "binding_site", [one], |cx, a| {
+        let site = node(cx, a, 0)
+            .ancestors()
+            .take_while(|up| !up.is(C::Def))
+            .filter(|up| up.is(C::Binding))
+            .find(|binding| {
+                binding.child(C::Rhs).is_some_and(|rhs| {
+                    rhs.child(C::SsaBranch).is_none() && rhs.value_child(C::Member).is_some()
+                })
+            });
+        of(site)
     }),
     function!(Pure, "is_class", [one], |cx, a| keep(arg(cx, a, 0), |c| c
         .is(C::Def)
@@ -330,12 +474,46 @@ static FUNCTIONS: &[Function<Core>] = &[
     function!(Flow, "class", [one], |cx, a| of(
         arg(cx, a, 0).and_then(enclosing_class)
     )),
-    function!(Flow, "ivar", [one], |cx, a| {
-        let found = cx.ivar(node(cx, a, 0).sym());
-        of(found.map(|binding| cx.at(producer_of(binding))))
+    function!(Pure, "ivar_binding", [one, one], |cx, a| {
+        let (class, Some(&Val::Sym(attr))) = (node(cx, a, 0), a[1].first()) else {
+            return Vals::new();
+        };
+        let binding = class.descendants().find(|n| {
+            n.is(C::Binding) && n.child_sym(C::Ivar) == Some(attr) && n.typed().is_some()
+        });
+        of(binding.map(|b| cx.at(producer_of(b))))
     }),
+    function!(Flow, "value_of", [one], |cx, a| {
+        let t = node(cx, a, 0);
+        match t {
+            t if C::try_from_u16(t.kind()).is_some_and(C::is_opaque_value) => one(Val::Opaque),
+            t if t.is(C::Call) => of([t]),
+            t if t.is(C::Ivar) => {
+                let found = cx.ivar(t);
+                if found.is_empty() {
+                    one(Val::Opaque)
+                } else {
+                    found
+                }
+            }
+            _ => Vals::new(),
+        }
+    }),
+    function!(Flow, "record", [one], |cx, a| {
+        let t = node(cx, a, 0);
+        if let Some(record) = t.is(C::Obj).then_some(t).or_else(|| t.child(C::Obj)) {
+            return of([record]);
+        }
+        let class = t
+            .child(C::Callee)
+            .is_some_and(|callee| cx.is_class_ref(callee));
+        of(t.child(C::Args).filter(|_| class))
+    }),
+    function!(Abstract, "read", [one], unbound),
+    function!(Abstract, "slot", [one], unbound),
+    function!(Abstract, "wildcards", [], unbound),
     function!(Flow, "name", [one], |cx, a| {
-        let mut found = cx.ssa(crate::fn_id!("ssa", "read"), node(cx, a, 0));
+        let mut found = cx.read(node(cx, a, 0));
         found.retain(|v| *v != Val::Opaque);
         found
     }),
@@ -378,7 +556,7 @@ static FUNCTIONS: &[Function<Core>] = &[
         let Some(receiver) = receiver else {
             return Vals::new();
         };
-        let mut found = cx.ssa(crate::fn_id!("ssa", "read"), receiver);
+        let mut found = cx.read(receiver);
         found.retain(|v| matches!(cx.view(*v), Some(Ref::Call(_))));
         found
     }),
@@ -401,7 +579,8 @@ static FUNCTIONS: &[Function<Core>] = &[
             parent.is(C::Callee)
                 || parent.is(C::Object) && parent.parent().is_some_and(|owner| owner.is(C::Member))
         });
-        match in_chain || !cx.ssa(crate::fn_id!("ssa", "field"), member).is_empty() {
+        let slot = cx.call1(crate::fn_id!("core", "slot"), Val::Node(member.into()));
+        match in_chain || !slot.is_empty() {
             true => Vals::new(),
             false => of([member]),
         }

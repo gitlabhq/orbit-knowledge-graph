@@ -18,6 +18,7 @@ pub enum Expr {
 pub struct Scope<'a> {
     pub slots: &'a HashMap<Box<str>, u16>,
     pub modules: &'a [String],
+    pub binds: &'a [(FnId, FnId)],
     pub lang: &'a Lang,
     pub effects: bool,
 }
@@ -190,6 +191,7 @@ impl<'s> Parser<'s, '_> {
         if !self.scope.modules.iter().any(|m| m == module_of(id)) {
             return Err(self.error(&format!("module {module} is not allowed in this phase")));
         }
+        let id = super::provider(self.scope.binds, id);
         let f = function(id);
         if f.kind == Kind::Effect && !self.scope.effects {
             return Err(self.error(&format!(

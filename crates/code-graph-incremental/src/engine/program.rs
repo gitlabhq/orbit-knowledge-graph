@@ -4,7 +4,7 @@ use smallvec::SmallVec;
 
 use super::expr::{Expr, Scope};
 use super::matching::matches;
-use super::{Cursor, Loc, Run, Val, Vals};
+use super::{Cursor, FnId, Kind, Loc, Run, Val, Vals};
 use crate::canonical::{CANONICAL_BASE, Canonical as C};
 use crate::dsl::parser::parse;
 use crate::dsl::types::{Cap, Ctx, Pat};
@@ -22,6 +22,8 @@ struct PhaseSpec {
     after: Vec<String>,
     outputs: Vec<String>,
     modules: Vec<String>,
+    #[serde(default)]
+    bind: BTreeMap<String, String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -101,6 +103,7 @@ pub struct Phase {
     pub scope: String,
     pub after: Vec<String>,
     pub(super) modules: Vec<u8>,
+    pub(super) binds: Vec<(FnId, FnId)>,
     rules: Vec<Rule>,
     by_kind: Vec<SmallVec<[u16; 4]>>,
     slots: usize,
@@ -140,6 +143,7 @@ impl Pipeline {
 
 impl Phase {
     fn load(spec: PhaseSpec, rules: &[RuleSpec], lang: &Lang) -> Result<Self, LoadError> {
+        let binds = binds(&spec)?;
         let mut phase = Phase {
             name: spec.name,
             scope: spec.scope,
@@ -149,6 +153,7 @@ impl Phase {
                 .iter()
                 .map(|m| super::slot_of(m).ok_or_else(|| LoadError(format!("no module named {m}"))))
                 .collect::<Result<_, _>>()?,
+            binds,
             rules: Vec::new(),
             by_kind: Vec::new(),
             slots: 1,
@@ -178,7 +183,7 @@ impl Phase {
                     ))));
                 }
             }
-            let rule = Rule::load(rule, &spec.modules, lang).map_err(at)?;
+            let rule = Rule::load(rule, &spec.modules, &phase.binds, lang).map_err(at)?;
             let Pat::Node { kind, .. } = rule.pat else {
                 return Err(at(LoadError("must match a node kind".into())));
             };
@@ -197,8 +202,57 @@ impl Phase {
     }
 }
 
+/// Each abstract function of the phase's modules, resolved once to the
+/// function `bind:` provides for it.
+fn binds(spec: &PhaseSpec) -> Result<Vec<(FnId, FnId)>, LoadError> {
+    let id = |path: &str| {
+        let (module, name) = path
+            .split_once('.')
+            .ok_or_else(|| LoadError(format!("bind {path}: expected <module>.<function>")))?;
+        if !spec.modules.iter().any(|m| m == module) {
+            return Err(LoadError(format!(
+                "bind {path}: {module} is not in the phase"
+            )));
+        }
+        super::lookup(module, name).ok_or_else(|| LoadError(format!("bind {path}: unknown")))
+    };
+    let mut binds = Vec::new();
+    for (of, to) in &spec.bind {
+        let (of, to) = (id(of)?, id(to)?);
+        let (declared, provider) = (super::function(of), super::function(to));
+        if declared.kind != Kind::Abstract || provider.kind == Kind::Abstract {
+            return Err(LoadError(format!(
+                "bind {}: must bind an abstract function to a provider",
+                declared.name
+            )));
+        }
+        if declared.sig != provider.sig {
+            return Err(LoadError(format!(
+                "bind {}: signatures differ",
+                declared.name
+            )));
+        }
+        binds.push((of, to));
+    }
+    for module in &spec.modules {
+        if let Some(id) = super::abstracts(module).find(|id| binds.iter().all(|(of, _)| of != id)) {
+            return Err(LoadError(format!(
+                "phase {}: {module}.{} needs a bind",
+                spec.name,
+                super::function(id).name
+            )));
+        }
+    }
+    Ok(binds)
+}
+
 impl Rule {
-    fn load(spec: &RuleSpec, modules: &[String], lang: &Lang) -> Result<Self, LoadError> {
+    fn load(
+        spec: &RuleSpec,
+        modules: &[String],
+        binds: &[(FnId, FnId)],
+        lang: &Lang,
+    ) -> Result<Self, LoadError> {
         let mut ctx = Ctx::new(lang);
         ctx.slot("ROOT")?;
         let pat = parse(&mut ctx, &spec.pattern)?;
@@ -206,6 +260,7 @@ impl Rule {
         let scope = |effects| Scope {
             slots,
             modules,
+            binds,
             lang,
             effects,
         };

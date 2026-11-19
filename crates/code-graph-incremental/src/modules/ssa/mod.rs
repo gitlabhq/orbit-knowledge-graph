@@ -1,25 +1,22 @@
-mod bind;
-mod control;
-mod deferred;
 pub mod engine;
-mod fields;
+mod names;
+mod values;
 
 use std::rc::Rc;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::canonical::Canonical as C;
 use crate::constants::WILDCARD;
-use crate::engine::{Cursor, Cx, Function, Loc, Module, Val, Vals, of, yes};
+use crate::engine::{Cursor, Cx, Function, Loc, Module, Val, Vals, of, one, yes};
 use crate::modules::{function, node};
-use crate::rules::LinkConfig;
 pub use engine::{BlockId, SsaEngine, Value};
 
 pub struct Ssa;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-enum BindingKey {
+enum Key {
     Name(u32),
     Declaration(u32, u32),
     Field(u32, u32),
@@ -30,54 +27,41 @@ enum Deferred {
     Receiver(u32, Vec<Value>),
 }
 
-struct Bound {
-    binding: u32,
-    lhs: u32,
-    first_edge: usize,
-    declaration: bool,
-    branch: bool,
-}
-
 enum Frame {
     Scope {
         wildcards: usize,
         block: Option<BlockId>,
     },
-    Binding(Option<Bound>),
     Branch {
-        node: u32,
-        lhs: Option<u32>,
-        pre: Option<BlockId>,
+        pre: BlockId,
+        exhaustive: bool,
         exits: SmallVec<[BlockId; 4]>,
     },
-    Arm(u32),
     Loop(BlockId),
-    Lambda(BlockId),
 }
 
 type Undo = Vec<(u32, Option<(u32, usize)>)>;
 
+/// Flow state of one file: the SSA graph and its current block, the open
+/// frames, the scopes from names to variables, field variables, the loops
+/// being walked and the calls deferred until their loop closes.
 #[derive(Default)]
 pub struct State {
     graph: SsaEngine,
     entry: BlockId,
     cur: BlockId,
-    registered: FxHashSet<u32>,
-    declared: Vec<u32>,
-    wildcards: Rc<Vec<u32>>,
     frames: Vec<Frame>,
-    loops: Vec<(BlockId, (u32, u32))>,
-    loop_ends: FxHashMap<u32, u32>,
-    assigned: FxHashMap<u32, Vec<u32>>,
-    loop_wildcards: Vec<u32>,
-    wildcard: u32,
-    value_sink: FxHashMap<u32, u32>,
-    pending: Vec<(Value, u32, u32, Deferred)>,
-    fields: FxHashMap<u32, FxHashMap<u32, u32>>,
     scopes: Vec<(u32, Undo)>,
     visible: FxHashMap<u32, (u32, usize)>,
     statics: FxHashMap<u32, Value>,
-    keys: FxHashMap<BindingKey, u32>,
+    keys: FxHashMap<Key, u32>,
+    fields: FxHashMap<u32, FxHashMap<u32, u32>>,
+    loops: Vec<(BlockId, (u32, u32))>,
+    loop_ends: FxHashMap<u32, u32>,
+    assigned: FxHashMap<u32, Vec<u32>>,
+    wildcard: u32,
+    wildcards: Rc<Vec<u32>>,
+    pending: Vec<(Value, u32, u32, Deferred)>,
 }
 
 fn to_vals<'v>(values: impl IntoIterator<Item = &'v Value>) -> Vals {
@@ -93,15 +77,109 @@ fn to_vals<'v>(values: impl IntoIterator<Item = &'v Value>) -> Vals {
         .collect()
 }
 
-fn loop_head(c: Cursor<'_>) -> usize {
-    c.children()
-        .position(|node| node.is(C::Binding) && node.has(C::Declaration) && !node.lifted())
-        .unwrap_or(0)
+/// Where each name is assigned, by node position, and where each loop ends.
+fn loop_spans(root: Cursor) -> (FxHashMap<u32, u32>, FxHashMap<u32, Vec<u32>>) {
+    let (mut ends, mut assigned) = (FxHashMap::default(), FxHashMap::<u32, Vec<u32>>::default());
+    let mut stack = vec![(root, false)];
+    let mut last = root.index();
+    while let Some((node, leaving)) = stack.pop() {
+        if leaving {
+            ends.insert(node.index(), last + 1);
+            continue;
+        }
+        last = node.index();
+        if node.is(C::Import) || node.is(C::ImportType) {
+            for name in std::iter::once(node).chain(node.descendants()) {
+                assigned.entry(name.sym()).or_default().push(last);
+            }
+            continue;
+        }
+        if [C::Binding, C::DefName, C::Alias, C::SsaHint]
+            .into_iter()
+            .any(|kind| node.is(kind))
+            || node.has(C::Declaration)
+        {
+            assigned.entry(node.sym()).or_default().push(last);
+        }
+        if node.is(C::SsaLoop) {
+            stack.push((node, true));
+        }
+        stack.extend(node.children_rev().map(|child| (child, false)));
+    }
+    (ends, assigned)
 }
 
 impl<'t> Cx<'_, 't, Ssa> {
-    fn link_config(&self) -> &'t LinkConfig {
-        &self.env().rules_for(&self.tree().label).config.link
+    fn fork(&mut self, exhaustive: bool) {
+        let s = self.write();
+        let pre = s.cur;
+        s.cur = s.graph.add_sealed_successor(pre);
+        s.frames.push(Frame::Branch {
+            pre,
+            exhaustive,
+            exits: SmallVec::new(),
+        });
+    }
+
+    fn join(&mut self) {
+        let s = self.write();
+        let cur = s.cur;
+        if let Some(Frame::Branch { pre, exits, .. }) = s.frames.last_mut() {
+            exits.push(cur);
+            let pre = *pre;
+            s.cur = s.graph.add_sealed_successor(pre);
+        }
+    }
+
+    fn loop_header(&mut self, c: Cursor<'t>) {
+        let root = self.tree().root();
+        let s = self.write();
+        if s.loop_ends.is_empty() {
+            (s.loop_ends, s.assigned) = loop_spans(root);
+        }
+        let span = (c.index(), s.loop_ends[&c.index()]);
+        s.loops.push((s.cur, span));
+        let (header, body) = s.graph.begin_loop(s.cur);
+        s.cur = body;
+        s.frames.push(Frame::Loop(header));
+    }
+
+    fn leave(&mut self) {
+        match self.write().frames.pop() {
+            Some(Frame::Scope { wildcards, block }) => {
+                self.exit_scope();
+                let s = self.write();
+                if s.wildcards.len() > wildcards {
+                    Rc::make_mut(&mut s.wildcards).truncate(wildcards);
+                }
+                if let Some(block) = block {
+                    s.cur = block;
+                }
+            }
+            Some(Frame::Branch {
+                pre,
+                exhaustive,
+                exits,
+            }) => {
+                let s = self.write();
+                s.cur = match exits.is_empty() {
+                    true => pre,
+                    false => {
+                        let exits = exits.into_iter().chain((!exhaustive).then_some(pre));
+                        s.graph.add_sealed_join(exits)
+                    }
+                };
+            }
+            Some(Frame::Loop(header)) => {
+                let s = self.write();
+                s.loops.pop();
+                s.cur = s.graph.finish_loop(header, s.cur);
+                if s.loops.is_empty() {
+                    self.resolve_pending();
+                }
+            }
+            None => {}
+        }
     }
 }
 
@@ -130,128 +208,73 @@ impl Module for Ssa {
         s.graph.seal_remaining();
         s.graph.remove_redundant_phi_sccs();
         cx.resolve_pending();
-        let s = cx.write();
-        s.cur = s.entry;
-        cx.decorators();
     }
 }
 
 static FUNCTIONS: &[Function<Ssa>] = &[
+    function!(Effect, "bind", [one, set, set], |cx, a| {
+        let from = a[2].first().and_then(|v| v.loc()).map(|loc| cx.jump(loc));
+        cx.bind(node(cx, a, 0), &a[1], from);
+        yes(true)
+    }),
+    function!(Effect, "declare", [one], |cx, a| {
+        let c = node(cx, a, 0);
+        cx.declare(c, c.sym());
+        yes(true)
+    }),
+    function!(Effect, "bind_static", [one], |cx, a| {
+        let c = node(cx, a, 0);
+        cx.declare_static(c, c.sym(), Value::Call(c.index()));
+        yes(true)
+    }),
     function!(Effect, "bind_import", [one], |cx, a| {
         cx.bind_import(node(cx, a, 0));
-        yes(true)
-    }),
-    function!(Effect, "bind_imports", [one], |cx, a| {
-        for import in node(cx, a, 0).children().filter(|c| c.is(C::Import)) {
-            cx.bind_import(import);
-        }
-        yes(true)
-    }),
-    function!(Effect, "enter_def", [one], |cx, a| {
-        cx.enter_def(node(cx, a, 0));
         yes(true)
     }),
     function!(Effect, "enter_scope", [one], |cx, a| {
         cx.scope(node(cx, a, 0), None);
         yes(true)
     }),
-    function!(Effect, "leave", [], |cx, _| {
-        cx.leave();
+    function!(Effect, "enter_def", [one], |cx, a| {
+        cx.enter_def(node(cx, a, 0));
         yes(true)
     }),
-    function!(Effect, "declare_static", [one], |cx, a| {
-        let c = node(cx, a, 0);
-        cx.declare_static(c, c.sym(), Value::Call(c.index()));
+    function!(Effect, "fork", [set], |cx, a| {
+        cx.fork(!a[0].is_empty());
         yes(true)
     }),
-    function!(Effect, "bind", [one, one], |cx, a| {
-        let lhs = match a[1][0] {
-            Val::Sym(lhs) => lhs,
-            _ => 0,
-        };
-        cx.bind_binding(node(cx, a, 0), lhs);
-        yes(true)
-    }),
-    function!(Effect, "destructure", [one], |cx, a| {
-        cx.destructure(node(cx, a, 0));
-        yes(true)
-    }),
-    function!(Effect, "fork", [one], |cx, a| {
-        cx.fork(node(cx, a, 0));
-        yes(true)
-    }),
-    function!(Effect, "arm", [one], |cx, a| {
-        cx.arm(node(cx, a, 0));
-        yes(true)
-    }),
-    function!(Effect, "fork_lambda", [], |cx, _| {
-        let s = cx.write();
-        s.frames.push(Frame::Lambda(s.cur));
-        s.cur = s.graph.add_sealed_successor(s.cur);
+    function!(Effect, "join", [], |cx, _| {
+        cx.join();
         yes(true)
     }),
     function!(Effect, "loop_header", [one], |cx, a| {
-        cx.begin_loop(node(cx, a, 0));
+        cx.loop_header(node(cx, a, 0));
+        yes(true)
+    }),
+    function!(Effect, "leave", [], |cx, _| {
+        cx.leave();
         yes(true)
     }),
     function!(Effect, "defer", [one], |cx, a| {
         cx.defer(node(cx, a, 0));
         yes(true)
     }),
-    function!(Effect, "defer_receiver", [one], |cx, a| {
-        cx.defer_receiver(node(cx, a, 0));
-        yes(true)
-    }),
-    function!(Flow, "read", [one], |cx, a| {
-        let found = cx.lookup(node(cx, a, 0).sym());
-        to_vals(&found)
-    }),
-    function!(Flow, "read_static", [one], |cx, a| {
-        let found = cx.lookup_static(node(cx, a, 0).sym());
-        to_vals(&found)
-    }),
-    function!(Flow, "defined", [one], |cx, a| {
+    function!(Flow, "read", [one], |cx, a| cx.read(node(cx, a, 0))),
+    function!(Flow, "slot", [one], |cx, a| {
         let c = node(cx, a, 0);
-        let binding = cx.binding(c.sym());
-        let s = cx.state();
-        match s.graph.is_defined(binding, s.cur) {
-            true => of([c]),
-            false => Vals::new(),
-        }
+        let slot = match c.is(C::Binding) {
+            true => cx.target(c),
+            false => cx.field_slot(c),
+        };
+        slot.map_or_else(Vals::new, |slot| one(Val::Sym(slot)))
     }),
     function!(Flow, "phi", [one], |cx, a| {
         let callee = node(cx, a, 0);
         yes(cx.pending_value(callee).is_some())
     }),
-    function!(Flow, "field", [one], |cx, a| {
-        let c = node(cx, a, 0);
-        match cx.field_slot(c) {
-            Some(_) => of([c]),
-            None => Vals::new(),
-        }
-    }),
     function!(Flow, "wildcards", [], |cx, _| {
         let fi = cx.fi();
         let wildcards = Rc::clone(&cx.state().wildcards);
         of(wildcards.iter().map(|&node| Loc { fi, node }))
-    }),
-    function!(Flow, "target", [one], |cx, a| cx.target(node(cx, a, 0))),
-    function!(Flow, "rhs_order", [one], |cx, a| cx
-        .bind_children(node(cx, a, 0))),
-    function!(Flow, "in_fork", [one], |cx, a| {
-        let arm = node(cx, a, 0);
-        let top = match cx.state().frames.last() {
-            Some(Frame::Branch { node, .. }) => Some(*node),
-            _ => None,
-        };
-        yes(arm.parent().map(|p| p.index()) == top)
-    }),
-    function!(Pure, "loop_head", [one], |cx, a| {
-        let c = node(cx, a, 0);
-        of(c.children().take(loop_head(c)))
-    }),
-    function!(Pure, "loop_body", [one], |cx, a| {
-        let c = node(cx, a, 0);
-        of(c.children().skip(loop_head(c)))
     }),
 ];
