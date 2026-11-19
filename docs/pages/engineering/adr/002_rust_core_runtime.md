@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 002: Rust as the core runtime for the Orbit service"
+title: "ADR 002: Rust as the core runtime for the Orbit service"
+description: Why all of Orbit is one Rust codebase, from the indexer and the query compiler to the data pipeline and the web server.
 creation-date: "2026-02-23"
 authors: [ "@michaelangeloio" ]
 toc_hide: true

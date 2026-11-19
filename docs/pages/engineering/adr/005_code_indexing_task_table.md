@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 005: PostgreSQL task table for code indexing triggers"
+title: "ADR 005: PostgreSQL task table for code indexing"
+description: Why Rails writes a PostgreSQL task row for each push to the default branch, so the Orbit code indexer reads only the events it needs.
 creation-date: "2026-03-14"
 authors: [ "@jgdoyon1" ]
 toc_hide: true

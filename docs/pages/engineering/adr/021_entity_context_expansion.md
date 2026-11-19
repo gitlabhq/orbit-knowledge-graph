@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 021: Entity context expansion for the Orbit context endpoint"
+title: "ADR 021: Entity context expansion"
+description: A proposal for the Orbit context endpoint, where each request takes one token and runs at most one billable graph query.
 creation-date: "2026-09-30"
 authors: [ "@dgruzd", "@aalgutifan" ]
 toc_hide: true

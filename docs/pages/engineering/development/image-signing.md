@@ -1,3 +1,7 @@
+---
+description: How Orbit signs its container images with keyless Sigstore cosign, and how to verify, mirror, and keep the signatures.
+---
+
 # Image signing
 
 The manifest jobs of the canonical project sign every `gkg` image digest that they publish. They

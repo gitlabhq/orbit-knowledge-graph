@@ -1,4 +1,8 @@
-# GitLab Orbit CLI development quickstart
+---
+description: How to build and test the Orbit CLI and related crates without a Caproni cluster, NATS, Siphon, ClickHouse, or PostgreSQL.
+---
+
+# Orbit CLI development quickstart
 
 Build and test the `orbit` CLI and related crates without a Caproni cluster, NATS, Siphon,
 ClickHouse, or PostgreSQL. Many contributions only need the tools on this

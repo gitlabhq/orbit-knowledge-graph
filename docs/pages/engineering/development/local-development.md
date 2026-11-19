@@ -1,3 +1,7 @@
+---
+description: How to run Orbit from your checkout against a Caproni cluster that hosts GitLab, ClickHouse, NATS, PostgreSQL, and Siphon.
+---
+
 # Local development setup
 
 Run Orbit from your checkout against a Caproni cluster that hosts GitLab, the dev stack
@@ -6,7 +10,7 @@ place of the Orbit pods.
 
 > Working on `orbit-cli`, the ontology, language parsers, or docs only?
 > You don't need a cluster. See the
-> [GitLab Orbit CLI development quickstart](orbit-local-quickstart.md).
+> [Orbit CLI development quickstart](orbit-local-quickstart.md).
 
 ## What runs where
 

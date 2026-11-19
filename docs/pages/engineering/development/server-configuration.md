@@ -1,3 +1,7 @@
+---
+description: How the Orbit server loads its configuration, and the settings for NATS, ClickHouse, the worker pool, the webserver, billing, and more.
+---
+
 # Server configuration
 
 `gkg-server` reads the same configuration in all modes. The default values are in

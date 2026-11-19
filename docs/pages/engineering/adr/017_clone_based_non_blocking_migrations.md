@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 017: Clone-based non-blocking schema migrations"
+title: "ADR 017: Clone-based non-blocking schema migrations"
+description: Why an Orbit schema migration clones each table that the new version does not invalidate, and reindexes only the invalidated entities.
 creation-date: "2026-07-13"
 authors: [ "@jgdoyon1" ]
 toc_hide: true

@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 001: gRPC communication protocol for Rails-GKG integration"
+title: "ADR 001: gRPC protocol for Rails-Orbit integration"
+description: Why Rails and Orbit talk over gRPC, with a bidirectional query stream so that the redaction exchange runs inside one call.
 creation-date: "2026-02-19"
 authors: [ "@michaelangeloio" ]
 toc_hide: true

@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 013: Materialize edges from system notes"
+title: "ADR 013: Materialize edges from system notes"
+description: A proposal for the Orbit SDLC indexer to parse GitLab system notes in a Rust transform and turn them into graph edges.
 creation-date: "2026-05-18"
 authors: [ "@dgruzd" ]
 toc_hide: true

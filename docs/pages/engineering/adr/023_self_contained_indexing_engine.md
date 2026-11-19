@@ -1,5 +1,6 @@
 ---
-title: "Orbit ADR 023: A self-contained engine for indexing work"
+title: "ADR 023: A self-contained engine for indexing work"
+description: A proposal for one library that runs all Orbit indexing work, where each flow is a planner and a worker, and the engine owns lanes, retries, and scaling.
 creation-date: "2026-11-07"
 authors: [ "@jgdoyon1" ]
 toc_hide: true

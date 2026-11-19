@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 015: Pluggable transforms over a shared SDLC pipeline"
+title: "ADR 015: Pluggable transforms in the SDLC pipeline"
+description: Why every Orbit SDLC entity runs on one shared pipeline for extraction and writing, with the transform as the only stage that varies.
 creation-date: "2026-06-03"
 authors: [ "@jgdoyon1" ]
 toc_hide: true

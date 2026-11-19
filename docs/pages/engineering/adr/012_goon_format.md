@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 012: GOON Format (Graph Object Output Notation)"
+title: "ADR 012: GOON format (Graph Object Output Notation)"
+description: "Why Orbit adopted GOON, a line-oriented text format, for query results in the LLM format. Superseded: Orbit now uses TOON."
 creation-date: "2026-04-15"
 last-updated: "2026-05-10"
 authors: [ "@michaelangeloio", "@jgdoyon1" ]

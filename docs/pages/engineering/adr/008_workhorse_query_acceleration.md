@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 008: Workhorse query acceleration for GKG requests"
+title: "ADR 008: Workhorse query acceleration"
+description: Why Workhorse was to run the Orbit query stream while Rails kept authentication and JWT construction. ADR 022 supersedes it.
 creation-date: "2026-03-29"
 authors: [ "@michaelangeloio" ]
 toc_hide: true

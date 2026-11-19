@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 011: Agent Command Surface (lazy-mcp pattern)"
+title: "ADR 011: Agent command surface (lazy-mcp pattern)"
+description: Why agents see two MCP tools, one to list commands and one to invoke a command, backed by a typed command registry in Orbit.
 creation-date: "2026-05-06"
 authors: [ "@dgruzd", "@bohdanpk", "@michaelangeloio" ]
 toc_hide: true

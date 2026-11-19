@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 000: ClickHouse as graph storage"
+title: "ADR 000: ClickHouse as graph storage"
+description: Why Orbit stores its graph as a property graph in ClickHouse tables instead of a dedicated graph database, with PostgreSQL as the fallback.
 creation-date: "2025-11-03"
 authors: [ "@michaelangeloio", "@jgdoyon1", "@bohdanpk", "@michaelusa" ]
 toc_hide: true

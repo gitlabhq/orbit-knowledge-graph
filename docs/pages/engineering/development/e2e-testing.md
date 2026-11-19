@@ -1,3 +1,7 @@
+---
+description: The commands and harness details for the Orbit end-to-end tests, which deploy GitLab and every Orbit component on a shared GKE cluster.
+---
+
 # E2E Testing Harness
 
 The e2e harness deploys the full GitLab stack and every Orbit component on a shared GKE cluster. Then it runs Robot Framework suites against the stack.

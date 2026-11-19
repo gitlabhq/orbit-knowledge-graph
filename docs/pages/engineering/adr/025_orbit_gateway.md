@@ -1,5 +1,6 @@
 ---
-title: "Orbit ADR 025: The Orbit Gateway"
+title: "ADR 025: The Orbit Gateway"
+description: A proposal for the Orbit Gateway, an Orbit-owned Envoy proxy in front of the Orbit web servers in every deployment.
 creation-date: "2026-11-12"
 authors: [ "@veberechi" ]
 toc_hide: true

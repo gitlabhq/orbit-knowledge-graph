@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 014: Entity-level SDLC indexing"
+title: "ADR 014: Entity-level SDLC indexing"
+description: Why Orbit replaces its two SDLC indexing handlers with one handler for each ontology entity, with partitions for parallelism.
 creation-date: "2026-05-08"
 authors: [ "@jgdoyon1" ]
 toc_hide: true

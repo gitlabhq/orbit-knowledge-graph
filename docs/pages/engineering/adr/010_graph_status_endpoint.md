@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 010: Evolving GetGraphStats into GetGraphStatus"
+title: "ADR 010: Evolving GetGraphStats into GetGraphStatus"
+description: Why Orbit merges the graph stats RPC into one graph status RPC that returns entity counts and indexing progress together.
 creation-date: "2026-04-21"
 authors: [ "@jgdoyon1" ]
 toc_hide: true

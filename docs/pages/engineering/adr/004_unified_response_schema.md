@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 004: Unified Query Response Schema"
+title: "ADR 004: Unified query response schema"
+description: Why every Orbit query returns the same graph shape of nodes and edges, with the labels and styles taken from the ontology.
 creation-date: "2026-03-11"
 authors: [ "@michaelangeloio", "@michaelusa", "@jgdoyon1", "@bohdanpk" ]
 toc_hide: true

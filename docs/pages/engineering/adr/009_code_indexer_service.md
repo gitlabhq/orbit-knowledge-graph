@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 009: Separate code indexer service"
+title: "ADR 009: Separate code indexer service"
+description: A proposal to split Orbit code indexing into a dedicated code indexer service, with its own resource limits and Helm deployment.
 creation-date: "2026-04-22"
 authors: [ "@michaelangeloio" ]
 toc_hide: true

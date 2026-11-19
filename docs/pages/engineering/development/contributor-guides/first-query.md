@@ -1,3 +1,7 @@
+---
+description: A tutorial that indexes a local repository with the Orbit CLI and runs your first graph queries, with no server or GitLab account.
+---
+
 # Write your first Orbit query
 
 This tutorial takes you from a clean checkout to your first useful queries on

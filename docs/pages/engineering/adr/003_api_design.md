@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 003: Orbit API Design (Unified REST + GraphQL)"
+title: "ADR 003: Orbit API design (unified REST + GraphQL)"
+description: "A proposal for the Orbit APIs: GraphQL serves Orbit settings, REST serves Orbit data, and the gRPC service has four operations."
 creation-date: "2026-02-26"
 authors: [ "@michaelangeloio" ]
 toc_hide: true

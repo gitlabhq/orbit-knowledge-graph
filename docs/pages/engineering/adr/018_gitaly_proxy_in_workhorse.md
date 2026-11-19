@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 018: Gitaly proxy in Workhorse"
+title: "ADR 018: Gitaly proxy in Workhorse"
+description: A proposal for one Gitaly proxy route in Workhorse for Orbit and other consumers, with gRPC tunneled over a WebSocket.
 creation-date: "2026-09-03"
 authors: [ "@dgruzd" ]
 toc_hide: true

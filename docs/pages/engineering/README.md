@@ -1,3 +1,7 @@
+---
+description: How to contribute to GitLab Orbit, and how Orbit is built, tested, and operated. The entry point to the Orbit developer documentation.
+---
+
 # Developer docs
 
 These pages are for everyone who builds GitLab Orbit: how to contribute, and how Orbit is built, tested, and operated.

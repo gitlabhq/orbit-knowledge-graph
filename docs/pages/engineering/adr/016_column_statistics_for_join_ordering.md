@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 016: Column statistics for cost-based join ordering"
+title: "ADR 016: Column statistics for cost-based join ordering"
+description: A proposal for the Orbit query compiler to order joins by cost, with column statistics that ClickHouse maintains on insert.
 creation-date: "2026-06-05"
 authors: [ "@michaelusa" ]
 toc_hide: true

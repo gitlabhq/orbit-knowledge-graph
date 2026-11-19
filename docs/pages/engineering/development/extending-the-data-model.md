@@ -1,3 +1,7 @@
+---
+description: How to extend the Orbit data model with a package, a frontend, or a backend, from a GitLab entity to a new query language.
+---
+
 # Extending the data model
 
 This guide shows the packages and APIs of the [data model spike MR](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3346), and it changes with the code. The MR is a reference implementation and is not meant to merge. [ADR 024](../adr/024_pluggable_data_model.md) records the design and explains how it works.

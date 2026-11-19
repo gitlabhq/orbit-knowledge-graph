@@ -1,5 +1,6 @@
 ---
-title: "Orbit ADR 022: Run Orbit queries in Rails instead of Workhorse"
+title: "ADR 022: Run queries in Rails instead of Workhorse"
+description: Why Rails runs the Orbit query stream and redaction in one request, and Workhorse only proxies the request instead of running it.
 creation-date: "2026-10-28"
 authors: [ "@michaelangeloio", "@dgruzd" ]
 toc_hide: true

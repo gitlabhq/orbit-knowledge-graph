@@ -1,5 +1,6 @@
 ---
-title: "GKG ADR 019: GQL response format"
+title: "ADR 019: GQL response format"
+description: A proposal for a GQL response format that prints Orbit query results as a table of node literals, like the output of OpenCypher-like shells.
 creation-date: "2026-09-28"
 authors: [ "@aalgutifan" ]
 toc_hide: true

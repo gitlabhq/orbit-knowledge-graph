@@ -1,5 +1,6 @@
 ---
-title: "Orbit ADR 024: A pluggable data model for entities, sources and backends"
+title: "ADR 024: A pluggable data model"
+description: Why versioned packages replace the Orbit ontology, and how a loader checks them so that every plan runs through checked catalogs.
 creation-date: "2026-11-08"
 authors: [ "@michaelusa" ]
 toc_hide: true

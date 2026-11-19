@@ -1,3 +1,7 @@
+---
+description: "How to add a flow to the Orbit indexing engine, step by step: triggers, planner, worker, reconciler, pod configuration, and tests."
+---
+
 # Extending the indexing engine
 
 This guide shows its API, and it changes with the code.

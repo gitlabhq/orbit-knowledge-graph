@@ -1,3 +1,7 @@
+---
+description: How Orbit keeps upstream artifacts in the repository so that builds work offline, and the YAML and script contracts for each one.
+---
+
 # Vendored dependencies
 
 A vendored dependency is an upstream artifact in the repository, so builds work without network

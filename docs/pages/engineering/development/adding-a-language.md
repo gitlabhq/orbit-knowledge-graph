@@ -1,3 +1,7 @@
+---
+description: How to add a programming language to the Orbit code indexer, from the DSL language trait to test fixtures and common traps.
+---
+
 # Adding a new language to the code indexer
 
 Canonical worked example:
