@@ -246,7 +246,14 @@ impl CoreGitaliskRepository {
     /// carries its old path in `original_path`.
     pub fn changes_since(&self, base: &str) -> Result<Vec<FileStatusInfo>, std::io::Error> {
         let output = Command::new("git")
-            .args(["diff", "--name-status", "-z", base, "HEAD"])
+            .args([
+                "diff",
+                "--name-status",
+                "-z",
+                "--end-of-options",
+                base,
+                "HEAD",
+            ])
             .current_dir(&self.path)
             .output()?;
         if !output.status.success() {

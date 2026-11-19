@@ -531,6 +531,21 @@ mod tests {
         assert!(repo.changes_since("HEAD").unwrap().is_empty());
     }
 
+    #[test]
+    fn changes_since_rejects_option_like_base_without_side_effects() {
+        let mut local_repo = LocalGitRepository::new(None);
+        local_repo.fs.create_file("a.rs", Some("fn a() {}"));
+        local_repo.add_all().commit("base");
+        let repo = repo_handle(&local_repo);
+        let target = local_repo.path.join("injected");
+
+        assert!(
+            repo.changes_since(&format!("--output={}", target.display()))
+                .is_err()
+        );
+        assert!(!target.exists());
+    }
+
     fn repo_handle(local_repo: &LocalGitRepository) -> CoreGitaliskRepository {
         CoreGitaliskRepository::new(
             local_repo.path.to_string_lossy().to_string(),

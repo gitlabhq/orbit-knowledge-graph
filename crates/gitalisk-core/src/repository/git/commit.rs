@@ -56,7 +56,8 @@ pub fn get_commits_info(
         .arg(repo_path)
         .arg("show")
         .arg("-s")
-        .arg(format!("--format={format}"));
+        .arg(format!("--format={format}"))
+        .arg("--end-of-options");
 
     for hash in commit_hashes {
         cmd.arg(hash);
@@ -294,5 +295,15 @@ mod tests {
                 Some("test-gl-user@gitlab.com".to_string())
             );
         }
+    }
+
+    #[test]
+    fn option_like_revision_is_rejected_without_side_effects() {
+        let repo = init_test_repo();
+        let target = repo.path.join("injected");
+        let arg = format!("--output={}", target.display());
+
+        assert!(get_commits_info(repo.path.as_path(), &[arg.as_str()]).is_err());
+        assert!(!target.exists());
     }
 }
