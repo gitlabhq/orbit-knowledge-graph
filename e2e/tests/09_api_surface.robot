@@ -1,19 +1,7 @@
 *** Settings ***
-Documentation       Smoke the read-only Orbit API surface beyond /query and /status (covered by 01):
-...                 schema, CALL db.schema(), schema/format, graph_status, tools, and agent commands. Each
-...                 is a thin gRPC pass-through; this guards the Rails wiring and the enabled-namespace
-...                 gate on graph_status.
-...
-...                 Each endpoint is asserted present-and-correct (200 + content) OR absent (404),
-...                 because the e2e stack pins a gitlab-org/gitlab image that can predate the newer
-...                 Orbit routes (which are owned upstream). A 5xx still fails the test, so a real
-...                 GKG-side regression is caught. /schema is always present, so its content check
-...                 always runs.
-...
-...                 MCP (POST /orbit/mcp) is intentionally not covered: it requires an OAuth token
-...                 carrying the mcp scope (PATs cannot grant mcp / mcp_orbit / ai_workflows — they
-...                 are in unavailable_ai_features_scopes), so it needs an OAuth bootstrap. Tracked
-...                 in #792. The tools listing is smoked here via GET /orbit/tools and /schema.
+Documentation       Smoke the read-only Orbit API surface beyond /query (covered by 01): the
+...                 schema and the scoped status over GraphQL, and CALL db.schema(). MCP needs an
+...                 OAuth token with the mcp scope, which a PAT cannot carry.
 
 Resource            gitlab.resource
 Resource            orbit.resource
@@ -21,35 +9,25 @@ Resource            orbit.resource
 Suite Setup         Attach To Shared Fixture
 
 
+*** Variables ***
+${SCHEMA_QUERY}             { orbit { schema { nodes(first: 100) { nodes { name } } } } }
+${GROUP_STATUS_QUERY}       query($fullPath: ID!) { group(fullPath: $fullPath) { orbit {
+...                         indexingStatus { domains { name } } itemCounts { domains { name } } } } }
+
+
 *** Test Cases ***
-Schema Lists Domains And Nodes
+Schema Lists Node Kinds
     [Tags]    api
-    Orbit Endpoint Smoke    schema    Project
-    Orbit Endpoint Smoke    schema    Vulnerability
+    Wait Until Keyword Succeeds    30s    5s    Schema Node Kinds Are Served
+
+Group Status Reports Indexing And Item Counts
+    [Tags]    api
+    Wait Until Keyword Succeeds    30s    5s    Group Status Is Served
 
 Schema Call Describes A Node
     [Tags]    api
     ${resp}=    Orbit Query    CALL db.schema('Vulnerability')
     Should Be Equal    ${resp["result"]["domains"][0]["nodes"][0]["name"]}    Vulnerability
-    ${headers}=    GitLab Auth Headers
-    GET    ${GITLAB_URL}/api/v4/orbit/schema/dsl    headers=${headers}    expected_status=404
-
-Response Format Guidance Is Served
-    [Tags]    api
-    Orbit Endpoint Smoke    schema/format
-
-Graph Status Reports Namespace Coverage
-    [Tags]    api
-    ${params}=    Create Dictionary    namespace_id=${SHARED_NAMESPACE_ID}
-    Orbit Endpoint Smoke    graph_status    domains    ${params}
-
-Tools Endpoint Responds
-    [Tags]    api
-    Orbit Endpoint Smoke    tools
-
-Agent Commands Endpoint Responds
-    [Tags]    api
-    Orbit Endpoint Smoke    agent/commands
 
 Query Names Cannot Use The Internal Column Prefix
     [Tags]    api
@@ -59,3 +37,19 @@ Query Names Cannot Use The Internal Column Prefix
     Orbit Query Is Rejected
     ...    MATCH (_orbit_g:Group {id: ${SHARED_NAMESPACE_ID}}) RETURN _orbit_g
     ...    identifier "_orbit_g" conflicts with reserved prefix "_orbit_"
+
+
+*** Keywords ***
+Schema Node Kinds Are Served
+    ${data}=    Orbit GraphQL Data    ${SCHEMA_QUERY}
+    Should Not Be Equal    ${data["orbit"]}    ${None}    Orbit is not available to the bot user
+    ${names}=    Evaluate    [n["name"] for n in $data["orbit"]["schema"]["nodes"]["nodes"]]
+    List Should Contain Value    ${names}    Project
+    List Should Contain Value    ${names}    Vulnerability
+
+Group Status Is Served
+    ${variables}=    Create Dictionary    fullPath=${SHARED_NAMESPACE_NAME}
+    ${data}=    Orbit GraphQL Data    ${GROUP_STATUS_QUERY}    ${variables}
+    ${orbit}=    Set Variable    ${data["group"]["orbit"]}
+    Should Not Be Equal    ${orbit}    ${None}    Orbit is not available to the bot user
+    Should Be True    $orbit["indexingStatus"]["domains"] and $orbit["itemCounts"]["domains"]    ${orbit}

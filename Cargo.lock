@@ -2774,8 +2774,8 @@ dependencies = [
 
 [[package]]
 name = "gitalisk-core"
-version = "0.8.1"
-source = "git+https://gitlab.com/gitlab-org/rust/gitalisk.git?tag=v0.8.1#9e483ad15ffad8541a325aedc8d8247a2ee9fd85"
+version = "0.9.0"
+source = "git+https://gitlab.com/gitlab-org/rust/gitalisk.git?tag=v0.9.0#7ee31252b5419d4be97fafcfb87b317d8b86c2d7"
 dependencies = [
  "dunce",
  "ignore",
@@ -3433,6 +3433,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "indexing-engine-next"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3543,6 +3557,7 @@ dependencies = [
  "tempfile",
  "testcontainers",
  "tokio",
+ "toon-format",
  "uuid",
 ]
 
@@ -3597,7 +3612,6 @@ dependencies = [
  "serde",
  "serde_json",
  "siphon-proto",
- "sqlparser",
  "tar",
  "tempfile",
  "testcontainers",
@@ -3607,7 +3621,6 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tonic-prost",
- "toon-format",
  "uuid",
 ]
 
@@ -5205,6 +5218,7 @@ dependencies = [
  "lz4_flex 0.11.6",
  "memchr",
  "orbit-log-fields",
+ "percent-encoding",
  "rayon",
  "regex",
  "rustc-hash 2.1.3",

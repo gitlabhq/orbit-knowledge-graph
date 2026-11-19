@@ -1,13 +1,13 @@
 use std::path::Path;
 
 use orbit_utils::markdown::{
-    Document, FQN_SEPARATOR, FRONT_MATTER_NAME, LineIndex, escape_segment, parse, segment_path,
+    FQN_SEPARATOR, FRONT_MATTER_NAME, LineIndex, escape_segment, parse, segment_path,
 };
 
 use crate::v2::config::Language;
 use crate::v2::dsl::types::*;
 use crate::v2::types::{
-    CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, Fqn, Position, Range,
+    CanonicalDefinition, DefKind, DefinitionMetadata, FileLinks, Fqn, Position, Range,
 };
 
 #[derive(Default)]
@@ -27,10 +27,7 @@ impl DslLanguage for MarkdownDsl {
     }
 }
 
-fn parse_markdown(
-    source: &str,
-    file_path: &str,
-) -> (Vec<CanonicalDefinition>, Vec<CanonicalImport>) {
+fn parse_markdown(source: &str, file_path: &str) -> CustomParse {
     let stem = escape_segment(
         Path::new(file_path)
             .file_stem()
@@ -46,12 +43,10 @@ fn parse_markdown(
             (start, end),
         )
     };
-    let Document {
-        front_matter,
-        sections,
-    } = parse(source);
-    let mut definitions = Vec::new();
-    if let Some(front_matter) = front_matter {
+    let document = parse(source);
+    let sections = document.sections;
+    let mut definitions = Vec::with_capacity(sections.len() + 1);
+    if let Some(front_matter) = document.front_matter {
         definitions.push(CanonicalDefinition {
             definition_type: "FrontMatter",
             kind: DefKind::Other,
@@ -65,11 +60,13 @@ fn parse_markdown(
             })),
         });
     }
-    definitions.extend(sections.iter().enumerate().map(|(index, section)| {
+    let mut anchors = Vec::with_capacity(sections.len());
+    for (index, section) in sections.iter().enumerate() {
         let parts: Vec<&str> = std::iter::once(stem.as_str())
             .chain(segment_path(&sections, index))
             .collect();
-        CanonicalDefinition {
+        anchors.push((definitions.len(), section.anchor.clone()));
+        definitions.push(CanonicalDefinition {
             definition_type: "Section",
             kind: DefKind::Module,
             name: section.name.clone(),
@@ -77,9 +74,21 @@ fn parse_markdown(
             range: range(section.start, section.end),
             is_top_level: section.parent.is_none(),
             metadata: None,
-        }
-    }));
-    (definitions, Vec::new())
+        });
+    }
+    let links = FileLinks {
+        targets: document
+            .links
+            .iter()
+            .filter_map(|link| link.target(file_path))
+            .collect(),
+        anchors,
+    };
+    CustomParse {
+        definitions,
+        imports: Vec::new(),
+        links,
+    }
 }
 
 #[cfg(test)]
@@ -239,6 +248,28 @@ mod tests {
     }
 
     #[test]
+    fn anchors_index_the_section_definitions_they_name() {
+        let parsed = super::parse_markdown(
+            "# Setup\n\n## Install\n\n> ## Install\n\n## Install\n",
+            "g.md",
+        );
+        let named: Vec<(&str, &str)> = parsed
+            .links
+            .anchors
+            .iter()
+            .map(|(index, anchor)| (parsed.definitions[*index].name.as_str(), anchor.as_str()))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("Setup", "setup"),
+                ("Install", "install"),
+                ("Install", "install-2")
+            ]
+        );
+    }
+
+    #[test]
     fn every_range_is_in_bounds_and_on_char_boundaries() {
         let cases = [
             "> > > *em* `c`\n> > ## Quoted \u{e9}h\n",
@@ -251,7 +282,7 @@ mod tests {
             "\u{feff}---\r\nt\u{e9}: \u{4f60}\r\n---\r\n\r\n# H\n",
         ];
         for src in cases {
-            let (definitions, _) = super::parse_markdown(src, "g.md");
+            let definitions = super::parse_markdown(src, "g.md").definitions;
             for range in definitions.iter().map(|d| d.range) {
                 let (start, end) = range.byte_offset;
                 assert!(start <= end, "inverted range {range} in {src:?}");

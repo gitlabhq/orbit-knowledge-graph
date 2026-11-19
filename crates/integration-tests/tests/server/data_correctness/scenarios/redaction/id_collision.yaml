@@ -1,0 +1,78 @@
+description: Group 1 shares its numeric id with User 1, and redaction tells them apart by entity type
+
+config:
+  security: { paths: ["1/700/"] }
+  seed: redaction
+  extra_seed:
+    gl_group:
+      - { id: 1, name: Collision Group, visibility_level: public, traversal_path: "1/700/1/" }
+    gl_edge:
+      - { traversal_path: "1/700/1/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 1, target_kind: Group }
+
+cases:
+  - name: group_with_colliding_id_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [1, 701, 702, 703]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "g", "entity": "Group"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "limit": 30
+        }
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 30
+    expect:
+      node_count: 9
+      nodes:
+        User:
+          ids: [1, 2, 3, 4, 5]
+        Group:
+          ids: [1, 701, 702, 703]
+      edges:
+        MEMBER_OF: [[1, 1], [1, 701], [1, 703], [2, 701], [3, 702], [4, 702], [4, 703], [5, 702]]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 1 }
+
+  - name: group_with_colliding_id_denied_by_type
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: [701, 703]
+        deny:
+          group: [1]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "g", "entity": "Group"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "limit": 30
+        }
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 30
+    expect:
+      node_count: 3
+      nodes:
+        User:
+          ids: [1]
+        Group:
+          ids: [701, 703]
+          absent: [1]
+      edges:
+        MEMBER_OF: [[1, 701], [1, 703]]
+      edge_absent:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 1 }

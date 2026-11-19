@@ -13,4 +13,4 @@ if ci_skip_requested "migration-ledger-check"; then
     exit 0
 fi
 
-cargo xtask migration-ledger check --base "$BASE_REF"
+${XTASK:-cargo xtask} migration-ledger check --base "$BASE_REF"

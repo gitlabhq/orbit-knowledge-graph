@@ -1,0 +1,166 @@
+description: Redaction fails closed, so a row survives only when every id in it is allowed
+
+config:
+  security: { paths: ["1/700/"] }
+  seed: redaction
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u LIMIT 10
+
+cases:
+  - name: all_users_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+    expect:
+      node_count: 5
+      nodes:
+        User:
+          ids: [1, 2, 3, 4, 5]
+
+  - name: no_authorization_returns_nothing
+    config:
+      redaction: none
+    expect:
+      node_count: 0
+
+  - name: partial_authorization_denies_unknown_ids
+    config:
+      redaction:
+        allow:
+          user: [1, 2]
+    expect:
+      node_count: 2
+      nodes:
+        User:
+          ids: [1, 2]
+          absent: [3, 4, 5]
+
+  - name: explicit_deny_filters_row
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4]
+        deny:
+          user: [5]
+    expect:
+      node_count: 4
+      nodes:
+        User:
+          ids: [1, 2, 3, 4]
+          absent: [5]
+
+  - name: column_selection_no_authorization_returns_nothing
+    config:
+      redaction: none
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                     "columns": ["username", "name", "state"]}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.name, u.state LIMIT 10
+    expect:
+      node_count: 0
+
+  - name: column_selection_users_visible_when_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                     "columns": ["username", "name", "state"]}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.name, u.state LIMIT 10
+    expect:
+      node_count: 5
+      nodes:
+        User:
+          ids: [1, 2, 3, 4, 5]
+
+  - name: empty_result_stays_empty
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "filters": {"username": "nonexistent"}}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (u:User) WHERE u.username = 'nonexistent' RETURN u LIMIT 10
+    expect:
+      node_count: 0
+
+  - name: impossible_filter_returns_nothing
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"username": {"eq": "definitely_does_not_exist_12345"}}}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (u:User) WHERE u.username = 'definitely_does_not_exist_12345' RETURN u LIMIT 10
+    expect:
+      node_count: 0
+
+  - name: groups_visible_when_allowed
+    config:
+      redaction:
+        allow:
+          group: [701, 702, 703]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
+          "limit": 100
+        }
+      gql: |
+        MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g LIMIT 100
+    expect:
+      node_count: 3
+      nodes:
+        Group:
+          ids: [701, 702, 703]
+
+  - name: groups_no_authorization_returns_nothing
+    config:
+      redaction: none
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
+          "limit": 100
+        }
+      gql: |
+        MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g LIMIT 100
+    expect:
+      node_count: 0

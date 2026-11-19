@@ -16,6 +16,11 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 121
+  scope: code
+  note: >-
+    Markdown links emit File IMPORTS File and File IMPORTS Definition(Section)
+    edges; re-index code to backfill them.
 - version: 120
   scope: code
   note: >-

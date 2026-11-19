@@ -8,6 +8,15 @@ spec:
   template:
     spec:
       restartPolicy: Never
+{{- if .Values.cliImage }}
+      initContainers:
+      - name: orbit-cli
+        image: {{ .Values.cliImage }}
+        command: ["cp", "-r", "/opt/orbit-cli/.", "/orbit-cli/"]
+        volumeMounts:
+        - name: orbit-cli
+          mountPath: /orbit-cli
+{{- end }}
       containers:
       - name: robot
         image: {{ .Values.image }}
@@ -51,6 +60,10 @@ spec:
             secretKeyRef:
               name: {{ .Values.rootPatSecret }}
               key: {{ .Values.rootPatSecretKey }}
+{{- if .Values.cliImage }}
+        - name: ORBIT_CLI_DIR
+          value: /orbit-cli
+{{- end }}
         volumeMounts:
         - name: tests
           mountPath: /tests
@@ -58,6 +71,11 @@ spec:
         - name: fixtures
           mountPath: /fixtures-archive
           readOnly: true
+{{- if .Values.cliImage }}
+        - name: orbit-cli
+          mountPath: /orbit-cli
+          readOnly: true
+{{- end }}
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
       volumes:
@@ -67,3 +85,7 @@ spec:
       - name: fixtures
         configMap:
           name: {{ .Values.fixturesConfigMap }}
+{{- if .Values.cliImage }}
+      - name: orbit-cli
+        emptyDir: {}
+{{- end }}

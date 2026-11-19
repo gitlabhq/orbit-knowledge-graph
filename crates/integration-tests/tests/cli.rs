@@ -1656,3 +1656,69 @@ fn piped_index_prints_one_json_document_per_repository() {
     assert!(document["graph"]["definitions"].as_u64().unwrap() >= 1);
     assert!(document["processing"].is_object());
 }
+
+#[test]
+fn context_on_markdown_section_shows_parent_and_child_sections() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    init_repo_at(
+        &repo,
+        &[(
+            "docs/guide.md",
+            "# Guide\n\nIntro.\n\n## Setup\n\nInstall it.\n\n### Windows\n\nUse winget.\n\n### Linux\n\nUse apt.\n\n### macOS\n\nUse brew.\n",
+        )],
+    );
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo, dd));
+    let repo_arg = repo.to_str().unwrap();
+
+    let (setup, err, ok) = run_cmd(&["context", "guide.Guide.Setup", "--repo", repo_arg], dd);
+    assert!(ok, "{err}");
+    let outline = setup.split("Connections (").nth(1).unwrap_or_default();
+    assert!(
+        outline.starts_with("4 indexed):")
+            && outline.contains("<-- guide#Guide  [defines]")
+            && outline.contains("--> guide#Guide#Setup#Windows  [defines]")
+            && !outline.contains("docs/guide.md  [defines]"),
+        "{setup}"
+    );
+    let children: Vec<_> = setup
+        .lines()
+        .filter(|line| line.starts_with("  --> "))
+        .map(|line| line.split_whitespace().nth(1).unwrap())
+        .collect();
+    assert_eq!(
+        children,
+        [
+            "guide#Guide#Setup#Windows",
+            "guide#Guide#Setup#Linux",
+            "guide#Guide#Setup#macOS"
+        ],
+        "{setup}"
+    );
+
+    let (leaf, err, ok) = run_cmd(
+        &["context", "guide.Guide.Setup.Linux", "--repo", repo_arg],
+        dd,
+    );
+    assert!(ok, "{err}");
+    let outline = leaf.split("Connections (").nth(1).unwrap_or_default();
+    assert!(
+        outline.starts_with("1 indexed):")
+            && outline.contains("<-- guide#Guide#Setup  [defines]")
+            && !outline.contains("-->"),
+        "{leaf}"
+    );
+
+    let (top, err, ok) = run_cmd(&["context", "guide.Guide", "--repo", repo_arg], dd);
+    assert!(ok, "{err}");
+    let outline = top.split("Connections (").nth(1).unwrap_or_default();
+    assert!(
+        outline.starts_with("2 indexed):")
+            && outline.contains("<-- docs/guide.md  [defines]")
+            && outline.contains("--> guide#Guide#Setup  [defines]")
+            && !outline.contains("Linux"),
+        "{top}"
+    );
+}

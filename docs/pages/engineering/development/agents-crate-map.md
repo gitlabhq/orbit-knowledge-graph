@@ -2,7 +2,7 @@
 
 Every `[workspace]` member needs a row here; `crates/xtask/build.rs` enforces this.
 
-Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, HealthCheck, ClickhouseSetup via `--mode`).
+Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, HealthCheck, ClickhouseSetup via `--mode`), plus a `check-config` subcommand that validates a configuration file.
 
 | Crate | Role |
 |---|---|
@@ -22,6 +22,7 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `orbit-log-fields` | Names of every log and span field, split into `safe` (always written; the server's expanded logs allowlist) and `expanded` (written only on expanded log lines), and the log macros that name fields with `safe(NAME)` and `expanded(NAME)` |
 | `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/`, schema version tracking (`schema/version.rs`), migration orchestrator (`schema/migration.rs`), migration completion detection and dead-version GC (`orchestrator/scheduled/migration_completion.rs`). **See `crates/indexer/AGENTS.md` (reuse-infra checklist) before adding a handler.** |
 | `indexer/duckdb` | DuckDB SQL projection for `data_fusion` SDLC plans, injected into `indexer::run` |
+| `indexing-engine-next` | ADR 023 engine library: planner, worker and reconciler traits, `EngineBuilder` checks, and the in-memory `testkit`. No domain terms (ast-grep rule `indexing-engine-next-no-domain-terms`) |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
 | `query-data-model` | Derives shared graph and access-path contracts, backend catalogs, and authorization catalogs; the ClickHouse implementation owns storage definitions used by its DDL and migration consumers |
 | `code-graph` | Code parsing and linking pipeline under `src/v2/` (`pipeline`, `registry`, `config`, `types`, `linker`, `dsl`, `langs/{generic,custom}`); the old `src/legacy/` parser and linker have been removed. Shared `Range`/`Position`/`IntervalTree` live at `src/utils.rs`. |

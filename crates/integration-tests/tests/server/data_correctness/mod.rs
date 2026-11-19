@@ -28,7 +28,7 @@ async fn data_correctness() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn data_correctness_scenarios() {
     let ctx = data_correctness_context().await;
     query_scenario::run_dir(&ctx, SCENARIOS, PRESETS).await;

@@ -284,7 +284,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             "Listing requested agent commands for user"
         );
 
-        let all_commands = CommandRegistry::commands_for(
+        let all_commands = CommandRegistry::agent_commands_for(
             query_frontend(req.language).map_err(Status::invalid_argument)?,
         );
         let commands: Vec<_> = if requested.is_empty() {

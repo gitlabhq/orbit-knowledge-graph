@@ -209,6 +209,117 @@ fn compile_errors_never_show_private_details() {
 }
 
 #[test]
+fn edge_prop_absent_checks_every_edge() {
+    let traversal =
+        json!({"gql": "MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) RETURN a, b"});
+    run_suite(
+        traversal.clone(),
+        "edges: {CALLS: [[1, 2]]}\nedge_prop_absent: [path_id, step, depth]",
+    );
+    rejects(
+        traversal,
+        "edges: {CALLS: [[1, 2]]}\nedge_prop_absent: [weight]",
+        "edge_prop_absent takes depth, path_id, or step, got weight",
+    );
+    rejects(
+        json!({"json": r#"{"query_type": "path_finding",
+            "nodes": [{"id": "a", "entity": "Definition", "node_ids": [1]}, {"id": "b", "entity": "Definition", "node_ids": [3]}],
+            "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3, "rel_types": ["CALLS"]}}"#}),
+        "path_count: 1\nedge_prop_absent: [path_id]",
+        "CALLS edge Definition 1 -> Definition 2 has path_id",
+    );
+}
+
+#[test]
+fn aggregation_columns_match_exactly_and_in_order() {
+    let query =
+        json!({"gql": "MATCH (d:Definition) WHERE d.id >= 1 AND d.id <= 4 RETURN count(d) AS n"});
+    let rows = "row_values: [{n: 4}]\n";
+    run_suite(
+        query.clone(),
+        &format!("{rows}aggregation_columns: [{{name: n, function: count, target: d}}]"),
+    );
+    for columns in [
+        "[{name: n, function: sum, target: d}]",
+        "[{name: n, function: count, target: d, property: id}]",
+        "[{name: n, function: count, target: d}, {name: m, function: count, target: d}]",
+    ] {
+        rejects(
+            query.clone(),
+            &format!("{rows}aggregation_columns: {columns}"),
+            "aggregation columns mismatch",
+        );
+    }
+}
+
+#[test]
+fn toon_expectations_check_text_value_and_absent_keys() {
+    let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
+    let base = "nodes: {Definition: {ids: [1]}}\nformat:\n  toon:\n";
+    run_suite(
+        query.clone(),
+        &format!(
+            "{base}    contains: [\"Definition[1]{{id,name}}:\"]\n    ends_with: \"truncated: false\\n\"\n    absent: [edges]\n    value: {{nodes: {{Definition: [{{id: 1, name: alpha}}]}}}}"
+        ),
+    );
+    rejects(
+        query.clone(),
+        &format!("{base}    value: {{nodes: {{Definition: [{{name: beta}}]}}}}"),
+        "toon.nodes.Definition[0].name is \"alpha\", expected \"beta\"",
+    );
+    rejects(
+        query.clone(),
+        &format!("{base}    value: {{nodes: {{Definition: [{{id: 1}}, {{id: 2}}]}}}}"),
+        "toon.nodes.Definition has 1 items, expected 2",
+    );
+    rejects(
+        query.clone(),
+        &format!("{base}    contains: [absent-fragment]"),
+        "toon output lacks \"absent-fragment\"",
+    );
+    rejects(
+        query.clone(),
+        &format!("{base}    absent: [nodes]"),
+        "toon output has nodes",
+    );
+    rejects(query, &format!("{base}    exact: true"), "unknown field");
+}
+
+#[test]
+fn gql_format_expectations_also_run_for_json_queries() {
+    let query = json!({"json": r#"{"query_type": "traversal", "nodes": [{"id": "d", "entity": "Definition", "node_ids": [1]}], "limit": 1}"#});
+    let base = "nodes: {Definition: {ids: [1]}}\nformat:\n  gql:\n";
+    run_suite(query.clone(), &format!("{base}    value: {{header: [d]}}"));
+    rejects(
+        query,
+        &format!("{base}    value: {{header: [e]}}"),
+        "gql.header[0] is \"d\", expected \"e\"",
+    );
+}
+
+#[test]
+fn gql_format_expectations_check_text_and_table() {
+    let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
+    let base = "nodes: {Definition: {ids: [1]}}\nformat:\n  gql:\n";
+    run_suite(
+        query.clone(),
+        &format!(
+            "{base}    contains: [\"(:Definition {{id: 1, name: \\\"alpha\\\"}})\"]\n    value: {{header: [d], rows: [[\"(:Definition {{id: 1, name: \\\"alpha\\\"}})\"]]}}"
+        ),
+    );
+    rejects(
+        query.clone(),
+        &format!("{base}    value: {{header: [e]}}"),
+        "gql.header[0] is \"d\", expected \"e\"",
+    );
+    rejects(
+        query,
+        "nodes: {Definition: {ids: [1]}}\nformat: {csv: {}}",
+        "unknown variant `csv`",
+    );
+}
+
+#[test]
 fn seed_presets_replace_the_base_dataset() {
     let query = json!({"gql": "MATCH (d:Definition) WHERE d.id >= 1 AND d.id <= 10 RETURN d.name"});
     run_suite_with(
@@ -349,12 +460,28 @@ fn repeated_nodes_preserve_order_within_each_entity_type() {
 }
 
 #[test]
+fn top_level_result_fields_are_rejected_next_to_pages() {
+    let query = json!({"gql": "MATCH (d:Definition) RETURN d.name SKIP 0 LIMIT 2"});
+    for field in [
+        "edge_prop_absent: [path_id]",
+        "aggregation_columns: [{name: n, function: count, target: d}]",
+    ] {
+        rejects(
+            query.clone(),
+            &format!("{field}\npages: [{{}}]"),
+            "pages is set alongside top-level result assertions",
+        );
+    }
+}
+
+#[test]
 fn page_expectations_reject_fields_that_are_not_executed() {
     let query = json!({"gql": "MATCH (d:Definition) RETURN d.name SKIP 0 LIMIT 2"});
     for field in [
         "repeat_count: 2",
         "compile_error: parse",
         "compile_error_not_contains: [secret]",
+        "format: {toon: {absent: [edges]}}",
         "pages: [{}]",
         "all_pages: {page_count: 1}",
     ] {

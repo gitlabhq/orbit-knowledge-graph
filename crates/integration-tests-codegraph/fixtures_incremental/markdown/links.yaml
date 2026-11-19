@@ -1,0 +1,106 @@
+name: "Markdown (incremental): links become File IMPORTS edges to files and heading sections"
+pipeline: markdown
+fixture_tree: markdown_links
+
+tests:
+  - name: "page links, broken anchors, images and cross-language targets link files"
+    query: |
+      MATCH (f:File)-[:IMPORTS]->(t:File)
+      WHERE f.path = 'docs/index.md'
+      RETURN t.path AS target
+    assert:
+      - { row_count: 6 }
+      - column_values:
+          field: target
+          values:
+            - assets/diagram.svg
+            - assets/logo.png
+            - docs/guide.md
+            - docs/my notes.md
+            - docs/other.md
+            - src/main.py
+
+  - name: "a broken anchor matching a link fragment in the target still falls back to the page"
+    query: |
+      MATCH (f:File)-[:IMPORTS]->(t:File)
+      WHERE f.path = 'docs/index.md' AND t.path = 'docs/other.md'
+      RETURN t.path AS target
+    assert:
+      - { row_count: 1 }
+
+  - name: "anchors that resolve link the heading section, counting quoted headings"
+    query: |
+      MATCH (f:File)-[:IMPORTS]->(d:Definition)
+      RETURN f.path AS source, d.fqn AS target
+    assert:
+      - { row_count: 5 }
+      - { row: { source: "docs/index.md", target: "guide#Guide#Install" } }
+      - { row: { source: "docs/index.md", target: "guide#Guide#Install 1" } }
+      - { row: { source: "docs/index.md", target: "guide#Guide#Café über" } }
+      - { row: { source: "docs/index.md", target: "faq#FAQ#Question" } }
+      - { row: { source: "docs/my notes.md", target: "index#Index" } }
+
+  - name: "external, same-document, missing and out-of-repository links add no edges"
+    query: |
+      MATCH (f:File)-[:IMPORTS]->(t:File)
+      WHERE t.path IN ['docs/index.md', 'docs/missing.md']
+      RETURN t.path AS target
+    assert:
+      - { row_count: 0 }
+
+  - name: "link endpoint ids match across engines"
+    query: |
+      MATCH (f:File)-[:IMPORTS]->(t:File)
+      WHERE f.path = 'docs/index.md' AND t.path IN ['docs/guide.md', 'src/main.py']
+      RETURN f.id AS source, t.id AS target, t.path AS path
+    assert:
+      - { row_count: 2 }
+      - { row: { path: "docs/guide.md", source: 3150211441383902751, target: 9131820625577551583 } }
+      - { row: { path: "src/main.py", source: 3150211441383902751, target: 7208206329522652730 } }
+
+  - name: "section link endpoint ids match across engines"
+    query: |
+      MATCH (f:File)-[:IMPORTS]->(d:Definition)
+      WHERE d.name = 'Install'
+      RETURN f.id AS source, d.id AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: 3150211441383902751, target: 4354769340535525246 } }
+
+steps:
+  - name: "links follow edited and removed targets"
+    snapshot: true
+    remove:
+      - docs/other.md
+    modify:
+      - path: docs/faq.md
+        content: |
+          # FAQ
+    tests:
+      - name: "a removed target drops its edge and a vanished anchor falls back to the page"
+        query: |
+          MATCH (f:File)-[:IMPORTS]->(t:File)
+          WHERE f.path = 'docs/index.md'
+          RETURN t.path AS target
+        assert:
+          - { row_count: 6 }
+          - column_values:
+              field: target
+              values:
+                - assets/diagram.svg
+                - assets/logo.png
+                - docs/faq.md
+                - docs/guide.md
+                - docs/my notes.md
+                - src/main.py
+
+      - name: "anchors that still resolve keep their section edges"
+        query: |
+          MATCH (f:File)-[:IMPORTS]->(d:Definition)
+          RETURN f.path AS source, d.fqn AS target
+        assert:
+          - { row_count: 4 }
+          - { row: { source: "docs/index.md", target: "guide#Guide#Install" } }
+          - { row: { source: "docs/index.md", target: "guide#Guide#Install 1" } }
+          - { row: { source: "docs/index.md", target: "guide#Guide#Café über" } }
+          - { row: { source: "docs/my notes.md", target: "index#Index" } }

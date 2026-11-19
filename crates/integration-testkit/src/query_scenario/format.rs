@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
 
 use query_engine::compiler::{QueryType, RejectionReason};
+use query_engine::formatters::ColumnDescriptor;
 use regex::Regex;
 use serde::Deserialize;
 use strum::IntoEnumIterator;
 
+use super::output_format::{OutputExpect, OutputFormat};
 use crate::scenario::Seed;
 
 #[derive(Debug, Deserialize)]
@@ -123,6 +125,8 @@ pub struct QueryExpect {
     #[serde(default)]
     pub compile_error_not_contains: Vec<ErrorPattern>,
     #[serde(default)]
+    pub format: BTreeMap<OutputFormat, OutputExpect>,
+    #[serde(default)]
     pub node_count: Option<usize>,
     #[serde(default)]
     pub nodes: BTreeMap<String, NodeExpect>,
@@ -142,7 +146,6 @@ pub struct QueryExpect {
     /// Assert row count for ungrouped/property-grouped aggregation results.
     #[serde(default)]
     pub row_count: Option<usize>,
-    /// Assert values on rows by index: `[{index: 0, col: val}]`
     #[serde(default)]
     pub row_values: Vec<BTreeMap<String, serde_json::Value>>,
     /// Assert group column metadata: `{ v_severity: "v.severity" }` verifies
@@ -150,6 +153,10 @@ pub struct QueryExpect {
     /// node `v`, property `severity`.
     #[serde(default)]
     pub group_columns: BTreeMap<String, String>,
+    #[serde(default)]
+    pub aggregation_columns: Option<Vec<ColumnDescriptor>>,
+    #[serde(default)]
+    pub edge_prop_absent: Vec<String>,
     /// Assert total edge count across all types.
     #[serde(default)]
     pub total_edge_count: Option<usize>,
@@ -172,10 +179,6 @@ pub struct QueryExpect {
     pub referential_integrity: bool,
     #[serde(default)]
     pub has_more: Option<bool>,
-    #[serde(default)]
-    pub gql_columns: BTreeMap<String, Vec<String>>,
-    #[serde(default)]
-    pub gql_column_names: Vec<String>,
     /// Assertions across ALL pages combined. The runner collects node IDs
     /// and edge tuples from every page and asserts at the end.
     #[serde(default)]
@@ -295,6 +298,7 @@ impl QueryExpect {
                 page.repeat_count.is_none()
                     && page.compile_error.is_none()
                     && page.compile_error_not_contains.is_empty()
+                    && page.format.is_empty()
                     && page.pages.is_empty()
                     && page.all_pages.is_none(),
                 "{scenario}: page {} supports only result assertions",
@@ -320,6 +324,7 @@ impl QueryExpect {
             || self.empty_aggregation
             || self.row_count.is_some()
             || !self.row_values.is_empty()
+            || self.aggregation_columns.is_some()
     }
 
     fn has_path_assertions(&self) -> bool {
@@ -340,9 +345,9 @@ impl QueryExpect {
             || self.total_edge_count.is_some()
             || self.has_path_assertions()
             || self.referential_integrity
+            || !self.edge_prop_absent.is_empty()
             || self.has_more.is_some()
-            || !self.gql_columns.is_empty()
-            || !self.gql_column_names.is_empty()
+            || !self.format.is_empty()
     }
 
     /// Derive a total node count from per-entity specs when `node_count` is

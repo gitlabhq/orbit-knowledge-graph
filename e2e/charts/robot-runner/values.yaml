@@ -1,15 +1,16 @@
 image: python:3.14-slim
+cliImage: ""
 
 robotframework:
   version: "7.5"
   requestsVersion: "0.9.7"
   pabotVersion: "5.2.2"
-  processes: 12
+  processes: 16
 
 resources:
   requests:
-    cpu: "1"
-    memory: 1Gi
+    cpu: 300m
+    memory: 512Mi
   limits:
     cpu: "4"
     memory: 2Gi
