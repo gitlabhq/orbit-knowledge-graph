@@ -1,0 +1,56 @@
+name: "Python: calls beside a conditional expression in a right-hand side keep their edges"
+
+fixtures:
+  - path: models.py
+    content: |
+      class Client:
+          def get(self): pass
+          def close(self): pass
+
+      class Other:
+          def get(self): pass
+          def close(self): pass
+
+      class Third:
+          def get(self): pass
+
+  - path: main.py
+    content: |
+      from models import Client, Other, Third
+
+      def dict_literal(flag):
+          d = {"a": Client() if flag else Other(), "b": Third().get()}
+          return d
+
+      def list_literal(flag):
+          x = Other()
+          x = [Client() if flag else Client(), x.close()]
+          x.get()
+          return x
+
+tests:
+  - name: "A call next to a conditional expression in a dict literal gets an edge"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.dict_literal' AND callee.name = 'get'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: models.Third.get } }
+
+  - name: "A call in a list literal reads the value from before the assignment"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.list_literal' AND callee.name = 'close'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: models.Other.close } }
+
+  - name: "A call after the assignment does not read the value from before it"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.list_literal' AND callee.fqn = 'models.Other.get'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 0 }
