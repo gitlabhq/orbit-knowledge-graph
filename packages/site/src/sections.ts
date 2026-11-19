@@ -1,4 +1,7 @@
-export const HOME = { title: "GitLab Orbit", description: "What GitLab Orbit is, and its developer docs." };
+export const HOME = {
+  title: "GitLab Orbit",
+  description: "GitLab Orbit is one context layer for all your AI agents: your code, merge requests, pipelines, and vulnerabilities in one graph they can query.",
+};
 
 export type Tab = { route: string; label: string; menu?: { route: string; label: string; description: string; icon?: string }[] };
 
@@ -18,7 +21,6 @@ export const TABS: Tab[] = [
       { route: "engineering/architecture", label: "Architecture", description: "The design contracts of each component", icon: "diagram" },
       { route: "engineering/adr", label: "ADRs", description: "Architecture decision records", icon: "doc-text" },
       { route: "engineering/testing", label: "Testing", description: "How Orbit is tested", icon: "work-item-test-case" },
-      { route: "engineering/runbooks", label: "Runbooks", description: "Operate Orbit and recover from failures", icon: "book" },
       { route: "team", label: "Team", description: "Who builds Orbit, and how we work", icon: "users" },
     ],
   },
@@ -28,6 +30,14 @@ export const TABS: Tab[] = [
 export const GUIDES = TABS.flatMap((tab) => tab.menu ?? []).filter(({ route }) => route !== "engineering");
 
 export const USER_DOCS = { label: "Docs", href: "https://docs.gitlab.com/orbit/" };
+
+export const LLMS_NOTES = [
+  "- GitLab Orbit connects your code, merge requests, pipelines, work items, and vulnerabilities in one graph. Ask what breaks if a service changes, or which CI/CD jobs fail most.",
+  "- Each answer shows only the data that your GitLab role lets you see. Orbit stores no permission data, and the graph is read-only.",
+  "- The graph of your group needs GitLab Premium or Ultimate with GitLab Orbit purchased: https://about.gitlab.com/gitlab-orbit/",
+  "- `glab orbit setup` sets up Claude Code, Codex, GitLab Duo, OpenCode, or Pi.",
+  `- This site is the product overview and the developer docs. To use Orbit, see ${USER_DOCS.href}`,
+].join("\n");
 
 export const PAGES_DIR = "docs/pages";
 
