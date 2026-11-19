@@ -381,8 +381,10 @@ impl TestContext {
 }
 
 fn test_settings() -> HashMap<String, String> {
-    let mut settings = AppConfig::embedded_defaults().graph.session_settings;
+    let graph = AppConfig::embedded_defaults().graph;
+    let mut settings = graph.session_settings;
     settings.extend([
+        ("compatibility".to_string(), graph.compatibility),
         ("async_insert".to_string(), "0".to_string()),
         ("fsync_metadata".to_string(), "0".to_string()),
         (
