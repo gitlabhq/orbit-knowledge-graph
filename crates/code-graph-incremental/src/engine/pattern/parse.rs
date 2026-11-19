@@ -251,17 +251,20 @@ impl PatParser<'_, '_> {
             },
         };
         let optional = self.s.eat("?");
-        let (mut text, mut kids, mut tags, mut flags) = (Text::Any, Vec::new(), Vec::new(), 0u8);
+        let (mut text, mut kids, mut tags) = (Text::Any, Vec::new(), Vec::new());
+        let (mut flags, mut unflags) = (0u8, 0u8);
         loop {
             self.s.ws();
             match self.s.peek() {
                 None => return Err(self.s.err("unclosed node")),
                 Some(b'#') => {
                     self.s.at += 1;
+                    let absent = self.s.eat("!");
                     let name = self.s.name()?;
-                    match super::FLAGS.iter().position(|f| *f == name) {
-                        Some(bit) => flags |= 1 << bit,
-                        None => tags.push(self.lang.syms.intern(name)),
+                    match (super::FLAGS.iter().position(|f| *f == name), absent) {
+                        (Some(bit), false) => flags |= 1 << bit,
+                        (Some(bit), true) => unflags |= 1 << bit,
+                        (None, _) => tags.push((self.lang.syms.intern(name), !absent)),
                     }
                 }
                 Some(b')') => {
@@ -301,6 +304,7 @@ impl PatParser<'_, '_> {
             text,
             tags: tags.into(),
             flags,
+            unflags,
             kids: kids.into(),
             optional,
         })
