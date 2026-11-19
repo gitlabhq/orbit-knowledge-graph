@@ -70,10 +70,12 @@ fn defs_by_name(
     _: &[crate::tree::Edge],
 ) -> Box<dyn std::any::Any + Send + Sync> {
     let mut defs = DefsByName::default();
-    for tree in trees {
+    for (fi, tree) in trees.iter().enumerate() {
         for def in tree.root().descendants().filter(|d| d.is(C::Def)) {
             if let Some(name) = def.child_sym(C::DefName) {
-                defs.entry(name).or_default().push(def.into());
+                defs.entry(name)
+                    .or_default()
+                    .push(Loc::new(fi, def.index()));
             }
         }
     }
