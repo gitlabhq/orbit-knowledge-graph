@@ -1,4 +1,4 @@
-description: MERGED comes from the metrics merger, falls back to merge_user_id, and needs a merged MR
+description: MERGED comes from the metrics merger, wins over merge_user_id, falls back to it, and needs a merged MR
 scope: { namespace: 100 }
 
 seed:
@@ -6,10 +6,12 @@ seed:
     - { id: 1, iid: 101, title: Manual merge, source_branch: a, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, author_id: 1, merge_user_id: null, traversal_path: "1/100/" }
     - { id: 2, iid: 102, title: Auto-merge without a metrics merger, source_branch: b, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, author_id: 1, merge_user_id: 7, traversal_path: "1/100/" }
     - { id: 3, iid: 103, title: Auto-merge set then closed, source_branch: c, target_branch: main, state_id: 2, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, author_id: 1, merge_user_id: 8, traversal_path: "1/100/" }
+    - { id: 4, iid: 104, title: Auto-merge set by one user then merged by another, source_branch: d, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, author_id: 1, merge_user_id: 9, traversal_path: "1/100/" }
   siphon_merge_request_metrics:
     - { id: 1, merge_request_id: 1, merged_by_id: 5, target_project_id: 1000, traversal_path: "1/100/" }
     - { id: 2, merge_request_id: 2, merged_by_id: null, target_project_id: 1000, traversal_path: "1/100/" }
     - { id: 3, merge_request_id: 3, merged_by_id: null, target_project_id: 1000, traversal_path: "1/100/" }
+    - { id: 4, merge_request_id: 4, merged_by_id: 6, target_project_id: 1000, traversal_path: "1/100/" }
 
 expect:
   edges:
@@ -17,7 +19,8 @@ expect:
       from: User
       to: MergeRequest
       traversal_path: "1/100/"
-      count: 2
+      count: 3
       rows:
         - { source_id: 5, target_id: 1 }
         - { source_id: 7, target_id: 2 }
+        - { source_id: 6, target_id: 4 }
