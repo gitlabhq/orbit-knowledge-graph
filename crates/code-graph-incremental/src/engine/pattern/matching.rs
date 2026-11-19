@@ -106,7 +106,7 @@ impl<S: Storage<Node = Node>> Matcher<'_, S> {
                 cap.push(self.t.storage.id(raw));
                 true
             }
-            Pat::Var { .. } | Pat::Not(_) | Pat::Desc(_) => false,
+            Pat::Var { .. } | Pat::Not(_) | Pat::Desc(..) => false,
         }
     }
 
@@ -165,13 +165,12 @@ impl<S: Storage<Node = Node>> Matcher<'_, S> {
                     }
                     clear(inner, caps);
                 }
-                Pat::Desc(inner) => {
-                    if !self
+                Pat::Desc(inner, stop) => {
+                    let mut walk = self
                         .t
                         .cursor(raw)
-                        .descendants()
-                        .any(|d| self.at(d.index(), inner, caps))
-                    {
+                        .descendants_pruned(|d| stop.admits(d.kind()));
+                    if !walk.any(|d| self.at(d.index(), inner, caps)) {
                         return false;
                     }
                 }
@@ -209,6 +208,6 @@ fn clear<I>(p: &Pat, caps: &mut [Cap<I>]) {
         }
         Pat::Var { slot, .. } => caps[*slot as usize].clear(),
         Pat::Node { kids, .. } => kids.iter().for_each(|kid| clear(kid, caps)),
-        Pat::Not(inner) | Pat::Desc(inner) => clear(inner, caps),
+        Pat::Not(inner) | Pat::Desc(inner, _) => clear(inner, caps),
     }
 }

@@ -194,8 +194,21 @@ impl PatParser<'_, '_> {
         if self.s.eat("!") {
             return Ok(Pat::Not(Box::new(self.element(field)?)));
         }
-        if self.s.eat("**/") {
-            return Ok(Pat::Desc(Box::new(self.element(0)?)));
+        if self.s.eat("**") {
+            let stop = match self.s.peek() {
+                Some(b'!') => {
+                    self.s.at += 1;
+                    self.s.test(self.lang, Some(self.data))?.kinds
+                }
+                _ => KindFilter {
+                    kinds: Vec::new(),
+                    negate: false,
+                },
+            };
+            if !self.s.eat("/") {
+                return Err(self.s.err("expected / after **"));
+            }
+            return Ok(Pat::Desc(Box::new(self.element(0)?), stop));
         }
         if self.s.eat("$$$") {
             let slot = self.slots.slot(self.s.name()?);
@@ -278,7 +291,7 @@ impl PatParser<'_, '_> {
                     let syms = self.data(name)?;
                     text = Text::Syms(syms.iter().map(|s| self.lang.syms.intern(s)).collect());
                 }
-                Some(b) if is_ident(b) && !self.s.rest().starts_with("**/") => {
+                Some(b) if is_ident(b) && !self.s.rest().starts_with("**") => {
                     let field = self.lang.intern_field(self.s.field()?);
                     let opt = self.s.eat("?");
                     self.s.ws();

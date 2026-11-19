@@ -2,10 +2,16 @@ functions:
   producing:
     cases:
       - match: '(__call)'
-        value: '$ROOT | callees | type'
+        value: '$ROOT | callees | returned'
       - value: '$ROOT | type'
+
+  returned:
+    cases:
+      - when: '$ROOT | returns | is_class'
+        value: '$ROOT | returns'
+      - value: 'mod.scope.lookup($ROOT, $ROOT | returns)'
 
 dispatch:
   - group: use
     match: '(__call (__callee $M:__member))'
-    emit: { calls: { from: enclosing, to: '$ROOT | producers | producing | member($M) | foreign', site: $ROOT } }
+    emit: { calls: { from: enclosing, to: '$ROOT | producers | producing | member($M)', site: $ROOT } }

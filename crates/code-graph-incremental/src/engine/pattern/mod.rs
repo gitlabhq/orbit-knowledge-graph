@@ -153,7 +153,9 @@ pub enum Pat {
         test: Test,
     },
     Not(Box<Pat>),
-    Desc(Box<Pat>),
+    /// `**/P` matches when a descendant matches P; `**!k|k/P` does not
+    /// enter nodes of the listed kinds.
+    Desc(Box<Pat>, KindFilter),
 }
 
 pub enum TplText<T> {

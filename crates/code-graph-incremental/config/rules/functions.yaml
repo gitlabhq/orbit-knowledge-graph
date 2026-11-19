@@ -102,7 +102,7 @@ functions:
         value: $ROOT
       - match: '(__def $T:__ssa_return_type)'
         value: '$T | type'
-      - match: '(__def **/(__ssa_return $B:__ssa_branch))'
+      - match: '(__def **!__def|__lambda/(__ssa_return $B:__ssa_branch))'
         value: '$B | branch_type'
       - value: '$ROOT | inferred_return'
 
