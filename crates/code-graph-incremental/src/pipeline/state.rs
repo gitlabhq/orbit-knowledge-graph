@@ -264,7 +264,7 @@ struct Shared {
     configs: Vec<(String, String)>,
 }
 
-pub const SNAPSHOT_VERSION: u32 = 20;
+pub const SNAPSHOT_VERSION: u32 = 21;
 
 const FILES_PER_BLOCK: usize = 64;
 

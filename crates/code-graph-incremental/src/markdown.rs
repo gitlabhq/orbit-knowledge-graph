@@ -24,14 +24,14 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
             ..Default::default()
         }
     };
-    let document = markdown::parse(source);
+    let agent_file = AgentFile::classify(label);
+    let document = markdown::parse(source, agent_file);
     let sections = document.sections;
     let targets: Vec<_> = document
         .links
         .iter()
         .filter_map(|link| link.target(label).map(|target| (link.section, target)))
         .collect();
-    let agent_file = AgentFile::classify(label);
     let front_matter_values = document.front_matter.as_ref().map_or(0, |block| {
         block
             .values
