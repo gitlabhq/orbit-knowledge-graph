@@ -3015,7 +3015,7 @@ async fn cancelled_lease_wait_is_backpressure(incremental: bool) {
     );
 }
 
-async fn dockerfile_stages_and_variables_are_definitions(incremental: bool) {
+async fn dockerfile_stages_variables_and_references(incremental: bool) {
     let project_id: i64 = 2811;
     let traversal_path = "1/2811/";
     if incremental {
@@ -3032,7 +3032,7 @@ async fn dockerfile_stages_and_variables_are_definitions(incremental: bool) {
         "main",
         &[(
             "Dockerfile",
-            "ARG GO=1.22\nFROM golang:${GO} AS builder\nENV CGO=0\nFROM alpine\n",
+            "ARG GO=1.22\nFROM golang:${GO} AS builder\nENV CGO=0\nFROM alpine\nCOPY --from=builder /a /b\n",
         )],
     );
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
@@ -3054,10 +3054,57 @@ async fn dockerfile_stages_and_variables_are_definitions(incremental: bool) {
         &["GO", "builder", "CGO", "stage:alpine#3"],
     )
     .await;
+    assert_eq!(
+        active_call_targets(&clickhouse, project_id, "gl_definition", "name").await,
+        BTreeSet::from([
+            ("builder".to_string(), "GO".to_string()),
+            ("stage:alpine#3".to_string(), "builder".to_string()),
+        ])
+    );
+    assert_eq!(
+        active_call_targets(&clickhouse, project_id, "gl_imported_symbol", "import_path").await,
+        BTreeSet::from([
+            ("builder".to_string(), "golang".to_string()),
+            ("stage:alpine#3".to_string(), "alpine".to_string()),
+        ])
+    );
+}
+
+async fn active_call_targets(
+    clickhouse: &integration_testkit::TestContext,
+    project_id: i64,
+    target_table: &str,
+    target_column: &str,
+) -> BTreeSet<(String, String)> {
+    let ontology = integration_testkit::load_ontology();
+    let edge_table = ontology.edge_table_for_relationship("CALLS").unwrap();
+    let result = clickhouse
+        .query(&format!(
+            "SELECT s.name AS source_name, target.{target_column} AS target_name \
+             FROM {edge_table} AS e FINAL \
+             INNER JOIN {} AS s FINAL ON s.id = e.source_id \
+             INNER JOIN {} AS target FINAL ON target.id = e.target_id \
+             WHERE e.relationship_kind = 'CALLS' AND e.project_id = {project_id} AND e._deleted = false \
+             AND s.project_id = {project_id} AND s._deleted = false AND target._deleted = false",
+            t("gl_definition"),
+            t(target_table),
+        ))
+        .await;
+    let mut pairs = BTreeSet::new();
+    for batch in &result {
+        let sources = ArrowUtils::get_column_by_name::<StringArray>(batch, "source_name")
+            .expect("source_name column");
+        let targets = ArrowUtils::get_column_by_name::<StringArray>(batch, "target_name")
+            .expect("target_name column");
+        for i in 0..batch.num_rows() {
+            pairs.insert((sources.value(i).to_string(), targets.value(i).to_string()));
+        }
+    }
+    pairs
 }
 
 both_engines! {
-    dockerfile_stages_and_variables_are_definitions,
+    dockerfile_stages_variables_and_references,
     timed_out_job_writes_no_data,
     heartbeat_keeps_a_slow_job_alive_and_indexes_it,
     disk_is_clean_after_a_timed_out_job,

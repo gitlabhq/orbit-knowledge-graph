@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::path::Path;
 use std::time::Duration;
@@ -7,14 +8,19 @@ use treesitter_visit::{Node, SupportLang};
 
 use crate::utils::node_to_range;
 use crate::v2::config::Language;
+use crate::v2::dsl::engine::CollectedRef;
 use crate::v2::dsl::types::*;
 use crate::v2::dsl::utils::canonical_range;
+use crate::v2::linker::rules::{ReceiverMode, ResolveStage};
+use crate::v2::linker::{HasRules, ResolutionRules};
+use crate::v2::types::ssa::ParseValue;
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, Fqn, ImportBindingKind, ImportMode, Range,
 };
 
 const MAX_STAGES_PER_FILE: usize = 1_000;
 const MAX_VARIABLES_PER_FILE: usize = 10_000;
+const MAX_REFERENCES_PER_FILE: usize = 20_000;
 const MAX_NAME_BYTES: usize = 512;
 
 type AstNode<'r> = Node<'r, StrDoc<SupportLang>>;
@@ -33,6 +39,28 @@ impl DslLanguage for DockerfileDsl {
 
     fn parser() -> LanguageParser {
         LanguageParser::Custom(parse_dockerfile)
+    }
+}
+
+/// References are bound to their target in the parser, so resolution only has to follow
+/// the reaching definitions and imports.
+pub struct DockerfileRules;
+
+impl HasRules for DockerfileRules {
+    fn rules() -> ResolutionRules {
+        let spec = DockerfileDsl::spec();
+        let scopes = ResolutionRules::derive_scopes(&spec);
+        ResolutionRules::new(
+            "dockerfile",
+            scopes,
+            spec,
+            vec![ResolveStage::SSA],
+            vec![],
+            ReceiverMode::None,
+            DockerfileDsl::language().fqn_separator(),
+            &[],
+            None,
+        )
     }
 }
 
@@ -59,9 +87,20 @@ struct DockerfileParser<'a> {
     stem: &'a str,
     definitions: Vec<CanonicalDefinition>,
     imports: Vec<CanonicalImport>,
+    refs: Vec<CollectedRef>,
+    seen_refs: HashSet<(Option<u32>, bool, u32)>,
+    copy_sources: Vec<(String, u32)>,
+    stage_definitions: HashMap<String, u32>,
+    file_variables: HashMap<String, u32>,
+    stage_variables: HashMap<String, u32>,
     stage_count: usize,
     variable_count: usize,
     stage: Option<Stage>,
+}
+
+enum RefTarget {
+    Definition(u32),
+    Import(u32),
 }
 
 struct Stage {
@@ -76,6 +115,12 @@ impl<'a> DockerfileParser<'a> {
             stem,
             definitions: Vec::new(),
             imports: Vec::new(),
+            refs: Vec::new(),
+            seen_refs: HashSet::new(),
+            copy_sources: Vec::new(),
+            stage_definitions: HashMap::new(),
+            file_variables: HashMap::new(),
+            stage_variables: HashMap::new(),
             stage_count: 0,
             variable_count: 0,
             stage: None,
@@ -87,7 +132,11 @@ impl<'a> DockerfileParser<'a> {
             "from_instruction" => return self.visit_from(index, instruction),
             "arg_instruction" => self.visit_variables(instruction, "arg_pair"),
             "env_instruction" => self.visit_variables(instruction, "env_pair"),
-            _ => {}
+            _ => {
+                let enclosing = self.stage.as_ref().map(|s| s.definition as u32);
+                self.add_copy_from_refs(instruction, enclosing);
+                self.add_variable_refs(instruction, enclosing, None);
+            }
         }
         if instruction.kind() != "comment"
             && let Some(stage) = &mut self.stage
@@ -128,21 +177,37 @@ impl<'a> DockerfileParser<'a> {
             is_type_only: false,
             wildcard: false,
         });
+        let stage_definition = self.definitions.len() as u32;
         self.stage = Some(Stage {
             name: name.clone(),
             end: range,
             definition: self.definitions.len(),
         });
+        self.stage_variables.clear();
         self.definitions.push(CanonicalDefinition {
             definition_type: "Class",
             kind: DefKind::Class,
-            name,
+            name: name.clone(),
             fqn,
             range,
             is_top_level: true,
             metadata: None,
         });
         self.stage_count += 1;
+
+        let enclosing = Some(stage_definition);
+        self.push_ref(
+            format!("image:{image}"),
+            RefTarget::Import(self.imports.len() as u32 - 1),
+            enclosing,
+        );
+        if image != name
+            && let Some(&base_stage) = self.stage_definitions.get(&image)
+        {
+            self.push_ref(image, RefTarget::Definition(base_stage), enclosing);
+        }
+        self.add_variable_refs(instruction, enclosing, None);
+        self.stage_definitions.insert(name, stage_definition);
         ControlFlow::Continue(())
     }
 
@@ -155,6 +220,12 @@ impl<'a> DockerfileParser<'a> {
                 continue;
             };
             let name = truncate_name(&name_node.text());
+            let definition = self.definitions.len() as u32;
+            for value in ["default", "value"] {
+                for part in pair.field_children(value) {
+                    self.add_variable_refs(&part, Some(definition), Some(&name));
+                }
+            }
             let fqn = match &self.stage {
                 Some(stage) => Fqn::from_segments(&[self.stem, &stage.name, &name], "."),
                 None => Fqn::from_segments(&[self.stem, &name], "."),
@@ -169,10 +240,77 @@ impl<'a> DockerfileParser<'a> {
                 metadata: None,
             });
             self.variable_count += 1;
+            let scope = match self.stage {
+                Some(_) => &mut self.stage_variables,
+                None => &mut self.file_variables,
+            };
+            scope.insert(
+                self.definitions[definition as usize].name.clone(),
+                definition,
+            );
         }
     }
 
+    fn add_copy_from_refs(&mut self, instruction: &AstNode<'_>, enclosing: Option<u32>) {
+        let Some(current) = enclosing else {
+            return;
+        };
+        for copy in instruction.dfs().filter(|n| n.kind() == "copy_instruction") {
+            let target = copy
+                .children()
+                .filter(|n| n.kind() == "param")
+                .find_map(|param| param.text().strip_prefix("--from=").map(truncate_name));
+            if let Some(target) = target
+                && self.copy_sources.len() < MAX_REFERENCES_PER_FILE
+            {
+                self.copy_sources.push((target, current));
+            }
+        }
+    }
+
+    fn add_variable_refs(
+        &mut self,
+        node: &AstNode<'_>,
+        enclosing: Option<u32>,
+        defining: Option<&str>,
+    ) {
+        for variable in node.dfs().filter(|n| n.kind() == "variable") {
+            let name = truncate_name(&variable.text());
+            if defining == Some(name.as_str()) {
+                continue;
+            }
+            let target = self
+                .stage_variables
+                .get(&name)
+                .or_else(|| self.file_variables.get(&name))
+                .copied();
+            if let Some(target) = target {
+                self.push_ref(name, RefTarget::Definition(target), enclosing);
+            }
+        }
+    }
+
+    fn push_ref(&mut self, name: String, target: RefTarget, enclosing: Option<u32>) {
+        if self.refs.len() >= MAX_REFERENCES_PER_FILE {
+            return;
+        }
+        let (is_import, index, reaching) = match target {
+            RefTarget::Definition(index) => (false, index, ParseValue::LocalDef(index)),
+            RefTarget::Import(index) => (true, index, ParseValue::ImportRef(index)),
+        };
+        if !self.seen_refs.insert((enclosing, is_import, index)) {
+            return;
+        }
+        self.refs.push(CollectedRef {
+            name: name.into(),
+            chain: None,
+            reaching: vec![reaching],
+            enclosing_def: enclosing,
+        });
+    }
+
     fn close_stage(&mut self) {
+        self.stage_variables.clear();
         let Some(stage) = self.stage.take() else {
             return;
         };
@@ -186,9 +324,21 @@ impl<'a> DockerfileParser<'a> {
 
     fn finish(mut self) -> CustomParse {
         self.close_stage();
+        for (target, current) in std::mem::take(&mut self.copy_sources) {
+            if let Some(&stage_definition) = self.stage_definitions.get(&target)
+                && stage_definition != current
+            {
+                self.push_ref(
+                    target,
+                    RefTarget::Definition(stage_definition),
+                    Some(current),
+                );
+            }
+        }
         CustomParse {
             definitions: self.definitions,
             imports: self.imports,
+            refs: self.refs,
             ..Default::default()
         }
     }
@@ -211,6 +361,7 @@ mod tests {
     use crate::v2::dsl::engine::{ParseFullError, ParseFullResult, PhaseTimeouts};
     use crate::v2::error::AbortPhase;
     use crate::v2::trace::Tracer;
+    use crate::v2::types::ssa::ParseValue;
 
     fn parse(code: &str) -> ParseFullResult {
         DockerfileDsl::spec()
@@ -378,6 +529,144 @@ mod tests {
             .join()
             .unwrap();
         assert!(names(&result, "Class").contains(&"Dockerfile.first".to_string()));
+    }
+
+    fn refs(result: &ParseFullResult) -> Vec<(String, String, String)> {
+        let describe = |index: u32| result.definitions[index as usize].fqn.to_string();
+        result
+            .refs
+            .iter()
+            .map(|r| {
+                let target = match &r.reaching[0] {
+                    ParseValue::LocalDef(i) => describe(*i),
+                    ParseValue::ImportRef(i) => {
+                        format!("import:{}", result.imports[*i as usize].path)
+                    }
+                    other => panic!("unexpected reaching value {other:?}"),
+                };
+                (
+                    r.enclosing_def.map(describe).unwrap_or_default(),
+                    r.name.to_string(),
+                    target,
+                )
+            })
+            .collect()
+    }
+
+    fn edge(from: &str, name: &str, to: &str) -> (String, String, String) {
+        (from.to_string(), name.to_string(), to.to_string())
+    }
+
+    #[test]
+    fn stages_call_their_base_image_and_the_stages_they_build_on() {
+        let result = parse(
+            "FROM golang AS builder\nFROM alpine AS runtime\nCOPY --from=builder /a /b\nCOPY --from=nginx:latest /c /d\nFROM runtime AS debug\nFROM runtime\n",
+        );
+        assert_eq!(
+            refs(&result),
+            [
+                edge("Dockerfile.builder", "image:golang", "import:golang"),
+                edge("Dockerfile.runtime", "image:alpine", "import:alpine"),
+                edge("Dockerfile.debug", "image:runtime", "import:runtime"),
+                edge("Dockerfile.debug", "runtime", "Dockerfile.runtime"),
+                edge(
+                    "Dockerfile.stage:runtime#5",
+                    "image:runtime",
+                    "import:runtime"
+                ),
+                edge(
+                    "Dockerfile.stage:runtime#5",
+                    "runtime",
+                    "Dockerfile.runtime"
+                ),
+                edge("Dockerfile.runtime", "builder", "Dockerfile.builder"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_stage_never_calls_itself() {
+        let result = parse("FROM alpine AS alpine\nFROM x AS two\nCOPY --from=two /a /b\n");
+        assert_eq!(
+            refs(&result),
+            [
+                edge("Dockerfile.alpine", "image:alpine", "import:alpine"),
+                edge("Dockerfile.two", "image:x", "import:x"),
+            ]
+        );
+    }
+
+    #[test]
+    fn expansions_call_the_variable_visible_from_their_stage() {
+        let result = parse(
+            "ARG V=1\nFROM img:${V} AS one\nENV HOME=/h\nENV P=${HOME}/bin:$P\nFROM img AS two\nLABEL v=${V} h=$HOME\n",
+        );
+        let calls: Vec<_> = refs(&result)
+            .into_iter()
+            .filter(|(_, name, _)| !name.starts_with("image:"))
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                edge("Dockerfile.one", "V", "Dockerfile.V"),
+                edge("Dockerfile.one.P", "HOME", "Dockerfile.one.HOME"),
+                edge("Dockerfile.two", "V", "Dockerfile.V"),
+            ]
+        );
+    }
+
+    #[test]
+    fn references_past_the_cap_are_dropped() {
+        let uses = "ENV X=$A$B$C\n".repeat(MAX_REFERENCES_PER_FILE / 3 + 100);
+        let result = parse(&format!("ARG A=1 B=1 C=1\nFROM img AS s\n{uses}"));
+        assert_eq!(result.refs.len(), MAX_REFERENCES_PER_FILE);
+        assert_eq!(refs(&result)[0].1, "image:img");
+    }
+
+    #[test]
+    fn repeated_references_to_one_target_collapse_to_one() {
+        let result = parse("ARG A=1\nFROM img AS s\nLABEL x=$A y=$A\nENV B=${A:-$A}\n");
+        assert_eq!(
+            refs(&result),
+            [
+                edge("Dockerfile.s", "image:img", "import:img"),
+                edge("Dockerfile.s", "A", "Dockerfile.A"),
+                edge("Dockerfile.s.B", "A", "Dockerfile.A"),
+            ]
+        );
+    }
+
+    #[test]
+    fn copy_from_links_later_stages_but_from_links_only_earlier_ones() {
+        let result =
+            parse("FROM later AS a\nCOPY --from=later2 /x /y\nFROM x AS later\nFROM y AS later2\n");
+        let stage_calls: Vec<_> = refs(&result)
+            .into_iter()
+            .filter(|(_, name, _)| !name.starts_with("image:"))
+            .collect();
+        assert_eq!(
+            stage_calls,
+            [edge("Dockerfile.a", "later2", "Dockerfile.later2")]
+        );
+    }
+
+    #[test]
+    fn onbuild_copy_from_calls_the_stage() {
+        let result =
+            parse("FROM img AS builder\nFROM img AS user\nONBUILD COPY --from=builder /a /b\n");
+        assert!(refs(&result).contains(&edge("Dockerfile.user", "builder", "Dockerfile.builder")));
+    }
+
+    #[test]
+    fn collected_copy_sources_stop_at_the_reference_cap() {
+        let copies = "COPY --from=a /x /y\n".repeat(MAX_REFERENCES_PER_FILE + 50);
+        let source = format!("FROM img AS a\n{copies}");
+        let ast = Language::Dockerfile.parse_ast(&source, None).unwrap();
+        let mut parser = DockerfileParser::new("Dockerfile");
+        for (index, instruction) in ast.root().children().filter(|n| n.is_named()).enumerate() {
+            let _ = parser.visit(index, &instruction);
+        }
+        assert_eq!(parser.copy_sources.len(), MAX_REFERENCES_PER_FILE);
     }
 
     #[test]

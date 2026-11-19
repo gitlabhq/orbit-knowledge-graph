@@ -18,3 +18,14 @@ tests:
       - { row: { image: "golang" } }
       - { row: { image: "registry.gitlab.com/group/project/base" } }
       - { row: { image: "scratch" } }
+
+  - name: "a stage calls its base image"
+    query: |
+      MATCH (s:Definition)-[:CALLS]->(i:ImportedSymbol)
+      RETURN s.name AS stage, i.import_path AS image
+      ORDER BY stage
+    assert:
+      - { row_count: 3 }
+      - { row: { stage: "build", image: "registry.gitlab.com/group/project/base" } }
+      - { row: { stage: "compile", image: "golang" } }
+      - { row: { stage: "stage:scratch#2", image: "scratch" } }

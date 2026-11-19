@@ -615,7 +615,7 @@ impl LanguageSpec {
             return Ok(ParseFullResult {
                 definitions: parsed.definitions,
                 imports: parsed.imports,
-                refs: Vec::new(),
+                refs: parsed.refs,
                 inferred_returns: Vec::new(),
                 unresolved_aliases: Vec::new(),
                 links: parsed.links,

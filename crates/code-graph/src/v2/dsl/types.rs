@@ -765,6 +765,7 @@ pub type CustomParseFn = fn(&str, &str, Option<std::time::Duration>) -> Result<C
 pub struct CustomParse {
     pub definitions: Vec<crate::v2::types::CanonicalDefinition>,
     pub imports: Vec<crate::v2::types::CanonicalImport>,
+    pub refs: Vec<crate::v2::dsl::engine::CollectedRef>,
     pub links: crate::v2::types::FileLinks,
 }
 

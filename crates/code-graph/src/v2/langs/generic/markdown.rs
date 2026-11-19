@@ -87,6 +87,7 @@ fn parse_markdown(source: &str, file_path: &str) -> CustomParse {
     CustomParse {
         definitions,
         imports: Vec::new(),
+        refs: Vec::new(),
         links,
     }
 }

@@ -15,3 +15,11 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { stage: "Dockerfile.s29", variable: "Dockerfile.s29.E29" } }
+
+  - name: "a COPY --from chain links all thirty stages"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.definition_type = 'Class' AND b.definition_type = 'Class'
+      RETURN a.name AS from_stage, b.name AS to_stage
+    assert:
+      - { row_count: 29 }
