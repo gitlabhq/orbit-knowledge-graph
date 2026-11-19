@@ -175,6 +175,13 @@ pub struct IterFileOptions {
     pub exclude_patterns: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct IndexedFile {
+    pub path: PathBuf,
+    pub tracked: bool,
+    pub skip_worktree: bool,
+}
+
 impl CoreGitaliskRepository {
     fn moved_unstaged(&self, deleted_path: &Path, new_path: &Path) -> bool {
         let mut revision_path = std::ffi::OsString::from("HEAD:");
@@ -397,6 +404,45 @@ impl CoreGitaliskRepository {
             &["--cached", "--ignored", "--exclude-standard"],
             &[] as &[&str],
         )
+    }
+
+    pub fn index_files(&self) -> Result<Vec<IndexedFile>, std::io::Error> {
+        let output = Command::new("git")
+            .arg("--literal-pathspecs")
+            .args([
+                "ls-files",
+                "-z",
+                "-t",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+            ])
+            .current_dir(&self.path)
+            .output()?;
+        if !output.status.success() {
+            return Err(std::io::Error::other(format!(
+                "git ls-files failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        let mut files: Vec<IndexedFile> = output
+            .stdout
+            .split(|b| *b == 0)
+            .filter_map(|record| {
+                let (tag, path) = record.split_at_checked(2)?;
+                if path.is_empty() || path.ends_with(b"/") {
+                    return None;
+                }
+                Some(IndexedFile {
+                    path: path_from_bytes(path),
+                    tracked: tag[0] != b'?',
+                    skip_worktree: tag[0] == b'S',
+                })
+            })
+            .collect();
+        files.sort();
+        files.dedup_by(|later, earlier| later.path == earlier.path);
+        Ok(files)
     }
 
     fn list_files<S: AsRef<OsStr>>(

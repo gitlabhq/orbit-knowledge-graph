@@ -497,22 +497,12 @@ fn resolve_missing(root: &Path, scope: Vec<String>, notes: &mut Vec<String>) -> 
     if !scope.iter().any(missing) {
         return scope;
     }
-    let tracked: Vec<String> = std::process::Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["ls-files", "-z"])
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .split('\0')
-                .filter(|file| !file.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
+    let tracked: Vec<String> = crate::workspace::repository_at(root)
+        .index_files()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|file| file.path.to_string_lossy().into_owned())
+        .collect();
     let mut resolved = Vec::new();
     for path in scope {
         if !missing(&path) {
