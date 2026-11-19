@@ -1,0 +1,9 @@
+name: Named query
+generate: { kind: named_queries }
+security: { admin: true, access_level: 50 }
+
+logical:
+  expect: ["(Input ... (...))"]
+
+physical:
+  clickhouse: {}

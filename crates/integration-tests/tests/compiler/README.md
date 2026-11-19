@@ -178,6 +178,21 @@ language_differs:
 A file can hold several fixtures in a `cases` list. Every other top-level key
 is a default for each case, and each case needs its own `name`.
 
+A case with `generate` expands before it runs. `kind: named_queries` makes one
+case per embedded named query. Each case renders the query in JSON and GQL with
+its example parameters, keeps every other key of the case, and appends the
+query name to the case name. `kind: repeat` replaces `placeholder` in every
+query string with `text` repeated `count` times, so a fixture can check a large
+input without embedding it.
+
+```yaml
+- name: A query past the byte limit is rejected before parsing
+  generate: {kind: repeat, placeholder: LONG_NAME, text: x, count: 40000}
+  query:
+    gql: |
+      MATCH (u:User {username: 'LONG_NAME'}) RETURN u
+```
+
 The fixtures cover access-path choices and their important eligibility guards.
 
 A fixture that the compiler must reject sets `rejected` under a backend:

@@ -1,6 +1,7 @@
 mod aliases;
 mod clickhouse;
 mod explain;
+mod generate;
 mod operator;
 mod pattern;
 mod schema;
@@ -1417,9 +1418,18 @@ fn read_fixtures(directory: &Path) -> Vec<(std::path::PathBuf, Scenario)> {
     paths
         .into_iter()
         .flat_map(|path| {
-            crate::scenario::read_cases::<Scenario>(&path)
+            crate::scenario::read_cases::<serde_json::Value>(&path)
                 .into_iter()
-                .map(move |(_, scenario)| (path.clone(), scenario))
+                .flat_map(|(_, case)| {
+                    generate::expand(case)
+                        .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+                })
+                .map(|case| {
+                    let scenario = serde_json::from_value(case)
+                        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+                    (path.clone(), scenario)
+                })
+                .collect::<Vec<_>>()
         })
         .collect()
 }
