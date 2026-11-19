@@ -25,8 +25,8 @@ this table.
 1. `setup` fetches `SKILLS_REPO` at `SKILLS_REF` with the flow's
    `GITLAB_TOKEN`, then runs the gate (threshold 6) and the related-MR check.
    Most MRs end here, with no model call and no GitLab Credits.
-1. `MODE=shadow`, the committed default, stops after the gate and logs one
-   line per MR. `MODE=full` runs the rest.
+1. `MODE=full`, the committed mode, runs the rest. `MODE=shadow` stops after
+   the gate and logs one line per MR.
 1. A writer agent writes the change in one context. It runs `check.py`, the
    docs linters and the rules a script can check, until the check is clean.
 1. `publish` checks the writer report, runs `check.py` again as a hard gate,
@@ -63,7 +63,7 @@ this table.
 
 ```mermaid
 flowchart TD
-  T[MR created, marked ready, or a mention] --> S[setup: gate, related]
+  T[a mention] --> S[setup: gate, related]
   S -->|no docs, shadow| E[end]
   S --> W[writer agent: docs-write, check.py]
   S -->|mention on a docs MR| TH
@@ -137,9 +137,8 @@ Prerequisites:
 1. In **Display name**, enter `docs-write`.
 1. For **Visibility**, select **Private**.
 1. Under **Configuration**, select **Flow**, and paste `docs-write.yml`.
-1. Keep `setup` as committed: `MODE=shadow` and `SKILLS_REF` pinned to a
-   `team/skills` commit. Full mode is a one-word change to `MODE=full`,
-   made and reviewed in an MR here first.
+1. Keep `setup` as committed: `MODE=full` and `SKILLS_REF` pinned to a
+   `team/skills` commit. Change either one in a reviewed MR here first.
 1. Select **Create flow**.
 
 The GraphQL mutations are `aiCatalogFlowCreate` (with `visibility: PRIVATE`
@@ -156,31 +155,34 @@ and `release: true`) and `aiCatalogFlowUpdate` (with `versionBump`).
 
 ### Create the trigger
 
-In **AI** > **Triggers**, select the flow's service account and the flow,
-and add these conditions:
+During rollout the trigger is **Mention** only, so the flow runs only where
+someone asks for it. In **AI** > **Triggers**, select the flow's service
+account and the flow, and add one condition:
 
-| Event | Run when | Why |
-|---|---|---|
-| **Merge request** | **Created** | New MRs. The gate skips drafts and fork MRs. |
-| **Merge request** | **Marked ready** | Draft MRs that become ready. |
-| **Mention** | | On a feature MR: run the gate again on demand. On a docs MR the flow opened in this project: fix open threads from trusted authors (the flow, Duo Code Review, authors and reviewers of feature MRs from this project, docs MR reviewers, and Developer+ members), then hand off again. |
+| Event | Why |
+|---|---|
+| **Mention** | On a feature MR: run the gate, and draft the docs MR when it needs one. On a docs MR the flow opened in this project: fix open threads from trusted authors (the flow, Duo Code Review, authors and reviewers of feature MRs from this project, docs MR reviewers, and Developer+ members), then hand off again. |
 
 Leave **Instructions** empty. GraphQL: `aiFlowTriggerCreate` with
-`eventTypes: [0, 4, 6]` (mention, merge request ready, merge request) and
-the filter `{"merge_request": {"rules": [{"field": "action", "operator": "in", "value": ["created"]}]}}`.
-Filters are keyed by event type, so this one applies only to **Merge
-request** events. **Marked ready** events have no filter and always start
-the flow (`Ai::FlowTriggers::FilterEvaluator` in `gitlab-org/gitlab`).
+`eventTypes: [0]` (mention) and `aiCatalogItemConsumerId` set to the
+project's item configuration.
 
-Events that a flow causes start triggers too, so the docs MR the flow opens
-starts the flow again. The gate ends that run with no model call: it skips
+To run on every new or ready MR later, add **Merge request** events
+(`eventTypes` 6 and 4) in a reviewed MR here first. Filter **Created** with
+`{"merge_request": {"rules": [{"field": "action", "operator": "in", "value": ["created"]}]}}`.
+Filters are keyed by event type, and **Marked ready** events have no filter
+(`Ai::FlowTriggers::FilterEvaluator` in `gitlab-org/gitlab`).
+
+With **Merge request** events on, events that a flow causes start triggers
+too, so the docs MR the flow opens starts the flow again. The gate ends that run with no model call: it skips
 fork MRs, MRs on a `docs-write/` branch or with the docs-write marker, and
 MRs with `~documentation` or `~"docs-factory::skip"`. Each run still spends about
 100 seconds of runner time on setup.
 
-## Shadow mode (rollout stage 1)
+## Shadow mode
 
-`MODE=shadow` is the committed default. Each run logs one line in the session
+`MODE=shadow` turns the writes off: use it to test the gate on new trigger
+events before they open docs MRs. Each run logs one line in the session
 (**AI** > **Sessions**, and the workload job log), and writes nothing:
 
 ```plaintext
