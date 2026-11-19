@@ -1,4 +1,4 @@
-import { Embed, EmbedGrid, findPage, LinkedHeading, PageContent, PageFrame, pageHeadOf, Video, VideoGrid } from "@gitlab-org/orbit-site";
+import { Embed, EmbedGrid, findPage, LinkedHeading, PageFrame, pageHeadOf, Video, VideoGrid } from "@gitlab-org/orbit-site";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { PageFooter } from "../components/PageFooter";
 import { type DemoVideo, featured, links, videos } from "../content/demos";
@@ -7,7 +7,6 @@ export const Route = createFileRoute("/about/")({
   beforeLoad: ({ location }) => {
     if (location.hash === "roadmap") throw redirect({ to: "/next", replace: true });
   },
-  loader: async () => ({ body: await findPage("about")?.load() }),
   head: () => pageHeadOf(findPage("about")),
   component: AboutPage,
 });
@@ -16,10 +15,8 @@ const without = ({ featured: _, ...video }: DemoVideo) => video;
 
 function AboutPage() {
   const page = findPage("about");
-  const { body } = Route.useLoaderData();
   return (
     <PageFrame path="about" title={page?.meta.title ?? "About GitLab Orbit"} description={page?.meta.description} footer={page && <PageFooter page={page} />}>
-      {body && <PageContent body={body} />}
       {featured && <Video {...without(featured)} bare />}
       {links.length > 0 && (
         <section aria-labelledby="related" className="mt-10">

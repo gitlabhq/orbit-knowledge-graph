@@ -21,6 +21,7 @@ export const TABS: Tab[] = [
       { route: "engineering/architecture", label: "Architecture", description: "The design contracts of each component", icon: "diagram" },
       { route: "engineering/adr", label: "ADRs", description: "Architecture decision records", icon: "doc-text" },
       { route: "engineering/testing", label: "Testing", description: "How Orbit is tested", icon: "work-item-test-case" },
+      { route: "engineering/runbooks", label: "Runbooks", description: "Operate Orbit and recover from failures", icon: "book" },
       { route: "team", label: "Team", description: "Who builds Orbit, and how we work", icon: "users" },
     ],
   },
