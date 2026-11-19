@@ -1,0 +1,50 @@
+cases:
+  - name: A MATCH statement prepares as a query
+    call: "MATCH (n:User {id: 1}) RETURN n"
+    scope: all
+    expect: query
+
+  - name: The full schema call returns the compact overview
+    call: "CALL db.schema()"
+    scope: all
+    expect: overview
+
+  - name: The local full schema call returns the local compact overview
+    call: "CALL db.schema()"
+    scope: local
+    expect: overview
+
+  - name: A node schema call returns only that node and its properties
+    call: "CALL db.schema('MergeRequest')"
+    scope: all
+    expect: { node: MergeRequest }
+
+  - name: A local node schema call returns only that node and its properties
+    call: "CALL db.schema('File')"
+    scope: local
+    expect: { node: File }
+
+  - name: An unknown node is rejected
+    call: "CALL db.schema('Missing')"
+    scope: all
+    rejected: { contains: ["schema node 'Missing' is unknown or unavailable in this scope"] }
+
+  - name: A wildcard node is rejected
+    call: "CALL db.schema('*')"
+    scope: all
+    rejected: { contains: ["schema node '*' is unknown or unavailable in this scope"] }
+
+  - name: Two nodes are rejected
+    call: "CALL db.schema('File', 'User')"
+    scope: all
+    rejected: { contains: ["Orbit query syntax at line 1, column 1: expected Statement"] }
+
+  - name: YIELD is rejected
+    call: "CALL db.schema() YIELD name"
+    scope: all
+    rejected: { contains: ["Orbit query syntax at line 1, column 18: expected end of query"] }
+
+  - name: A node outside the local scope is rejected
+    call: "CALL db.schema('MergeRequest')"
+    scope: local
+    rejected: { contains: ["schema node 'MergeRequest' is unknown or unavailable in this scope"] }

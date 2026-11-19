@@ -223,6 +223,23 @@ The exact order must list every top-level CTE and can use bound captures.
 Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
 `absent: false`, and combining both forms are rejected.
 
+## Schema calls
+
+`schema/` holds the checks for `CALL db.schema()`, which `gql::prepare` answers
+with a schema response instead of compiling a query. Each case names the
+`call`, the introspection `scope` (`all` or `local`), and one of `expect` or
+`rejected`. `expect` takes `query` for a statement that prepares as a query,
+`overview` for the compact overview of the scope, or `{node: Name}` for one
+domain with that node, its properties, and no edges. `rejected` takes
+`contains`, and every rejection must be safe to show a client.
+
+```yaml
+- name: A node outside the local scope is rejected
+  call: "CALL db.schema('MergeRequest')"
+  scope: local
+  rejected: {contains: ["schema node 'MergeRequest' is unknown or unavailable in this scope"]}
+```
+
 ## Coverage
 
 | Area | Fixtures |

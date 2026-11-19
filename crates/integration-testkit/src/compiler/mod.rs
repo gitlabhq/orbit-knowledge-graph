@@ -3,6 +3,7 @@ mod clickhouse;
 mod explain;
 mod operator;
 mod pattern;
+mod schema;
 mod terms;
 
 use query_engine::compiler;
@@ -1396,6 +1397,7 @@ impl SettingsAssertions {
 }
 
 pub use clickhouse::run_index_explains;
+pub use schema::run_schema_dir;
 
 pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
     if let Err(failures) = check_dir(directory, ontology) {

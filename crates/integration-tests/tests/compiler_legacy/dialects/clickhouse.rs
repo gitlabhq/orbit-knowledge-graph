@@ -1,10 +1,5 @@
-use crate::compiler_legacy::setup::{embedded_ontology, test_ctx, test_ontology};
-use compiler::gql::{PreparedStatement, prepare};
+use crate::compiler_legacy::setup::{test_ctx, test_ontology};
 use compiler::{Frontend, compile};
-use ontology::introspection::{
-    IntrospectionScope::{All, Local},
-    build_compact_schema_response,
-};
 
 #[test]
 fn invalid_json_rejected() {
@@ -100,53 +95,4 @@ fn native_conditions_need_a_column() {
             "{error}"
         );
     }
-}
-
-#[test]
-fn gql_prepares_queries_and_scoped_schema() {
-    let ontology = embedded_ontology();
-    let ctx = test_ctx();
-    assert!(matches!(
-        prepare("MATCH (n:User {id: 1}) RETURN n", &ontology, &ctx, All),
-        Ok(PreparedStatement::Query(_))
-    ));
-    for (scope, call, node) in [
-        (All, "CALL db.schema()", None),
-        (Local, "CALL db.schema()", None),
-        (All, "CALL db.schema('MergeRequest')", Some("MergeRequest")),
-        (Local, "CALL db.schema('File')", Some("File")),
-    ] {
-        let PreparedStatement::Schema(response) = prepare(call, &ontology, &ctx, scope).unwrap()
-        else {
-            panic!("expected schema: {call}");
-        };
-        if let Some(name) = node {
-            assert_eq!(response.domains.len(), 1);
-            assert_eq!(response.domains[0].nodes.len(), 1);
-            let node = serde_json::to_value(&response.domains[0].nodes[0]).unwrap();
-            assert_eq!(node["name"], name);
-            assert!(!node["props"].as_array().unwrap().is_empty());
-            assert!(response.edges.is_empty());
-        } else {
-            assert_eq!(
-                serde_json::to_value(response).unwrap(),
-                serde_json::to_value(build_compact_schema_response(&ontology, scope, None))
-                    .unwrap(),
-            );
-        }
-    }
-    for (scope, call) in [
-        (All, "CALL db.schema('Missing')"),
-        (All, "CALL db.schema('*')"),
-        (All, "CALL db.schema('File', 'User')"),
-        (All, "CALL db.schema() YIELD name"),
-        (Local, "CALL db.schema('MergeRequest')"),
-    ] {
-        assert!(
-            prepare(call, &ontology, &ctx, scope)
-                .unwrap_err()
-                .is_client_safe()
-        );
-    }
-    assert!(compile("CALL db.schema()", Frontend::Gql, &ontology, &ctx).is_err());
 }
