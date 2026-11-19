@@ -82,6 +82,12 @@ link:
     when: 'unresolved($ROOT, true)'
     emit: { imports: { from: enclosing, to: mod.ssa.wildcards | callable_import, site: $ROOT, resolution: reference, resolve: none } }
   - group: call
+    match: '(__call #implicit_self (__callee %providers))'
+    when: 'unresolved($ROOT, true)'
+    enter:
+      - emit: { imports: { from: enclosing, to: 'mod.ssa.wildcards | callable_import | sourced(%providers, true)', site: $ROOT, resolution: reference, resolve: none } }
+      - emit: { imports: { from: enclosing, to: 'mod.ssa.wildcards | callable_import | sourced(%providers, false)', site: $ROOT } }
+  - group: call
     match: '(__call #implicit_self (__callee "/./"))'
     when: 'unresolved($ROOT, true)'
     emit: { imports: { from: enclosing, to: mod.ssa.wildcards | callable_import, site: $ROOT } }
@@ -135,7 +141,9 @@ link:
   - group: call
     match: '(__call (__callee %providers))'
     when: 'unresolved($ROOT, false)'
-    emit: { imports: { from: enclosing, to: mod.ssa.wildcards, site: $ROOT, resolution: reference, resolve: none } }
+    enter:
+      - emit: { imports: { from: enclosing, to: 'mod.ssa.wildcards | sourced(%providers, true)', site: $ROOT, resolution: reference, resolve: none } }
+      - emit: { imports: { from: enclosing, to: 'mod.ssa.wildcards | sourced(%providers, false)', site: $ROOT } }
   - group: call
     match: '(__call (__callee "/./"))'
     when: 'unresolved($ROOT, false)'
@@ -220,10 +228,6 @@ link:
     exit: [revisit]
 
   - group: flow
-    match: '(__source_file #scoped)'
-    enter: ['mod.ssa.enter_scope($ROOT, $ROOT | tag("scoped"), false)']
-    exit: [mod.ssa.leave]
-  - group: flow
     match: '(__scope #hoisted)'
     enter: ['mod.ssa.enter_scope($ROOT, $ROOT | tag("scoped"), true)']
     exit: [mod.ssa.leave]
@@ -254,11 +258,7 @@ link:
     match: '(__ssa_branch $ROOT:__ssa_arm)'
     exit: ['mod.ssa.yield($ROOT | valued, $ROOT | value_of, $ROOT | source)', mod.ssa.join]
   - group: flow
-    match: '(__ssa_loop $$$H (__binding #lifted (__declaration)))'
-    enter: [mod.ssa.loop_header($ROOT)]
-    exit: [mod.ssa.leave]
-  - group: flow
-    match: '(__ssa_loop $$$H $B:(__binding (__declaration)) $$$R)'
+    match: '(__ssa_loop $$$H $B:(__binding (__declaration) #!lifted) $$$R)'
     children: [$H, $B, $R]
     between: [mod.ssa.loop_header($ROOT)]
     exit: [mod.ssa.leave]

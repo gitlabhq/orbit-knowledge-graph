@@ -112,11 +112,12 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
                 continue;
             }
             if let Some(owner) = declaration.child_sym(C::Alias) {
-                let owner = s.scopes[..depth].iter().rposition(|(l, _)| *l == owner);
-                if let Some(at) = owner {
-                    let bound = self.bound_at(name, at).unwrap_or(unbound);
-                    self.bind_name(name, bound);
-                }
+                let at = s.scopes[..depth]
+                    .iter()
+                    .rposition(|(l, _)| *l == owner)
+                    .unwrap_or(0);
+                let bound = self.bound_at(name, at).unwrap_or(unbound);
+                self.bind_name(name, bound);
                 continue;
             }
             self.bind_name(name, key);

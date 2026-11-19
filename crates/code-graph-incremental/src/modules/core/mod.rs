@@ -321,6 +321,16 @@ static FUNCTIONS: &[Function<Core>] = &[
             None => Vals::new(),
         }
     }),
+    function!(Pure, "sourced", [one, set, one], |cx, a| {
+        let source = arg(cx, a, 0)
+            .and_then(|name| name.parent())
+            .and_then(|import| import.child_sym(C::SourcePath));
+        let listed = source.is_some_and(|s| a[1].iter().any(|&v| cx.text(v) == Some(s)));
+        match listed == crate::engine::truthy(&a[2]) {
+            true => a[0].clone(),
+            false => Vals::new(),
+        }
+    }),
     function!(Pure, "sole", [set, one], |cx, a| {
         let exclude = Loc::from(node(cx, a, 1));
         match a[0].as_slice() {
