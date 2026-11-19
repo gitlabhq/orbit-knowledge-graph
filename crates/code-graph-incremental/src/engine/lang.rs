@@ -24,7 +24,15 @@ const RULES: &[(&str, &str)] = &[
         "functions",
         include_str!("../../config/rules/functions.yaml"),
     ),
+    (
+        "normalize",
+        include_str!("../../config/rules/normalize.yaml"),
+    ),
+    ("project", include_str!("../../config/rules/project.yaml")),
     ("link", include_str!("../../config/rules/link.yaml")),
+    ("imports", include_str!("../../config/rules/imports.yaml")),
+    ("resolve", include_str!("../../config/rules/resolve.yaml")),
+    ("dispatch", include_str!("../../config/rules/dispatch.yaml")),
 ];
 
 const MAX_DEPTH: usize = 32;

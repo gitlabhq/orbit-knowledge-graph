@@ -5,23 +5,31 @@ phases:
     outputs: [replace, append, tag]
     modules: [text]
     budget: { label: rewrite, tree: file_rewrite_ms }
-  - name: project
-    scope: project
+  - name: normalize
+    scope: tree
+    after: [canonicalize]
     walk: fixpoint
     outputs: [replace, append, tag]
     modules: [text]
+    budget: { label: rewrite, tree: file_rewrite_ms }
   - name: link
     scope: tree
-    after: [canonicalize]
+    after: [normalize]
     walk: flow
     outputs: [emit]
     modules: [core, ssa, text]
     bind: { core.read: ssa.read, core.slot: ssa.slot }
     resolve: { imports: resolution, type_flow: resolution }
     budget: { tree: file_link_ms }
+  - name: project
+    scope: project
+    after: [link]
+    walk: fixpoint
+    outputs: [replace, append, tag]
+    modules: [text]
   - name: display
     scope: tree
-    after: [link]
+    after: [project]
     walk: each
     outputs: [tag]
     modules: [text]
