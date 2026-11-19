@@ -1849,4 +1849,71 @@ mod tests {
         assert!(!re.is_match("üser")); // Latin u with diaeresis
         assert!(!re.is_match("用户")); // CJK
     }
+
+    #[test]
+    fn native_predicate_trees_are_bounded_before_planning() {
+        use crate::input::{BooleanExpression, Condition, InputFilter, PredicateTarget};
+        let ontology = Ontology::load_embedded().unwrap();
+        let validator = validator(&ontology);
+        let mut input =
+            crate::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
+        let leaf = |target| {
+            BooleanExpression::Leaf(Condition {
+                target,
+                property: "id".into(),
+                filter: InputFilter {
+                    op: Some(FilterOp::In),
+                    value: Some(serde_json::json!([1])),
+                    ..Default::default()
+                },
+            })
+        };
+        let mut deep = leaf(PredicateTarget::Node("u".into()));
+        for _ in 0..1024 {
+            deep = BooleanExpression::Not(Box::new(deep));
+        }
+        input.predicates = vec![deep];
+        let error = validator.check_shape(&input).unwrap_err();
+        assert!(
+            error.to_string().contains("must not nest deeper than 32"),
+            "{error}"
+        );
+        input.predicates = vec![BooleanExpression::Not(Box::new(leaf(
+            PredicateTarget::Relationship(7),
+        )))];
+        let error = validator.check_shape(&input).unwrap_err();
+        assert!(
+            error.to_string().contains("undefined relationship"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn native_conditions_need_a_column() {
+        use crate::input::{BooleanExpression, InputFilter};
+        let base = crate::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
+        let mut empty_group = base.clone();
+        empty_group.predicates = vec![BooleanExpression::Not(Box::new(BooleanExpression::And(
+            vec![],
+        )))];
+        let mut empty_property = base;
+        empty_property.nodes[0].filters.insert(
+            String::new(),
+            vec![InputFilter {
+                value: Some(serde_json::json!(1)),
+                ..Default::default()
+            }],
+        );
+        let ontology = std::sync::Arc::new(Ontology::load_embedded().unwrap());
+        for input in [empty_group, empty_property] {
+            let error = crate::compile_input(
+                input,
+                Default::default(),
+                &ontology,
+                &crate::testkit::non_admin_ctx(),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains(CONDITION_COLUMN_RULE), "{error}");
+        }
+    }
 }
