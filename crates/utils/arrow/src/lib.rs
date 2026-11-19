@@ -5,8 +5,8 @@ use rustc_hash::FxHashMap;
 
 use arrow::array::{
     Array, ArrayBuilder, ArrayRef, BooleanArray, BooleanBuilder, Date32Array, Date64Array,
-    Float64Array, Int8Array, Int16Array, Int32Array, Int64Array, Int64Builder, LargeStringArray,
-    ListArray, PrimitiveArray, Scalar, StringArray, StringBuilder, StructArray,
+    Decimal128Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array, Int64Builder,
+    LargeStringArray, ListArray, PrimitiveArray, Scalar, StringArray, StringBuilder, StructArray,
     TimestampMicrosecondArray, TimestampMicrosecondBuilder, TimestampMillisecondArray,
     TimestampNanosecondArray, TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array,
     UInt64Array, new_null_array,
@@ -267,6 +267,13 @@ impl ArrowUtils {
         downcast!(StringArray, v => ColumnValue::String(v.to_string()));
         downcast!(LargeStringArray, v => ColumnValue::String(v.to_string()));
         downcast!(Float64Array, v => ColumnValue::Float64(v));
+        if let Some(arr) = array.as_any().downcast_ref::<Decimal128Array>() {
+            let value = arr.value(idx);
+            return match (arr.scale(), i64::try_from(value)) {
+                (0, Ok(value)) => ColumnValue::Int64(value),
+                (scale, _) => ColumnValue::Float64(value as f64 / 10f64.powi(i32::from(scale))),
+            };
+        }
         downcast!(BooleanArray, v => ColumnValue::Bool(v));
 
         if let Some(arr) = array.as_any().downcast_ref::<TimestampSecondArray>() {
