@@ -1,14 +1,15 @@
 mod tla;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fmt;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::{Duration, SystemTime};
 
 use indexing_engine_next::protocol::{
-    Claim, Hold, HolderId, Lease, LeaseRules, Publish, Renewal, TaskId, decide_submit,
+    Claim, Generation, Hold, HolderId, Lease, LeaseRules, Publish, Renewal, TaskId, decide_submit,
 };
 use indexing_engine_next::testkit::simulator::{
-    DatabaseWrite, FaultBudget, SimulatedBroker, SimulatedClock, SimulatedDatabase,
+    DatabaseWrite, FaultBudget, MessageState, SimulatedBroker, SimulatedClock, SimulatedDatabase,
     SimulatedKeyValue,
 };
 use rand::rngs::Xoshiro256PlusPlus;
@@ -18,15 +19,70 @@ use uuid::Uuid;
 pub use tla::write_runs_module;
 
 const UNIT: Duration = Duration::from_secs(20);
-const HOLDERS: usize = 3;
 const OFFSETS: [u64; 2] = [0, 1];
 const TTL: u32 = 3;
 const SKEW_MARGIN: u32 = 1;
 const ACKNOWLEDGE_WAIT: u64 = 2;
-const MAX_TIME: u64 = 12;
-const MAX_EVENTS: usize = 3;
-const MAX_STALLS: u32 = 2;
-const MAX_CRASHES: u32 = 2;
+
+#[derive(Clone, Copy, Debug)]
+pub struct Bounds {
+    pub holders: usize,
+    pub max_time: u64,
+    pub max_events: usize,
+    pub faults: FaultBudget,
+}
+
+pub const RANDOM_RUN_BOUNDS: Bounds = Bounds {
+    holders: 3,
+    max_time: 12,
+    max_events: 3,
+    faults: FaultBudget {
+        stalls: 2,
+        crashes: 2,
+        wipes: 1,
+        duplicates: 1,
+        losses: 0,
+    },
+};
+
+pub const SMALL_CLUSTER: Bounds = Bounds {
+    holders: 2,
+    max_time: 4,
+    max_events: 1,
+    faults: FaultBudget {
+        stalls: 1,
+        crashes: 1,
+        wipes: 0,
+        duplicates: 0,
+        losses: 0,
+    },
+};
+
+pub const SMALL_CLUSTER_WITH_NATS_WIPE: Bounds = Bounds {
+    holders: 2,
+    max_time: 4,
+    max_events: 1,
+    faults: FaultBudget {
+        stalls: 1,
+        crashes: 1,
+        wipes: 1,
+        duplicates: 0,
+        losses: 0,
+    },
+};
+
+pub const SMALL_CLUSTER_WITH_DUPLICATE: Bounds = Bounds {
+    holders: 2,
+    max_time: 4,
+    max_events: 1,
+    faults: FaultBudget {
+        stalls: 1,
+        crashes: 1,
+        wipes: 0,
+        duplicates: 1,
+        losses: 0,
+    },
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -34,7 +90,11 @@ pub enum Action {
     Submit,
     Publish,
     PlannerCrash,
+    NatsWipe,
+    RecoverNats,
     Redeliver(usize),
+    DuplicateCopy(usize),
+    LoseMessage(usize),
     Deliver(usize, usize),
     AcquireLease(usize),
     StartTask(usize),
@@ -55,7 +115,11 @@ impl fmt::Display for Action {
             Action::Submit => f.write_str("Submit"),
             Action::Publish => f.write_str("Publish"),
             Action::PlannerCrash => f.write_str("PlannerCrash"),
+            Action::NatsWipe => f.write_str("NatsWipe"),
+            Action::RecoverNats => f.write_str("RecoverNats"),
             Action::Redeliver(c) => write!(f, "Redeliver({})", c + 1),
+            Action::DuplicateCopy(c) => write!(f, "DuplicateCopy({})", c + 1),
+            Action::LoseMessage(c) => write!(f, "LoseMessage({})", c + 1),
             Action::Deliver(p, c) => write!(f, "Deliver(p{},{})", p + 1, c + 1),
             Action::AcquireLease(p) => write!(f, "AcquireLease(p{})", p + 1),
             Action::StartTask(p) => write!(f, "StartTask(p{})", p + 1),
@@ -78,6 +142,8 @@ pub struct Coverage {
     pub fence_rejections: u32,
     pub lost_renewals: u32,
     pub releases: u32,
+    pub recoveries: u32,
+    pub duplicates: u32,
 }
 
 impl std::ops::AddAssign for Coverage {
@@ -87,17 +153,24 @@ impl std::ops::AddAssign for Coverage {
         self.fence_rejections += other.fence_rejections;
         self.lost_renewals += other.lost_renewals;
         self.releases += other.releases;
+        self.recoveries += other.recoveries;
+        self.duplicates += other.duplicates;
     }
 }
 
 pub struct RandomRun {
+    pub seed: u64,
     pub states: Vec<String>,
     pub coverage: Coverage,
 }
 
 pub fn random_run(seed: u64, max_steps: usize) -> RandomRun {
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-    let mut cluster = Cluster::init(&mut rng);
+    let bounds = RANDOM_RUN_BOUNDS;
+    let skews = (0..bounds.holders)
+        .map(|_| OFFSETS[rng.random_range(0..OFFSETS.len())])
+        .collect();
+    let mut cluster = Cluster::init(bounds, skews);
     let mut states = vec![cluster.to_tla()];
 
     for step in 1..=max_steps {
@@ -108,17 +181,74 @@ pub fn random_run(seed: u64, max_steps: usize) -> RandomRun {
         let action = actions[rng.random_range(0..actions.len())];
         cluster.apply(action);
         if let Err(broken) = cluster.check_invariants() {
-            panic!("seed {seed}, step {step}, {action:?}: {broken}");
+            panic!("seed {seed}, step {step}, {action}: {broken}");
         }
         states.push(cluster.to_tla());
     }
 
     RandomRun {
+        seed,
         states,
         coverage: cluster.coverage,
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Exploration {
+    pub states: u64,
+}
+
+pub fn explore_every_state(bounds: Bounds) -> Exploration {
+    let mut seen = HashSet::new();
+    let mut queue = VecDeque::new();
+
+    for skews in skew_combinations(bounds.holders) {
+        let cluster = Cluster::init(bounds, skews);
+        if seen.insert(fingerprint(&cluster)) {
+            queue.push_back(cluster);
+        }
+    }
+
+    while let Some(cluster) = queue.pop_front() {
+        if let Err(broken) = cluster.check_invariants() {
+            panic!("state {}: {broken}", cluster.to_tla());
+        }
+        for action in cluster.enabled_actions() {
+            let mut next = cluster.clone();
+            next.apply(action);
+            if seen.insert(fingerprint(&next)) {
+                queue.push_back(next);
+            }
+        }
+    }
+
+    Exploration {
+        states: seen.len() as u64,
+    }
+}
+
+fn fingerprint(cluster: &Cluster) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    cluster.to_tla().hash(&mut hasher);
+    hasher.finish()
+}
+
+fn skew_combinations(holders: usize) -> Vec<Vec<u64>> {
+    (0..holders).fold(vec![Vec::new()], |combinations, _| {
+        combinations
+            .iter()
+            .flat_map(|prefix| {
+                OFFSETS.iter().map(move |skew| {
+                    let mut next = prefix.clone();
+                    next.push(*skew);
+                    next
+                })
+            })
+            .collect()
+    })
+}
+
+#[derive(Clone)]
 enum Step {
     Idle,
     Leasing(Claim),
@@ -161,12 +291,14 @@ impl Step {
 
 #[derive(Clone, Copy, Default)]
 struct LastHold {
+    token_generation: u64,
     token: u64,
     seen: u64,
     expiry: u64,
     renew_at: u64,
 }
 
+#[derive(Clone)]
 struct Holder {
     id: HolderId,
     skew: u64,
@@ -176,12 +308,15 @@ struct Holder {
     last_hold: LastHold,
 }
 
+#[derive(Clone)]
 struct Cluster {
+    bounds: Bounds,
     rules: LeaseRules,
     clock: SimulatedClock,
     holders: Vec<Holder>,
     lease: SimulatedKeyValue<Lease>,
     marker: SimulatedKeyValue<TaskId>,
+    generation: SimulatedKeyValue<Generation>,
     broker: SimulatedBroker,
     database: SimulatedDatabase,
     faults: FaultBudget,
@@ -189,23 +324,35 @@ struct Cluster {
     publishing: Option<TaskId>,
     covers: Vec<TaskId>,
     started: BTreeSet<TaskId>,
+    lost_in_wipe: BTreeSet<TaskId>,
+    rejected_current: bool,
     coverage: Coverage,
 }
 
 impl Cluster {
-    fn init(rng: &mut Xoshiro256PlusPlus) -> Self {
-        let holders = (1..=HOLDERS)
-            .map(|n| Holder {
-                id: HolderId::new(format!("p{n}")),
-                skew: OFFSETS[rng.random_range(0..OFFSETS.len())],
+    fn init(bounds: Bounds, skews: Vec<u64>) -> Self {
+        let holders = skews
+            .into_iter()
+            .enumerate()
+            .map(|(n, skew)| Holder {
+                id: HolderId::new(format!("p{}", n + 1)),
+                skew,
                 stalled: false,
                 step: Step::Idle,
                 held: None,
                 last_hold: LastHold::default(),
             })
             .collect();
+        let database = SimulatedDatabase::default();
+        let mut generation = SimulatedKeyValue::default();
+        let written = generation.put(generation.revision(), Some(database.generation()));
+        assert!(
+            written.is_ok(),
+            "a fresh key-value entry takes its first write"
+        );
 
         Self {
+            bounds,
             rules: LeaseRules {
                 ttl: UNIT * TTL,
                 renew_every: UNIT,
@@ -215,15 +362,22 @@ impl Cluster {
             holders,
             lease: SimulatedKeyValue::default(),
             marker: SimulatedKeyValue::default(),
+            generation,
             broker: SimulatedBroker::new(ACKNOWLEDGE_WAIT),
-            database: SimulatedDatabase::default(),
-            faults: FaultBudget::new(MAX_STALLS, MAX_CRASHES),
+            database,
+            faults: bounds.faults,
             next_id: 1,
             publishing: None,
             covers: Vec::new(),
             started: BTreeSet::new(),
+            lost_in_wipe: BTreeSet::new(),
+            rejected_current: false,
             coverage: Coverage::default(),
         }
+    }
+
+    fn lease_entry(&self) -> indexing_engine_next::protocol::LeaseEntry {
+        self.lease.entry(self.generation.get().copied())
     }
 
     fn local_now(&self, h: usize) -> SystemTime {
@@ -242,26 +396,43 @@ impl Cluster {
     fn enabled_actions(&self) -> Vec<Action> {
         let mut actions = Vec::new();
         let renewals_on_time =
-            (0..HOLDERS).all(|h| self.holders[h].stalled || !self.is_renew_due(h));
+            (0..self.holders.len()).all(|h| self.holders[h].stalled || !self.is_renew_due(h));
 
-        if self.clock.ticks() < MAX_TIME && renewals_on_time {
+        if self.clock.ticks() < self.bounds.max_time && renewals_on_time {
             actions.push(Action::Tick);
         }
-        if self.publishing.is_none() && self.covers.len() < MAX_EVENTS {
+        if self.publishing.is_none() && self.covers.len() < self.bounds.max_events {
             actions.push(Action::Submit);
         }
         if self.publishing.is_some() {
             actions.push(Action::Publish);
-            if self.faults.can_crash() {
+            if self.faults.crashes > 0 {
                 actions.push(Action::PlannerCrash);
             }
+        }
+        if self.faults.wipes > 0 {
+            actions.push(Action::NatsWipe);
+        }
+        if self.generation.get().is_none() {
+            actions.push(Action::RecoverNats);
         }
         actions.extend(
             self.broker
                 .expired_messages(self.clock.ticks())
                 .map(Action::Redeliver),
         );
-        for h in 0..HOLDERS {
+        for (c, message) in self.broker.messages().iter().enumerate() {
+            if self.faults.duplicates > 0 && message.state != MessageState::Lost {
+                actions.push(Action::DuplicateCopy(c));
+            }
+        }
+        for (c, message) in self.broker.messages().iter().enumerate() {
+            let live = matches!(message.state, MessageState::Ready | MessageState::Inflight);
+            if self.faults.losses > 0 && live {
+                actions.push(Action::LoseMessage(c));
+            }
+        }
+        for h in 0..self.holders.len() {
             self.push_holder_actions(h, &mut actions);
         }
 
@@ -279,7 +450,7 @@ impl Cluster {
                 }
                 Step::Leasing(claim) => {
                     if claim
-                        .acquire_lease(&self.rules, &self.lease.entry(), self.local_now(h))
+                        .acquire_lease(&self.rules, &self.lease_entry(), self.local_now(h))
                         .is_some()
                     {
                         actions.push(Action::AcquireLease(h));
@@ -293,17 +464,17 @@ impl Cluster {
         }
         if awake && self.is_renew_due(h) {
             actions.push(Action::Renew(h));
-            if self.faults.can_crash() {
+            if self.faults.crashes > 0 {
                 actions.push(Action::RenewFails(h));
             }
         }
-        if awake && holder.step.hold().is_some() && self.faults.can_stall() {
+        if awake && holder.step.hold().is_some() && self.faults.stalls > 0 {
             actions.push(Action::Stall(h));
         }
         if holder.stalled {
             actions.push(Action::Resume(h));
         }
-        if !matches!(holder.step, Step::Idle) && self.faults.can_crash() {
+        if !matches!(holder.step, Step::Idle) && self.faults.crashes > 0 {
             actions.push(Action::Crash(h));
         }
     }
@@ -314,28 +485,39 @@ impl Cluster {
             Action::Submit => self.submit(),
             Action::Publish => self.publish(),
             Action::PlannerCrash => {
-                self.faults.take_crash();
+                self.faults.crashes -= 1;
                 self.publishing = None;
             }
+            Action::NatsWipe => self.wipe_nats(),
+            Action::RecoverNats => self.recover_nats(),
             Action::Redeliver(c) => self.broker.redeliver(c),
+            Action::DuplicateCopy(c) => {
+                self.faults.duplicates -= 1;
+                self.coverage.duplicates += 1;
+                self.broker.duplicate(c);
+            }
+            Action::LoseMessage(c) => {
+                self.faults.losses -= 1;
+                self.broker.lose(c);
+            }
             Action::Deliver(h, c) => self.deliver(h, c),
             Action::AcquireLease(h) => self.acquire_lease(h),
             Action::StartTask(h) => self.start_task(h),
             Action::Renew(h) => self.renew(h),
             Action::RenewFails(h) => {
-                self.faults.take_crash();
+                self.faults.crashes -= 1;
                 self.drop_run(h);
             }
             Action::BeginWrite(h) => self.advance(h),
             Action::CommitWrite(h) => self.commit_write(h),
             Action::Finish(h) => self.finish(h),
             Action::Stall(h) => {
-                self.faults.take_stall();
+                self.faults.stalls -= 1;
                 self.holders[h].stalled = true;
             }
             Action::Resume(h) => self.holders[h].stalled = false,
             Action::Crash(h) => {
-                self.faults.take_crash();
+                self.faults.crashes -= 1;
                 self.drop_run(h);
                 self.holders[h].stalled = false;
             }
@@ -378,14 +560,18 @@ impl Cluster {
         let Step::Leasing(claim) = std::mem::replace(&mut self.holders[h].step, Step::Idle) else {
             return;
         };
-        let entry = self.lease.entry();
+        let entry = self.lease_entry();
         let Some(lease) = claim.acquire_lease(&self.rules, &entry, local_now) else {
+            return;
+        };
+        let Some(generation) = entry.generation else {
             return;
         };
         let Ok(written) = self.lease.put(entry.revision, Some(lease.clone())) else {
             return;
         };
-        self.holders[h].step = Step::Leased(claim.hold(&self.rules, &lease, written, local_now));
+        self.holders[h].step =
+            Step::Leased(claim.hold(&self.rules, &lease, written, generation, local_now));
     }
 
     fn start_task(&mut self, h: usize) {
@@ -405,7 +591,7 @@ impl Cluster {
 
     fn renew(&mut self, h: usize) {
         let local_now = self.local_now(h);
-        let entry = self.lease.entry();
+        let entry = self.lease_entry();
         let Some(renewal) = self
             .holds(h)
             .map(|hold| hold.renew(&self.rules, &entry, local_now))
@@ -447,6 +633,11 @@ impl Cluster {
         match self.database.write(fence) {
             DatabaseWrite::Kept => self.advance(h),
             DatabaseWrite::Rejected => {
+                let entry = self.lease_entry();
+                let holds_current = self
+                    .holds(h)
+                    .is_some_and(|hold| hold.release(&entry).is_some());
+                self.rejected_current |= holds_current;
                 self.coverage.fence_rejections += 1;
                 self.drop_run(h);
             }
@@ -459,13 +650,33 @@ impl Cluster {
         }
         let release = self
             .holds(h)
-            .and_then(|hold| hold.release(&self.lease.entry()));
+            .and_then(|hold| hold.release(&self.lease_entry()));
         if let Some(expected) = release
             && self.lease.put(expected, None).is_ok()
         {
             self.coverage.releases += 1;
         }
         self.drop_run(h);
+    }
+
+    fn wipe_nats(&mut self) {
+        self.faults.wipes -= 1;
+        self.lease.wipe();
+        self.marker.wipe();
+        self.generation.wipe();
+        self.broker.wipe();
+        let unstarted: Vec<TaskId> = (1..self.next_id)
+            .map(task_id)
+            .filter(|task| !self.started.contains(task))
+            .collect();
+        self.lost_in_wipe.extend(unstarted);
+    }
+
+    fn recover_nats(&mut self) {
+        let next = self.database.start_next_generation();
+        let written = self.generation.put(self.generation.revision(), Some(next));
+        assert!(written.is_ok(), "a recovery is atomic in the spec");
+        self.coverage.recoveries += 1;
     }
 
     fn drop_run(&mut self, h: usize) {
@@ -477,7 +688,8 @@ impl Cluster {
         for holder in &mut self.holders {
             if let Some(hold) = holder.step.hold() {
                 holder.last_hold = LastHold {
-                    token: hold.fence().0,
+                    token_generation: hold.fence().generation.0,
+                    token: hold.fence().revision.0,
                     seen: hold.seen_revision().0,
                     expiry: self.clock.ticks_at(hold.expires_at()),
                     renew_at: self.clock.ticks_at(hold.renew_at()),
@@ -487,11 +699,15 @@ impl Cluster {
     }
 
     fn check_invariants(&self) -> Result<(), String> {
+        if self.rejected_current {
+            return Err("NoRejectedCurrentHolder: the database refused the write of the current lease holder".into());
+        }
+
         let marker = self.marker.get().copied();
         let pending: Vec<TaskId> = self
             .broker
             .live_tasks()
-            .filter(|task| !self.started.contains(task))
+            .filter(|task| !self.started.contains(task) && !self.lost_in_wipe.contains(task))
             .collect();
         if pending.iter().any(|task| Some(*task) != marker) {
             return Err(format!(
@@ -501,6 +717,7 @@ impl Cluster {
 
         let lost = self.covers.iter().find(|task| {
             !self.started.contains(task)
+                && !self.lost_in_wipe.contains(task)
                 && !self.broker.has_live_message(**task)
                 && self.publishing != Some(**task)
         });

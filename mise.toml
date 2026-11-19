@@ -480,16 +480,35 @@ done
 """
 
 [tasks."spec:engine:code"]
-description = "Check with TLC that random runs of the Rust protocol code are runs of the spec"
+description = "Check with TLC that the Rust protocol code follows the spec: every state of three small clusters, then random runs"
 tools = { java = "temurin-21.0.13+9.0.LTS" }
 depends = ["spec:engine:tools"]
 shell = "bash -c"
 run = """
 set -euo pipefail
-cargo test -p indexing-engine-next --test protocol
-dir="${CARGO_TARGET_DIR:-target}/tmp/indexing-engine-next-spec"
-cp specs/indexing-engine-next/LeaseDedupe.tla specs/indexing-engine-next/code-check/* "$dir/"
-java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-code -config "$dir/LeaseDedupeCodeCheck.cfg" "$dir/LeaseDedupeCodeCheck.tla"
+cargo test -q --release -p indexing-engine-next --test protocol -- --include-ignored --nocapture 2>&1 | grep -E "wrote|reaches|test result"
+out="${CARGO_TARGET_DIR:-target}/tmp/indexing-engine-next-spec"
+spec=specs/indexing-engine-next
+tlc() { java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup "$@"; }
+
+for config in "$spec"/code-check/small-cluster/*.cfg; do
+  name=$(basename "$config" .cfg)
+  log="$out/small-cluster/$name.tlc.log"
+  tlc -metadir "target/tlc-small-$name" -config "$config" "$spec/LeaseDedupe.tla" > "$log" 2>&1 || { tail -40 "$log"; exit 1; }
+  spec_states=$(grep -oE "[0-9]+ distinct states found, 0 states left" "$log" | grep -oE "^[0-9]+")
+  code_states=$(cat "$out/small-cluster/$name.txt")
+  if [ "$spec_states" != "$code_states" ]; then
+    echo "$name: the spec reaches $spec_states states and the code reaches $code_states"
+    exit 1
+  fi
+  echo "$name: the spec and the code both reach $code_states states"
+done
+
+for chunk in "$out"/runs/chunk-*; do
+  cp "$spec/LeaseDedupe.tla" "$spec"/code-check/*.tla "$spec"/code-check/*.cfg "$chunk/"
+  tlc -metadir "target/tlc-code-$(basename "$chunk")" -config "$chunk/LeaseDedupeCodeCheck.cfg" "$chunk/LeaseDedupeCodeCheck.tla" > "$chunk/tlc.log" 2>&1 || { tail -60 "$chunk/tlc.log"; echo "$chunk: a run of the code is not a run of the spec"; exit 1; }
+  echo "$(basename "$chunk"): every step is a step of the spec ($(grep -oE "[0-9]+ distinct states found" "$chunk/tlc.log"))"
+done
 """
 
 [tasks."schema:bump"]

@@ -5,6 +5,7 @@ pub enum MessageState {
     Ready,
     Inflight,
     Acknowledged,
+    Lost,
 }
 
 #[derive(Clone, Debug)]
@@ -17,7 +18,7 @@ pub struct BrokerMessage {
 
 impl BrokerMessage {
     fn is_live(&self) -> bool {
-        self.state != MessageState::Acknowledged
+        matches!(self.state, MessageState::Ready | MessageState::Inflight)
     }
 }
 
@@ -103,6 +104,30 @@ impl SimulatedBroker {
     }
 
     pub fn acknowledge(&mut self, message: usize) {
-        self.messages[message].state = MessageState::Acknowledged;
+        if self.messages[message].state != MessageState::Lost {
+            self.messages[message].state = MessageState::Acknowledged;
+        }
+    }
+
+    pub fn duplicate(&mut self, message: usize) {
+        let task = self.messages[message].task;
+        self.messages.push(BrokerMessage {
+            task,
+            state: MessageState::Ready,
+            deadline: 0,
+            consumer: None,
+        });
+    }
+
+    pub fn lose(&mut self, message: usize) {
+        if self.messages[message].is_live() {
+            self.messages[message].state = MessageState::Lost;
+        }
+    }
+
+    pub fn wipe(&mut self) {
+        for message in 0..self.messages.len() {
+            self.lose(message);
+        }
     }
 }

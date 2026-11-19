@@ -1,4 +1,4 @@
-use crate::protocol::Fence;
+use crate::protocol::{Fence, Generation, Revision};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DatabaseWrite {
@@ -9,12 +9,17 @@ pub enum DatabaseWrite {
 #[derive(Clone, Copy, Debug)]
 pub struct SimulatedDatabase {
     highest_fence: Fence,
+    generation: Generation,
 }
 
 impl Default for SimulatedDatabase {
     fn default() -> Self {
         Self {
-            highest_fence: Fence(0),
+            highest_fence: Fence {
+                generation: Generation(0),
+                revision: Revision(0),
+            },
+            generation: Generation(1),
         }
     }
 }
@@ -30,5 +35,14 @@ impl SimulatedDatabase {
 
     pub fn highest_fence(&self) -> Fence {
         self.highest_fence
+    }
+
+    pub fn generation(&self) -> Generation {
+        self.generation
+    }
+
+    pub fn start_next_generation(&mut self) -> Generation {
+        self.generation = Generation(self.generation.0 + 1);
+        self.generation
     }
 }

@@ -3,7 +3,7 @@ use std::fmt::{self, Write};
 use indexing_engine_next::protocol::TaskId;
 use indexing_engine_next::testkit::simulator::MessageState;
 
-use super::{Cluster, Holder, MAX_EVENTS, RandomRun};
+use super::{Cluster, Holder, RandomRun};
 
 pub(super) struct Tla<'a>(pub(super) &'a Cluster);
 
@@ -60,6 +60,7 @@ impl fmt::Display for Tla<'_> {
                     MessageState::Ready => "ready",
                     MessageState::Inflight => "inflight",
                     MessageState::Acknowledged => "acked",
+                    MessageState::Lost => "lost",
                 };
                 format!(
                     "[id |-> {}, state |-> \"{state}\", deadline |-> {}, pod |-> {}]",
@@ -80,7 +81,7 @@ impl fmt::Display for Tla<'_> {
             .iter()
             .map(|task| spec_id(*task).to_string())
             .collect();
-        cover.resize(MAX_EVENTS, "0".to_string());
+        cover.resize(cluster.bounds.max_events, "0".to_string());
         let started: Vec<String> = cluster
             .started
             .iter()
@@ -99,7 +100,12 @@ impl fmt::Display for Tla<'_> {
         f.write_str(", held |-> ")?;
         self.per_holder(f, |holder| holder.held.map_or(0, |c| c + 1).to_string())?;
         f.write_str(", token |-> ")?;
-        self.per_holder(f, |holder| holder.last_hold.token.to_string())?;
+        self.per_holder(f, |holder| {
+            format!(
+                "<<{}, {}>>",
+                holder.last_hold.token_generation, holder.last_hold.token
+            )
+        })?;
         f.write_str(", seenRev |-> ")?;
         self.per_holder(f, |holder| holder.last_hold.seen.to_string())?;
         f.write_str(", expiry |-> ")?;
@@ -114,14 +120,36 @@ impl fmt::Display for Tla<'_> {
             .iter()
             .map(|action| format!("\"{action}\""))
             .collect();
+        let fence = cluster.database.highest_fence();
+        let lost_in_wipe: Vec<String> = cluster
+            .lost_in_wipe
+            .iter()
+            .map(|task| spec_id(*task).to_string())
+            .collect();
         write!(
             f,
-            ", stallsLeft |-> {}, crashesLeft |-> {}, storeFence |-> {}, staleWrite |-> FALSE, enabled |-> {{{}}}]",
-            cluster.faults.stalls_left(),
-            cluster.faults.crashes_left(),
-            cluster.database.highest_fence().0,
-            enabled.join(", ")
-        )
+            ", stallsLeft |-> {}, crashesLeft |-> {}, storeFence |-> <<{}, {}>>, staleWrite |-> FALSE",
+            cluster.faults.stalls, cluster.faults.crashes, fence.generation.0, fence.revision.0
+        )?;
+        write!(
+            f,
+            ", rejectedCurrent |-> {}, generation |-> {}, natsGeneration |-> {}",
+            tla_bool(cluster.rejected_current),
+            cluster.database.generation().0,
+            cluster
+                .generation
+                .get()
+                .map_or(0, |generation| generation.0)
+        )?;
+        write!(
+            f,
+            ", wipesLeft |-> {}, duplicatesLeft |-> {}, lossesLeft |-> {}, lostInWipe |-> {{{}}}",
+            cluster.faults.wipes,
+            cluster.faults.duplicates,
+            cluster.faults.losses,
+            lost_in_wipe.join(", ")
+        )?;
+        write!(f, ", enabled |-> {{{}}}]", enabled.join(", "))
     }
 }
 
@@ -133,18 +161,25 @@ fn tla_bool(value: bool) -> &'static str {
     if value { "TRUE" } else { "FALSE" }
 }
 
-pub fn write_runs_module(runs: &[RandomRun]) -> String {
-    let mut module = String::new();
-    module.push_str(
-        "---------------------------- MODULE LeaseDedupeRuns ----------------------------\n",
-    );
-    module.push_str("EXTENDS LeaseDedupe\n\nCONSTANTS p1, p2, p3\n\nRuns == <<\n");
+fn module_header(name: &str, holders: usize) -> String {
+    let pods: Vec<String> = (1..=holders).map(|n| format!("p{n}")).collect();
+    format!(
+        "---------------------------- MODULE {name} ----------------------------\nEXTENDS LeaseDedupe\n\nCONSTANTS {}\n\n",
+        pods.join(", ")
+    )
+}
+
+const MODULE_FOOTER: &str =
+    "=============================================================================\n";
+
+pub fn write_runs_module(runs: &[RandomRun], holders: usize) -> String {
+    let mut module = module_header("LeaseDedupeRuns", holders);
+    module.push_str("Runs == <<\n");
     for (n, run) in runs.iter().enumerate() {
         let separator = if n + 1 == runs.len() { "" } else { "," };
         let _ = writeln!(module, "<<\n{}\n>>{separator}", run.states.join(",\n"));
     }
-    module.push_str(
-        ">>\n=============================================================================\n",
-    );
+    module.push_str(">>\n");
+    module.push_str(MODULE_FOOTER);
     module
 }

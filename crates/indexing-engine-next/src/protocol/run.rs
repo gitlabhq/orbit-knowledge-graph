@@ -1,6 +1,6 @@
 use std::time::SystemTime;
 
-use super::lease::{Fence, HolderId, Lease, LeaseEntry, LeaseRules, Revision};
+use super::lease::{Fence, Generation, HolderId, Lease, LeaseEntry, LeaseRules, Revision};
 use super::marker::TaskId;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,8 +20,8 @@ impl Claim {
         entry: &LeaseEntry,
         local_now: SystemTime,
     ) -> Option<Lease> {
-        rules
-            .is_free(entry, local_now)
+        let recovered = entry.generation.is_some();
+        (recovered && rules.is_free(entry, local_now))
             .then(|| rules.lease_for(&self.holder, local_now))
     }
 
@@ -30,12 +30,16 @@ impl Claim {
         rules: &LeaseRules,
         lease: &Lease,
         written: Revision,
+        generation: Generation,
         local_now: SystemTime,
     ) -> Hold {
         Hold {
             holder: self.holder,
             task: self.task,
-            fence: Fence(written.0),
+            fence: Fence {
+                generation,
+                revision: written,
+            },
             seen: written,
             expires_at: lease.expires_at,
             renew_at: local_now + rules.renew_every,

@@ -17,7 +17,13 @@ impl HolderId {
 pub struct Revision(pub u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Fence(pub u64);
+pub struct Generation(pub u64);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Fence {
+    pub generation: Generation,
+    pub revision: Revision,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Lease {
@@ -29,6 +35,7 @@ pub struct Lease {
 pub struct LeaseEntry {
     pub lease: Option<Lease>,
     pub revision: Revision,
+    pub generation: Option<Generation>,
 }
 
 impl LeaseEntry {

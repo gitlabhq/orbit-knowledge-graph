@@ -1,4 +1,4 @@
-use crate::protocol::{Lease, LeaseEntry, Revision};
+use crate::protocol::{Generation, Lease, LeaseEntry, Revision};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RevisionConflict {
@@ -43,13 +43,19 @@ impl<V> SimulatedKeyValue<V> {
         self.value = value;
         Ok(self.revision)
     }
+
+    pub fn wipe(&mut self) {
+        self.value = None;
+        self.revision = Revision(0);
+    }
 }
 
 impl SimulatedKeyValue<Lease> {
-    pub fn entry(&self) -> LeaseEntry {
+    pub fn entry(&self, generation: Option<Generation>) -> LeaseEntry {
         LeaseEntry {
             lease: self.value.clone(),
             revision: self.revision,
+            generation,
         }
     }
 }
