@@ -281,11 +281,21 @@ struct TpBoundsAssertions {
 }
 
 impl TpBoundsAssertions {
-    fn check(&self, bounds: &compiler::tp_bounds::TpBounds, label: &str) -> Result<(), String> {
+    fn check(
+        &self,
+        bounds: &compiler::tp_bounds::TpBounds,
+        aliases: &[&str],
+        label: &str,
+    ) -> Result<(), String> {
         if self.nodes.is_empty() {
             return Err(format!("{label}: needs nodes"));
         }
         for (alias, expected) in &self.nodes {
+            if !aliases.contains(&alias.as_str()) {
+                return Err(format!(
+                    "{label}.nodes.{alias}: the query has no node {alias}; nodes: {aliases:?}"
+                ));
+            }
             let actual = bounds
                 .node_predicate(alias)
                 .map(|predicate| explain::expression(&predicate));
@@ -513,7 +523,12 @@ where
 }
 
 impl ResultContextAssertions {
-    fn check(&self, context: &compiler::ResultContext, label: &str) -> Result<(), String> {
+    fn check(
+        &self,
+        context: &compiler::ResultContext,
+        entity_exists: &dyn Fn(&str) -> bool,
+        label: &str,
+    ) -> Result<(), String> {
         if self.query_type.is_none()
             && self.nodes.is_none()
             && self.neighbors_center.is_none()
@@ -577,6 +592,9 @@ impl ResultContextAssertions {
             }
         }
         for (entity, expected) in &self.labels {
+            if !entity_exists(entity) {
+                return Err(format!("{label}.labels.{entity}: no such entity"));
+            }
             let actual = context.label(entity);
             if actual != expected.as_deref() {
                 return Err(format!(
@@ -970,11 +988,19 @@ fn check_pipeline(
             .table(table)
             .is_some_and(|table| table.options.indexes.iter().any(|item| item.name == index))
     };
+    let entity_exists = |entity: &str| {
+        use query_data_model::OrbitQueryModel;
+        match backend {
+            "duckdb" => models.local.entity(entity).is_some(),
+            _ => remote.entity(entity).is_some(),
+        }
+    };
     let observe = Expectations {
         phases,
         rejection: scenario.rejected.get(backend),
         frontend: language,
         index_exists: &index_exists,
+        entity_exists: &entity_exists,
         local_database: (backend == "duckdb").then_some(&models.local_database),
         reads_other_cte: &models.reads_other_cte,
         label,
@@ -1077,6 +1103,7 @@ struct Expectations<'a> {
     rejection: Option<&'a Rejection>,
     frontend: &'a str,
     index_exists: &'a dyn Fn(&str, &str) -> bool,
+    entity_exists: &'a dyn Fn(&str) -> bool,
     local_database: Option<&'a DuckDbClient>,
     reads_other_cte: &'a std::cell::Cell<bool>,
     label: &'a str,
@@ -1216,9 +1243,15 @@ impl Expectations<'_> {
         if let Some(assertions) = &state.tp_bounds {
             check(
                 "tp_bounds",
-                ctx.tp_bounds()
-                    .as_ref()
-                    .map(|bounds| assertions.check(bounds, &format!("{label}.tp_bounds"))),
+                ctx.tp_bounds().as_ref().map(|bounds| {
+                    let aliases: Vec<&str> = ctx
+                        .input()
+                        .iter()
+                        .flat_map(|input| &input.nodes)
+                        .map(|node| node.id.as_str())
+                        .collect();
+                    assertions.check(bounds, &aliases, &format!("{label}.tp_bounds"))
+                }),
             );
         }
         if let Some(assertions) = &state.query_plan {
@@ -1266,9 +1299,9 @@ impl Expectations<'_> {
         if let Some(assertions) = &state.result_ctx {
             check(
                 "result_ctx",
-                ctx.result_ctx()
-                    .as_ref()
-                    .map(|context| assertions.check(context, &format!("{label}.result_ctx"))),
+                ctx.result_ctx().as_ref().map(|context| {
+                    assertions.check(context, self.entity_exists, &format!("{label}.result_ctx"))
+                }),
             );
         }
         if let Some(assertions) = &state.output {
@@ -1861,6 +1894,10 @@ fn output_hydration_and_result_context_assertions_check_their_fields() {
             "{result_context: {labels: {User: username}}}",
             "labels.User: None",
         ),
+        (
+            "{result_context: {labels: {Nope: username}}}",
+            "labels.Nope: no such entity",
+        ),
         ("{hydration: static}", "None, expected Static"),
     ] {
         let failures = run(physical);
@@ -1882,6 +1919,76 @@ fn output_hydration_and_result_context_assertions_check_their_fields() {
             .unwrap_or_default();
         assert!(error.contains(expected), "{state}: {error}");
     }
+}
+
+fn run_one(fixture: &str, ontology: ontology::Ontology) -> String {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("case.yaml"), fixture).unwrap();
+    check_dir(directory.path(), Arc::new(ontology))
+        .err()
+        .unwrap_or_default()
+        .join("\n")
+}
+
+#[test]
+fn tp_bounds_assertions_check_each_listed_alias() {
+    let fixture = |nodes: &str| {
+        format!(
+            "name: bounds\nsecurity: {{paths: [1/9970/]}}\nquery:\n  json: '{{\"query_type\":\"traversal\",\"nodes\":[{{\"id\":\"u\",\"entity\":\"User\"}},{{\"id\":\"p\",\"entity\":\"Project\",\"node_ids\":[7]}}],\"relationships\":[{{\"type\":\"MEMBER_OF\",\"from\":\"u\",\"to\":\"p\"}}]}}'\n  gql: 'MATCH (u:User)-[:MEMBER_OF]->(p:Project {{id: 7}}) RETURN u, p'\nphysical:\n  clickhouse:\n    tp_bounds:\n      tp_bounds: {{nodes: {nodes}}}\n"
+        )
+    };
+    let ontology = || ontology::Ontology::load_embedded().unwrap();
+    assert_eq!(
+        run_one(
+            &fixture(
+                "{p: 'StartsWith(p.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 7)) ...'}"
+            ),
+            ontology()
+        ),
+        ""
+    );
+    for (nodes, expected) in [
+        ("{p: null}", "tp_bounds.nodes.p: Some("),
+        (
+            "{p: 'StartsWith(u.traversal_path, ...'}",
+            "tp_bounds.nodes.p: Some(",
+        ),
+        ("{x: null}", "the query has no node x"),
+    ] {
+        let failures = run_one(&fixture(nodes), ontology());
+        assert!(failures.contains(expected), "{nodes}: {failures}");
+    }
+}
+
+#[test]
+fn schema_version_prefix_renames_the_tables_a_fixture_sees() {
+    let fixture = |prefix: &str| {
+        format!(
+            "name: prefix\n{prefix}query:\n  json: '{{\"query_type\":\"traversal\",\"nodes\":[{{\"id\":\"u\",\"entity\":\"User\",\"node_ids\":[1]}}]}}'\n  gql: 'MATCH (u:User {{id: 1}}) RETURN u'\nphysical:\n  clickhouse:\n    final_ast: {{expect: ['(Scan Table(v1_gl_user) AS u)']}}\n"
+        )
+    };
+    let ontology = || ontology::Ontology::new().with_nodes(["User"]);
+    assert_eq!(
+        run_one(&fixture("schema_version_prefix: v1_\n"), ontology()),
+        ""
+    );
+    assert!(run_one(&fixture(""), ontology()).contains("expected pattern not found"));
+}
+
+#[test]
+fn hydration_columns_replace_the_selected_columns() {
+    let fixture = |alias: &str| {
+        format!(
+            "name: columns\nhydration: {{columns: {{{alias}: []}}}}\nquery:\n  json: '{{\"query_type\":\"traversal\",\"nodes\":[{{\"id\":\"u\",\"entity\":\"User\",\"node_ids\":[1],\"columns\":[\"username\"]}}]}}'\n  gql: 'MATCH (u:User {{id: 1}}) RETURN u.username'\nphysical:\n  clickhouse:\n    emitted: {{expect: [\"(Project u.id AS u_id, 'User' AS u_entity_type, '{{}}' AS u_props (...))\"]}}\n"
+        )
+    };
+    let ontology = || {
+        ontology::Ontology::new()
+            .with_nodes(["User"])
+            .with_fields("User", [("username", ontology::DataType::String)])
+    };
+    assert_eq!(run_one(&fixture("u"), ontology()), "");
+    assert!(run_one(&fixture("x"), ontology()).contains("unknown hydration node 'x'"));
 }
 
 #[test]
