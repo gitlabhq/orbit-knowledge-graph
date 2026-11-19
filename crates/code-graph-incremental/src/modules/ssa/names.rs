@@ -205,7 +205,9 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
 
     fn inline_module(&mut self, import: Cursor<'t, S>) -> Option<Cursor<'t, S>> {
         let syms = &self.lang().syms;
-        let path = syms.resolve(import.child_sym(C::SourcePath)?);
+        let path = import
+            .child_sym(C::SourcePath)
+            .map_or("", |p| syms.resolve(p));
         let mut segments = path.split(PATH_SEP).filter(|s| !s.is_empty());
         let Some(first) = segments.next() else {
             return Some(self.tree().root());
