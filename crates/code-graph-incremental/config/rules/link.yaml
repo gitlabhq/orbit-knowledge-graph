@@ -99,7 +99,7 @@ link:
     match: '(__call (__callee (__member)))'
   - group: call
     match: '(__call (__callee $I:__ivar))'
-    emit: { calls: { from: enclosing, to: 'enclosing | class | members(@$I, $ROOT)', site: $ROOT } }
+    emit: { calls: { from: enclosing, to: 'lookup(@$I, $ROOT, enclosing | class)', site: $ROOT } }
   - group: call
     match: '(__call (__callee "/./"))'
     when: $ROOT | targets
@@ -216,13 +216,23 @@ link:
     enter: [mod.ssa.fork(none)]
     exit: [mod.ssa.leave]
   - group: flow
+    match: '$B:(__binding (__rhs $ROOT:(__ssa_branch $$$C $A:__ssa_arm $$$REST:__ssa_arm)))'
+    children: [$C, $A, $REST]
+    between: [mod.ssa.fork($B)]
+    exit: [mod.ssa.leave]
+  - group: flow
+    match: '(__ssa_arm !$X:!__ssa_branch $ROOT:(__ssa_branch $$$C $A:__ssa_arm $$$REST:__ssa_arm))'
+    children: [$C, $A, $REST]
+    between: [mod.ssa.fork($ROOT)]
+    exit: [mod.ssa.leave]
+  - group: flow
     match: '(__ssa_branch $$$C $A:__ssa_arm $$$REST:__ssa_arm)'
     children: [$C, $A, $REST]
-    between: [mod.ssa.fork($ROOT | sink)]
+    between: [mod.ssa.fork(none)]
     exit: [mod.ssa.leave]
   - group: flow
     match: '(__ssa_branch $ROOT:__ssa_arm)'
-    exit: ['mod.ssa.bind($ROOT | valued | sink, $ROOT | value_of, $ROOT | source)', mod.ssa.join]
+    exit: ['mod.ssa.yield($ROOT | valued, $ROOT | value_of, $ROOT | source)', mod.ssa.join]
   - group: flow
     match: '(__ssa_loop $$$H $B:(__binding (__declaration)) $$$R)'
     when: $B | unlifted

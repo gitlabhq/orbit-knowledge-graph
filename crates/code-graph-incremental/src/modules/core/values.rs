@@ -24,63 +24,7 @@ pub(super) fn field_value<S: Store>(def: Cursor<'_, S>) -> Option<Val> {
     stored.then(|| Val::Node(def.jump(def.fi(), producer(binding)).into()))
 }
 
-pub(super) fn sink_step<S: Store>(
-    c: Cursor<'_, S>,
-) -> Result<Cursor<'_, S>, Option<Cursor<'_, S>>> {
-    if c.is(C::SsaArm) {
-        let tail = c.tail_expr();
-        if tail.is(C::SsaBranch) || tail.is(C::SsaReturn) {
-            return Err(None);
-        }
-        return c.parent().filter(|p| p.is(C::SsaBranch)).ok_or(None);
-    }
-    if !c.is(C::SsaBranch) {
-        return Err(None);
-    }
-    let first = c.parent().ok_or(None)?;
-    if first.is(C::Rhs) {
-        let direct = first
-            .child(C::SsaBranch)
-            .is_some_and(|b| b.index() == c.index());
-        return Err(first.parent().filter(|b| direct && b.is(C::Binding)));
-    }
-    let (mut up, mut below) = (first, c);
-    while !up.is(C::SsaArm) {
-        let tail = up.last_named().filter(|t| up.stands_for(*t));
-        if tail.is_none_or(|t| t.index() != below.index()) {
-            return Err(None);
-        }
-        (below, up) = (up, up.parent().ok_or(None)?);
-    }
-    match up.tail_expr().index() == c.index() {
-        true => up.parent().filter(|p| p.is(C::SsaBranch)).ok_or(None),
-        false => Err(None),
-    }
-}
-
-pub(super) fn binding_site<S: Store>(c: Cursor<'_, S>) -> Option<Cursor<'_, S>> {
-    c.ancestors()
-        .take_while(|up| !up.is(C::Def))
-        .filter(|up| up.is(C::Binding))
-        .find(|binding| {
-            binding.child(C::Rhs).is_some_and(|rhs| {
-                rhs.child(C::SsaBranch).is_none() && rhs.value_child(C::Member).is_some()
-            })
-        })
-}
-
 impl<'t, S: Store> Cx<'_, 't, Core, S> {
-    pub(super) fn source(&mut self, c: Cursor<'t, S>) -> Cursor<'t, S> {
-        let t = c.tail_expr();
-        if let Some(record) = Some(t).filter(|t| t.is(C::Obj)).or_else(|| t.child(C::Obj)) {
-            return record;
-        }
-        let class = t
-            .child(C::Callee)
-            .is_some_and(|callee| self.is_class_ref(callee));
-        t.child(C::Args).filter(|_| class).unwrap_or(t)
-    }
-
     fn value(&mut self, t: Cursor<'t, S>) -> Vals {
         if C::try_from_u16(t.kind()).is_some_and(C::is_opaque_value) {
             return one(Val::Opaque);
@@ -126,19 +70,11 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
 
     pub(super) fn valued(&mut self, arm: Cursor<'t, S>) -> bool {
         let tail = arm.tail_expr();
+        if tail.is(C::SsaBranch) || tail.is(C::SsaReturn) {
+            return false;
+        }
         !self.value_of(arm).is_empty()
             || self.value(tail).is_empty() && self.read(tail).iter().any(|v| *v != Val::Opaque)
-    }
-
-    pub(super) fn reference(&mut self, c: Cursor<'t, S>) -> Vals {
-        let found = self.type_of(c);
-        let parent = c.parent().map_or(c.index(), Cursor::index);
-        match found.as_slice() {
-            [v] if matches!(self.view(*v), Some(Ref::Def(t) | Ref::Import(t)) if t != parent) => {
-                found
-            }
-            _ => Vals::new(),
-        }
     }
 
     pub(super) fn receiver_calls(&mut self, member: Cursor<'t, S>) -> Vals {

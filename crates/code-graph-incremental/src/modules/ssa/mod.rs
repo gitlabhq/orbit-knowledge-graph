@@ -29,7 +29,7 @@ enum Frame {
     },
     Branch {
         pre: BlockId,
-        exhaustive: bool,
+        sink: Option<u32>,
         exits: SmallVec<[BlockId; 4]>,
     },
     Loop(BlockId),
@@ -107,7 +107,13 @@ static FUNCTIONS: &[Function<Ssa>] = &[
         yes(true)
     }),
     function!(Effect, "fork", [set], |cx, a| {
-        cx.fork(!a[0].is_empty());
+        let sink = arg(cx, a, 0);
+        cx.fork(sink);
+        yes(true)
+    }),
+    function!(Effect, "yield", [one, set, set], |cx, a| {
+        let from = arg(cx, a, 2);
+        cx.yields(&a[1], from);
         yes(true)
     }),
     function!(Effect, "join", [], |cx, _| {
@@ -165,15 +171,38 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
             .collect()
     }
 
-    fn fork(&mut self, exhaustive: bool) {
+    fn fork(&mut self, sink: Option<Cursor<'t, S>>) {
         let s = self.write();
+        let sink = match sink {
+            Some(c) if c.is(C::Binding) => Some(c.index()),
+            Some(c) if c.is(C::SsaBranch) => s
+                .frames
+                .iter()
+                .rev()
+                .find_map(|f| match f {
+                    Frame::Branch { sink, .. } => Some(*sink),
+                    _ => None,
+                })
+                .flatten(),
+            _ => None,
+        };
         let pre = s.cur;
         s.cur = s.graph.add_sealed_successor(pre);
         s.frames.push(Frame::Branch {
             pre,
-            exhaustive,
+            sink,
             exits: SmallVec::new(),
         });
+    }
+
+    fn yields(&mut self, values: &[Val], from: Option<Cursor<'t, S>>) {
+        let sink = self.state().frames.iter().rev().find_map(|f| match f {
+            Frame::Branch { sink, .. } => Some(*sink),
+            _ => None,
+        });
+        if let Some(Some(sink)) = sink {
+            self.bind(self.at(sink), values, from);
+        }
     }
 
     fn join(&mut self) {
@@ -218,15 +247,11 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
                     s.cur = block;
                 }
             }
-            Some(Frame::Branch {
-                pre,
-                exhaustive,
-                exits,
-            }) => {
+            Some(Frame::Branch { pre, sink, exits }) => {
                 s.cur = match exits.is_empty() {
                     true => pre,
                     false => {
-                        let exits = exits.into_iter().chain((!exhaustive).then_some(pre));
+                        let exits = exits.into_iter().chain(sink.is_none().then_some(pre));
                         s.graph.add_sealed_join(exits)
                     }
                 };

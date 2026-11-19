@@ -1,4 +1,4 @@
-mod chain;
+mod members;
 mod values;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -43,40 +43,33 @@ fn role_of(code: u32) -> Role {
     }
 }
 
-fn use_role<S: Store>(member: Cursor<'_, S>) -> Role {
-    member
-        .parent()
-        .filter(|p| p.is(C::Callee))
-        .map_or(Role::Value, Cursor::role)
+fn site_role<S: Store>(site: Cursor<'_, S>) -> Role {
+    match site.is(C::Callee) || site.is(C::Call) {
+        true => site.role(),
+        false => site
+            .parent()
+            .filter(|p| p.is(C::Callee))
+            .map_or(Role::Value, Cursor::role),
+    }
 }
 
 fn sym<S: Store>(c: Cursor<'_, S>) -> u32 {
     c.sym()
 }
 
-fn member_role<S: Store>(c: Cursor<'_, S>) -> u32 {
-    role_code(use_role(c))
+fn class_of<S: Store>(c: Cursor<'_, S>) -> Option<Cursor<'_, S>> {
+    Some(c)
+        .filter(|c| c.is_class())
+        .or_else(|| c.enclosing_def(crate::tree::CLASS_LIKE))
 }
 
-fn site_role<S: Store>(c: Cursor<'_, S>) -> u32 {
-    role_code(c.role())
-}
-
-fn object_name<S: Store>(member: Cursor<'_, S>) -> u32 {
-    member.child(C::Object).map_or(0, |o| o.reference().sym())
-}
-
-macro_rules! derive {
-    ($f:ident) => {
-        Derive {
-            compact: $f::<Compact>,
-            mutable: $f::<Mutable>,
-        }
-    };
-}
-
-const KEY_NAME: KeyPart = KeyPart::Of(1, derive!(sym));
-const KEY_ROLE: KeyPart = KeyPart::Of(1, derive!(member_role));
+const KEY_SYM: KeyPart = KeyPart::Of(
+    0,
+    Derive {
+        compact: sym::<Compact>,
+        mutable: sym::<Mutable>,
+    },
+);
 
 impl<'t, S: Store> Cx<'_, 't, Core, S> {
     fn view(&self, val: Val) -> Option<Ref> {
@@ -99,8 +92,8 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         self.call1(crate::fn_id!("core", "read"), Val::Node(c.into()))
     }
 
-    fn type_of(&mut self, c: Cursor<'_, S>) -> Vals {
-        self.call1(crate::fn_id!("core", "type"), Val::Node(c.into()))
+    fn ivar(&mut self, c: Cursor<'_, S>) -> Vals {
+        self.call1(crate::fn_id!("core", "ivar"), Val::Node(c.into()))
     }
 
     fn keep(&self, val: Val, pred: impl FnOnce(Ref, &Self) -> bool) -> Vals {
@@ -162,12 +155,16 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
             self.write().shadowed.insert(call.index());
         }
     }
-}
 
-fn class_of<S: Store>(c: Cursor<'_, S>) -> Option<Cursor<'_, S>> {
-    Some(c)
-        .filter(|c| c.is_class())
-        .or_else(|| c.enclosing_def(crate::tree::CLASS_LIKE))
+    fn field(&mut self, attr: u32) -> Vals {
+        let Some(class) = self.enclosing_class() else {
+            return Vals::new();
+        };
+        let binding = class.descendants().find(|n| {
+            n.is(C::Binding) && n.child_sym(C::Ivar) == Some(attr) && n.typed().is_some()
+        });
+        of(binding.map(|b| self.at(values::producer(b))))
+    }
 }
 
 impl Module for Core {
@@ -198,7 +195,7 @@ static FUNCTIONS: &[Function<Core>] = &[
         let def = cx.enclosing_def();
         def.map_or_else(Vals::new, |d| one(cx.node(d)))
     }),
-    function!(Flow, "class", [one], |cx, a| of(
+    function!(Pure, "class", [one], |cx, a| of(
         arg(cx, a, 0).and_then(class_of)
     )),
     function!(Flow, "name", [one], @uses ["core"."read"], |cx, a| {
@@ -206,52 +203,27 @@ static FUNCTIONS: &[Function<Core>] = &[
         found.retain(|v| *v != Val::Opaque);
         found
     }),
-    function!(
-        Flow, "type", [one],
-        @uses ["core"."read", "core"."type", "core"."named_member", "core"."ivar", "core"."declared"],
-        |cx, a| {
-            let mut found = cx.chain(node(cx, a, 0));
-            found.retain(|v| *v != Val::Opaque);
-            found
-        }
-    ),
-    function!(
-        Flow, "named_member", [one, one],
-        @key [KeyPart::Of(0, derive!(object_name)), KeyPart::Of(0, derive!(sym)), KeyPart::Of(1, derive!(site_role))],
-        @uses ["core"."type", "core"."declared"],
-        |cx, a| {
-            let member = node(cx, a, 0);
-            cx.member_of_object(node(cx, a, 1), member)
-        }
-    ),
-    function!(
-        Flow, "member", [one, one],
-        @key [KeyPart::Arg(0), KEY_NAME, KEY_ROLE],
-        @uses ["core"."type", "core"."member", "core"."declared"],
-        |cx, a| match arg(cx, a, 1) {
-            Some(m) => cx.member(a[0][0], m),
-            None => Vals::new(),
-        }
-    ),
-    function!(
-        Flow, "unmatched", [one, one],
-        @key [KeyPart::Arg(0), KEY_NAME, KEY_ROLE],
-        @uses ["core"."declared"],
-        |cx, a| match arg(cx, a, 1) {
+    function!(Flow, "ivar", [one], @key [KEY_SYM], |cx, a| {
+        let attr = node(cx, a, 0).sym();
+        cx.field(attr)
+    }),
+    function!(Flow, "lookup", [one, one, set], @uses ["core"."declared"], |cx, a| {
+        let (Some(name), Some(site)) = (a[0].first().and_then(|&v| cx.text(v)), arg(cx, a, 1)) else {
+            return Vals::new();
+        };
+        cx.lookup(name, site_role(site), &a[2])
+    }),
+    function!(Flow, "meaning", [one, one], @uses ["core"."declared"], |cx, a| {
+        let site = node(cx, a, 1);
+        cx.meaning(a[0][0], site)
+    }),
+    function!(Flow, "unmatched", [one, one], @uses ["core"."declared"], |cx, a| {
+        match arg(cx, a, 1) {
             Some(m) => cx.unmatched(a[0][0], m),
             None => Vals::new(),
         }
-    ),
-    function!(Flow, "members", [one, one, one], @uses ["core"."declared"], |cx, a| {
-        let (Some(owner), Some(name), Some(site)) = (arg(cx, a, 0), a[1].first(), arg(cx, a, 2))
-        else {
-            return Vals::new();
-        };
-        let Some(name) = cx.text(*name) else {
-            return Vals::new();
-        };
-        of(cx.members(owner, name, site.role()))
     }),
+    function!(Flow, "callable", [one], @uses ["core"."declared"], |cx, a| cx.callable(a[0][0])),
     function!(Pure, "declared", [one, one, one], |cx, a| {
         let (owner, Some(&Val::Sym(name)), Some(&Val::Sym(role))) =
             (node(cx, a, 0), a[1].first(), a[2].first())
@@ -264,21 +236,27 @@ static FUNCTIONS: &[Function<Core>] = &[
         let found = crate::tree::find_member_in(owner, defs, role_of(role), &cx.tags());
         of(found.map(|node| Loc::new(owner.fi() as usize, node)))
     }),
-    function!(Pure, "ivar", [one, one], |cx, a| {
-        let (class, Some(&Val::Sym(attr))) = (node(cx, a, 0), a[1].first()) else {
-            return Vals::new();
-        };
-        let binding = class.descendants().find(|n| {
-            n.is(C::Binding) && n.child_sym(C::Ivar) == Some(attr) && n.typed().is_some()
-        });
-        of(binding.map(|b| cx.at(values::producer(b))))
-    }),
     function!(Flow, "supers", [one], |cx, a| {
         let def = node(cx, a, 0).index();
         let supers = cx.state().supers.get(&def).cloned().unwrap_or_default();
         supers.into_iter().map(|d| cx.node(d)).collect()
     }),
-    function!(Flow, "callable", [one], @uses ["core"."declared"], |cx, a| cx.callable(a[0][0])),
+    function!(Pure, "sole", [set, one], |cx, a| {
+        let exclude = node(cx, a, 1).index();
+        match a[0].as_slice() {
+            [v] if matches!(cx.view(*v), Some(Ref::Def(t) | Ref::Import(t)) if t != exclude) => {
+                a[0].clone()
+            }
+            _ => Vals::new(),
+        }
+    }),
+    function!(Pure, "type_node", [one], |cx, a| match cx.view(a[0][0]) {
+        Some(Ref::Call(n)) => of(values::declared_type(cx.at(n))),
+        _ => Vals::new(),
+    }),
+    function!(Pure, "tail", [one], |cx, a| of(
+        arg(cx, a, 0).map(Cursor::tail_expr)
+    )),
     function!(Pure, "imported", [one], |cx, a| cx
         .keep(a[0][0], |r, _| matches!(r, Ref::Import(_)))),
     function!(Pure, "produced", [one], |cx, a| cx
@@ -308,38 +286,19 @@ static FUNCTIONS: &[Function<Core>] = &[
             matches!(r, Ref::Import(n) if cx.at(n).parent().is_some_and(|i| i.has_tag(callable)))
         })
     }),
-    function!(Flow, "source", [one], @uses ["core"."type"], |cx, a| match arg(cx, a, 0) {
-        Some(c) => of([cx.source(c)]),
-        None => Vals::new(),
-    }),
-    function!(Pure, "sink", [one], @uses ["core"."sink"], |cx, a| {
-        match values::sink_step(node(cx, a, 0)) {
-            Ok(next) => cx.call1(crate::fn_id!("core", "sink"), Val::Node(next.into())),
-            Err(binding) => of(binding),
-        }
-    }),
-    function!(Flow, "value_of", [one], @uses ["core"."read", "core"."type", "core"."ivar", "core"."declared"], |cx, a| {
-        cx.value_of(node(cx, a, 0))
-    }),
-    function!(Flow, "valued", [one], @uses ["core"."read", "core"."ivar"], |cx, a| {
-        let arm = node(cx, a, 0);
-        match cx.valued(arm) {
-            true => a[0].clone(),
-            false => Vals::new(),
-        }
-    }),
-    function!(Pure, "chain_head", [one], |cx, a| {
-        let head = arg(cx, a, 0).filter(|c| c.value_child(C::Member).is_some());
-        of(head.map(|c| c.chain_root()))
-    }),
-    function!(Pure, "binding_site", [one], |cx, a| of(
-        values::binding_site(node(cx, a, 0))
-    )),
     function!(Pure, "unlifted", [one], |cx, a| match arg(cx, a, 0) {
         Some(c) if !c.lifted() => a[0].clone(),
         _ => Vals::new(),
     }),
-    function!(Flow, "reference", [one], @uses ["core"."type"], |cx, a| cx.reference(node(cx, a, 0))),
+    function!(Flow, "value_of", [one], @uses ["core"."read", "core"."ivar"], |cx, a| {
+        cx.value_of(node(cx, a, 0))
+    }),
+    function!(Flow, "valued", [one], @uses ["core"."read", "core"."ivar"], |cx, a| {
+        match cx.valued(node(cx, a, 0)) {
+            true => a[0].clone(),
+            false => Vals::new(),
+        }
+    }),
     function!(Flow, "receiver_calls", [one], @uses ["core"."read"], |cx, a| {
         cx.receiver_calls(node(cx, a, 0))
     }),
@@ -355,10 +314,8 @@ static FUNCTIONS: &[Function<Core>] = &[
     }),
     function!(Flow, "resolution", [one, set], |cx, a| {
         let target = node(cx, a, 0);
-        match cx.state().shadowed.contains(&target.index())
-            && !target.is(C::Def)
-            && !target.is(C::Name)
-        {
+        let shadowed = cx.state().shadowed.contains(&target.index());
+        match shadowed && !target.is(C::Def) && !target.is(C::Name) {
             true => one(Val::Sym(cx.tags().non_callable)),
             false => Vals::new(),
         }

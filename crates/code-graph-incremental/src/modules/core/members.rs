@@ -1,7 +1,7 @@
 use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
-use super::{Core, Ref, role_code, use_role, values};
+use super::{Core, Ref, role_code, site_role, values};
 use crate::canonical::Canonical as C;
 use crate::engine::{Cursor, Cx, Loc, Store, Val, Vals, of, one};
 use crate::tree::Role;
@@ -9,130 +9,30 @@ use crate::tree::Role;
 type Parts<'t, S> = SmallVec<[Cursor<'t, S>; 4]>;
 
 impl<'t, S: Store> Cx<'_, 't, Core, S> {
-    pub(super) fn chain(&mut self, c: Cursor<'t, S>) -> Vals {
-        if let Some(call) = c.value_child(C::Call)
-            && !(call.has(C::Property) && self.is_class_ref(c.reference()))
-        {
-            return of([call]);
-        }
-        let c = c.reference();
-        let member = Some(c)
-            .filter(|c| c.has(C::Object))
-            .or_else(|| c.value_child(C::Member));
-        let Some(member) = member else {
-            return self.named(c);
-        };
-        let Some(object) = member.child(C::Object) else {
-            return Vals::new();
-        };
-        let name = object.reference();
-        let bare = object.value_child(C::Call).is_none()
-            && !name.has(C::Object)
-            && !name.has(C::Qualifier)
-            && name.value_child(C::Member).is_none()
-            && name.value_child(C::Ivar).is_none();
-        match bare {
-            true => {
-                let key = [one(Val::Node(member.into())), one(Val::Node(c.into()))];
-                self.call(crate::fn_id!("core", "named_member"), &key)
-            }
-            false => self.member_of_object(c, member),
-        }
-    }
-
-    fn named(&mut self, c: Cursor<'t, S>) -> Vals {
-        if c.has(C::Qualifier) {
-            return self.read(c);
-        }
-        let ivar = c.value_child(C::Ivar);
-        let mut bound = match ivar {
-            Some(_) => Vals::new(),
-            None => self.read(c),
-        };
-        if bound.is_empty() {
-            bound = self.ivar(ivar.unwrap_or(c));
-        }
-        bound
-            .into_iter()
-            .map(|v| {
-                let v = self.member_for(v, c);
-                match self.view(v) {
-                    Some(Ref::Def(d)) => values::field_value(self.at(d)).unwrap_or(v),
-                    _ => v,
-                }
-            })
-            .collect()
-    }
-
-    pub(super) fn ivar(&mut self, c: Cursor<'t, S>) -> Vals {
-        let Some(class) = self.enclosing_class() else {
-            return Vals::new();
-        };
-        let args = [one(Val::Node(class.into())), one(Val::Sym(c.sym()))];
-        self.call(crate::fn_id!("core", "ivar"), &args)
-    }
-
-    pub(super) fn is_class_ref(&mut self, c: Cursor<'t, S>) -> bool {
-        let found = self.type_of(c);
-        found
-            .iter()
-            .any(|v| matches!(self.view(*v), Some(Ref::Def(n)) if self.at(n).is_class()))
-    }
-
-    pub(super) fn member_of_object(&mut self, c: Cursor<'t, S>, member: Cursor<'t, S>) -> Vals {
-        let Some(object) = member.child(C::Object) else {
-            return Vals::new();
-        };
-        let mut held = Vals::new();
-        for v in self.type_of(object) {
-            match self.view(v) {
-                Some(Ref::Type(n)) => held.push(self.node(n)),
-                Some(Ref::Call(n)) if let Some(ty) = values::declared_type(self.at(n)) => {
-                    held.extend(self.type_of(ty));
-                    held.push(v);
-                }
-                _ => held.push(v),
-            }
-        }
-        let role = c.role();
+    pub(super) fn lookup(&mut self, name: u32, role: Role, values: &[Val]) -> Vals {
         let mut found = Vals::new();
-        for v in held {
-            match self.view(v) {
-                Some(Ref::Def(d)) => found.extend(of(self.members(self.at(d), member.sym(), role))),
-                Some(Ref::Import(_)) => found.push(v),
-                _ => {}
+        for &v in values {
+            let hits = match self.view(v) {
+                Some(Ref::Def(n) | Ref::Type(n)) => of(self.members(self.at(n), name, role)),
+                Some(Ref::Import(_)) => one(v),
+                _ => continue,
+            };
+            for hit in hits {
+                if !found.contains(&hit) {
+                    found.push(hit);
+                }
             }
         }
         found
-    }
-
-    pub(super) fn member(&mut self, value: Val, member: Cursor<'t, S>) -> Vals {
-        match self.view(value) {
-            Some(Ref::Type(n) | Ref::Def(n)) => {
-                of(self.members(self.at(n), member.sym(), use_role(member)))
-            }
-            Some(Ref::Call(n)) if let Some(ty) = values::declared_type(self.at(n)) => {
-                let mut out = Vals::new();
-                for t in self.type_of(ty) {
-                    let args = [one(t), one(Val::Node(member.into()))];
-                    for found in self.call(crate::fn_id!("core", "member"), &args) {
-                        if !out.contains(&found) {
-                            out.push(found);
-                        }
-                    }
-                }
-                out
-            }
-            _ => Vals::new(),
-        }
     }
 
     pub(super) fn unmatched(&mut self, value: Val, member: Cursor<'t, S>) -> Vals {
         let keep = match self.view(value) {
             Some(Ref::Type(_)) | None => false,
-            Some(Ref::Def(n)) => self
-                .members(self.at(n), member.sym(), use_role(member))
-                .is_empty(),
+            Some(Ref::Def(n)) => {
+                let role = site_role(member);
+                self.members(self.at(n), member.sym(), role).is_empty()
+            }
             Some(_) => true,
         };
         match keep {
@@ -217,6 +117,14 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
             level = next;
         }
         Vec::new()
+    }
+
+    pub(super) fn meaning(&mut self, value: Val, site: Cursor<'t, S>) -> Vals {
+        let value = self.member_for(value, site);
+        match self.view(value) {
+            Some(Ref::Def(d)) => one(values::field_value(self.at(d)).unwrap_or(value)),
+            _ => one(value),
+        }
     }
 
     pub(super) fn member_for(&mut self, value: Val, site: Cursor<'t, S>) -> Val {
