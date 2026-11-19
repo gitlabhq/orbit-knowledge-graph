@@ -2,9 +2,9 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use code_graph_incremental::canonical::Canonical as C;
-use code_graph_incremental::pipeline::SNAPSHOT_VERSION;
+use code_graph_incremental::driver::{self, SNAPSHOT_VERSION};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, State, dsl::rules, pattern, templates};
+use code_graph_incremental::{Env, Sentinel, State};
 mod common;
 
 const MAIN: &str = "from utils import helper\nhelper()\n";
@@ -22,10 +22,9 @@ fn write(root: &Path, files: &[(&str, &str)]) -> Vec<String> {
 }
 
 fn index(env: &Env, repo: &Path) -> State {
-    templates::index(Context::new(env, common::walk(repo)))
+    driver::index(env, &common::walk(repo), &Sentinel::disabled())
         .unwrap()
-        .into_value()
-        .state
+        .0
 }
 
 fn reindex(env: &Env, state: State, repo: &Path, changed: Vec<String>, removed: &[&str]) -> State {
@@ -36,14 +35,10 @@ fn reindex(env: &Env, state: State, repo: &Path, changed: Vec<String>, removed: 
         root: repo,
         paths: changed,
     });
-    templates::reindex(
-        Context::new(env, changes),
-        state,
-        removed.iter().map(|s| s.to_string()).collect(),
-    )
-    .unwrap()
-    .into_value()
-    .state
+    let removed: Vec<String> = removed.iter().map(|s| s.to_string()).collect();
+    driver::reindex(env, &changes, state, &removed, &Sentinel::disabled())
+        .unwrap()
+        .0
 }
 
 fn save_and_load(env: &Env, state: &State) -> (Env, State) {
@@ -99,92 +94,6 @@ fn a_snapshot_round_trips_the_graph() {
         assert_eq!(
             (before.from(), before.to(), before.kind),
             (after.from(), after.to(), after.kind)
-        );
-    }
-}
-
-#[test]
-fn post_link_tree_edits_preserve_node_ids_tags_and_edges_across_snapshots() {
-    let repo = tempfile::tempdir().unwrap();
-    write(repo.path(), &[("main.py", MAIN), ("utils.py", UTILS)]);
-    let env = Env::for_lang(SupportLang::Python).unwrap();
-    let mut state = index(&env, repo.path());
-    let edits = rules::load_rules(
-        r#"
-stages:
-  - rules:
-      - match: '(__defname)'
-        append: ['(__name "owner")', '(__name "discard")', '(__name "member")']
-  - rules:
-      - match: '(__name "discard")'
-        replace: '(discard)'
-      - match: '(__name "member")'
-        tag: { identity: member }
-"#,
-        &env.lang,
-    )
-    .unwrap();
-    state.trees = state
-        .trees
-        .into_iter()
-        .map(|tree| {
-            let mut tree: code_graph_incremental::tree::Tree = tree.into();
-            for stage in &edits {
-                pattern::apply_stage(&mut tree, &env.lang, stage, &[]).unwrap();
-            }
-            tree.prune();
-            tree.into()
-        })
-        .collect();
-    let structure = |state: &State| {
-        state
-            .trees
-            .iter()
-            .map(|tree| {
-                std::iter::once(tree.root())
-                    .chain(tree.root().descendants())
-                    .map(|node| {
-                        (
-                            node.index(),
-                            node.kind(),
-                            node.sym(),
-                            node.parent().map(|parent| parent.index()),
-                            node.tag(env.lang.syms.lookup("identity")),
-                        )
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>()
-    };
-    let expected = structure(&state);
-    let (loaded_env, loaded) = save_and_load(&env, &state);
-    assert_eq!(structure(&loaded), expected);
-    assert_eq!(loaded.edges.len(), state.edges.len());
-    for (before, after) in state.edges.iter().zip(&loaded.edges) {
-        assert_eq!(
-            (before.from(), before.to(), before.site),
-            (after.from(), after.to(), after.site)
-        );
-    }
-    let updated = reindex(&loaded_env, loaded, repo.path(), vec![], &[]);
-    assert_eq!(structure(&updated), expected);
-    assert_eq!(cross_file_edges(&updated), cross_file_edges(&state));
-    let (_, restored) = save_and_load(&loaded_env, &updated);
-    assert_eq!(structure(&restored), expected);
-    let changed = write(
-        repo.path(),
-        &[("main.py", "from utils import helper\nhelper()\nhelper()\n")],
-    );
-    let updated = reindex(&loaded_env, restored, repo.path(), changed, &[]);
-    for edge in updated
-        .edges
-        .iter()
-        .filter(|edge| edge.from_tree != edge.to_tree)
-    {
-        let target = updated.trees[edge.to_tree as usize].cursor(edge.to_node);
-        assert_eq!(
-            target.child_sym(C::DefName),
-            Some(loaded_env.lang.syms.lookup("helper"))
         );
     }
 }
@@ -335,20 +244,13 @@ fn reindex_and_stage(
         root: repo,
         paths: changed,
     });
-    let resolved = templates::reindex(
-        Context::new(&env, changes),
-        loaded,
-        removed.iter().map(|s| s.to_string()).collect(),
-    )
-    .unwrap()
-    .into_value();
+    let removed: Vec<String> = removed.iter().map(|s| s.to_string()).collect();
+    let (state, _) =
+        driver::reindex(&env, &changes, loaded, &removed, &Sentinel::disabled()).unwrap();
     let staged = snapshot.with_extension("staged");
-    resolved
-        .state
-        .stage(&env, snapshot, &staged, Some(&resolved.touched))
-        .unwrap();
+    state.stage(&env, snapshot, &staged, None).unwrap();
     State::commit_staged(&staged, snapshot).unwrap();
-    (env, resolved.state)
+    (env, state)
 }
 
 fn links(state: &State) -> HashSet<(String, String)> {

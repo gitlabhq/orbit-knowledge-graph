@@ -1,10 +1,9 @@
 use std::path::Path;
 
-use code_graph_incremental::pipeline::{Each, Parse, Parsed, Prepare, Sources, Workset};
 use code_graph_incremental::tree::Tree;
 use code_graph_incremental::treesitter::{SupportLang, all_languages};
-use code_graph_incremental::{Context, Env, Limits, Pipeline};
-use orbit_utils::vfs::Decision;
+use code_graph_incremental::{Env, Limits, Sentinel, driver, frontend};
+use orbit_utils::vfs::{Decision, Vfs};
 mod common;
 
 fn write_all(root: &Path, files: &[(&str, &[u8])]) {
@@ -15,14 +14,17 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
     }
 }
 
-fn parse_repo(env: &Env, root: &Path) -> Workset<Vec<Parsed>> {
-    let sources = common::walk(root);
-    Pipeline::new(Context::new(env, sources), ())
-        .then(Prepare)
-        .unwrap()
-        .then(Each(Parse))
-        .unwrap()
-        .into_value()
+fn parse_repo(env: &Env, root: &Path) -> Vec<Tree> {
+    let repository = common::walk(root);
+    driver::candidates(&repository, 0)
+        .filter(|file| SupportLang::from_path(&file.path).is_some_and(|l| env.in_family(l)))
+        .map(|file| {
+            let source = String::from_utf8(repository.read(&file.path).unwrap().to_vec()).unwrap();
+            frontend::parse(env, &file.path, &source, &Sentinel::disabled())
+                .unwrap()
+                .0
+        })
+        .collect()
 }
 
 fn error_nodes(tree: &Tree, env: &Env) -> usize {
@@ -35,7 +37,6 @@ fn error_nodes(tree: &Tree, env: &Env) -> usize {
 
 #[test]
 fn unread_sources_and_manifests_remain_in_the_graph_and_report() {
-    use code_graph_incremental::templates;
     struct LazyFiles;
     impl orbit_utils::vfs::Pass for LazyFiles {
         type Tag = ();
@@ -61,16 +62,14 @@ fn unread_sources_and_manifests_remain_in_the_graph_and_report() {
         std::fs::remove_file(root.path().join(path)).unwrap();
     }
     let env = Env::with_limits(SupportLang::TypeScript, Limits::UNLIMITED).unwrap();
-    let (context, graph) = templates::index(Context::new(&env, repository))
-        .unwrap()
-        .finish();
-    assert_eq!(context.report.unread_files, ["main.ts", "package.json"]);
+    let (state, report) = driver::index(&env, &repository, &Sentinel::disabled()).unwrap();
+    assert_eq!(report.unread_files, ["main.ts", "package.json"]);
     assert!(
-        graph.state.configs.is_empty(),
+        state.configs.is_empty(),
         "unread manifests must not become SourceFile inputs"
     );
-    assert_eq!(graph.state.trees.len(), 2);
-    for tree in graph.state.trees {
+    assert_eq!(state.trees.len(), 2);
+    for tree in state.trees {
         let reason = tree.root().tag(env.lang.syms.lookup("reason")).unwrap();
         assert_eq!(env.lang.syms.resolve(reason), "fault_file_read");
     }
@@ -92,14 +91,11 @@ fn every_configured_language_parses_when_classified_for_parsing() {
 
         let parsed = parse_repo(&env, repo.path());
 
-        let labels: Vec<_> = parsed.items.iter().map(|p| p.0.label.as_str()).collect();
+        let labels: Vec<_> = parsed.iter().map(|tree| tree.label.as_str()).collect();
         match lang.has_rules() {
             true => {
                 assert_eq!(labels, [path.as_str()], "{lang:?}");
-                assert!(
-                    parsed.items[0].0.root().descendants().count() > 0,
-                    "{lang:?}"
-                );
+                assert!(parsed[0].root().descendants().count() > 0, "{lang:?}");
             }
             _ => assert!(labels.is_empty(), "{lang:?} is not classified for parsing"),
         }
@@ -118,10 +114,10 @@ fn tsx_inside_the_typescript_pipeline_gets_the_tsx_grammar() {
 
     let parsed = parse_repo(&env, repo.path());
 
-    let mut labels: Vec<_> = parsed.items.iter().map(|p| p.0.label.clone()).collect();
+    let mut labels: Vec<_> = parsed.iter().map(|tree| tree.label.clone()).collect();
     labels.sort();
     assert_eq!(labels, ["app.tsx", "util.ts"]);
-    for Parsed(tree, _) in &parsed.items {
+    for tree in &parsed {
         assert_eq!(error_nodes(tree, &env), 0, "{}", tree.label);
     }
 }
@@ -143,7 +139,7 @@ fn only_this_familys_files_are_parsed() {
 
     let parsed = parse_repo(&env, repo.path());
 
-    let labels: Vec<_> = parsed.items.iter().map(|p| p.0.label.as_str()).collect();
+    let labels: Vec<_> = parsed.iter().map(|tree| tree.label.as_str()).collect();
     assert_eq!(labels, ["src/main.py"]);
 }
 
@@ -171,7 +167,7 @@ fn classify_agrees_with_walk() {
     assert_eq!(strip(walked), strip(classified));
 }
 
-fn strip(entries: Sources) -> Vec<(String, u64, Decision<()>)> {
+fn strip(entries: std::sync::Arc<Vfs<()>>) -> Vec<(String, u64, Decision<()>)> {
     entries
         .files()
         .map(|e| (e.path.to_string(), e.size, e.decision()))
@@ -197,10 +193,10 @@ fn a_family_parses_each_member_with_its_own_grammar() {
 
     let parsed = parse_repo(&env, repo.path());
 
-    let mut labels: Vec<_> = parsed.items.iter().map(|p| p.0.label.clone()).collect();
+    let mut labels: Vec<_> = parsed.iter().map(|tree| tree.label.clone()).collect();
     labels.sort();
     assert_eq!(labels, ["Service.kt", "User.java"]);
-    for Parsed(tree, _) in &parsed.items {
+    for tree in &parsed {
         assert_eq!(error_nodes(tree, &env), 0, "{}", tree.label);
     }
 }

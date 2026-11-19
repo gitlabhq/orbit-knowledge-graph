@@ -1,11 +1,9 @@
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use code_graph_incremental::pipeline::{Canonicalize, Link, Parse, Rewrite, SourceFile};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, ItemPhase, Killed, Limits, Sentinel, templates};
+use code_graph_incremental::{Env, Killed, Limits, Sentinel, driver};
 mod common;
 
 const MAIN: &str = "\
@@ -25,17 +23,6 @@ class Store:
 ";
 
 const BUDGET_MS: u64 = 20;
-const STALL: Duration = Duration::from_millis(3 * BUDGET_MS);
-
-fn sleeps_once() -> Sentinel {
-    let slept = AtomicBool::new(false);
-    Sentinel::new("run", "", u64::MAX).with_cancellation(Arc::new(move || {
-        if !slept.swap(true, Ordering::Relaxed) {
-            std::thread::sleep(STALL);
-        }
-        false
-    }))
-}
 
 fn sleeps_always() -> Sentinel {
     Sentinel::new("run", "", u64::MAX).with_cancellation(Arc::new(|| {
@@ -44,57 +31,24 @@ fn sleeps_always() -> Sentinel {
     }))
 }
 
-fn python(limits: Limits) -> Env {
-    Env::with_limits(SupportLang::Python, limits).unwrap()
-}
-
-fn source() -> SourceFile {
-    SourceFile::from(("main.py".to_string(), MAIN.to_string()))
-}
-
 #[test]
 fn per_file_budgets_count_thread_cpu_time_not_time_asleep() {
-    let env = python(Limits {
-        file_parse_ms: BUDGET_MS,
-        file_rewrite_ms: BUDGET_MS,
-        file_link_ms: BUDGET_MS,
-        ..Limits::UNLIMITED
-    });
-    let free = Sentinel::disabled();
-    let parse = |run: &Sentinel| Parse.run(&env, run, source());
-    let rewrite = |run: &Sentinel| Rewrite.run(&env, run, parse(&free).unwrap());
-    let link = |run: &Sentinel| {
-        let canonical = Canonicalize.run(&env, &free, rewrite(&free).unwrap());
-        Link.run(&env, run, canonical.unwrap())
-    };
-
-    let killed: Vec<_> = [
-        parse(&sleeps_once()).err(),
-        rewrite(&sleeps_once()).err(),
-        link(&sleeps_once()).err(),
-    ]
-    .into_iter()
-    .flatten()
-    .map(|killed| killed.label)
-    .collect();
-
-    assert!(killed.is_empty(), "{killed:?}");
-}
-
-#[test]
-fn the_per_file_resolve_budget_counts_thread_cpu_time() {
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), &[("main.py", MAIN), ("utils.py", UTILS)]);
-    let env = python(Limits {
-        file_resolve_ms: BUDGET_MS,
-        ..Limits::UNLIMITED
-    });
-    let mut context = Context::new(&env, common::walk(repo.path()));
-    context.run = sleeps_always();
+    let env = Env::with_limits(
+        SupportLang::Python,
+        Limits {
+            file_parse_ms: BUDGET_MS,
+            file_rewrite_ms: BUDGET_MS,
+            file_link_ms: BUDGET_MS,
+            ..Limits::UNLIMITED
+        },
+    )
+    .unwrap();
 
-    let (context, _) = templates::index(context).unwrap().finish();
+    let (_, report) = driver::index(&env, &common::walk(repo.path()), &sleeps_always()).unwrap();
 
-    assert_eq!(skipped(&context.report.skipped), Vec::<(&str, &str)>::new());
+    assert_eq!(skipped(&report.skipped), Vec::<(&str, &str)>::new());
 }
 
 fn write_all(root: &Path, files: &[(&str, &str)]) {

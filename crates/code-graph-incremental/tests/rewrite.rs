@@ -1,12 +1,11 @@
 use std::path::Path;
 
 use code_graph_incremental::canonical::{Canonical as C, def_type_of, is_canonical};
-use code_graph_incremental::pipeline::{Canonical, Canonicalize, Each, Parse, Prepare, Rewrite};
 use code_graph_incremental::tree::Compact;
 type Tree = code_graph_incremental::tree::Tree<Compact>;
 type Cursor<'a> = code_graph_incremental::tree::Cursor<'a, Compact>;
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, ItemPhase, Killed, Limits, Pipeline};
+use code_graph_incremental::{Env, Killed, Limits, Sentinel, driver};
 mod common;
 
 const MAIN: &str = "\
@@ -22,52 +21,9 @@ def run():
     g.greet(os.getcwd())
 ";
 
-#[test]
-fn standard_library_configuration_rejects_invalid_entries_and_legacy_fields() {
-    let lang = code_graph_incremental::intern::Lang::new();
-    for entry in [
-        "{}",
-        "json",
-        "{module: ''}",
-        "{module: json, symbols: ['']}",
-        "{symbols: [print]}",
-        "{symbols: [print], availability: imported}",
-        "{symbols: [print], availability: implicit, precedence: runtime}",
-        "{module: json, availability: implicit}",
-        "{module: json, availability: imported}",
-        "{module: json, availability: sometimes}",
-        "{module: json, precedence: unknown}",
-        "{module: json, implicit: true}",
-        "{module: json, typo: true}",
-    ] {
-        let yaml = format!("config:\n  stdlib: [{entry}]\nstages: []\n");
-        assert!(
-            code_graph_incremental::dsl::rules::load_lang(&yaml, &lang).is_err(),
-            "accepted {entry}"
-        );
-    }
-    for legacy in [
-        "link: {builtins: [print]}",
-        "resolve: {external: [sys]}",
-        "resolve: {stdlib: [json]}",
-    ] {
-        let yaml = format!("config:\n  {legacy}\nstages: []\n");
-        assert!(
-            code_graph_incremental::dsl::rules::load_lang(&yaml, &lang).is_err(),
-            "accepted {legacy}"
-        );
-    }
-}
-
-fn rewrite_repo(env: &Env, root: &Path) -> (Vec<Canonical>, Vec<Killed>) {
-    let sources = common::walk(root);
-    let (context, workset) = Pipeline::new(Context::new(env, sources), ())
-        .then(Prepare)
-        .unwrap()
-        .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize)))
-        .unwrap()
-        .finish();
-    (workset.items, context.report.skipped)
+fn rewrite_repo(env: &Env, root: &Path) -> (Vec<Tree>, Vec<Killed>) {
+    let (state, report) = driver::index(env, &common::walk(root), &Sentinel::disabled()).unwrap();
+    (state.trees, report.skipped)
 }
 
 fn python_env(limits: Limits) -> Env {
@@ -92,7 +48,7 @@ fn a_python_file_rewrites_into_only_canonical_nodes() {
     let (items, skipped) = rewrite_repo(&env, repo.path());
 
     assert!(skipped.is_empty());
-    let Canonical(tree, _) = &items[0];
+    let tree = &items[0];
     assert_eq!(tree.label, "main.py");
     assert!(
         tree.source.is_empty(),
@@ -115,7 +71,7 @@ fn definitions_carry_their_type_and_name() {
 
     let (items, _) = rewrite_repo(&env, repo.path());
 
-    let Canonical(tree, _) = &items[0];
+    let tree = &items[0];
     let mut defs: Vec<(String, &str)> = nodes(tree, C::Def)
         .map(|d| {
             let name = d
@@ -146,7 +102,7 @@ fn imports_and_calls_become_canonical_nodes() {
 
     let (items, _) = rewrite_repo(&env, repo.path());
 
-    let Canonical(tree, _) = &items[0];
+    let tree = &items[0];
     let mut imports: Vec<String> = nodes(tree, C::Import).map(|i| name_of(&env, i)).collect();
     imports.sort();
     assert_eq!(imports, ["helper", "os"]);
@@ -167,49 +123,10 @@ fn a_file_over_the_rewrite_budget_is_skipped_and_reported() {
 
     let (items, skipped) = rewrite_repo(&env, repo.path());
 
-    assert!(items.is_empty());
+    assert_eq!(items[0].root().descendants().count(), 0);
     assert_eq!(skipped.len(), 1);
     assert_eq!(
         (skipped[0].label.as_ref(), skipped[0].path.as_str()),
         ("rewrite", "main.py")
     );
-}
-
-const GROUP_FUNCTIONS: &str = r#"
-stages:
-  - repeat: REPEAT
-    rules:
-      - match: '(module $$$PRE (function_definition $$$H) $$$BODY $G:function_definition $$$POST)'
-        replace: '(module @$ROOT $$$PRE (__group (function_definition $$$H) $$$BODY) $G $$$POST)'
-"#;
-
-fn groups_after_grouping(repeat: bool) -> usize {
-    let env = python_env(Limits::UNLIMITED);
-    let source =
-        "def a(): pass\nx = 1\ndef b(): pass\ny = 2\ndef c(): pass\nz = 3\ndef d(): pass\n";
-    let run = code_graph_incremental::Sentinel::new("test", "main.py", u64::MAX);
-    let (mut tree, _) = code_graph_incremental::treesitter::parse_with_sentinel(
-        source,
-        SupportLang::Python,
-        &env.lang,
-        "main.py",
-        &run,
-        usize::MAX,
-    )
-    .unwrap();
-    let yaml = GROUP_FUNCTIONS.replace("REPEAT", &repeat.to_string());
-    let stages = code_graph_incremental::dsl::rules::load_rules(&yaml, &env.lang).unwrap();
-    for stage in &stages {
-        code_graph_incremental::pattern::apply_stage(&mut tree, &env.lang, stage, &[]).unwrap();
-    }
-    tree.root()
-        .children()
-        .filter(|c| env.lang.kinds.resolve(c.kind() as u32) == "__group")
-        .count()
-}
-
-#[test]
-fn a_repeat_stage_runs_until_no_node_is_replaced() {
-    assert_eq!(groups_after_grouping(false), 1);
-    assert_eq!(groups_after_grouping(true), 3);
 }

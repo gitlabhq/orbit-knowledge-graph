@@ -15,7 +15,7 @@ mod output;
 #[cfg(test)]
 mod policy;
 mod run;
-pub(super) use code_graph_incremental::templates::Options;
+pub(super) use code_graph_incremental::driver::Options;
 pub(super) use run::run;
 #[cfg(test)]
 mod tests;

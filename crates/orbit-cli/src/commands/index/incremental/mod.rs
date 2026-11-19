@@ -5,7 +5,6 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
-use code_graph_incremental::pipeline::Observer;
 use code_graph_incremental::treesitter::SupportLang;
 
 use ontology::Ontology;
@@ -210,15 +209,11 @@ pub(super) struct FamilyBars {
     files: usize,
 }
 
-impl Observer for FamilyBars {
-    fn finished(&mut self, phase: &str, _: Duration) {
-        let Some(phases) = self.bars.phases.get() else {
-            return;
-        };
-        match phase {
-            "resolve" => phases.resolve.advance(self.files),
-            phase if phase.starts_with("parse") => phases.parse.advance(self.files),
-            _ => {}
+impl FamilyBars {
+    pub(super) fn done(&self) {
+        if let Some(phases) = self.bars.phases.get() {
+            phases.parse.advance(self.files);
+            phases.resolve.advance(self.files);
         }
     }
 }
@@ -491,11 +486,12 @@ pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>
         families: &families,
         saved_files: &saved_files,
         stats: false,
-        context: &|env, paths| {
-            Ok(code_graph_incremental::pipeline::Context::new(
-                env,
-                input::paths(&git.repo_path, paths)?,
-            ))
+        indexing: &|env, paths| {
+            Ok(state::Indexing {
+                repository: input::paths(&git.repo_path, paths)?,
+                run: code_graph_incremental::Sentinel::new("run", "", env.limits.total_ms),
+                bars: None,
+            })
         },
     };
     let refresh = reader.read(reader.work(changed, removed)?, u64::MAX, &|| false)?;
