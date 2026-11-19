@@ -454,7 +454,8 @@ mv "$jar.tmp" "$jar"
 """
 
 [tasks."spec:engine"]
-description = "Model-check the indexing engine lease and dedupe spec with TLC (needs Java 11+)"
+description = "Model-check the indexing engine lease and dedupe spec with TLC"
+tools = { java = "temurin-21.0.13+9.0.LTS" }
 depends = ["spec:engine:tools"]
 shell = "bash -c"
 run = """
@@ -466,6 +467,7 @@ done
 
 [tasks."spec:engine:counterexample"]
 description = "Check that TLC still finds each counterexample against the rules as ADR 023 writes them"
+tools = { java = "temurin-21.0.13+9.0.LTS" }
 depends = ["spec:engine:tools"]
 shell = "bash -c"
 run = """
@@ -475,6 +477,19 @@ for config in specs/indexing-engine-next/counterexamples/*.cfg; do
   [ $? -eq 12 ] || { echo "$config: expected an invariant violation (TLC exit 12)"; exit 1; }
   echo "$config: violation found, as expected"
 done
+"""
+
+[tasks."spec:engine:code"]
+description = "Check with TLC that random runs of the Rust protocol code are runs of the spec"
+tools = { java = "temurin-21.0.13+9.0.LTS" }
+depends = ["spec:engine:tools"]
+shell = "bash -c"
+run = """
+set -euo pipefail
+cargo test -p indexing-engine-next --test protocol
+dir="${CARGO_TARGET_DIR:-target}/tmp/indexing-engine-next-spec"
+cp specs/indexing-engine-next/LeaseDedupe.tla specs/indexing-engine-next/LeaseDedupeCodeCheck.tla specs/indexing-engine-next/LeaseDedupeCodeCheck.cfg "$dir/"
+java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-code -config "$dir/LeaseDedupeCodeCheck.cfg" "$dir/LeaseDedupeCodeCheck.tla"
 """
 
 [tasks."schema:bump"]

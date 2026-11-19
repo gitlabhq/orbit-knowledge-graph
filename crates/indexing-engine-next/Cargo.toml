@@ -18,4 +18,5 @@ tokio = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 
 [dev-dependencies]
+rand = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
