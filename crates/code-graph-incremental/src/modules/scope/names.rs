@@ -48,9 +48,15 @@ impl<'t, S: Store> Cx<'_, 't, Scope, S> {
     }
 
     fn scope_of(&self, c: Cursor<'t, S>) -> Cursor<'t, S> {
-        c.ancestors()
-            .find(|a| a.is(C::Def) || a.parent().is_none())
-            .unwrap_or(c)
+        if c.parent().is_none() {
+            return c;
+        }
+        let owners: &super::Owners = self.index("owners").expect("scope runs in family phases");
+        let loc = Loc::from(c);
+        self.jump(Loc {
+            node: owners[loc.fi as usize][loc.node as usize],
+            ..loc
+        })
     }
 
     pub(super) fn read(&mut self, c: Cursor<'t, S>) -> Vals {
@@ -116,20 +122,23 @@ impl<'t, S: Store> Cx<'_, 't, Scope, S> {
     }
 
     pub(super) fn exported(&mut self, file: Cursor<'t, S>, name: u32) -> Vals {
-        let exports = self.tags().exports;
-        let offers = |d: Cursor<'t, S>| {
-            let nested = d.is_class()
+        let fi = file.fi();
+        let in_file = |locs: &'t [Loc]| locs.iter().copied().filter(move |l| l.fi == fi);
+        let nested = |d: Cursor<'t, S>| {
+            d.is_class()
                 && d.ancestors()
                     .find(|a| a.is(C::Def))
-                    .is_some_and(|a| a.is_class());
-            (!nested && d.child_sym(C::DefName) == Some(name))
-                || d.child_sym(C::DefaultExport) == Some(name)
-                || d.tag(exports) == Some(name)
+                    .is_some_and(|a| a.is_class())
         };
-        let defs: SmallVec<[Cursor<'t, S>; 2]> = file
-            .descendants()
-            .filter(|d| d.is(C::Def) && !d.has(C::ImplBlock) && offers(*d))
+        let mut defs: SmallVec<[Cursor<'t, S>; 2]> = in_file(self.indexed("def_names", name))
+            .map(|l| self.jump(l))
+            .filter(|d| !nested(*d))
+            .chain(in_file(self.indexed("offered", name)).map(|l| self.jump(l)))
+            .filter(|d| !d.has(C::ImplBlock))
+            .filter(|d| file.parent().is_none() || d.ancestors().any(|a| a.index() == file.index()))
             .collect();
+        defs.sort_unstable_by_key(|d| d.index());
+        defs.dedup_by_key(|d| d.index());
         let classes: Vals = of(defs.iter().copied().filter(|d| d.is_class()));
         if !classes.is_empty() {
             return classes;

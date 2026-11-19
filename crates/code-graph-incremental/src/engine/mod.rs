@@ -14,7 +14,6 @@ use crate::constants::{RED_ZONE, STACK_SEGMENT};
 use crate::env::Env;
 use crate::modules;
 use crate::sentinel::{Killed, Sentinel};
-use crate::tags::ReservedTags;
 use crate::tree::{Compact, Edge, EdgeKind, Mutable, Node, Storage};
 pub use program::{Def, Part, Phase, Pipeline, RowShape, Walk, resolution};
 
@@ -171,6 +170,37 @@ pub trait Module: Sized + 'static {
 pub struct IndexDecl {
     pub name: &'static str,
     pub build: fn(&crate::intern::Lang, &[Tree<Compact>], &[Edge]) -> Box<dyn Any + Send + Sync>,
+}
+
+/// The entries a family phase's `index:` rules add, by index name and key.
+#[derive(Default)]
+pub struct Indexed(FxHashMap<(u32, u32), Vec<Loc>>);
+
+impl Indexed {
+    fn build(
+        phase: &Phase,
+        trees: &[Tree<Compact>],
+        files: usize,
+        env: &Env,
+        budget: &Sentinel,
+    ) -> Self {
+        use rayon::prelude::*;
+        if !phase.has_indexers() {
+            return Self::default();
+        }
+        let entries: Vec<Vec<(u32, u32, Loc)>> = (0..files)
+            .into_par_iter()
+            .map(|fi| {
+                let mut run = Run::new(trees, fi as u32, env, phase, budget, budget);
+                phase.index_entries(&mut run, Cursor::new(trees, fi as u32, 0))
+            })
+            .collect();
+        let mut map: FxHashMap<(u32, u32), Vec<Loc>> = FxHashMap::default();
+        for (name, key, at) in entries.into_iter().flatten() {
+            map.entry((name, key)).or_default().push(at);
+        }
+        Self(map)
+    }
 }
 
 /// The declared indexes of one family run, each built at most once.
@@ -454,7 +484,6 @@ pub struct Run<'t, S: Store = Compact> {
     trees: &'t [Tree<S>],
     fi: u32,
     pub(crate) lang_ref: &'t crate::intern::Lang,
-    tags: ReservedTags,
     links: &'t Links,
     budget: &'t Sentinel,
     file: &'t Sentinel,
@@ -464,6 +493,7 @@ pub struct Run<'t, S: Store = Compact> {
     files: u32,
     project: Option<u32>,
     indexes: Option<&'t Indexes<'t>>,
+    indexed: Option<&'t Indexed>,
     fns: &'t [program::Def],
     graph_fi: u32,
     lang: usize,
@@ -511,7 +541,6 @@ impl<'t, S: Store> Run<'t, S> {
             fi,
             lang_ref: lang,
             links,
-            tags: ReservedTags::new(lang),
             budget,
             file,
             killed: None,
@@ -520,6 +549,7 @@ impl<'t, S: Store> Run<'t, S> {
             files: trees.len() as u32,
             project: None,
             indexes: None,
+            indexed: None,
             fns: &[],
             graph_fi: 0,
             lang: 0,
@@ -550,6 +580,15 @@ impl<'t, S: Store> Run<'t, S> {
     }
 
     /// A node's text as a symbol: its own symbol, or its source text.
+    /// A value's text: a symbol as is, or a node's own text.
+    pub(crate) fn text_of(&self, val: Val) -> Option<u32> {
+        match val {
+            Val::Sym(sym) => Some(sym),
+            Val::Node(loc) | Val::Type(loc) => Some(self.sym_at(loc)).filter(|&s| s != 0),
+            _ => None,
+        }
+    }
+
     pub(crate) fn sym_at(&self, loc: Loc) -> u32 {
         self.trees[loc.fi as usize].sym_at(loc.node, self.lang_ref)
     }
@@ -785,6 +824,7 @@ pub fn run_family(
     let scope = scope_budget(phase, env, budget);
     let indexes = Indexes::new(&env.lang, trees, edges);
     let files = project.unwrap_or(trees.len() as u32) as usize;
+    let indexed = Indexed::build(phase, trees, files, env, &scope);
     let edges: Vec<Result<Vec<Edge>, Killed>> = (0..files)
         .into_par_iter()
         .map(|fi| {
@@ -793,6 +833,7 @@ pub fn run_family(
             run.graph = Some(graph);
             run.graph_fi = fi as u32;
             run.indexes = Some(&indexes);
+            run.indexed = Some(&indexed);
             run.files = files as u32;
             run.project = project;
             let root = Cursor::new(trees, fi as u32, 0);
@@ -986,22 +1027,23 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
         self.run.lang_ref
     }
 
-    pub fn tags(&self) -> ReservedTags {
-        self.run.tags
-    }
-
     /// One of this module's declared indexes, in a family run.
     pub fn index<T: 'static>(&self, name: &str) -> Option<&'t T> {
         self.run.indexes?.get(self.slot, name)?.downcast_ref()
     }
 
+    /// What a YAML `index:` rule filed under `key` in the index `name`.
+    pub fn indexed(&self, name: &str, key: u32) -> &'t [Loc] {
+        let Some(indexed) = self.run.indexed else {
+            return &[];
+        };
+        let name = self.run.lang_ref.syms.intern(name);
+        indexed.0.get(&(name, key)).map_or(&[], Vec::as_slice)
+    }
+
     /// A value's text: a symbol as is, or a node's own text.
     pub fn text(&self, val: Val) -> Option<u32> {
-        match val {
-            Val::Sym(sym) => Some(sym),
-            Val::Node(loc) | Val::Type(loc) => Some(self.run.sym_at(loc)).filter(|&s| s != 0),
-            _ => None,
-        }
+        self.run.text_of(val)
     }
 
     /// Whether `node` of this tree has an edge of `kind` in the phase's graph.

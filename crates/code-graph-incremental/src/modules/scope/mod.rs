@@ -1,9 +1,10 @@
 mod names;
 mod paths;
 
-use crate::engine::{Cx, Function, Module, Store, Val, Vals, of, one, yes};
+use crate::canonical::Canonical as C;
+use crate::engine::{Cx, Function, IndexDecl, Module, Store, Val, Vals, of, one, yes};
 use crate::modules::{arg, function, node};
-use crate::tree::EdgeKind;
+use crate::tree::{Compact, EdgeKind, Tree};
 
 pub struct Scope;
 
@@ -14,6 +15,40 @@ impl Module for Scope {
     fn functions() -> &'static [Function<Self>] {
         FUNCTIONS
     }
+
+    fn indexes() -> &'static [IndexDecl] {
+        &[IndexDecl {
+            name: "owners",
+            build: owners,
+        }]
+    }
+}
+
+/// For each tree, every node's nearest enclosing def or the root.
+type Owners = Vec<Vec<u32>>;
+
+fn owners(
+    _: &crate::intern::Lang,
+    trees: &[Tree<Compact>],
+    _: &[crate::tree::Edge],
+) -> Box<dyn std::any::Any + Send + Sync> {
+    let owners: Owners = trees
+        .iter()
+        .map(|tree| {
+            let root = tree.root();
+            let mut owner = vec![root.index(); tree.len() as usize];
+            for n in root.descendants() {
+                if let Some(p) = n.parent().filter(|p| p.index() != root.index()) {
+                    owner[n.index() as usize] = match p.is(C::Def) {
+                        true => p.index(),
+                        false => owner[p.index() as usize],
+                    };
+                }
+            }
+            owner
+        })
+        .collect();
+    Box::new(owners)
 }
 
 fn sited<S: Store>(cx: &Cx<'_, '_, Scope, S>, a: &[Vals], kind: EdgeKind) -> Vals {
@@ -77,10 +112,10 @@ static FUNCTIONS: &[Function<Scope>] = &[
     function!(Pure, "roots", [], |cx, _| cx.roots()),
     function!(Pure, "aliases", [], |cx, _| cx.aliases()),
     function!(
-        Pure, "alias", [one],
+        Pure, "alias", [one, set],
         @uses ["scope"."aliases", "scope"."files", "scope"."keys", "scope"."roots"],
         |cx, a| match arg(cx, a, 0) {
-            Some(import) => cx.alias(import),
+            Some(import) => cx.alias(import, a[1].first().and_then(|&v| cx.text(v))),
             None => Vals::new(),
         }
     ),

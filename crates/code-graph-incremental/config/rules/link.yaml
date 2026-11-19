@@ -1,7 +1,7 @@
 link:
   - group: imports
     match: '$ROOT:__import|__import_type'
-    enter: ['mod.ssa.bind_import($ROOT, %shadows_locals, %inline_modules)']
+    enter: ['mod.ssa.bind_import($ROOT, %shadows_locals, %inline_modules, "type_only")']
     children: skip
 
   - group: impl
@@ -11,11 +11,11 @@ link:
   - group: inline
     match: '(__def (__defname "/./") $$$S:__supertype)'
     enter:
-      - 'mod.ssa.bind_import($S | child("__import"), %shadows_locals, %inline_modules)'
-      - 'mod.ssa.bind_import($S | child("__import_type"), %shadows_locals, %inline_modules)'
+      - 'mod.ssa.bind_import($S | child("__import"), %shadows_locals, %inline_modules, "type_only")'
+      - 'mod.ssa.bind_import($S | child("__import_type"), %shadows_locals, %inline_modules, "type_only")'
   - group: inline
     match: '(__call $$$I:__import|__import_type)'
-    enter: ['mod.ssa.bind_import($I, %shadows_locals, %inline_modules)']
+    enter: ['mod.ssa.bind_import($I, %shadows_locals, %inline_modules, "type_only")']
 
   - group: def
     match: '(__def #scoped (__defname "/./") $$$S:__supertype)'
@@ -80,17 +80,17 @@ link:
   - group: call
     match: '(__call #implicit_self (__callee %builtins))'
     when: 'unresolved($ROOT, true, %callable_kinds, %value_kinds, %type_kinds)'
-    emit: { imports: { from: enclosing, to: mod.ssa.wildcards | callable_import, site: $ROOT, resolution: reference, resolve: none } }
+    emit: { imports: { from: enclosing, to: 'mod.ssa.wildcards | callable_import("callable")', site: $ROOT, resolution: reference, resolve: none } }
   - group: call
     match: '(__call #implicit_self (__callee %providers))'
     when: 'unresolved($ROOT, true, %callable_kinds, %value_kinds, %type_kinds)'
     enter:
-      - emit: { imports: { from: enclosing, to: 'mod.ssa.wildcards | callable_import | sourced(%providers, true)', site: $ROOT, resolution: reference, resolve: none } }
-      - emit: { imports: { from: enclosing, to: 'mod.ssa.wildcards | callable_import | sourced(%providers, false)', site: $ROOT } }
+      - emit: { imports: { from: enclosing, to: 'mod.ssa.wildcards | callable_import("callable") | sourced(%providers, true)', site: $ROOT, resolution: reference, resolve: none } }
+      - emit: { imports: { from: enclosing, to: 'mod.ssa.wildcards | callable_import("callable") | sourced(%providers, false)', site: $ROOT } }
   - group: call
     match: '(__call #implicit_self (__callee "/./"))'
     when: 'unresolved($ROOT, true, %callable_kinds, %value_kinds, %type_kinds)'
-    emit: { imports: { from: enclosing, to: mod.ssa.wildcards | callable_import, site: $ROOT } }
+    emit: { imports: { from: enclosing, to: 'mod.ssa.wildcards | callable_import("callable")', site: $ROOT } }
   - group: call
     match: '(__call #implicit_self (__callee "/./"))'
   - group: call

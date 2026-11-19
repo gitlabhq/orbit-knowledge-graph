@@ -101,12 +101,11 @@ impl<'t, S: Store> Cx<'_, 't, Scope, S> {
         aliases.into_iter().map(|(_, v)| v).collect()
     }
 
-    pub(super) fn alias(&mut self, import: Cursor<'t, S>) -> Vals {
+    pub(super) fn alias(&mut self, import: Cursor<'t, S>, scope: Option<u32>) -> Vals {
         let Some(source) = self.source(import) else {
             return Vals::new();
         };
         let source = self.str(source);
-        let scope = import.tag(self.tags().alias_scope);
         let aliases = self.call(crate::fn_id!("scope", "aliases"), &[]);
         for alias in aliases.iter().filter_map(|v| v.loc()) {
             let alias = self.jump(alias);
@@ -126,9 +125,7 @@ impl<'t, S: Store> Cx<'_, 't, Scope, S> {
     }
 
     pub(super) fn source(&self, import: Cursor<'t, S>) -> Option<u32> {
-        import
-            .tag(self.tags().original_source_path)
-            .or_else(|| import.child_sym(C::SourcePath))
+        import.child_sym(C::SourcePath)
     }
 
     fn entries(&self) -> SmallVec<[(String, u32); 4]> {

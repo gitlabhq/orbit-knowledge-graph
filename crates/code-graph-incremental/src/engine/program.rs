@@ -157,16 +157,27 @@ struct Rewrite {
     unique: Option<(Pat, u16, usize)>,
 }
 
+/// `by_kind` lists, per node kind, the rules a node of that kind tries in
+/// order, the kind's own rules merged with `any`, the rules for every kind.
 struct Stage {
     rules: Vec<Rewrite>,
     by_kind: HashMap<u16, Vec<u16>>,
+    any: Vec<u16>,
     repeat: bool,
+}
+
+/// A rule with an `index:` hook. Indexers run in a pass before the walk,
+/// every matching one firing, and take no part in rule groups.
+struct Indexer {
+    at: Match,
+    entries: Box<[(u32, Expr, Expr)]>,
 }
 
 enum Body {
     Flow {
         rules: Vec<FlowRule>,
         by_kind: Vec<SmallVec<[u16; 4]>>,
+        indexers: Vec<Indexer>,
     },
     Rewrite {
         stages: Vec<Vec<Stage>>,
@@ -726,6 +737,7 @@ impl Loader<'_> {
             ("emit", spec.emit.is_some()),
             ("tag", spec.tag.is_some()),
             ("row", spec.row.is_some()),
+            ("index", spec.index.is_some()),
         ] {
             if used && !allowed(hook) {
                 return Err(LoadError(format!(
@@ -761,11 +773,16 @@ impl Loader<'_> {
             }
         }
         let mut rules = Vec::new();
+        let mut indexers = Vec::new();
         let mut steering: BTreeMap<u16, u8> = BTreeMap::new();
         let mut by_kind: Vec<SmallVec<[u16; 4]>> = Vec::new();
         for (owner, spec) in ordered {
             let at = self.at(spec);
             self.check_hooks(spec).map_err(&at)?;
+            if let Some(index) = &spec.index {
+                indexers.push(self.indexer(spec, index, owner).map_err(&at)?);
+                continue;
+            }
             let name = spec.group.clone().unwrap_or_else(|| "default".into());
             let group = match groups.iter().position(|g| *g == name) {
                 Some(found) => found,
@@ -801,7 +818,51 @@ impl Loader<'_> {
             rules.push(rule);
         }
         let slots = rules.iter().map(|r| r.at.slots.len()).max().unwrap_or(1);
-        Ok((Body::Flow { rules, by_kind }, slots))
+        let slots = indexers
+            .iter()
+            .map(|i| i.at.slots.len())
+            .fold(slots, usize::max);
+        Ok((
+            Body::Flow {
+                rules,
+                by_kind,
+                indexers,
+            },
+            slots,
+        ))
+    }
+
+    fn indexer(
+        &self,
+        spec: &RuleSpec,
+        index: &BTreeMap<String, crate::engine::lang::IndexSpec>,
+        lang: Option<u8>,
+    ) -> Result<Indexer, LoadError> {
+        let hooks = [
+            spec.enter.is_some(),
+            spec.children.is_some(),
+            spec.between.is_some(),
+            spec.exit.is_some(),
+            spec.late.is_some(),
+            spec.emit.is_some(),
+            spec.row.is_some(),
+        ];
+        if hooks.into_iter().any(|h| h) {
+            return Err(LoadError("an index rule has no other hooks".into()));
+        }
+        let at = self.matcher(spec, lang)?;
+        let scope = self.scope(&at.slots, false);
+        let entries = index
+            .iter()
+            .map(|(name, entry)| {
+                Ok((
+                    self.lang.syms.intern(name),
+                    Expr::parse(&entry.key, &scope)?,
+                    Expr::parse(&entry.value, &scope)?,
+                ))
+            })
+            .collect::<Result<_, LoadError>>()?;
+        Ok(Indexer { at, entries })
     }
 
     fn actions(
@@ -1005,9 +1066,16 @@ impl Loader<'_> {
             }
             rules.push(rule);
         }
+        let any = by_kind.remove(&0).unwrap_or_default();
+        for list in by_kind.values_mut() {
+            list.extend(&any);
+            list.sort_unstable();
+            list.dedup();
+        }
         Ok(Stage {
             rules,
             by_kind,
+            any,
             repeat,
         })
     }
@@ -1296,7 +1364,7 @@ impl Phase {
         root: Cursor<'_, S>,
         mut stack: Vec<Item>,
     ) -> Vec<Late> {
-        let Body::Flow { rules, by_kind } = &self.body else {
+        let Body::Flow { rules, by_kind, .. } = &self.body else {
             return Vec::new();
         };
         let mut w = Scratch::<S>::new(self.slots);
@@ -1330,6 +1398,39 @@ impl Phase {
             }
         }
         late
+    }
+
+    pub fn has_indexers(&self) -> bool {
+        matches!(&self.body, Body::Flow { indexers, .. } if !indexers.is_empty())
+    }
+
+    /// Every entry the phase's index rules add for one tree: the index
+    /// name, the key, and the value.
+    pub fn index_entries<S: Store>(
+        &self,
+        run: &mut Run<S>,
+        root: Cursor<'_, S>,
+    ) -> Vec<(u32, u32, Loc)> {
+        let Body::Flow { indexers, .. } = &self.body else {
+            return Vec::new();
+        };
+        let mut w = Scratch::<S>::new(self.slots);
+        let mut out = Vec::new();
+        for c in std::iter::once(root).chain(root.descendants()) {
+            for indexer in indexers.iter().filter(|i| i.at.kinds.contains(&c.kind())) {
+                if !w.matches(run, &indexer.at, c) || !w.holds(run, &indexer.at) {
+                    continue;
+                }
+                for (name, key, value) in &indexer.entries {
+                    let keys = key.eval(run, &w.vals);
+                    let values = value.eval(run, &w.vals);
+                    for k in keys.iter().filter_map(|&k| run.text_of(k)) {
+                        out.extend(values.iter().filter_map(|v| v.loc()).map(|v| (*name, k, v)));
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Runs the `late` actions of each deferred node, with the def that
@@ -1551,20 +1652,20 @@ impl Phase {
         let sentinels = [budget, file];
         let lang = &env.lang;
         let mut replaced = false;
+        let mut w = Scratch::<Mutable>::new(self.slots);
         for target in order(tree, preorder) {
             sentinels.iter().try_for_each(|s| s.check())?;
             if tree.storage.is_removed(tree.storage.id(target)) {
                 continue;
             }
-            for i in candidates(stage, tree, target).collect::<Vec<_>>() {
+            for i in candidates(stage, tree, target) {
                 let rule = &stage.rules[i as usize];
                 let fired = {
                     let mut run = self.run(&*tree, env, budget, file);
-                    let mut w = Scratch::<Mutable>::new(self.slots);
                     let Some((tags, texts)) = self.decide(&mut run, &mut w, rule, target) else {
                         continue;
                     };
-                    let mut caps = w.caps;
+                    let mut caps = w.caps.clone();
                     caps[0] = SmallVec::from_elem(tree.storage.id(target), 1);
                     Fired { caps, tags, texts }
                 };
@@ -1687,12 +1788,12 @@ fn candidates<'a, S: Store>(
     target: u32,
 ) -> impl Iterator<Item = u16> + 'a {
     let kind = tree.storage.node(target).kind;
-    let specific = stage.by_kind.get(&kind).map_or(&[][..], Vec::as_slice);
-    let any = stage.by_kind.get(&0).map_or(&[][..], Vec::as_slice);
-    let mut merged: Vec<u16> = specific.iter().chain(any).copied().collect();
-    merged.sort_unstable();
-    merged.dedup();
-    merged.into_iter()
+    stage
+        .by_kind
+        .get(&kind)
+        .unwrap_or(&stage.any)
+        .iter()
+        .copied()
 }
 
 fn set_tags<S: Store>(tree: &mut Tree<S>, target: u32, rule: &Rewrite, tags: &[(u32, u32)]) {

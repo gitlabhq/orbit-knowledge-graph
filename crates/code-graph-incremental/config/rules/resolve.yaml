@@ -1,4 +1,7 @@
+import: [scope]
+
 resolve:
+  - use: scope_indexes
   - group: call
     match: '(__call (__callee $M:(__member $O:__object)))'
     when: '$O | read | module'

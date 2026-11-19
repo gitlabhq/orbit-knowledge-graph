@@ -1,0 +1,8 @@
+rulesets:
+  scope_indexes:
+    - match: '$D:(__def $N:__defname)'
+      index: { def_names: { key: $N, value: $D } }
+    - match: '$D:(__def $N:__default_export)'
+      index: { offered: { key: $N, value: $D } }
+    - match: '$D:(__def #exports)'
+      index: { offered: { key: '$D | tag("exports")', value: $D } }

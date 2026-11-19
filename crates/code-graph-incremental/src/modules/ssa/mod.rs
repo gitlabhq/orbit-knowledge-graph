@@ -96,8 +96,9 @@ static FUNCTIONS: &[Function<Ssa>] = &[
         cx.bind(node(cx, a, 0), &a[1], from);
         yes(true)
     }),
-    function!(Effect, "bind_import", [one, one, one], |cx, a| {
-        cx.bind_import(node(cx, a, 0), truthy(&a[1]), truthy(&a[2]));
+    function!(Effect, "bind_import", [one, one, one, set], |cx, a| {
+        let type_only = a[3].first().and_then(|&v| cx.text(v)).unwrap_or(0);
+        cx.bind_import(node(cx, a, 0), truthy(&a[1]), truthy(&a[2]), type_only);
         yes(true)
     }),
     function!(Effect, "enter_scope", [one, set, one], |cx, a| {

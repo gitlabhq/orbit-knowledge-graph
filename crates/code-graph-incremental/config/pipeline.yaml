@@ -31,20 +31,20 @@ phases:
     scope: family
     after: [project]
     walk: each
-    outputs: [emit]
+    outputs: [emit, index]
     modules: [scope, text]
   - name: resolve
     scope: family
     after: [imports]
     walk: each
-    outputs: [emit]
+    outputs: [emit, index]
     modules: [core, scope, text]
     bind: { core.read: scope.read }
   - name: dispatch
     scope: family
     after: [resolve]
     walk: fixpoint
-    outputs: [emit]
+    outputs: [emit, index]
     modules: [core, scope, text]
     bind: { core.read: scope.read }
   - name: display

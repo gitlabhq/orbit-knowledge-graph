@@ -14,7 +14,7 @@ pub mod tree;
 
 pub use shared::error::{Error, LoadError};
 pub use shared::sentinel::{Killed, Limits, Sentinel};
-pub use shared::{canonical, error, sentinel, tags};
+pub use shared::{canonical, error, sentinel};
 
 pub use driver::{Report, State};
 pub use env::Env;

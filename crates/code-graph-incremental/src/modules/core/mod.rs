@@ -409,8 +409,10 @@ static FUNCTIONS: &[Function<Core>] = &[
         .keep(a[0][0], |r, cx| {
             matches!(r, Ref::Call(n) if values::declared_type(cx.jump(n)).is_some())
         })),
-    function!(Pure, "callable_import", [one], |cx, a| {
-        let callable = cx.tags().callable;
+    function!(Pure, "callable_import", [one, set], |cx, a| {
+        let Some(callable) = a[1].first().and_then(|&v| cx.text(v)) else {
+            return Vals::new();
+        };
         cx.keep(a[0][0], |r, cx| {
             matches!(r, Ref::Import(n) if cx.jump(n).parent().is_some_and(|i| i.has_tag(callable)))
         })

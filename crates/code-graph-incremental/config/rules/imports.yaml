@@ -1,11 +1,13 @@
+import: [scope]
+
 data:
   import_kinds: [__import, __import_type]
 
 functions:
   modules:
     cases:
-      - when: '$ROOT | alias'
-        value: '$ROOT | alias | files | foreign'
+      - when: '$ROOT | alias($ROOT | tag("alias_scope"))'
+        value: '$ROOT | alias($ROOT | tag("alias_scope")) | files | foreign'
       - when: '$ROOT | mod.scope.source | under(%external)'
         value: none
       - value: '$ROOT | tag("resolved_source") | files | foreign'
@@ -21,6 +23,7 @@ functions:
       - value: $ROOT
 
 imports:
+  - use: scope_indexes
   - group: name
     match: '$I:(%import_kinds $ROOT:__name)'
     when: '$I | modules'
