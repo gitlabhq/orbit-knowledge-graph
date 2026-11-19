@@ -4,10 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use code_graph_incremental::treesitter::SupportLang;
-use orbit_utils::vfs::{
-    Limits, Loading, Options, Source, SourceError, Tag, Vfs,
-    sources::{Diff, Directory},
-};
+use orbit_utils::vfs::{Limits, Options, Vfs, sources::Diff};
 use orbit_utils::vfs_policies::CodePolicy;
 
 use crate::workspace;
@@ -18,38 +15,19 @@ const MEMORY_BUDGET_BYTES: u64 = 64 * 1024 * 1024;
 pub(super) type Repository = Arc<Vfs<()>>;
 
 pub(super) fn directory(root: &Path) -> Result<Repository> {
-    let mut tracked_ignored = workspace::git_tracked_ignored(root)?;
-    tracked_ignored.retain(|path| under_real_directories(root, path));
-    load(WorkingTree {
-        root,
-        tracked_ignored,
-    })
+    let mut paths = workspace::git_index_files(root)?;
+    paths.retain(|path| under_real_directories(root, path));
+    load(Diff { root, paths })
 }
 
 /// The per-path load fails on a parent that is no longer a real directory, and
-/// sparse checkout, skip-worktree or assume-unchanged can keep such paths listed.
+/// sparse checkout or assume-unchanged can keep such paths listed.
 fn under_real_directories(root: &Path, path: &str) -> bool {
     Path::new(path)
         .ancestors()
         .skip(1)
         .filter(|parent| !parent.as_os_str().is_empty())
         .all(|parent| std::fs::symlink_metadata(root.join(parent)).is_ok_and(|meta| meta.is_dir()))
-}
-
-struct WorkingTree<'a> {
-    root: &'a Path,
-    tracked_ignored: Vec<String>,
-}
-
-impl Source for WorkingTree<'_> {
-    fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
-        Directory(self.root).fill(into)?;
-        Diff {
-            root: self.root,
-            paths: self.tracked_ignored,
-        }
-        .fill(into)
-    }
 }
 
 pub(super) fn paths(root: &Path, paths: Vec<String>) -> Result<Repository> {

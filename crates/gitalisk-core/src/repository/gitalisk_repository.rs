@@ -179,6 +179,15 @@ pub struct IterFileOptions {
     pub exclude_patterns: Vec<String>,
 }
 
+/// One file in the git index listing, with its path relative to the repository
+/// root and as git emitted it, so a name that is not UTF-8 survives.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct IndexedFile {
+    pub path: PathBuf,
+    pub tracked: bool,
+    pub skip_worktree: bool,
+}
+
 impl CoreGitaliskRepository {
     /// Whether the untracked file at `new_path` holds exactly what HEAD has
     /// at `deleted_path`: git's own notion of a rename, before staging.
@@ -415,6 +424,48 @@ impl CoreGitaliskRepository {
             &["--cached", "--ignored", "--exclude-standard"],
             &[] as &[&str],
         )
+    }
+
+    /// Tracked files plus untracked files that no ignore rule excludes.
+    /// Untracked nested repositories are left out, and a submodule appears as
+    /// the tracked entry for its directory.
+    pub fn index_files(&self) -> Result<Vec<IndexedFile>, std::io::Error> {
+        let output = Command::new("git")
+            .arg("--literal-pathspecs")
+            .args([
+                "ls-files",
+                "-z",
+                "-t",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+            ])
+            .current_dir(&self.path)
+            .output()?;
+        if !output.status.success() {
+            return Err(std::io::Error::other(format!(
+                "git ls-files failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        let mut files: Vec<IndexedFile> = output
+            .stdout
+            .split(|b| *b == 0)
+            .filter_map(|record| {
+                let (tag, path) = record.split_at_checked(2)?;
+                if path.is_empty() || path.ends_with(b"/") {
+                    return None;
+                }
+                Some(IndexedFile {
+                    path: path_from_bytes(path),
+                    tracked: tag[0] != b'?',
+                    skip_worktree: tag[0] == b'S',
+                })
+            })
+            .collect();
+        files.sort();
+        files.dedup_by(|later, earlier| later.path == earlier.path);
+        Ok(files)
     }
 
     fn list_files<S: AsRef<OsStr>>(

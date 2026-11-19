@@ -643,6 +643,75 @@ mod tests {
     }
 
     #[test]
+    fn index_files_lists_tracked_and_unignored_untracked_files() {
+        let mut local_repo = LocalGitRepository::new(None);
+        local_repo
+            .fs
+            .create_file("src/a.rs", Some("fn a() {}"))
+            .create_file("build/out.rs", Some("fn out() {}"))
+            .create_file("hidden.rs", Some("fn h() {}"));
+        local_repo.add_all().commit("base");
+        local_repo
+            .fs
+            .create_file(".gitignore", Some("build/\n*.log\n"));
+        local_repo.fs.create_file("untracked.rs", Some("fn u() {}"));
+        local_repo.fs.create_file("noise.log", Some("log"));
+        let repo = repo_handle(&local_repo);
+        Command::new("git")
+            .args(["update-index", "--skip-worktree", "hidden.rs"])
+            .current_dir(&local_repo.path)
+            .output()
+            .unwrap();
+
+        let listed: Vec<_> = repo
+            .index_files()
+            .unwrap()
+            .into_iter()
+            .map(|file| {
+                (
+                    file.path.to_string_lossy().into_owned(),
+                    file.tracked,
+                    file.skip_worktree,
+                )
+            })
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                (".gitignore".to_string(), false, false),
+                ("build/out.rs".to_string(), true, false),
+                ("hidden.rs".to_string(), true, true),
+                ("src/a.rs".to_string(), true, false),
+                ("untracked.rs".to_string(), false, false),
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn index_files_keeps_names_that_are_not_utf8() {
+        use std::os::unix::ffi::OsStrExt;
+        let mut local_repo = LocalGitRepository::new(None);
+        local_repo.fs.create_file("a.rs", Some("fn a() {}"));
+        local_repo.add_all().commit("base");
+        let name = std::ffi::OsStr::from_bytes(b"bad-\xff.rs");
+        std::fs::write(local_repo.path.join(name), "fn b() {}").unwrap();
+        let repo = repo_handle(&local_repo);
+
+        let listed = repo.index_files().unwrap();
+        assert!(listed.iter().any(|file| file.path.as_os_str() == name));
+    }
+
+    #[test]
+    fn index_files_error_carries_gits_stderr() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        let repo = CoreGitaliskRepository::new(path.clone(), path);
+        let error = repo.index_files().unwrap_err().to_string();
+        assert!(error.contains("not a git repository"), "{error}");
+    }
+
+    #[test]
     fn remote_url_is_none_for_a_missing_remote() {
         let mut local_repo = LocalGitRepository::new(None);
         local_repo.fs.create_file("README.md", Some("readme"));
