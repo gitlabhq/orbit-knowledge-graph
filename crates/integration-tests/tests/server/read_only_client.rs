@@ -30,7 +30,8 @@ async fn read_only_client_query_is_cancelled_when_the_caller_drops_it() {
     let client = ctx.create_client().read_only();
     let marker = format!("read_only_client_{}", uuid::Uuid::new_v4().simple());
     let sql = format!(
-        "SELECT count() /* {marker} */ FROM numbers(100000000000) WHERE cityHash64(number) % 7 = 0"
+        "SELECT count() /* {marker} */ FROM numbers(100000000000) WHERE cityHash64(number) % 7 = 0 \
+         SETTINGS max_execution_time = 60"
     );
 
     let running = tokio::spawn(async move { client.query(&sql).fetch_arrow().await });
