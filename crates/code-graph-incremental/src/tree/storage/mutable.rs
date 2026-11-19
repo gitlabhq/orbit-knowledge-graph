@@ -44,7 +44,7 @@ impl Tree {
         self.remove_subtree(target);
     }
 
-    fn remove_subtree(&mut self, id: NodeId) {
+    pub(crate) fn remove_subtree(&mut self, id: NodeId) {
         for node in id.descendants(&self.storage.0) {
             self.tags.remove(&Self::to_raw(node));
         }

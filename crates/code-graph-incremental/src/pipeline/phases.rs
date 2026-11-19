@@ -325,8 +325,21 @@ impl ItemPhase<Parsed> for Rewrite {
         if tree.root().kind() == 0 {
             tree.node_mut(root).kind = crate::canonical::Canonical::SourceFile.into();
         }
-        for stage in &env.rules_for(&tree.label).rewrite_stages {
+        let rules = env.rules_for(&tree.label);
+        for stage in &rules.rewrite_stages {
             pattern::apply_stage(&mut tree, &env.lang, stage, &[run, &budget])?;
+        }
+        if rules.config.max_imports > 0 {
+            let import = u16::from(crate::canonical::Canonical::Import);
+            let excess: Vec<_> = tree
+                .preorder()
+                .into_iter()
+                .filter(|id| tree.node(*id).kind == import)
+                .skip(rules.config.max_imports)
+                .collect();
+            for id in excess {
+                tree.remove_subtree(id);
+            }
         }
         if !tree.root().is(crate::canonical::Canonical::SourceFile) {
             tree.node_mut(root).kind = crate::canonical::Canonical::SourceFile.into();

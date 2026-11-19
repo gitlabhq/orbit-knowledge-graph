@@ -55,6 +55,7 @@ tree-sitter-rust = { workspace = true }
 tree-sitter-scala = { workspace = true }
 tree-sitter-swift = { workspace = true }
 tree-sitter-typescript = { workspace = true }
+tree-sitter-yaml = { workspace = true }
 tree-sitter-zig = { workspace = true }
 tree-sitter-haskell = { workspace = true }
 tree-sitter-ocaml = { workspace = true }

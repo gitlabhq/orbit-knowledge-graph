@@ -80,7 +80,10 @@ fn unread_sources_and_manifests_remain_in_the_graph_and_report() {
 fn every_configured_language_parses_when_classified_for_parsing() {
     for (lang, entry) in all_languages() {
         let repo = tempfile::tempdir().unwrap();
-        let path = format!("a.{}", entry.extensions()[0]);
+        let path = match entry.extensions().first() {
+            Some(extension) => format!("a.{extension}"),
+            None => ".gitlab-ci.yml".to_string(),
+        };
         let source: &[u8] = match lang {
             SupportLang::Markdown => b"# x",
             _ => b"x",
@@ -256,4 +259,35 @@ fn container_build_files_are_recognized_by_name() {
         SupportLang::from_path("Dockerfile.py"),
         Some(SupportLang::Python)
     );
+}
+
+#[test]
+fn only_gitlab_ci_files_are_yaml() {
+    for path in [
+        ".gitlab-ci.yml",
+        ".gitlab-ci.yaml",
+        "sub/.gitlab-ci.yml",
+        ".gitlab-ci-deploy.yml",
+        ".gitlab-ci.deploy.yaml",
+    ] {
+        assert_eq!(
+            SupportLang::from_path(path),
+            Some(SupportLang::Yaml),
+            "{path}"
+        );
+    }
+    for path in [
+        "config.yml",
+        "docker-compose.yaml",
+        ".gitlab/ci/build.yml",
+        ".gitlab-ci.yml.bak",
+        ".gitlab-ci.md",
+        "gitlab-ci.yml",
+    ] {
+        assert_ne!(
+            SupportLang::from_path(path),
+            Some(SupportLang::Yaml),
+            "{path}"
+        );
+    }
 }
