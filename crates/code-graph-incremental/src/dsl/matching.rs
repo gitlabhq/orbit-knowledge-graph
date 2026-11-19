@@ -63,66 +63,53 @@ pub(crate) fn matches<S: Storage<Node = Node>>(
                 Text::Regex(re) if !re.is_match(t.text_at(raw, lang)) => return false,
                 _ => {}
             }
-            let children: Vec<_> = t
-                .cursor(raw)
-                .children()
-                .map(|c| t.storage.id(c.index()))
-                .collect();
-            let mut ci = 0;
+            let children = || {
+                std::iter::successors(t.storage.first_child(raw), |&c| t.storage.next_sibling(c))
+                    .map(|c| t.storage.id(c))
+            };
+            let mut rest = children().peekable();
             for (k, kid) in kids.iter().enumerate() {
                 match kid {
                     Pat::Var { slot, guard, .. } => {
-                        let start = ci;
-                        while ci < children.len()
-                            && !kids
+                        let mut range = SmallVec::new();
+                        while let Some(&child) = rest.peek() {
+                            if kids
                                 .get(k + 1)
-                                .is_some_and(|nx| matches(t, lang, children[ci], nx, caps))
-                        {
-                            ci += 1;
+                                .is_some_and(|nx| matches(t, lang, child, nx, caps))
+                            {
+                                break;
+                            }
+                            range.push(child);
+                            rest.next();
                         }
-                        let range = &children[start..ci];
                         let keep = guard
                             .as_ref()
                             .is_none_or(|g| range.iter().any(|&e| matches(t, lang, e, g, caps)));
-                        caps[*slot as usize] = if keep {
-                            SmallVec::from_slice(range)
-                        } else {
-                            SmallVec::new()
-                        };
+                        caps[*slot as usize] = if keep { range } else { SmallVec::new() };
                     }
                     Pat::Not(inner) => {
-                        for &child in &children {
-                            if matches(t, lang, child, inner, caps) {
-                                return false;
-                            }
+                        if children().any(|child| matches(t, lang, child, inner, caps)) {
+                            return false;
                         }
                     }
                     Pat::Desc(inner) => {
-                        let mut found = false;
-                        for desc in t.cursor(raw).descendants() {
-                            if matches(t, lang, t.storage.id(desc.index()), inner, caps) {
-                                found = true;
-                                break;
-                            }
-                        }
-                        if !found {
+                        let mut descendants = t.cursor(raw).descendants();
+                        if !descendants
+                            .any(|desc| matches(t, lang, t.storage.id(desc.index()), inner, caps))
+                        {
                             return false;
                         }
                     }
                     _ => {
-                        let saved = ci;
-                        while ci < children.len() && !matches(t, lang, children[ci], kid, caps) {
-                            ci += 1;
-                        }
-                        if ci >= children.len() {
+                        let saved = rest.clone();
+                        if !rest.any(|child| matches(t, lang, child, kid, caps)) {
                             if is_optional(kid) {
                                 mark_empty(kid, caps);
-                                ci = saved;
+                                rest = saved;
                                 continue;
                             }
                             return false;
                         }
-                        ci += 1;
                     }
                 }
             }

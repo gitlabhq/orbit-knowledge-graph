@@ -2,7 +2,7 @@ use std::ops::ControlFlow;
 
 use super::{Cursor, Edge, EdgeKind, Node, Storage};
 use crate::canonical::Canonical as C;
-use crate::resolver::CLASS_LIKE;
+use crate::resolve::CLASS_LIKE;
 use crate::tags::ReservedTags;
 
 impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {

@@ -47,7 +47,9 @@ mod tests {
     fn engine_interns_tag_keys_only_here() {
         for (name, src) in [
             ("linker.rs", include_str!("../linker.rs")),
-            ("resolver.rs", include_str!("../resolver.rs")),
+            ("resolve/mod.rs", include_str!("../resolve/mod.rs")),
+            ("resolve/types.rs", include_str!("../resolve/types.rs")),
+            ("resolve/imports.rs", include_str!("../resolve/imports.rs")),
             ("tree/semantic.rs", include_str!("../tree/semantic.rs")),
         ] {
             for (i, line) in src.lines().enumerate() {

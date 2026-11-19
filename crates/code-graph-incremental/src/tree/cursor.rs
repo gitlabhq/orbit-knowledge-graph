@@ -25,7 +25,7 @@ impl<'a, S: Storage> Cursor<'a, S> {
     pub fn new(trees: &'a [Tree<S>], fi: u32, id: u32) -> Self {
         Self { trees, fi, id }
     }
-    fn tree(self) -> &'a Tree<S> {
+    pub(crate) fn tree(self) -> &'a Tree<S> {
         &self.trees[self.fi as usize]
     }
     pub fn node(self) -> &'a S::Node {

@@ -8,7 +8,7 @@ use smallvec::smallvec;
 use crate::canonical::Canonical as C;
 use crate::constants::{PATH_SEP, RED_ZONE, STACK_SEGMENT, WILDCARD};
 use crate::env::Env;
-use crate::resolver::CLASS_LIKE;
+use crate::resolve::CLASS_LIKE;
 use crate::rules::LinkConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::ssa::{BlockId, SsaEngine, Value};

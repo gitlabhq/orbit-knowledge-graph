@@ -8,7 +8,8 @@ pub mod intern;
 pub mod linker;
 pub mod markdown;
 pub mod pipeline;
-pub mod resolver;
+pub mod resolve;
+pub mod rules;
 pub mod shared;
 pub mod ssa;
 pub mod templates;
@@ -22,9 +23,6 @@ pub use shared::{canonical, error, sentinel, tags};
 pub mod pattern {
     pub use crate::dsl::rewrite::*;
     pub use crate::dsl::types::*;
-}
-pub mod rules {
-    pub use crate::dsl::rules::*;
 }
 
 pub use env::Env;

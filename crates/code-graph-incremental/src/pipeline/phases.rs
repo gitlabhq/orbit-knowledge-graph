@@ -570,12 +570,8 @@ impl Phase<DirtyGraph> for Resolve {
         let result = state.resolver.resolve(
             &state.trees,
             &mut state.edges,
-            &env.lang,
             &dirty,
-            env.lang_id,
-            &walk.lookup,
-            &env.resolve.config,
-            &walk.entrypoints,
+            &walk,
             env,
             &resolve_budget,
         )?;
