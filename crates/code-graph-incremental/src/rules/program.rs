@@ -5,9 +5,9 @@ use strum::EnumProperty;
 
 use super::{Func, Host, Loc, Memo, Val, call};
 use crate::canonical::{CANONICAL_BASE, Canonical as C};
-use crate::dsl::matching::matches;
 use crate::dsl::parser::parse;
 use crate::dsl::types::{Cap, Ctx, Pat};
+use crate::engine::matching::matches;
 use crate::error::LoadError;
 use crate::intern::Lang;
 use crate::tree::Compact;

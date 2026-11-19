@@ -1,0 +1,6 @@
+phases:
+  - name: link
+    scope: tree
+    walk: flow
+    outputs: [emit]
+    modules: [core, ssa, text]

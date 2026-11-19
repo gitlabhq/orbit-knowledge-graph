@@ -1,4 +1,3 @@
-mod ops;
 mod program;
 
 use std::hash::Hash;
@@ -9,45 +8,10 @@ use smallvec::SmallVec;
 
 use crate::constants::{RED_ZONE, STACK_SEGMENT};
 pub use crate::dsl::rules::*;
-pub use ops::{Chain, Members, Parts, Types, ancestors, chain, members};
+pub use crate::modules::core::ops::{Chain, Members, Parts, Types, ancestors, chain, members};
 pub use program::Program;
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct Loc {
-    pub fi: u32,
-    pub node: u32,
-}
-
-impl Loc {
-    pub fn new(fi: usize, node: u32) -> Self {
-        Self {
-            fi: u32::try_from(fi).expect("file index exceeds u32"),
-            node,
-        }
-    }
-}
-
-impl<S: crate::tree::Storage> From<crate::tree::Cursor<'_, S>> for Loc {
-    fn from(c: crate::tree::Cursor<'_, S>) -> Self {
-        Self {
-            fi: c.fi(),
-            node: c.index(),
-        }
-    }
-}
+pub use crate::engine::Loc;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Val {
@@ -57,7 +21,6 @@ pub enum Val {
     Lit(u32, u16),
     Node(Loc),
     Nodes(SmallVec<[Loc; 2]>),
-    Flow(SmallVec<[crate::ssa::Value; 2]>),
 }
 
 impl Val {

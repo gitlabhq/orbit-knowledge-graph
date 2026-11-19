@@ -3,7 +3,7 @@ use smallvec::{SmallVec, smallvec};
 use crate::intern::Lang;
 use crate::tree::{Node, Storage, Tree};
 
-use super::types::{Cap, Pat, Text};
+use crate::dsl::types::{Cap, Pat, Text};
 
 pub(crate) fn matches<S: Storage<Node = Node>>(
     t: &Tree<S>,

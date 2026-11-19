@@ -16,7 +16,7 @@ use super::{
 };
 use crate::env::Env;
 use crate::export::{self, Envelope};
-use crate::link;
+use crate::modules::ssa as link;
 use crate::pattern::{self, EdgeCtx, EdgeIndex};
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Edge, Storage, Tag, Tree};

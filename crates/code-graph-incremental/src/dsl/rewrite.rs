@@ -5,9 +5,9 @@ use crate::intern::Lang;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Compact, Node, Storage, Tree};
 
-use super::matching::matches;
 use super::rules::RewriteStage;
 use super::types::{Cap, EdgeCtx, Out, Pat, Rewrite, TagEntry, Text, Tf};
+use crate::engine::matching::matches;
 
 /// How captured subtrees enter a template. The target is about to be removed,
 /// so its descendants can be moved in place of copied, except when the built

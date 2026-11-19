@@ -46,9 +46,23 @@ mod tests {
     #[test]
     fn engine_interns_tag_keys_only_here() {
         for (name, src) in [
-            ("link/mod.rs", include_str!("../link/mod.rs")),
-            ("link/calls.rs", include_str!("../link/calls.rs")),
-            ("link/flow.rs", include_str!("../link/flow.rs")),
+            ("modules/ssa/mod.rs", include_str!("../modules/ssa/mod.rs")),
+            (
+                "modules/ssa/calls.rs",
+                include_str!("../modules/ssa/calls.rs"),
+            ),
+            (
+                "modules/ssa/flow.rs",
+                include_str!("../modules/ssa/flow.rs"),
+            ),
+            (
+                "modules/core/mod.rs",
+                include_str!("../modules/core/mod.rs"),
+            ),
+            (
+                "modules/core/lookup.rs",
+                include_str!("../modules/core/lookup.rs"),
+            ),
             ("resolve/mod.rs", include_str!("../resolve/mod.rs")),
             ("resolve/types.rs", include_str!("../resolve/types.rs")),
             ("resolve/imports.rs", include_str!("../resolve/imports.rs")),

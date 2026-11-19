@@ -18,7 +18,7 @@ pub struct Env {
     pub members: Vec<SupportLang>,
     pub resolve: FamilyResolve,
     pub limits: Limits,
-    pub link_rules: Program<crate::link::Fun>,
+    pub pipeline: crate::engine::Pipeline,
     pub resolve_rules: Program<crate::resolve::Fun>,
     rules: FxHashMap<SupportLang, usize>,
     compiled: Vec<LangConfig>,
@@ -71,7 +71,7 @@ impl Env {
             rules.insert(member, index);
         }
         Ok(Self {
-            link_rules: Program::load(include_str!("../config/link.yaml"), &lang)?,
+            pipeline: crate::engine::Pipeline::load(&lang)?,
             resolve_rules: Program::load(include_str!("../config/resolve.yaml"), &lang)?,
             export_config: crate::export::ExportConfig::embedded().clone(),
             lang,

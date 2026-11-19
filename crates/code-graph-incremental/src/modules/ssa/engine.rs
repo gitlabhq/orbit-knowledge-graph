@@ -8,7 +8,7 @@ use smallvec::SmallVec;
 
 const FRAMES_PER_BLOCK: usize = 4;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct BlockId(pub u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

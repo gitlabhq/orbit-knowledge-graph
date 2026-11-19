@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
-use super::Loc;
 use crate::canonical::Canonical as C;
+use crate::engine::Loc;
 use crate::tags::ReservedTags;
 use crate::tree::{Compact, Role, find_member_in, members_named, reachable};
 
