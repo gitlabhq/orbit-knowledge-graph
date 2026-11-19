@@ -382,23 +382,34 @@ fn push_image_value(
 }
 
 fn is_unquoted_non_string(node: &N<'_>) -> bool {
-    matches!(
-        node.text().trim(),
-        "true"
-            | "false"
-            | "True"
-            | "False"
-            | "TRUE"
-            | "FALSE"
-            | "yes"
-            | "no"
-            | "on"
-            | "off"
-            | "null"
-            | "Null"
-            | "NULL"
-            | "~"
-    )
+    let scalar = if node.kind().as_ref() == "flow_node" {
+        Some(node.clone())
+    } else {
+        node.find(Child, Kind("flow_node"))
+    };
+    let Some(scalar) = scalar else {
+        return false;
+    };
+    let text = scalar.text();
+    let text = text.trim();
+    text.parse::<f64>().is_ok()
+        || matches!(
+            text,
+            "true"
+                | "false"
+                | "True"
+                | "False"
+                | "TRUE"
+                | "FALSE"
+                | "yes"
+                | "no"
+                | "on"
+                | "off"
+                | "null"
+                | "Null"
+                | "NULL"
+                | "~"
+        )
 }
 
 fn enclosing_keys(node: &N<'_>) -> Vec<String> {
