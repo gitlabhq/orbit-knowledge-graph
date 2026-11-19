@@ -49,6 +49,6 @@ cases:
       clickhouse:
         planned:
           exact: |
-            (Neighbors center=w direction=both directional outgoing=[gl_edge] incoming=[gl_edge] center_filter=false relationships=[ASSIGNED, AUTHORED, CLOSED, CLOSES, CONTAINS, HAS_LABEL, HAS_NOTE, IN_GROUP, IN_MILESTONE, IN_PROJECT, MENTIONS, RELATED_TO, REOPENED] incoming_scoped=[] incoming_cross_scope=[ASSIGNED, AUTHORED, CLOSED, CLOSES, CONTAINS, MENTIONS, RELATED_TO, REOPENED]
+            (Neighbors center=w direction=both directional outgoing=[gl_edge] incoming=[gl_edge] center_filter=false relationships=[ASSIGNED, AUTHORED, BLOCKS, CLOSED, CLOSES, CONTAINS, HAS_LABEL, HAS_NOTE, IN_GROUP, IN_MILESTONE, IN_PROJECT, MENTIONS, RELATED_TO, REOPENED] incoming_scoped=[] incoming_cross_scope=[ASSIGNED, AUTHORED, BLOCKS, CLOSED, CLOSES, CONTAINS, MENTIONS, RELATED_TO, REOPENED]
               (Filter w.id = 7, w._deleted = false
                 (NodeScan WorkItem AS w)))
