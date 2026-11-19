@@ -1,0 +1,26 @@
+---
+cases:
+  - name: A node aliased like a generated edge column keeps its properties
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "e0", "entity": "User", "node_ids": [1], "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "e0", "to": "mr"}],
+            "limit": 20
+        }
+      gql: |
+        MATCH (e0:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN e0.username, mr.title LIMIT 20
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains: []
+          not_contains:
+            - AS e0_type
+            - AS e0_src

@@ -5,6 +5,7 @@ WORKDIR /build
 COPY . .
 
 ARG ORBIT_BILLING_ENFORCED=false
+ARG SCCACHE_GCS_RW_MODE=READ_ONLY
 ENV CARGO_INCREMENTAL=0
 
 RUN --mount=type=secret,id=sccache_gcs_key \
@@ -14,13 +15,13 @@ RUN --mount=type=secret,id=sccache_gcs_key \
     if [ -s /run/secrets/sccache_gcs_key ]; then \
       export SCCACHE_GCS_KEY_PATH=/run/secrets/sccache_gcs_key \
              SCCACHE_GCS_BUCKET=gl-knowledgegraph-sccache \
-             SCCACHE_GCS_RW_MODE=READ_WRITE; \
+             SCCACHE_GCS_RW_MODE="${SCCACHE_GCS_RW_MODE}"; \
     fi && \
     export RUSTC_WRAPPER="$SCCACHE_BIN" ORBIT_BILLING_ENFORCED="${ORBIT_BILLING_ENFORCED}" && \
     "$SCCACHE_BIN" --start-server || true && \
-    cargo build --release -p orbit-server --locked && \
+    cargo build --release -p orbit-server --locked --features libduckdb-sys/bundled && \
     "$SCCACHE_BIN" --show-stats || true && \
-    ./scripts/checks/fips/check-binary.sh target/release/gkg-server && \
+    ./scripts/checks/fips/aws-lc/check-binary.sh target/release/gkg-server && \
     cp target/release/gkg-server /gkg-server
 
 FROM registry.access.redhat.com/ubi10/ubi-minimal:10.2

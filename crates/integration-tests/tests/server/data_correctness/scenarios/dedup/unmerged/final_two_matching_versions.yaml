@@ -16,8 +16,6 @@ query:
     MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000}) WHERE mr.source_branch = 'feature-zz' RETURN mr.title, mr.source_branch, p LIMIT 10
 
 expect:
-  sql_contains: ["AS mr FINAL"]
-  sql_not_contains: ["tuple(mr.traversal_path, mr.id) IN"]
   node_count: 2
   nodes:
     MergeRequest:

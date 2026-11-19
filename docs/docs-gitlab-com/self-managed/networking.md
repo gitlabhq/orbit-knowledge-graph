@@ -49,6 +49,19 @@ webserver:
       service.beta.kubernetes.io/aws-load-balancer-attributes: load_balancing.cross_zone.enabled=true
 ```
 
+## Billing connections
+
+Allow outbound HTTPS on port 443 from the GitLab Orbit webserver to:
+
+| Destination | Purpose |
+|-------------|---------|
+| `customers.gitlab.com` | Subscription checks |
+| `billing.prdsub.gitlab.net` | Usage reporting |
+
+If the webserver cannot reach `customers.gitlab.com`, queries fail with the error `Unable to verify GitLab credits`.
+
+For more information about billing, see [Billing requirements](orbit-setup.md#billing-requirements).
+
 ## Trust the webserver certificate in GitLab
 
 When the webserver certificate is self-signed or comes from a private CA, add the CA certificate to the GitLab trust store.

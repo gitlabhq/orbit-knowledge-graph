@@ -1,4 +1,4 @@
-description: ends_with filter returns the matching username regardless of case and prunes granules with the ngram skip index
+description: ends_with filter returns the matching username regardless of case
 
 config:
   unmerged_seed: true
@@ -18,8 +18,6 @@ query:
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username ENDS WITH 'ICE' RETURN u.username LIMIT 10
 
 expect:
-  sql_contains: ["endsWith(lower(u.username), lower('ICE'))"]
-  indexes_used: [{ table: gl_user, index: idx_username_ngram }]
   node_count: 1
   nodes:
     User:

@@ -21,6 +21,7 @@ pub struct Property {
 pub struct Entity {
     pub id: EntityId,
     pub name: String,
+    pub label: String,
     pub properties: Vec<PropertyId>,
 }
 
@@ -113,6 +114,7 @@ impl GraphCatalog {
             entities.push(Entity {
                 id: entity_id,
                 name: node.name.clone(),
+                label: node.label.clone(),
                 properties: entity_properties,
             });
             property_ids.push(entity_property_ids);

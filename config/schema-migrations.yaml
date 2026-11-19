@@ -16,6 +16,45 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 123
+  scope: "*"
+  note: >-
+    MergeRequest takes merge_user_id from the metrics merger, falls back to the MR
+    field, and sets it only for merged MRs, so manual merges get a MERGED edge.
+    AUTHORED and author_id become mutable on WorkItem, MergeRequest, Note and
+    Vulnerability, so the stale-edge sweep drops the old edge after GitLab moves a
+    deleted user's records to the Ghost user. The rebuild fixes the rows already indexed.
+- version: 122
+  scope: code
+  note: >-
+    Markdown links under a heading also emit Definition(Section) IMPORTS File and
+    Definition(Section) IMPORTS Definition(Section) edges from their innermost
+    section; re-index code to backfill them.
+- version: 121
+  scope: code
+  note: >-
+    Markdown links emit File IMPORTS File and File IMPORTS Definition(Section)
+    edges; re-index code to backfill them.
+- version: 120
+  scope: code
+  note: >-
+    Definition gains twelve front_matter_* columns holding Markdown front matter
+    values (Agent Skills fields, GitLab docs title, stage, group and info, plus version
+    and category). Only FrontMatter rows carry values; every other row stores ''.
+    Code tables are re-derived so existing FrontMatter rows pick the values up.
+- version: 119
+  scope: none
+  note: "Finding declares extract.partition_count: 5 so its first full load splits into five id ranges, as Job does. The partition count only changes how the indexer pages the datalake, not the rows it writes, so no table DDL or indexed row changes."
+- version: 118
+  scope: "*"
+  note: >-
+    Group and Project extracts add a late branch for ids whose route or
+    namespace_details row changed without a new namespace or project row, so those changes
+    re-extract the node. The indexer binds is_incremental so a full load skips that
+    branch. Group also tombstones namespaces in state 2 (deletion_scheduled) or 4
+    (deletion_in_progress). The rebuild recomputes full_path and description for groups and
+    projects whose route rows arrived after their last extract, as after a transfer
+    between top-level groups.
 - version: 117
   scope: "*"
   note: >-

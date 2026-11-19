@@ -1,0 +1,38 @@
+description: A project row that lands after a late route row, with an older replicated_at than that route row, still updates the project
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/", slug: org }
+      projects:
+        - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/", slug: app }
+    expect:
+      nodes:
+        gl_project:
+          rows:
+            - { id: 1000, full_path: app }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.Project, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }
+      siphon_routes:
+        - { id: 1000, source_id: 1000, source_type: Project, path: org/app, namespace_id: 100, traversal_path: "1/100/1000/", _siphon_replicated_at: "2024-01-20 18:00:00", _siphon_watermark: "2024-01-20 18:00:00" }
+    expect:
+      nodes:
+        gl_project:
+          count: 1
+          rows:
+            - { id: 1000, full_path: org/app }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.Project, watermark: "2024-01-20 19:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 19:00:00.000000" }
+      siphon_projects:
+        - { id: 1000, name: new-name, path: app, visibility_level: 20, namespace_id: 100, creator_id: 1, _siphon_replicated_at: "2024-01-20 17:00:00", _siphon_watermark: "2024-01-20 20:00:00" }
+    expect:
+      nodes:
+        gl_project:
+          count: 1
+          rows:
+            - { id: 1000, name: new-name, visibility_level: public, full_path: org/app }

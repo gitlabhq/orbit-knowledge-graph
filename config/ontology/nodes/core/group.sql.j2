@@ -1,3 +1,18 @@
+WITH late AS (
+  SELECT id, max({{watermark_column}}) AS watermark
+  FROM (
+    SELECT namespace_id AS id, {{watermark_column}}
+    FROM siphon_namespace_details
+    WHERE startsWith(traversal_path, {traversal_path:String})
+      AND {{watermark_column}} > {last_watermark:String} AND {{watermark_column}} <= {watermark:String}
+    UNION ALL
+    SELECT source_id AS id, {{watermark_column}}
+    FROM siphon_routes
+    WHERE startsWith(traversal_path, {traversal_path:String})
+      AND source_type = 'Namespace'
+      AND {{watermark_column}} > {last_watermark:String} AND {{watermark_column}} <= {watermark:String} )
+  WHERE {is_incremental:Bool}
+  GROUP BY id )
 SELECT
   namespace.id AS id,
   namespace.name AS name,
@@ -10,8 +25,17 @@ SELECT
   namespace.updated_at AS updated_at,
   traversal_paths.current_path AS traversal_path,
   namespace.{{version_column}} AS _version,
-  (namespace.{{deleted_column}} OR namespace.type != 'Group') AS _deleted
-FROM siphon_namespaces namespace
+  (namespace.{{deleted_column}} OR namespace.type != 'Group' OR namespace.state = 2 OR namespace.state = 4) AS _deleted
+FROM (
+  SELECT * FROM siphon_namespaces
+  WHERE id NOT IN (SELECT id FROM late)
+  UNION ALL
+  (SELECT ns.* REPLACE (late.watermark AS {{watermark_column}})
+  FROM siphon_namespaces ns
+  INNER JOIN late ON ns.id = late.id
+  WHERE ns.id IN (SELECT id FROM late)
+  ORDER BY ns.id, ns.{{version_column}} DESC
+  LIMIT 1 BY ns.id) ) namespace
 INNER JOIN (
   SELECT
     id,

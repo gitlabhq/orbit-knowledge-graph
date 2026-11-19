@@ -9,7 +9,7 @@ description: >
   Works on the working tree and unpushed branches, and also searches and reads
   the project's GitLab. Not a fit: reading one known file, or counts and
   relationships across GitLab (use the `orbit` skill).
-version: 0.33.1
+version: 0.34.0
 license: MIT
 compatibility: Requires the GitLab Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -79,13 +79,12 @@ or short names: `def:`, `class:`, `method:`, or `function:` for definitions, and
 words before it. `file:x` keeps paths containing x, and alone lists them.
 Unknown names such as `std::io` stay literal, and `-F` turns qualifiers off.
 
-A plain search with no paths or file filters also searches the GitLab group
-behind `origin`. It finds issues, merge requests, and notes; `commit:words` searches commits, and
-`orbit context repo:group/project symbol:Name` reads another project's code.
-Those results print after the local ones as tokens such as `MergeRequest[42]`.
+A plain search covers local code only. A GitLab kind searches the GitLab group
+behind `origin`: `issue:`, `mr:`, `comment:`, `commit:`, `milestone:`, `user:`,
+`project:`, `group:`, or `branch:`. Results print as tokens such as `MergeRequest[42]`,
+and `orbit context repo:group/project symbol:Name` reads another project's code.
 Name `group/project`, `Project[id]`, or `Group[id]` as a path to search another
 project or group, including its code when there is no local checkout.
-`mr:`, `issue:`, `commit:`, and `comment:` search GitLab only.
 `branch:` finds branches with their merge requests and pipelines, and
 `repo:group/project` names the project.
 
@@ -113,7 +112,7 @@ Line ranges show only the numbered lines.
 <!-- orbit:section quick-start -->
 ## Choose the command
 
-- `orbit grep 'a|b'` searches code, tests, config, and docs and labels each match with its enclosing definition. A plain query also searches the GitLab group behind `origin` over the network. For code only, pass the repository top-level as the path (`$(git rev-parse --show-toplevel)`). `.` scopes the search to the current directory, and widens when nothing matches there. Exit 1 means no match.
+- `orbit grep 'a|b'` searches code, tests, config, and docs and labels each match with its enclosing definition. A plain query searches local code only; a GitLab kind such as `mr:` searches the GitLab group behind `origin`. `.` scopes the search to the current directory, and widens when nothing matches there. Exit 1 means no match.
 - `orbit context <name> <path>:<lines> mr:42 job:9` reads several targets in one call. Definitions come with their callers and tests, and GitLab merge requests, issues, branches, pipelines, and jobs come with the local code they point at. A bare `orbit context` reads the current branch's merge request and CI failures.
 - `orbit query` answers relationship and aggregation questions across GitLab entities through the GitLab Orbit API. Examples: who reviewed which merge requests, or which changes to an area failed CI. Write the query in the language below.
 

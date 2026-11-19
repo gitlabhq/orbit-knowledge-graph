@@ -268,7 +268,7 @@ mod tests {
         plan.prepare()
             .with(WatermarkFilter {
                 column: &plan.watermark_column,
-                last: Utc::now(),
+                floor: Some(Utc::now()),
                 current: Utc::now(),
             })
             .with(TraversalPathFilter { path })
@@ -280,7 +280,7 @@ mod tests {
         plan.prepare()
             .with(WatermarkFilter {
                 column: &plan.watermark_column,
-                last: Utc::now(),
+                floor: Some(Utc::now()),
                 current: Utc::now(),
             })
             .to_sql()
@@ -454,11 +454,11 @@ mod tests {
             .expect("HAS_NOTE transform on Note plan");
 
         assert!(
-            sql.contains("WHEN noteable_type = 'Issue' THEN 'WorkItem'"),
+            sql.contains(r#"WHEN "noteable_type" = 'Issue' THEN 'WorkItem'"#),
             "sql: {sql}"
         );
         assert!(
-            sql.contains("WHEN noteable_type = 'Epic' THEN 'WorkItem'"),
+            sql.contains(r#"WHEN "noteable_type" = 'Epic' THEN 'WorkItem'"#),
             "sql: {sql}"
         );
         assert!(sql.contains("'MergeRequest'"), "sql: {sql}");
@@ -495,7 +495,7 @@ mod tests {
         };
         let sql = &transforms[0].sql;
         assert!(
-            sql.contains("target_type IN (") && sql.contains("'Issue'"),
+            sql.contains(r#""target_type" IN ("#) && sql.contains("'Issue'"),
             "filter must include the raw Rails value that maps to WorkItem: {sql}"
         );
         assert!(
@@ -689,7 +689,7 @@ mod tests {
             .prepare()
             .with(WatermarkFilter {
                 column: &user.watermark_column,
-                last: Utc::now(),
+                floor: Some(Utc::now()),
                 current: Utc::now(),
             })
             .with(CursorFilter {

@@ -18,12 +18,12 @@ spec:
         args:
         - |
           set -e
-          until pg_isready -h {{ .Values.pgHost }} -U postgres; do
+          until pg_isready -h {{ .Values.pgHost }} -U {{ .Values.pgUser }}; do
             echo "Waiting for PostgreSQL..."
             sleep 2
           done
           echo "Running CDC setup SQL..."
-          PGPASSWORD="$PG_PASS" psql -h {{ .Values.pgHost }} -U postgres -d gitlabhq_production \
+          PGPASSWORD="$PG_PASS" psql -h {{ .Values.pgHost }} -U {{ .Values.pgUser }} -d gitlabhq_production \
             -v ON_ERROR_STOP=1 -f /sql/setup.sql
           echo "CDC setup complete."
         env:

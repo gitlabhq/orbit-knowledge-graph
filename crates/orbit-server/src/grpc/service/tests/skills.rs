@@ -27,7 +27,12 @@ async fn list_skills_returns_deployed_skill_metadata() {
             .iter()
             .map(|skill| skill.name.as_str())
             .collect::<Vec<_>>(),
-        ["orbit", "orbit-gql-migration", "orbit-start"]
+        [
+            "orbit",
+            "orbit-gql-migration",
+            "orbit-package-registry",
+            "orbit-start"
+        ]
     );
     let skill = &response.skills[0];
     assert_eq!(skill.name, "orbit");
@@ -105,7 +110,7 @@ async fn get_skill_unknown_name_lists_sorted_known_names() {
     assert_eq!(error.code(), tonic::Code::NotFound);
     assert_eq!(
         error.message(),
-        "Unknown skill \"missing\". Known skills: [\"orbit\", \"orbit-gql-migration\", \"orbit-start\"]"
+        "Unknown skill \"missing\". Known skills: [\"orbit\", \"orbit-gql-migration\", \"orbit-package-registry\", \"orbit-start\"]"
     );
 }
 

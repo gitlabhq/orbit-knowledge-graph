@@ -1,0 +1,54 @@
+name: "Dockerfile: stage and variable references"
+
+fixtures:
+  - path: Dockerfile
+    content: |
+      ARG GO_VERSION=1.22
+      FROM golang:${GO_VERSION} AS builder
+      RUN go build -o /out/app ./cmd/app
+
+      FROM alpine:3.19 AS certs
+      RUN apk add ca-certificates
+
+      FROM alpine:3.19 AS runtime
+      ARG APP_USER=app
+      ENV APP_HOME=/opt/${APP_USER}
+      COPY --from=builder /out/app /usr/local/bin/app
+      COPY --from=certs /etc/ssl /etc/ssl
+      COPY --from=nginx:latest /etc/nginx /etc/nginx
+      COPY --chown=app:app config.yml /etc/config.yml
+
+      FROM runtime AS debug
+      RUN apk add strace
+
+tests:
+  - name: "COPY --from=<stage> and FROM <stage> link stages"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.definition_type = 'Class' AND b.definition_type = 'Class'
+      RETURN a.name AS from_stage, b.name AS to_stage
+      ORDER BY from_stage, to_stage
+    assert:
+      - { row_count: 3 }
+      - { row: { from_stage: "debug", to_stage: "runtime" } }
+      - { row: { from_stage: "runtime", to_stage: "builder" } }
+      - { row: { from_stage: "runtime", to_stage: "certs" } }
+
+  - name: "variable expansions link to the variable definition"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(v:Definition)
+      WHERE v.definition_type = 'Variable'
+      RETURN a.name AS user, v.name AS variable
+      ORDER BY user
+    assert:
+      - { row_count: 2 }
+      - { row: { user: "APP_HOME", variable: "APP_USER" } }
+      - { row: { user: "builder", variable: "GO_VERSION" } }
+
+  - name: "COPY --from naming an external image links to no stage"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE b.name = 'nginx'
+      RETURN a.name AS name
+    assert:
+      - { empty: true }

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write;
 use std::sync::LazyLock;
 
@@ -41,8 +41,73 @@ impl ResultFormatter for ToonFormatter {
     }
 
     fn format(&self, output: &PipelineOutput) -> Value {
-        Value::String(encode_response(&GraphFormatter.build_response(output)))
+        let response = GraphFormatter.build_response(output);
+        let mut out = encode_response(&response);
+        if let Some(center) = output.result_context.neighbors_center() {
+            let at = out.find('\n').map_or(out.len(), |end| end + 1);
+            out.insert_str(
+                at,
+                &relationships(&response, center, |entity| {
+                    output.result_context.label(entity)
+                }),
+            );
+        }
+        Value::String(out)
     }
+}
+
+fn relationships<'a>(
+    response: &'a GraphResponse,
+    (entity, id): (&str, i64),
+    label: impl Fn(&str) -> Option<&'a str>,
+) -> String {
+    let names: HashMap<(&str, i64), &Value> = response
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let label = label(&node.entity_type)?;
+            let name = node.properties.get(label).filter(|name| !name.is_null())?;
+            Some(((node.entity_type.as_str(), node.id), name))
+        })
+        .collect();
+    let mut groups: IndexMap<String, Vec<(&str, i64)>> = IndexMap::new();
+    for edge in &response.edges {
+        let (arrow, other) = if (edge.from.as_str(), edge.from_id) == (entity, id) {
+            ("->", (edge.to.as_str(), edge.to_id))
+        } else if (edge.to.as_str(), edge.to_id) == (entity, id) {
+            ("<-", (edge.from.as_str(), edge.from_id))
+        } else {
+            continue;
+        };
+        groups
+            .entry(format!("{} {arrow} {}", edge.edge_type, other.0))
+            .or_default()
+            .push(other);
+    }
+    let mut out = String::new();
+    if groups.is_empty() {
+        return out;
+    }
+    out.push_str("relationships:\n");
+    for (key, others) in &groups {
+        out.push_str("  ");
+        write_key(&mut out, key);
+        let _ = write!(out, "[{}]: ", others.len());
+        for (index, other) in others.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            match names.get(other) {
+                Some(Value::String(name)) => write_text(&mut out, name),
+                Some(name) => write_value(&mut out, name),
+                None => {
+                    let _ = write!(out, "{}", other.1);
+                }
+            }
+        }
+        out.push('\n');
+    }
+    out
 }
 
 #[derive(Serialize)]
@@ -324,6 +389,19 @@ mod tests {
         }
     }
 
+    fn link(from: &str, from_id: i64, edge_type: &str, to: &str, to_id: i64) -> GraphEdge {
+        GraphEdge {
+            from: from.into(),
+            from_id,
+            to: to.into(),
+            to_id,
+            edge_type: edge_type.into(),
+            depth: None,
+            path_id: None,
+            step: None,
+        }
+    }
+
     fn response(query_type: &str, nodes: Vec<GraphNode>, edges: Vec<GraphEdge>) -> GraphResponse {
         GraphResponse {
             format_version: String::new(),
@@ -421,6 +499,45 @@ mod tests {
             "{text}"
         );
         assert_eq!(decoded(&text)["edges"][1]["depth"], Value::Null);
+    }
+
+    #[test]
+    fn neighbors_list_relationships_by_label_first() {
+        let graph = response(
+            "neighbors",
+            vec![
+                node("MergeRequest", 5, json!({"title": "Fix"})),
+                node("User", 1, json!({"username": "ann"})),
+                node("User", 2, json!({"username": "1234"})),
+                node("Label", 3, json!({"title": "front, end"})),
+            ],
+            vec![
+                link("User", 1, "APPROVED", "MergeRequest", 5),
+                link("User", 2, "APPROVED", "MergeRequest", 5),
+                link("MergeRequest", 5, "HAS_LABEL", "Label", 3),
+                link("MergeRequest", 5, "HAS_LABEL", "Label", 4),
+            ],
+        );
+        let labels = HashMap::from([("User", "username"), ("Label", "title")]);
+        let mut text = encode_response(&graph);
+        let at = text.find('\n').unwrap() + 1;
+        text.insert_str(
+            at,
+            &relationships(&graph, ("MergeRequest", 5), |entity| {
+                labels.get(entity).copied()
+            }),
+        );
+        assert!(
+            text.starts_with(
+                "query_type: neighbors\nrelationships:\n  \"APPROVED <- User\"[2]: ann,\"1234\"\n  \
+                 \"HAS_LABEL -> Label\"[2]: \"front, end\",4\nnodes:\n"
+            ),
+            "{text}"
+        );
+        assert_eq!(
+            decoded(&text)["relationships"]["APPROVED <- User"],
+            json!(["ann", "1234"])
+        );
     }
 
     #[test]

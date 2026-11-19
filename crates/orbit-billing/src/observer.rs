@@ -2,11 +2,11 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::time::Duration;
 
+use compiler::{CompiledQueryContext, ExecMetrics};
 use labkit_events::BillingEvent;
 use opentelemetry::KeyValue;
 use orbit_observability::billing::events as spec;
-use query_engine::compiler::{CompiledQueryContext, ExecMetrics};
-use query_engine::pipeline::{PipelineError, PipelineObserver};
+use pipeline::{PipelineError, PipelineObserver};
 use serde::Serialize;
 use serde_json::json;
 
@@ -285,7 +285,7 @@ impl PipelineObserver for BillingObserver {
 mod tests {
     use std::sync::Arc;
 
-    use query_engine::pipeline::{PipelineError, PipelineObserver};
+    use pipeline::{PipelineError, PipelineObserver};
 
     use super::*;
     use crate::tracker::{FailingBillingTracker, InMemoryBillingTracker};

@@ -68,7 +68,6 @@ e2e/diagnostics/
 e2e/output.xml
 e2e/log.html
 e2e/report.html
-.claude/
 
 # Terraform
 **/.terraform/
@@ -86,3 +85,16 @@ packages/site/public/
 packages/site/src/routeTree.gen.ts
 .tanstack/
 .bun-cache/
+
+# Coding agent state: approved commands, transcripts, and MCP config can hold secrets
+.claude/
+.cursor/
+.gemini/
+.codex/
+.windsurf/
+.specstory/
+.aider*
+.vscode/
+.mcp.json
+CLAUDE.local.md
+AGENTS.local.md

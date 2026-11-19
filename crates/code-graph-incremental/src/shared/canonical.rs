@@ -183,6 +183,47 @@ pub enum Canonical {
     Dispatch,
     #[strum(serialize = "__qualifier")]
     Qualifier,
+    // New variants go last: snapshots store these discriminants as kind ids.
+    #[strum(serialize = "__section", props(def_type = "true", display = "Section"))]
+    Section,
+    /// A definition's FQN segment when it differs from its name.
+    #[strum(serialize = "__fqn_segment")]
+    FqnSegment,
+    #[strum(
+        serialize = "__front_matter",
+        props(def_type = "true", display = "FrontMatter")
+    )]
+    FrontMatter,
+    #[strum(serialize = "__front_matter_name")]
+    FrontMatterName,
+    #[strum(serialize = "__front_matter_description")]
+    FrontMatterDescription,
+    #[strum(serialize = "__front_matter_license")]
+    FrontMatterLicense,
+    #[strum(serialize = "__front_matter_compatibility")]
+    FrontMatterCompatibility,
+    #[strum(serialize = "__front_matter_allowed_tools")]
+    FrontMatterAllowedTools,
+    #[strum(serialize = "__front_matter_metadata")]
+    FrontMatterMetadata,
+    #[strum(serialize = "__front_matter_title")]
+    FrontMatterTitle,
+    #[strum(serialize = "__front_matter_stage")]
+    FrontMatterStage,
+    #[strum(serialize = "__front_matter_group")]
+    FrontMatterGroup,
+    #[strum(serialize = "__front_matter_info")]
+    FrontMatterInfo,
+    #[strum(serialize = "__front_matter_version")]
+    FrontMatterVersion,
+    #[strum(serialize = "__front_matter_category")]
+    FrontMatterCategory,
+    #[strum(serialize = "__side_effect")]
+    SideEffect,
+    #[strum(serialize = "__link")]
+    Link,
+    #[strum(serialize = "__anchor")]
+    Anchor,
 }
 
 impl From<Canonical> for u16 {

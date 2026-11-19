@@ -22,7 +22,6 @@ query:
     RETURN mr.id, n.note LIMIT 10
 
 expect:
-  hydration: static
   node_count: 3
   nodes:
     MergeRequest: { ids: [2000] }

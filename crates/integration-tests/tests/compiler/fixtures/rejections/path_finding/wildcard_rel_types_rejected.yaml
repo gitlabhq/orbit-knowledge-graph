@@ -1,0 +1,14 @@
+cases:
+  - name: The legacy shortestPath() syntax points to the typed ANY SHORTEST form
+    query:
+      gql: |
+        MATCH p = shortestPath((start:User {id: 1})-[*1..3]->(`end`:Project {id: 1004})) RETURN p
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains:
+            - -[:CONTAINS*1..3]->

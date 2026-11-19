@@ -18,7 +18,6 @@ query:
 
 expect:
   node_count: 1
-  skip_requirements: ["filter:project_id"]
   nodes:
     File:
       ids: [13003]

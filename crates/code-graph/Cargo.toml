@@ -10,7 +10,7 @@ test-utils = []
 [dependencies]
 orbit-log-fields = { workspace = true }
 treesitter-visit = { path = "treesitter-visit", features = ["builtin-parser"] }
-orbit-utils = { path = "../utils" }
+orbit-utils = { path = "../utils", features = ["markdown"] }
 orbit-arrow = { path = "../utils/arrow" }
 
 # Common
@@ -21,7 +21,7 @@ cargo-platform = { workspace = true }
 cargo-util-schemas = { workspace = true }
 cargo_metadata = { workspace = true }
 cpu-time = { workspace = true }
-crossbeam-channel = "0.5"
+crossbeam-channel = { workspace = true }
 either = { workspace = true }
 globset = { workspace = true }
 ignore = { workspace = true }
@@ -36,7 +36,7 @@ rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 smallvec = { workspace = true }
-smol_str = "0.3"
+smol_str = { workspace = true }
 stacker = { workspace = true }
 strum = { workspace = true }
 tempfile = { workspace = true }

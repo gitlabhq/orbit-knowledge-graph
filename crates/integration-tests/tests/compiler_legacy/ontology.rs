@@ -1,0 +1,721 @@
+use super::setup::{admin_ctx, embedded_ontology, test_ctx};
+use compiler::{
+    ColumnSelection, Frontend, HydrationCompileOptions, Input, InputNode, QueryType, compile,
+    compile_input,
+};
+use orbit_utils::traversal_path::TraversalPath;
+
+#[test]
+fn valid_column_in_order_by() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
+        "limit": 10,
+        "order_by": "u.username"
+    }"#;
+    assert!(compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).is_ok());
+}
+
+#[test]
+fn invalid_column_in_order_by() {
+    let err = compile(
+        r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
+        "limit": 10,
+        "order_by": "u.nonexistent_column"
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("does not exist"));
+}
+
+#[test]
+fn valid_column_in_filter() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": "admin"}}],
+        "limit": 10
+    }"#;
+    assert!(compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).is_ok());
+}
+
+#[test]
+fn invalid_column_in_filter() {
+    let err = compile(r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"nonexistent_column": "value"}}],
+        "limit": 10
+    }"#, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap_err();
+    assert!(err.to_string().contains("nonexistent_column"));
+}
+
+#[test]
+fn valid_column_in_aggregation() {
+    assert!(
+        compile(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
+            "aggregations": [{"count": "p.name", "as": "name_count"}],
+            "limit": 10
+        }"#,
+            Frontend::JsonDsl,
+            &embedded_ontology(),
+            &test_ctx(),
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn invalid_column_in_aggregation() {
+    let err = compile(
+        r#"{
+        "query_type": "aggregation",
+        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
+        "aggregations": [{"sum": "p.invalid_property", "as": "total"}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("does not exist"));
+}
+
+#[test]
+fn invalid_entity_type_rejected() {
+    let err = compile(
+        r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "n", "entity": "NonexistentType", "node_ids": [1], "columns": ["name"]}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("NonexistentType"), "got: {msg}");
+    // The enrichment must surface valid candidates, not strip or truncate them.
+    assert!(msg.contains("Valid values:"), "got: {msg}");
+    assert!(msg.contains("Branch"), "got: {msg}");
+    assert!(msg.contains("WorkItem"), "got: {msg}");
+    assert!(!msg.contains("more —"), "got: {msg}");
+}
+
+#[test]
+fn invalid_filter_key_lists_valid_candidates() {
+    let err = compile(
+        r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "columns": ["username"],
+                 "filters": {"project_full_path": "x"}}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("project_full_path"), "got: {msg}");
+    assert!(msg.contains("Valid values:"), "got: {msg}");
+    assert!(msg.contains("username"), "got: {msg}");
+    assert!(!msg.contains("more —"), "got: {msg}");
+    // The opaque "or N other candidates" truncation must not leak through.
+    assert!(!msg.contains("other candidates"), "got: {msg}");
+}
+
+#[test]
+fn invalid_group_by_property_lists_valid_fields() {
+    let err = compile(
+        r#"{
+        "query_type": "aggregation",
+        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
+        "group_by": ["p.reviewer_count"],
+        "aggregations": [{"count": "p", "as": "c"}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("reviewer_count"), "got: {msg}");
+    assert!(msg.contains("does not exist"), "got: {msg}");
+    assert!(msg.contains("Valid fields"), "got: {msg}");
+    assert!(msg.contains("name"), "got: {msg}");
+}
+
+#[test]
+fn malformed_group_by_entry_shows_expected_shapes() {
+    let err = compile(
+        r#"{
+        "query_type": "aggregation",
+        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
+        "group_by": [{"node": "p", "property": "name"}],
+        "aggregations": [{"count": "p", "as": "c"}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("/group_by/0"), "got: {msg}");
+    assert!(
+        msg.contains("\"<node-id>.<property>\"") && msg.contains("\"truncate\""),
+        "got: {msg}"
+    );
+}
+
+#[test]
+fn bare_string_group_by_dotted_garbage_shows_expected_shapes() {
+    let err = compile(
+        r#"{
+        "query_type": "aggregation",
+        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
+        "group_by": ["p.name.x"],
+        "aggregations": [{"count": "p", "as": "c"}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("/group_by/0"), "got: {msg}");
+    assert!(
+        msg.contains("\"<node-id>\"") && msg.contains("\"<node-id>.<property>\""),
+        "got: {msg}"
+    );
+}
+
+#[test]
+fn bare_string_group_by_unknown_node_names_the_reference() {
+    let err = compile(
+        r#"{
+        "query_type": "aggregation",
+        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
+        "group_by": ["name"],
+        "aggregations": [{"count": "p", "as": "c"}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("undefined node \"name\""), "got: {msg}");
+}
+
+#[test]
+fn invalid_column_lists_valid_candidates() {
+    let err = compile(
+        r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "columns": ["bogus_col"]}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("bogus_col"), "got: {msg}");
+    assert!(msg.contains("/nodes/0/columns"), "got: {msg}");
+    assert!(msg.contains("Valid values"), "got: {msg}");
+    assert!(msg.contains("username"), "got: {msg}");
+    // The opaque oneOf fallthrough must not leak through.
+    assert!(!msg.contains("under any of the schemas"), "got: {msg}");
+}
+
+#[test]
+fn invalid_relationship_type_lists_valid_candidates() {
+    let err = compile(
+        r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "node_ids": [1]},
+            {"id": "n", "entity": "Note"}
+        ],
+        "relationships": [{"type": "BOGUS_REL", "from": "u", "to": "n"}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("BOGUS_REL"), "got: {msg}");
+    assert!(msg.contains("/relationships/0/type"), "got: {msg}");
+    assert!(msg.contains("Valid values"), "got: {msg}");
+    assert!(msg.contains("AUTHORED"), "got: {msg}");
+    assert!(!msg.contains("under any of the schemas"), "got: {msg}");
+}
+
+#[test]
+fn path_finding_uses_orbit_path_not_node_columns() {
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "Project", "node_ids": [100], "columns": ["name"]},
+            {"id": "end", "entity": "Project", "node_ids": [200], "columns": ["name"]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                 "rel_types": ["CONTAINS"]}
+    }"#;
+
+    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+
+    assert!(rendered.contains("_orbit_path"));
+    assert!(result.base.result_context.query_type == Some(QueryType::PathFinding));
+}
+
+#[test]
+fn result_context_populated() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+            {"id": "p", "entity": "Project", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "CONTAINS", "from": "u", "to": "p"}],
+        "limit": 10
+    }"#;
+
+    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+
+    assert_eq!(result.base.result_context.len(), 2);
+
+    let user = result.base.result_context.get("u").unwrap();
+    assert_eq!(user.entity_type, "User");
+    assert_eq!(user.id_column, "_orbit_u_id");
+    assert_eq!(user.type_column, "_orbit_u_type");
+
+    let project = result.base.result_context.get("p").unwrap();
+    assert_eq!(project.entity_type, "Project");
+    assert_eq!(project.id_column, "_orbit_p_id");
+    assert_eq!(project.type_column, "_orbit_p_type");
+
+    assert!(rendered.contains("_orbit_u_id"));
+    assert!(rendered.contains("_orbit_u_type"));
+    assert!(rendered.contains("_orbit_p_id"));
+    assert!(rendered.contains("_orbit_p_type"));
+}
+
+#[test]
+fn debug_json_round_trip() {
+    let compiled = compile(
+        r#"{
+    "query_type": "traversal",
+    "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
+        {"id": "u", "entity": "User"}
+    ],
+    "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+    "limit": 10
+        }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
+
+    let rendered = compiled.base.render();
+    assert!(
+        !rendered.contains("{p"),
+        "rendered SQL should have no placeholders"
+    );
+
+    let debug_json = serde_json::json!({
+        "base": compiled.base.sql,
+        "base_rendered": rendered,
+        "hydration": serde_json::json!([]),
+    });
+    let parsed: serde_json::Value = serde_json::from_str(&debug_json.to_string()).unwrap();
+    assert!(
+        parsed["base"].as_str().unwrap().contains("{p"),
+        "base should have placeholders"
+    );
+    assert!(
+        !parsed["base_rendered"].as_str().unwrap().contains("{p"),
+        "rendered should not"
+    );
+    assert!(parsed["hydration"].is_array());
+}
+
+#[test]
+fn hydration_widens_paths_to_segment_budget() {
+    let deep = |count: usize| -> Vec<TraversalPath> {
+        (0..count)
+            .map(|i| TraversalPath::new_unchecked(format!("1/{i:0>40}/{:0>40}/", i + 10000)))
+            .collect()
+    };
+    let node = |entity: &str, paths: Vec<TraversalPath>| InputNode {
+        id: "hydrate".into(),
+        entity: Some(entity.into()),
+        columns: Some(ColumnSelection::List(vec!["id".into()])),
+        node_ids: vec![1],
+        traversal_paths: paths,
+        ..InputNode::default()
+    };
+    let compile_hydration = |nodes: Vec<InputNode>, budget: Option<usize>| {
+        let input = Input {
+            query_type: QueryType::Hydration,
+            nodes,
+            limit: 10,
+            ..Input::default()
+        };
+        compile_input(
+            input,
+            HydrationCompileOptions {
+                dynamic: true,
+                path_segment_budget: budget,
+            },
+            &embedded_ontology(),
+            &test_ctx(),
+        )
+        .unwrap()
+    };
+    let bound_paths = |result: &compiler::CompiledQueryContext| -> Vec<TraversalPath> {
+        result
+            .base
+            .params
+            .values()
+            .filter_map(|p| match &p.value {
+                serde_json::Value::Array(items) => Some(items),
+                _ => None,
+            })
+            .flat_map(|items| items.iter().filter_map(|v| v.as_str()))
+            .map(TraversalPath::new_unchecked)
+            .collect()
+    };
+
+    let exact = deep(500);
+    let result = compile_hydration(
+        vec![node("Note", exact.clone()), node("Project", exact.clone())],
+        Some(2000),
+    );
+    let array_params = result
+        .base
+        .params
+        .values()
+        .filter(|p| matches!(p.value, serde_json::Value::Array(_)))
+        .count();
+    assert_eq!(array_params, 1, "arms share one path array param");
+    let mut kept = bound_paths(&result);
+    kept.sort_unstable();
+    let mut expected = exact;
+    expected.sort_unstable();
+    assert_eq!(kept, expected, "under budget keeps exact leaf paths");
+
+    let over = deep(900);
+    let result = compile_hydration(vec![node("Note", over.clone())], Some(2000));
+    let widened = bound_paths(&result);
+    assert!(widened.iter().all(|w| !over.contains(w)));
+    for path in &over {
+        assert!(
+            widened
+                .iter()
+                .any(|w| path.as_str().starts_with(w.as_str())),
+            "{path} lost its ancestor prefix"
+        );
+    }
+
+    let result = compile_hydration(vec![node("Note", over.clone())], None);
+    assert_eq!(
+        bound_paths(&result).len(),
+        over.len(),
+        "no budget, no widening"
+    );
+}
+
+#[test]
+fn hydration_uses_parameterized_ids() {
+    let input = Input {
+        query_type: QueryType::Hydration,
+        nodes: vec![InputNode {
+            id: "hydrate".into(),
+            entity: Some("Note".into()),
+            columns: Some(ColumnSelection::List(vec![
+                "id".into(),
+                "confidential".into(),
+                "created_at".into(),
+            ])),
+            node_ids: vec![7777, 8888, 9999],
+            ..InputNode::default()
+        }],
+        limit: 3,
+        ..Input::default()
+    };
+
+    let result = compile_input(
+        input,
+        HydrationCompileOptions::default(),
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
+    let parameterized = &result.base.sql;
+
+    assert!(
+        parameterized.contains("Array(Int64)"),
+        "IDs should be parameterized"
+    );
+    assert!(
+        !parameterized.contains("7777"),
+        "literal IDs should not appear in parameterized SQL"
+    );
+
+    let rendered = result.base.render();
+    assert!(rendered.contains("7777") && rendered.contains("8888") && rendered.contains("9999"));
+}
+
+#[test]
+fn hydration_empty_columns_produces_empty_json() {
+    let input = Input {
+        query_type: QueryType::Hydration,
+        nodes: vec![InputNode {
+            id: "hydrate".into(),
+            entity: Some("User".into()),
+            columns: Some(ColumnSelection::List(vec![])),
+            node_ids: vec![1],
+            ..InputNode::default()
+        }],
+        limit: 1,
+        ..Input::default()
+    };
+
+    let result = compile_input(
+        input,
+        HydrationCompileOptions::default(),
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
+    let rendered = result.base.render();
+    assert!(
+        !rendered.contains("map("),
+        "empty props should use literal '{{}}', not map()"
+    );
+}
+
+#[test]
+fn like_rejects_short_contains_pattern() {
+    let err = compile(
+        r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User",
+                 "filters": {"username": {"contains": "ab"}}}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("search pattern must be at least 3"),
+        "expected min length error, got: {err}"
+    );
+}
+
+#[test]
+fn like_rejects_single_char_starts_with() {
+    let err = compile(
+        r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User",
+                 "filters": {"username": {"starts_with": "a"}}}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("search pattern must be at least 3"),
+        "expected min length error, got: {err}"
+    );
+}
+
+#[test]
+fn like_rejects_empty_ends_with() {
+    let err = compile(
+        r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User",
+                 "filters": {"username": {"ends_with": ""}}}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("search pattern must be at least 3"),
+        "expected min length error, got: {err}"
+    );
+}
+
+#[test]
+fn like_rejects_contains_on_email() {
+    let err = compile(
+        r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User",
+                 "filters": {"email": {"contains": "example"}}}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("string operators"),
+        "expected like_allowed rejection, got: {err}"
+    );
+}
+
+#[test]
+fn like_rejects_starts_with_on_email() {
+    let err = compile(
+        r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User",
+                 "filters": {"email": {"starts_with": "alice"}}}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("string operators"),
+        "expected like_allowed rejection, got: {err}"
+    );
+}
+
+#[test]
+fn like_equality_on_email_compiles_for_admin() {
+    // `like_allowed: false` blocks LIKE operators but not equality. Admin context
+    // is used because User.email is also gated by `admin_only`, which the
+    // RestrictPass enforces ahead of like_allowed.
+    assert!(
+        compile(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"email": "alice@example.com"}}],
+            "limit": 10
+        }"#,
+            Frontend::JsonDsl,
+            &embedded_ontology(),
+            &admin_ctx(),
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn equality_on_email_rejected_for_non_admin() {
+    let err = compile(
+        r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User",
+                 "filters": {"email": "alice@example.com"}}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("email") && msg.contains("administrator"),
+        "expected admin-only rejection on User.email, got: {msg}"
+    );
+}
+
+#[test]
+fn calls_to_imported_symbol_variant_compiles() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "caller", "entity": "Definition", "node_ids": [1], "columns": ["name"]},
+            {"id": "sym", "entity": "ImportedSymbol", "columns": ["identifier_name"]}
+        ],
+        "relationships": [{"type": "CALLS", "from": "caller", "to": "sym"}],
+        "limit": 10
+    }"#;
+
+    assert!(compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).is_ok());
+}
+
+#[test]
+fn calls_aggregation_compiles() {
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "caller", "entity": "Definition", "node_ids": [1]},
+            {"id": "callee", "entity": "Definition"}
+        ],
+        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+        "group_by": ["callee"],
+        "aggregations": [{"count": "caller", "as": "callers"}],
+        "limit": 1
+    }"#;
+
+    assert!(compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).is_ok());
+}
+
+#[test]
+fn agent_session_detail_columns_are_not_queryable() {
+    for column in [
+        "goal",
+        "title",
+        "summary",
+        "status",
+        "user_id",
+        "workflow_definition",
+        "agent_type",
+        "external_xid",
+        "session_finished_at",
+    ] {
+        let json = format!(
+            r#"{{
+            "query_type": "traversal",
+            "nodes": [{{"id": "w", "entity": "AgentSession", "columns": ["{column}"]}}],
+            "limit": 10
+        }}"#
+        );
+        assert!(
+            compile(&json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).is_err(),
+            "AgentSession.{column} must not be selectable"
+        );
+    }
+}

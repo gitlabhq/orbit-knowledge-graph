@@ -4,18 +4,21 @@ use std::sync::Arc;
 
 use crate::trace_event;
 use crate::v2::config::Language;
+use crate::v2::error::FileReason;
 use crate::v2::types::{
-    CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, EdgeKind, NodeKind,
-    Range, Relationship, containment_relationship,
+    CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, EdgeKind, LinkTarget,
+    NodeKind, Range, Relationship, containment_relationship,
 };
 use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
+use orbit_utils::fs_walk::FileInventory;
+use orbit_utils::markdown::FRONT_MATTER_FIELDS;
 
 fn common_prefix_len(a: &str, b: &str) -> usize {
     a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
 }
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{Bfs, EdgeFiltered, VisitMap, Visitable};
-use rustc_hash::{FxHashMap, FxHasher};
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use smallvec::SmallVec;
 use std::collections::VecDeque;
 
@@ -389,9 +392,8 @@ impl CodeGraph {
             self.indexes.by_fqn.insert(gdef.fqn, def_node);
             self.indexes.by_name.insert(gdef.name, def_node);
 
-            let fqn_str = self.strings.get(gdef.fqn).to_string();
-            if let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) {
-                let parent_id = self.strings.alloc(&fqn_str[..sep_pos]);
+            if let Some(parent_fqn) = definitions[i].fqn.parent() {
+                let parent_id = self.strings.alloc(parent_fqn);
                 self.indexes.nested.insert(parent_id, gdef.name, def_node);
             }
             definition_ranges.push((gdef.range, def_node));
@@ -408,16 +410,25 @@ impl CodeGraph {
             DefinitionRangeIndex::from_ranges(definition_ranges),
         );
 
-        for (i, gdef) in graph_defs.iter().enumerate() {
-            let fqn_str = self.strings.get(gdef.fqn);
-            let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) else {
+        let mut defs_by_fqn: FxHashMap<&str, SmallVec<[usize; 1]>> = FxHashMap::default();
+        for (i, definition) in definitions.iter().enumerate() {
+            defs_by_fqn
+                .entry(definition.fqn.as_str())
+                .or_default()
+                .push(i);
+        }
+        for (i, definition) in definitions.iter().enumerate() {
+            let Some(parents) = definition
+                .fqn
+                .parent()
+                .and_then(|parent_fqn| defs_by_fqn.get(parent_fqn))
+            else {
                 continue;
             };
-            let parent_fqn = &fqn_str[..sep_pos];
-            for (j, parent_def) in graph_defs.iter().enumerate() {
+            for &j in parents {
                 if j != i
-                    && self.strings.get(parent_def.fqn) == parent_fqn
-                    && let Some(rel) = containment_relationship(parent_def.kind, gdef.kind)
+                    && let Some(rel) =
+                        containment_relationship(graph_defs[j].kind, graph_defs[i].kind)
                 {
                     self.graph.add_edge(
                         def_nodes[j],
@@ -458,6 +469,118 @@ impl CodeGraph {
 
     pub fn drop_construction_indexes(&mut self) {
         self.indexes.drop_construction_indexes();
+    }
+
+    pub fn link_anchors(
+        &mut self,
+        sources: Vec<(NodeIndex, Vec<SectionLinkTarget>)>,
+        anchors: &FxHashMap<String, FxHashMap<String, NodeIndex>>,
+        inventory: Option<&InventoryFiles>,
+    ) -> Vec<PendingFileLink> {
+        let mut seen = FxHashSet::default();
+        let mut file_links = Vec::new();
+        let mut section_file_links = Vec::new();
+        for (file_node, targets) in sources {
+            for (section, target) in targets {
+                let definition = target.anchor.as_ref().and_then(|anchor| {
+                    anchors
+                        .get(&target.path)
+                        .and_then(|by_anchor| by_anchor.get(anchor))
+                });
+                let Some(&definition) = definition else {
+                    if let Some(section) = section
+                        && inventory.is_some_and(|files| files.entries.contains(&target.path))
+                    {
+                        section_file_links.push((section, target.path.clone()));
+                    }
+                    file_links.push(PendingFileLink {
+                        source: self.graph[file_node].path().to_string(),
+                        target: target.path,
+                    });
+                    continue;
+                };
+                let link_sources = std::iter::once((file_node, NodeKind::File))
+                    .chain(section.map(|section| (section, NodeKind::Definition)));
+                for (source, source_kind) in link_sources {
+                    if seen.insert((source, definition)) {
+                        self.graph.add_edge(
+                            source,
+                            definition,
+                            GraphEdge::structural(
+                                EdgeKind::Imports,
+                                source_kind,
+                                NodeKind::Definition,
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        if let Some(inventory) = inventory {
+            self.link_sections_to_files(section_file_links, inventory);
+        }
+        file_links
+    }
+
+    fn link_sections_to_files(
+        &mut self,
+        mut links: Vec<(NodeIndex, String)>,
+        inventory: &InventoryFiles,
+    ) {
+        if links.is_empty() {
+            return;
+        }
+        debug_assert!(
+            !self.output.writes_repository_structure(),
+            "endpoint File nodes would duplicate the inventory graph's File rows"
+        );
+        links.sort_unstable();
+        links.dedup();
+        let mut file_nodes: FxHashMap<String, NodeIndex> = self
+            .files()
+            .map(|(index, file)| (file.path.clone(), index))
+            .collect();
+        for (section, path) in links {
+            let file = match file_nodes.get(&path) {
+                Some(&file) => file,
+                None => {
+                    let language = inventory.languages.get(&path).copied();
+                    let file = self.add_unparsed_file(&path, language, 0, FileReason::None);
+                    file_nodes.insert(path, file);
+                    file
+                }
+            };
+            self.graph.add_edge(
+                section,
+                file,
+                GraphEdge::structural(EdgeKind::Imports, NodeKind::Definition, NodeKind::File),
+            );
+        }
+    }
+
+    pub fn link_files(&mut self, mut links: Vec<PendingFileLink>) {
+        let Some(file_index) = self.indexes.file_index.as_ref() else {
+            return;
+        };
+        links.sort_unstable();
+        links.dedup();
+        let edges: Vec<(NodeIndex, NodeIndex)> = links
+            .iter()
+            .filter(|link| link.source != link.target)
+            .filter_map(|link| {
+                Some((
+                    *file_index.get(&link.source)?,
+                    *file_index.get(&link.target)?,
+                ))
+            })
+            .collect();
+        for (source, target) in edges {
+            self.graph.add_edge(
+                source,
+                target,
+                GraphEdge::structural(EdgeKind::Imports, NodeKind::File, NodeKind::File),
+            );
+        }
     }
 
     /// Build extends edges and ancestor chains. Must be called after all
@@ -1316,6 +1439,15 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
         b.col("definition_type")?
             .push_str(self.def.definition_type)?;
         write_range(b, &self.def.range)?;
+        let front_matter = self
+            .def
+            .metadata
+            .as_ref()
+            .and_then(|m| m.front_matter.as_ref());
+        for (index, field) in FRONT_MATTER_FIELDS.iter().enumerate() {
+            let value = front_matter.map_or("", |values| values[index].as_str());
+            b.col(field.column)?.push_str(value)?;
+        }
         Ok(())
     }
 }
@@ -1340,6 +1472,19 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
         write_range(b, &self.import.range)?;
         Ok(())
     }
+}
+
+pub type SectionLinkTarget = (Option<NodeIndex>, LinkTarget);
+
+pub struct InventoryFiles {
+    pub entries: Arc<FileInventory>,
+    pub languages: FxHashMap<String, Language>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PendingFileLink {
+    pub source: String,
+    pub target: String,
 }
 
 pub struct EdgeRow<'a> {
@@ -1393,6 +1538,39 @@ mod tests {
             is_top_level: fqn_parts.len() == 1,
             metadata: None,
         }
+    }
+
+    #[test]
+    fn a_name_ending_in_a_backslash_still_contains_its_children() {
+        let cg = build_graph(
+            "/repo/values.py",
+            vec![
+                make_def("root", &["root"], DefKind::Module),
+                make_def(r"win\", &["root", r"win\"], DefKind::Class),
+                make_def("child", &["root", r"win\", "child"], DefKind::Method),
+            ],
+        );
+
+        let fqn = |node: &GraphNode| match node {
+            GraphNode::Definition { id, .. } => cg.str(cg.defs[id.0 as usize].fqn).to_string(),
+            _ => String::new(),
+        };
+        let mut containment: Vec<(String, String)> = cg
+            .edges()
+            .filter(|(_, _, e)| {
+                e.relationship.source_node == NodeKind::Definition
+                    && e.relationship.target_node == NodeKind::Definition
+            })
+            .map(|(source, target, _)| (fqn(source), fqn(target)))
+            .collect();
+        containment.sort();
+        assert_eq!(
+            containment,
+            vec![
+                ("root".to_string(), r"root.win\".to_string()),
+                (r"root.win\".to_string(), r"root.win\.child".to_string()),
+            ]
+        );
     }
 
     #[test]

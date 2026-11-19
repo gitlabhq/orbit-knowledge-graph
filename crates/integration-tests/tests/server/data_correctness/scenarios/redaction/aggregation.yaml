@@ -1,0 +1,137 @@
+description: Aggregation redacts only the group-by node, because the counted target rows are collapsed and carry no redaction ids
+
+config:
+  security: { paths: ["1/700/"] }
+  seed: redaction
+  extra_seed:
+    gl_merge_request:
+      - { id: 10001, iid: 1, title: MR 1, state: merged, author_id: 1, traversal_path: "1/700/701/7100/" }
+      - { id: 10002, iid: 2, title: MR 2, state: merged, author_id: 1, traversal_path: "1/700/701/7100/" }
+      - { id: 10003, iid: 3, title: MR 3, state: open, author_id: 2, traversal_path: "1/700/701/7100/" }
+    gl_edge:
+      - { traversal_path: "1/700/701/7100/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 10001, target_kind: MergeRequest }
+      - { traversal_path: "1/700/701/7100/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 10002, target_kind: MergeRequest }
+      - { traversal_path: "1/700/701/7100/", source_id: 2, source_kind: User, relationship_kind: AUTHORED, target_id: 10003, target_kind: MergeRequest }
+
+cases:
+  - name: specific_columns_all_users_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2]
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "mr", "entity": "MergeRequest"}
+          ],
+          "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+          "group_by": ["u"],
+          "aggregations": [{"count": "mr", "as": "mr_count"}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, count(mr) AS mr_count LIMIT 10
+    expect:
+      groups:
+        u:
+          entity: User
+          ids: [1, 2]
+          rows:
+            - { entity: User, id: 1, values: { mr_count: 2 }, properties: { username: alice } }
+            - { entity: User, id: 2, values: { mr_count: 1 }, properties: { username: bob } }
+
+  - name: specific_columns_redacts_group_by_node
+    config:
+      redaction:
+        allow:
+          user: [1]
+        deny:
+          user: [2]
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "mr", "entity": "MergeRequest"}
+          ],
+          "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+          "group_by": ["u"],
+          "aggregations": [{"count": "mr", "as": "mr_count"}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, count(mr) AS mr_count LIMIT 10
+    expect:
+      groups:
+        u:
+          entity: User
+          ids: [1]
+          rows:
+            - { entity: User, id: 1, values: { mr_count: 2 }, properties: { username: alice } }
+          absent:
+            - { entity: User, id: 2 }
+
+  - name: wildcard_columns_all_users_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2]
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": "*"},
+            {"id": "mr", "entity": "MergeRequest"}
+          ],
+          "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+          "group_by": ["u"],
+          "aggregations": [{"count": "mr", "as": "mr_count"}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN properties(u), count(mr) AS mr_count LIMIT 10
+    expect:
+      groups:
+        u:
+          entity: User
+          ids: [1, 2]
+          rows:
+            - { entity: User, id: 1, values: { mr_count: 2 }, properties: { username: alice } }
+            - { entity: User, id: 2, values: { mr_count: 1 }, properties: { username: bob } }
+
+  - name: wildcard_columns_redacts_group_by_node
+    config:
+      redaction:
+        allow:
+          user: [1]
+        deny:
+          user: [2]
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": "*"},
+            {"id": "mr", "entity": "MergeRequest"}
+          ],
+          "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+          "group_by": ["u"],
+          "aggregations": [{"count": "mr", "as": "mr_count"}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN properties(u), count(mr) AS mr_count LIMIT 10
+    expect:
+      groups:
+        u:
+          entity: User
+          ids: [1]
+          rows:
+            - { entity: User, id: 1, values: { mr_count: 2 }, properties: { username: alice } }
+          absent:
+            - { entity: User, id: 2 }

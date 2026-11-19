@@ -24,7 +24,6 @@ cases:
         MATCH (mr:MergeRequest) WHERE mr.id >= 9800 AND mr.id <= 9801 AND mr.created_at >= '2023-01-01' RETURN mr.id
 
     expect:
-      skip_requirements: ["filter:created_at"]
       node_count: 1
       nodes:
         MergeRequest: { ids: [9801] }
@@ -36,7 +35,6 @@ cases:
         MATCH (mr:MergeRequest) WHERE mr.id >= 9800 AND mr.id <= 9801 AND mr.created_at >= '2023-01-01' RETURN count(mr) AS n
 
     expect:
-      skip_requirements: ["filter:created_at"]
       row_count: 1
       row_values: [{ n: 1 }]
 
@@ -47,7 +45,6 @@ cases:
         MATCH (j:Job) WHERE j.id >= 9900 AND j.id <= 9901 AND j.created_at <= '2024-03-01' RETURN j.id
 
     expect:
-      skip_requirements: ["filter:created_at"]
       node_count: 1
       nodes:
         Job: { ids: [9901] }

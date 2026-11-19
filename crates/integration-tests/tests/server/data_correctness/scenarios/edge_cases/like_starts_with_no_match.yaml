@@ -12,5 +12,4 @@ query:
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username STARTS WITH 'xyz' RETURN u.username LIMIT 10
 
 expect:
-  skip_requirements: ["filter:username"]
   node_count: 0

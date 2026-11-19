@@ -1,4 +1,8 @@
-{{- range list .Values.namespaces.nats .Values.namespaces.clickhouse .Values.namespaces.gitlab .Values.namespaces.siphon }}
+{{- $namespaces := list .Values.namespaces.nats .Values.namespaces.clickhouse .Values.namespaces.siphon }}
+{{- if not .Values.externalGitlab }}
+{{- $namespaces = append $namespaces .Values.namespaces.gitlab }}
+{{- end }}
+{{- range $namespaces }}
 ---
 apiVersion: v1
 kind: Namespace

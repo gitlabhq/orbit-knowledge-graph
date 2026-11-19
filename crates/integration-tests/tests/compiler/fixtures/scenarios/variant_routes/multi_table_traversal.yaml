@@ -1,0 +1,20 @@
+---
+cases:
+  - name: Variable-depth traversal follows CALLS variants across both edge tables
+    ontology_overlay: variant_routes
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"file","entity":"File","node_ids":[11000]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"file","to":"callee","hops":[1,2]}],"limit":10}
+      gql: |
+        MATCH (file:File {id: 11000})-[:CALLS*1..2]->(callee:Definition) RETURN file, callee LIMIT 10
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - gl_edge
+            - gl_code_edge
+            - target_kind = 'Definition'
+          not_contains: []

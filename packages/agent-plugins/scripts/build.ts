@@ -7,6 +7,7 @@ const root = join(import.meta.dir, '..')
 const NOTICE = '/*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */\n'
 
 const OPENCODE_UI = '../../config/setup/agents/opencode_ui'
+const PI_UI = '../../config/setup/agents/pi_ui'
 
 // OpenCode resolves @opencode/plugin at runtime, and the server and TUI parts share rpc.ts as
 // installed, so the bundle imports them instead of inlining them.
@@ -34,3 +35,14 @@ await bundle('opencode/index.ts', join(OPENCODE_UI, 'index.js'), false, [keepExt
 for (const file of ['rpc.ts', 'tui.tsx']) {
   await copyFile(join(root, 'opencode', file), join(root, OPENCODE_UI, file))
 }
+
+// Pi loads the extension through its own runtime, which provides the pi-tui package.
+const piExternal: BunPlugin = {
+  name: 'pi-external',
+  setup(build) {
+    build.onResolve({ filter: /^@earendil-works\/pi-tui$/ }, (args) => ({ path: args.path, external: true }))
+  },
+}
+
+await mkdir(join(root, PI_UI), { recursive: true })
+await bundle('pi/index.ts', join(PI_UI, 'index.js'), false, [piExternal])

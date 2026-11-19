@@ -15,7 +15,7 @@ check() { # name, expected, actual
 
 # A fake target/debug tree with a stand-in binary and two fips artifact directories.
 FAKE_TARGET="$TMP/target/debug"
-mkdir -p "$FAKE_TARGET/build/aws-lc-fips-sys-aaaa/out/build/artifacts" "$FAKE_TARGET/build/aws-lc-fips-sys-bbbb/out/build/artifacts"
+mkdir -p "$FAKE_TARGET/build/aws-lc-fips-sys/aaaa/out/build/artifacts" "$FAKE_TARGET/build/aws-lc-fips-sys/bbbb/out/build/artifacts"
 FAKE_BINARY="$FAKE_TARGET/gkg-server"
 printf 'not a real binary\n' >"$FAKE_BINARY"
 chmod +x "$FAKE_BINARY"
@@ -43,6 +43,9 @@ check "overlay is private" "600" "$(stat -c '%a' "$overlay" 2>/dev/null || stat 
 check "deprecated prometheus port removed" "null" "$(yq '.metrics.prometheus.port' "$overlay")"
 check "prometheus stays enabled" "true" "$(yq '.metrics.prometheus.enabled' "$overlay")"
 
+out="$(yq() { local a; [[ -p /dev/stdin ]] || { echo "yq stdin is not a pipe" >&2; return 1; }; for a in "$@"; do [[ -e "$a" ]] && { echo "yq opened $a" >&2; return 1; }; done; command yq "$@"; }; write_overlay webserver 2>&1 || true)"
+check "pod config reaches yq on stdin" "0.0.0.0:9394" "$(yq '.probe_server.bind_address' "$out" 2>/dev/null)"
+
 # malformed_pod_config_fails: a yq failure must not produce a header-only overlay.
 printf 'probe_server: [unclosed\n' >"$TMP/bad.yaml"
 rc=0; out="$(POD_CONFIG="$TMP/bad.yaml" write_overlay dispatcher 2>&1)" || rc=$?
@@ -53,11 +56,10 @@ check "no overlay left behind" "no" "$([[ -f "$TMP/.dev/caproni-dispatcher.yaml"
 out="$(ORBIT_POD_CONFIG="$TMP/does-not-exist.yaml" bash "$SCRIPT" webserver 2>&1 || true)"
 check "missing pod config names caproni run" "yes" "$(grep -q 'caproni run' <<<"$out" && echo yes || echo no)"
 
-# build_stamps_only_on_relink: the stamp the mirrord-side processes watch follows the linked
-# artifact under deps/, so a no-op build restarts nothing, a failed build leaves the running
+# build_stamps_only_on_relink: the stamp the mirrord-side processes watch follows the size and
+# mtime of the binary, so a no-op build restarts nothing, a failed build leaves the running
 # servers alone, and a relink by any cargo (the watcher's or one run by hand) is noticed.
-FAKE_ARTIFACT="$FAKE_TARGET/deps/gkg_server-0123456789abcdef"
-mkdir -p "$FAKE_TARGET/deps"; printf 'linked once\n' >"$FAKE_ARTIFACT"
+FAKE_ARTIFACT="$FAKE_BINARY"
 fake_cargo() { # ok|fail -> prints what cargo's JSON stream would say
   case "$1" in
     fail) echo '{"reason":"build-finished","success":false}'; return 101 ;;
@@ -79,7 +81,7 @@ cargo_build() { fake_cargo ok; }
 printf 'linked again by some cargo\n' >"$FAKE_ARTIFACT" # an external relink, then a fresh watcher build
 build >/dev/null
 check "relink by any cargo refreshes the stamp" "yes" "$([[ "$STAMP" -nt "$TMP/marker" ]] && echo yes || echo no)"
-cp "$FAKE_BINARY" "$FAKE_BINARY.new" && mv "$FAKE_BINARY.new" "$FAKE_BINARY" # macOS re-copies the uplifted binary every build
+cp -p "$FAKE_BINARY" "$FAKE_BINARY.new" && mv "$FAKE_BINARY.new" "$FAKE_BINARY" # macOS re-copies the uplifted binary every build
 touch "$TMP/marker2"; sleep 1
 build >/dev/null
 check "re-copied uplift without a relink leaves the stamp alone" "no" "$([[ "$STAMP" -nt "$TMP/marker2" ]] && echo yes || echo no)"
@@ -102,7 +104,15 @@ check "first watcher takes the lock" "0" "$(acquire_watch_lock >/dev/null 2>&1; 
 bash -c "ORBIT_POD_CONFIG='$FIXTURE' GENERATED_DIR_OVERRIDE='$TMP/.dev' source '$SCRIPT'; sleep 60; :" & live_pid=$!
 sleep 0.5; echo "$live_pid" >"$WATCH_LOCK"
 check "second watcher is refused while the first lives" "1" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
+# A racer that read the same dead pid, but claims only after the winner replaced the lock.
+check "a late takeover leaves the new holder alone" "1" "$(replace_stale_lock "$WATCH_LOCK" 999999999 >/dev/null 2>&1; echo $?)"
+check "the new holder keeps the lock" "$live_pid" "$(cat "$WATCH_LOCK")"
+echo 999999999 >"$WATCH_LOCK"; echo "$live_pid" >"$WATCH_LOCK.stale.999999999"
+check "a stale lock claimed by a live watcher is refused" "1" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
+check "the claimed stale lock is left to its claimant" "999999999" "$(cat "$WATCH_LOCK")"
 kill "$live_pid" 2>/dev/null; wait "$live_pid" 2>/dev/null || true
+check "a claim left by a killed watcher is taken over" "0" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
+check "no claim left behind" "0" "$(ls "$TMP"/.dev/gkg-build.pid.stale.* 2>/dev/null | wc -l | tr -d ' ')"
 echo 999999999 >"$WATCH_LOCK"
 check "stale lock from a dead pid is taken over" "0" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
 sleep 60 & reused_pid=$!
@@ -132,14 +142,17 @@ check "watcher does not watch the repo root itself" "no" "$(grep -qE -- '(-W|--w
 # script binary cannot report it.)
 out="$(exec() { printf 'dyld=%s\nld=%s\nargs=%s\n' "${DYLD_FALLBACK_LIBRARY_PATH:-}" "${LD_LIBRARY_PATH:-}" "$*"; }; launch indexer "$overlay")"
 check "launcher passes mode and config" "args=$FAKE_BINARY --mode=indexer --config=$overlay" "$(grep '^args=' <<<"$out")"
-check "launcher adds every fips artifacts dir (macOS)" "yes" "$(grep '^dyld=' <<<"$out" | grep -q 'aws-lc-fips-sys-aaaa/out/build/artifacts' && grep '^dyld=' <<<"$out" | grep -q 'aws-lc-fips-sys-bbbb/out/build/artifacts' && echo yes || echo no)"
-check "launcher adds the fips artifacts dir (Linux)" "yes" "$(grep '^ld=' <<<"$out" | grep -q 'aws-lc-fips-sys-' && echo yes || echo no)"
+check "launcher adds every fips artifacts dir (macOS)" "yes" "$(grep '^dyld=' <<<"$out" | grep -q 'aws-lc-fips-sys/aaaa/out/build/artifacts' && grep '^dyld=' <<<"$out" | grep -q 'aws-lc-fips-sys/bbbb/out/build/artifacts' && echo yes || echo no)"
+check "launcher adds the fips artifacts dir (Linux)" "yes" "$(grep '^ld=' <<<"$out" | grep -q 'aws-lc-fips-sys/' && echo yes || echo no)"
+rm -rf "$FAKE_TARGET/build"
+out="$(bash -c "ORBIT_POD_CONFIG='$FIXTURE' GENERATED_DIR_OVERRIDE='$TMP/.dev' ORBIT_BINARY_OVERRIDE='$FAKE_BINARY' source '$SCRIPT'; exec() { printf 'args=%s ld=%s\n' \"\$*\" \"\${LD_LIBRARY_PATH-unset}\"; }; launch webserver '$overlay'" 2>&1 || true)"
+check "launcher runs without fips artifacts" "args=$FAKE_BINARY --mode=webserver --config=$overlay ld=unset" "$out"
 
 # project_file: the reloaders must agree with the wrapper.
 PROJECT="$HERE/../../../caproni-project.yaml"
 matches_pattern() { # path -> yes if any read_only pattern of the first reloader matches
   local path="$1" pat
-  while IFS= read -r pat; do [[ "$path" =~ $pat ]] && { echo yes; return; }; done < <(yq -r '.reloaders.gkg-webserver.mirror.filesystem.read_only[]' "$PROJECT")
+  while IFS= read -r pat; do [[ "$path" =~ $pat ]] && { echo yes; return; }; done < <(yq -r '.reloaders.orbit-webserver.mirror.filesystem.read_only[]' "$PROJECT")
   echo no
 }
 # The server checks that /etc/secrets itself exists before walking it, so the mirrord

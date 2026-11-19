@@ -21,7 +21,6 @@ query:
     RETURN mr
 
 expect:
-  skip_requirements: [node_ids, "relationship:APPROVED"]
   node_count: 0
   nodes:
     MergeRequest: { ids: [] }

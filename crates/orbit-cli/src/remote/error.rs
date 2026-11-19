@@ -72,9 +72,8 @@ pub(crate) fn map_http_error(status: u16, body: &str) -> RemoteError {
         429 => RemoteError::new(
             EXIT_RATE_LIMITED,
             "rate limited\n\n\
-             The Orbit API rejected the request with HTTP 429. Inspect the `Retry-After`\n\
-             response header and back off, or batch via aggregation if you are running\n\
-             many small queries.",
+             The Orbit API rejected the request with HTTP 429. Wait and try again, or\n\
+             batch via aggregation if you are running many small queries.",
         ),
         503 => RemoteError::new(
             EXIT_GENERIC,
@@ -124,10 +123,13 @@ fn parse_missing_resource(body: &str) -> Option<String> {
 }
 
 fn body_suffix(body: &str) -> String {
-    if body.is_empty() {
-        String::new()
-    } else {
-        format!(": {body}")
+    let message = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.get("message")?.as_str().map(str::to_string));
+    match (message, body.is_empty()) {
+        (Some(message), _) => format!(": {message}"),
+        (None, true) => String::new(),
+        (None, false) => format!(": {body}"),
     }
 }
 

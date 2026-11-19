@@ -26,7 +26,8 @@ fi
 
 export NS_NATS="e2e-${E2E_SHA}-nats"
 export NS_CH="${E2E_CH_NAMESPACE:-e2e-${E2E_SHA}-clickhouse}"
-export NS_GITLAB="e2e-${E2E_SHA}-gitlab"
+export E2E_EXTERNAL_GITLAB_NS="${E2E_EXTERNAL_GITLAB_NS:-}"
+export NS_GITLAB="${E2E_EXTERNAL_GITLAB_NS:-e2e-${E2E_SHA}-gitlab}"
 export NS_SIPHON="e2e-${E2E_SHA}-siphon"
 export NS_GKG="e2e-${E2E_SHA}-gkg"
 

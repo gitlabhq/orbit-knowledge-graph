@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 
 use crate::loading::ONTOLOGY_SCHEMA_FILE;
 
-/// Fingerprint-snapshot path relative to `CONFIG_DIR`.
+/// Fingerprint-snapshot path relative to `ORBIT_CONFIG_DIR`.
 pub const FINGERPRINT_FILE: &str = "schema-migrations.fingerprint.yaml";
 
 const FINGERPRINT_HEADER: &str = "\

@@ -68,7 +68,9 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
             .filter(move |node| node.is(kind) && node.sym_opt().is_some())
     }
     pub fn last_named(self) -> Option<Self> {
-        self.children().filter(|node| node.named()).last()
+        self.children()
+            .filter(|node| node.named() && !node.is(C::SideEffect))
+            .last()
     }
     pub fn calls(self) -> impl Iterator<Item = Self> + 'a {
         self.descendants().filter(|node| node.is(C::Call))
@@ -154,10 +156,19 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn typed(self) -> Option<Self> {
         self.child(C::SsaTyped).or_else(|| {
             let rhs = self.child(C::Rhs)?;
-            rhs.value_child(C::Call)
+            rhs.rhs_call()
                 .and_then(|call| call.child(C::Callee))
                 .or_else(|| rhs.value_child(C::Member))
         })
+    }
+    /// The call an unlabelled right-hand side evaluates to is its tail, as
+    /// for locals: a lifted `begin ... end` body yields its last call.
+    pub fn rhs_call(self) -> Option<Self> {
+        let tail = self.tail_expr();
+        if tail.index() == self.index() {
+            return self.value_child(C::Call);
+        }
+        tail.is(C::Call).then_some(tail)
     }
     pub fn enclosing_def(self, kinds: &'a [C]) -> Option<Self> {
         self.enclosing(move |node| {

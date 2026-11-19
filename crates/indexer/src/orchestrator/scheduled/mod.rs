@@ -3,6 +3,7 @@ mod metrics;
 pub mod backfill_sweep;
 pub mod code_stale_sweep;
 pub mod global;
+pub mod graph_stats;
 pub mod migration_completion;
 pub mod namespace;
 pub mod namespace_deletion;
@@ -12,6 +13,7 @@ pub mod table_cleanup;
 pub use backfill_sweep::CodeBackfillSweep;
 pub use code_stale_sweep::CodeStaleSweep;
 pub use global::GlobalDispatcher;
+pub use graph_stats::GraphStatsSnapshot;
 pub use metrics::ScheduledTaskMetrics;
 pub use migration_completion::MigrationCompletionChecker;
 pub use namespace::{NamespaceDispatcher, NamespaceFreshness};
@@ -31,6 +33,7 @@ use tracing::Instrument;
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsServices, NatsServicesImpl};
 use crate::orchestrator::{Trigger, TriggerError};
+use crate::retry::RetryExhausted;
 use orbit_server_config::NatsConfiguration;
 use orbit_server_config::ScheduleConfiguration;
 
@@ -41,6 +44,12 @@ pub struct TaskError(String);
 impl TaskError {
     pub fn new(error: impl std::fmt::Display) -> Self {
         Self(error.to_string())
+    }
+}
+
+impl From<RetryExhausted> for TaskError {
+    fn from(error: RetryExhausted) -> Self {
+        Self::new(error)
     }
 }
 
@@ -94,12 +103,13 @@ pub async fn run_loop(
     shutdown: CancellationToken,
 ) -> Result<(), SchedulerError> {
     let mut handles = JoinSet::new();
+    let metrics = ScheduledTaskMetrics::new();
 
     for task in tasks {
         let lock = lock_service.clone();
         let token = shutdown.clone();
         let span = info_span!("scheduled_task", safe(TASK) = task.name());
-        handles.spawn(run_task_loop(task, lock, token).instrument(span));
+        handles.spawn(run_task_loop(task, lock, metrics.clone(), token).instrument(span));
     }
 
     let mut panicked = 0usize;
@@ -124,6 +134,7 @@ pub async fn run_loop(
 async fn run_task_loop(
     task: Box<dyn ScheduledTask>,
     lock_service: Arc<dyn LockService>,
+    metrics: ScheduledTaskMetrics,
     shutdown: CancellationToken,
 ) {
     let task_name = task.name().to_owned();
@@ -156,16 +167,31 @@ async fn run_task_loop(
             }
         }
 
-        match task.run().await {
-            Ok(()) => {
+        let run_timeout = task.schedule().run_timeout();
+        let outcome = match run_timeout {
+            Some(limit) => tokio::time::timeout(limit, task.run()).await,
+            None => Ok(task.run().await),
+        };
+        match outcome {
+            Ok(Ok(())) => {
                 debug!(safe(TASK) = task_name.as_str(), "task completed");
             }
-            Err(error) => {
+            Ok(Err(error)) => {
                 warn!(
                     safe(TASK) = task_name.as_str(),
                     safe(ERROR_TYPE) = "task_failed",
                     expanded(ERROR_MESSAGE) = %error,
                     "task failed"
+                );
+            }
+            Err(_) => {
+                let limit_secs = run_timeout.unwrap_or_default().as_secs_f64();
+                metrics.record_run(&task_name, "timed_out", limit_secs);
+                warn!(
+                    safe(TASK) = task_name.as_str(),
+                    safe(ERROR_TYPE) = "task_timed_out",
+                    safe(TIMEOUT_S) = limit_secs,
+                    "task run timed out and was abandoned"
                 );
             }
         }
@@ -220,6 +246,15 @@ mod tests {
     /// Yearly cron: delay is always months, safe for "should not fire" assertions.
     const YEARLY: &str = "0 0 0 1 1 *";
 
+    const RUN_TIMEOUT_SECS: u64 = 10;
+
+    fn schedule(cron: &str) -> ScheduleConfiguration {
+        ScheduleConfiguration {
+            cron: CronSchedule::try_from(cron.to_owned()).unwrap(),
+            run_timeout_secs: RUN_TIMEOUT_SECS,
+        }
+    }
+
     struct StubTask {
         name: &'static str,
         config: ScheduleConfiguration,
@@ -230,9 +265,7 @@ mod tests {
         fn new(name: &'static str, cron: &str) -> Self {
             Self {
                 name,
-                config: ScheduleConfiguration {
-                    cron: CronSchedule::try_from(cron.to_owned()).unwrap(),
-                },
+                config: schedule(cron),
                 run_count: AtomicUsize::new(0),
             }
         }
@@ -255,6 +288,27 @@ mod tests {
         async fn run(&self) -> Result<(), TaskError> {
             self.run_count.fetch_add(1, Ordering::SeqCst);
             Ok(())
+        }
+    }
+
+    struct HangingTask {
+        config: ScheduleConfiguration,
+        run_count: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ScheduledTask for Arc<HangingTask> {
+        fn name(&self) -> &str {
+            "hanging"
+        }
+
+        fn schedule(&self) -> &ScheduleConfiguration {
+            &self.config
+        }
+
+        async fn run(&self) -> Result<(), TaskError> {
+            self.run_count.fetch_add(1, Ordering::SeqCst);
+            std::future::pending().await
         }
     }
 
@@ -334,10 +388,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn lines_inside_a_task_carry_the_task_name() {
         let (logs, _capture) = crate::testkit::logs::capture_logs();
-        let schedule = ScheduleConfiguration {
-            cron: CronSchedule::try_from(EVERY_5S.to_owned()).unwrap(),
-        };
-        let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(LoggingTask(schedule))];
+        let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(LoggingTask(schedule(EVERY_5S)))];
         let shutdown = CancellationToken::new();
 
         let handle = tokio::spawn(run_loop(
@@ -415,5 +466,28 @@ mod tests {
         assert_eq!(slow.run_count(), 0, "yearly task should not have fired");
 
         shutdown.cancel();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hanging_run_is_abandoned_and_the_task_runs_again() {
+        let task = Arc::new(HangingTask {
+            config: schedule(EVERY_5S),
+            run_count: AtomicUsize::new(0),
+        });
+        let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(Arc::clone(&task))];
+        let shutdown = CancellationToken::new();
+        tokio::spawn(run_loop(
+            tasks,
+            Arc::new(AlwaysGrantLockService),
+            shutdown.clone(),
+        ));
+
+        for _ in 0..(RUN_TIMEOUT_SECS + 12) {
+            tokio::time::advance(Duration::from_secs(1)).await;
+            settle().await;
+        }
+        shutdown.cancel();
+
+        assert_eq!(task.run_count.load(Ordering::SeqCst), 2);
     }
 }

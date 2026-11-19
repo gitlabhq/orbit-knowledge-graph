@@ -6,6 +6,7 @@ use duckdb_client::DuckDbClient;
 use orbit_server::redaction::QueryResult;
 use query_engine::compiler::{CompiledQueryContext, Frontend, compile_local, generate_local_ddl};
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
+use query_engine::pipeline::PipelineError;
 use query_engine::shared::PipelineOutput;
 
 use super::pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
@@ -34,8 +35,16 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
         database
             .initialize_schema(&generate_local_ddl(&ontology, ""))
             .unwrap_or_else(|e| panic!("{name}: local DDL: {e}"));
-        let (config, steps) = scenario.into_steps();
-        seed_local(&database, [&base, &config.extra_seed], &name);
+        let (config, steps) = scenario.into_steps(&name);
+        let preset = config
+            .seed
+            .as_ref()
+            .map(|preset| seed_preset(Path::new(presets), preset));
+        seed_local(
+            &database,
+            [preset.as_ref().unwrap_or(&base), &config.extra_seed],
+            &name,
+        );
         for (index, step) in steps.iter().enumerate() {
             seed_local(&database, [&step.seed], &name);
             run_step(
@@ -63,22 +72,23 @@ fn run_step(
         let label = format!("{name} [{key} on duckdb]");
         let expect = &step.expect;
         expect.validate_pages_exclusive(&label);
-        let compiled = compile_local(query, frontend, ontology).map(Arc::new);
-        let Some(compiled) = assert_compilation(compiled, expect, key, &label) else {
+        let compiled = compile_local(query, frontend, ontology)
+            .map(Arc::new)
+            .map_err(PipelineError::from);
+        let Some(compiled) = assert_compilation(compiled, expect, ("duckdb", key), &label) else {
             continue;
         };
-        if expect.compile_only {
-            continue;
-        }
         if expect.pages.is_empty() {
             let output = execute(database, &compiled, &label);
-            let baseline = assert_output(&output, frontend, expect, &label);
+            let baseline = assert_output(&output, expect, &label);
             for run in 2..=repeat_count(expect, &label) {
-                let compiled = compile_local(query, frontend, ontology).map(Arc::new);
-                let compiled = assert_compilation(compiled, expect, key, &label)
+                let compiled = compile_local(query, frontend, ontology)
+                    .map(Arc::new)
+                    .map_err(PipelineError::from);
+                let compiled = assert_compilation(compiled, expect, ("duckdb", key), &label)
                     .expect("repeated query should compile");
                 let output = execute(database, &compiled, &label);
-                let response = assert_output(&output, frontend, expect, &label);
+                let response = assert_output(&output, expect, &label);
                 assert_repeated_response(&baseline, &response, run, &label);
             }
             continue;
@@ -91,7 +101,7 @@ fn run_step(
                     .unwrap_or_else(|error| panic!("{page_label}: compile failed: {error}")),
             );
             let output = execute(database, &compiled, &page_label);
-            let response = assert_output(&output, frontend, page_expect, &page_label);
+            let response = assert_output(&output, page_expect, &page_label);
             let response = serde_json::from_value(response).expect("response should deserialize");
             collected.push(&response);
             assert_page_bounds(&response, index, expect.pages.len(), &page_label);

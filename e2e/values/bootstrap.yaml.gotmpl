@@ -1,5 +1,7 @@
 {{ $sha := requiredEnv "E2E_SHA" }}
 
+externalGitlab: {{ ne (env "E2E_EXTERNAL_GITLAB_NS") "" }}
+
 namespaces:
   nats: e2e-{{ $sha }}-nats
   clickhouse: e2e-{{ $sha }}-clickhouse

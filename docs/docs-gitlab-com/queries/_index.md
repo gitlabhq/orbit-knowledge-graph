@@ -42,6 +42,16 @@ Results include only the data that the token owner can access.
   see [`Query.orbit`](https://docs.gitlab.com/api/graphql/reference/queries/#orbit).
   `Query.orbit` is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 
+## Rate limits
+
+By default, each user can send 60 queries every minute to GitLab Orbit.
+The CLI, the API, MCP clients, and GitLab Duo Agent Platform share this limit.
+On GitLab Self-Managed and GitLab Dedicated, administrators can
+[change the limit](https://docs.gitlab.com/integration/orbit/#configure-orbit-rate-limits).
+
+When you exceed the limit, GitLab returns `429 Too Many Requests` with a `Retry-After` header, and the CLI exits with code `5`.
+Wait for the time in the `Retry-After` header, then try again.
+
 ## Query shapes
 
 | Use case | Query shape |

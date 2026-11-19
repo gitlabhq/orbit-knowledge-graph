@@ -1,8 +1,8 @@
 //! Handlers process messages from specific topics.
 //!
-//! ```ignore
-//! use etl_engine::handler::{Handler, HandlerContext, HandlerError};
-//! use etl_engine::types::{Envelope, Subscription};
+//! ```
+//! use indexer::handler::{Handler, HandlerContext, HandlerError};
+//! use indexer::types::{Envelope, Subscription};
 //! use async_trait::async_trait;
 //!
 //! struct MyHandler;

@@ -117,7 +117,7 @@ impl<F: Filter> Filter for Option<F> {
 
 pub(in crate::modules::sdlc) struct WatermarkFilter<'a> {
     pub column: &'a str,
-    pub last: DateTime<Utc>,
+    pub floor: Option<DateTime<Utc>>,
     pub current: DateTime<Utc>,
 }
 
@@ -130,15 +130,17 @@ impl Filter for WatermarkFilter<'_> {
     }
 
     fn params(&self) -> Vec<(String, Value)> {
+        let last = self.floor.unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
         vec![
             (
                 "last_watermark".into(),
-                Value::String(self.last.format(TIMESTAMP_FORMAT).to_string()),
+                Value::String(last.format(TIMESTAMP_FORMAT).to_string()),
             ),
             (
                 "watermark".into(),
                 Value::String(self.current.format(TIMESTAMP_FORMAT).to_string()),
             ),
+            ("is_incremental".into(), Value::Bool(self.floor.is_some())),
         ]
     }
 }
@@ -647,7 +649,7 @@ mod tests {
         let plan = test_plan(vec!["id"], 500);
         let prepared = plan.prepare().with(WatermarkFilter {
             column: &plan.watermark_column,
-            last: Utc::now(),
+            floor: Some(Utc::now()),
             current: Utc::now(),
         });
         let sql = prepared.to_sql().expect("renders extract SQL");
@@ -663,6 +665,21 @@ mod tests {
         let map = params.as_object().unwrap();
         assert!(map.contains_key("last_watermark"));
         assert!(map.contains_key("watermark"));
+        assert_eq!(map["is_incremental"], Value::Bool(true));
+    }
+
+    #[test]
+    fn watermark_filter_without_floor_is_a_full_load_from_the_epoch() {
+        let plan = test_plan(vec!["id"], 500);
+        let prepared = plan.prepare().with(WatermarkFilter {
+            column: &plan.watermark_column,
+            floor: None,
+            current: Utc::now(),
+        });
+        let params = prepared.params();
+        let map = params.as_object().unwrap();
+        assert_eq!(map["last_watermark"], "1970-01-01 00:00:00.000000");
+        assert_eq!(map["is_incremental"], Value::Bool(false));
     }
 
     #[test]
@@ -734,7 +751,7 @@ mod tests {
             .prepare()
             .with(WatermarkFilter {
                 column: &plan.watermark_column,
-                last: Utc::now(),
+                floor: Some(Utc::now()),
                 current: Utc::now(),
             })
             .with(TraversalPathFilter {

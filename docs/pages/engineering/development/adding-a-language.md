@@ -52,7 +52,8 @@ Sizes from the C and C++ MRs. All paths relative to `crates/`.
 
 | File | Change | LoC |
 |---|---|---:|
-| `treesitter-visit/Cargo.toml` | +1 optional `tree-sitter-<lang>` dep; +1 `builtin-parser` feature entry | +2 |
+| `Cargo.toml` (root) | +1 `tree-sitter-<lang>` entry in `[workspace.dependencies]` | +1 |
+| `treesitter-visit/Cargo.toml` | +1 optional `tree-sitter-<lang>` workspace dep; +1 `builtin-parser` feature entry | +2 |
 | `treesitter-visit/src/languages.rs` | +1 `SupportLang` variant; +1 `get_ts_language` arm | +8 |
 | `code-graph/src/v2/config/lang.rs` | +1 `define_languages!` row | +7 |
 | `code-graph/src/v2/langs/generic/<lang>.rs` | `<Lang>Dsl` + `<Lang>Rules` | 240–500 |
@@ -142,11 +143,19 @@ end-to-end before starting.
 
 ### Step 1 — Wire the tree-sitter grammar
 
+Add the grammar version to the root `Cargo.toml`:
+
+```toml
+[workspace.dependencies]
+tree-sitter-<lang> = "0.X.Y"
+```
+
+Inherit it as an optional dependency in
 `crates/code-graph/treesitter-visit/Cargo.toml`:
 
 ```toml
 [dependencies]
-tree-sitter-<lang> = { version = "0.X.Y", optional = true }
+tree-sitter-<lang> = { workspace = true, optional = true }
 
 [features]
 builtin-parser = [
@@ -390,7 +399,7 @@ and to the language list in [`docs/docs-gitlab-com/_index.md`](../../../docs-git
 
 ## Pre-flight checklist
 
-- [ ] tree-sitter grammar in `treesitter-visit/Cargo.toml` + `builtin-parser` feature
+- [ ] tree-sitter grammar in root `[workspace.dependencies]`, inherited in `treesitter-visit/Cargo.toml` + `builtin-parser` feature
 - [ ] `SupportLang` variant + dispatch in `treesitter-visit/src/languages.rs`
 - [ ] `Language` row in `define_languages!`
 - [ ] `<Lang>Dsl` implements `DslLanguage` (scopes + refs + imports)

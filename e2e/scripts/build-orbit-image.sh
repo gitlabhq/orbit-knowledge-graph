@@ -24,7 +24,7 @@ else
     (
       set -e
       # Drop DWARF: ~5x smaller image; backtraces keep function names.
-      CARGO_PROFILE_DEV_DEBUG=0 cargo build -p orbit-server --locked
+      CARGO_PROFILE_DEV_DEBUG=0 cargo build -p orbit-server --locked --features libduckdb-sys/bundled
       cp target/debug/gkg-server .
       docker build -t "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" -f e2e/Dockerfile.e2e .
       docker push "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
@@ -37,4 +37,13 @@ else
         --field-selector=status.phase=Pending 2>/dev/null || true
     ) &
   fi
+fi
+
+export E2E_CLI_IMAGE="${CI_REGISTRY_IMAGE}/orbit-cli-e2e:${CI_COMMIT_SHORT_SHA}"
+E2E_CLI_PID=""
+if docker manifest inspect "$E2E_CLI_IMAGE" >/dev/null 2>&1; then
+  echo "Reusing existing image ${E2E_CLI_IMAGE}"
+else
+  bash scripts/ci/fetch-orbit-cli.sh "$E2E_CLI_IMAGE" > e2e-cli-image.log 2>&1 &
+  E2E_CLI_PID=$!
 fi

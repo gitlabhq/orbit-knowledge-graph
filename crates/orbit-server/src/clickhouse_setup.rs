@@ -7,7 +7,7 @@ use orbit_log_fields::info;
 use orbit_server_config::{AppConfig, ClickHouseConfiguration};
 use orbit_utils::clickhouse::quote_sql_literal;
 
-const CONTRACT: &str = include_str!(concat!(env!("CONFIG_DIR"), "/clickhouse-setup.sql"));
+const CONTRACT: &str = include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/clickhouse-setup.sql"));
 
 pub async fn run(config: &AppConfig) -> anyhow::Result<()> {
     let setup = &config.clickhouse_setup;

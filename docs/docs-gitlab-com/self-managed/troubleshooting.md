@@ -38,6 +38,15 @@ This issue occurs on AWS when GitLab connects to one fixed Network Load Balancer
 
 To resolve this issue, turn on cross-zone load balancing in the webserver Service annotations.
 
+## Error: `Unable to verify GitLab credits`
+
+This issue occurs when the GitLab Orbit webserver cannot verify your subscription with `customers.gitlab.com`, for example when a firewall blocks the connection.
+
+To resolve this issue, allow outbound HTTPS from the webserver to `customers.gitlab.com`.
+For more information, see [Billing connections](networking.md#billing-connections).
+
+If the error persists after you allow access, contact GitLab Support.
+
 ## Error: `ontology archive vNN is missing`
 
 The dispatcher stops with `ontology archive vNN is missing; seed the catalog from the exact deployed release before upgrading`.

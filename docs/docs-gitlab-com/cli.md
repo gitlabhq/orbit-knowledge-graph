@@ -21,7 +21,7 @@ title: GitLab Orbit CLI
   - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
   - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) from experiment to beta in GitLab 19.1.
 - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- GitLab Orbit queries [changed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/265010) to accept GQL by default in GitLab 19.4.4, 19.5.2, and 19.6.
+- GitLab Orbit queries [changed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/265010) to accept GQL by default in GitLab 19.4.7, 19.5.5, and 19.6.
 
 {{< /history >}}
 
@@ -102,7 +102,7 @@ Commands that use only the local graph need no GitLab account and no network.
 | `status` | GitLab Orbit API | Show the health of the service, or the indexing progress of a group or project. |
 | `schema` | GitLab Orbit API | Show the node types, properties, and relationships. |
 | `skills get` | GitLab Orbit API when a GitLab credential is available, otherwise the built-in copy of `orbit` | Print the agent skill files, such as `orbit` and `orbit-start`. Only `orbit` has a built-in copy. |
-| `grep` | Local graph and GitLab Orbit API | Search every line of code, tests, configuration, and documentation, with the enclosing definitions, and the merge requests, issues, and comments of your GitLab group. |
+| `grep` | Local graph and GitLab Orbit API | Search every line of code, tests, configuration, and documentation, with the enclosing definitions. With `mr:`, `issue:`, or `comment:`, search the merge requests, issues, and comments of your GitLab group. |
 | `context` | Local graph and GitLab Orbit API | Show the source of definitions with their callers and tests, and read merge requests, issues, pipelines, and jobs. |
 | `workspace index` | Local graph | Index a repository, or a directory of repositories. |
 | `workspace list` | Local graph | List the indexed repositories. |
@@ -150,7 +150,7 @@ glab orbit query "<query>"
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
 | `<query>` | string | Yes, if you do not use `--file` | The query text in the [GitLab Orbit query language](queries/query-language.md). |
-| `--file` | string | No | A file that holds the request body, or `-` for stdin. The body is a JSON object, such as `{"query": "MATCH ...", "response_format": "raw"}`. |
+| `--file` | string | No | A file that holds the request body, or `-` for `stdin`. The body is a JSON object, such as `{"query": "MATCH ...", "response_format": "raw"}`. |
 | `--response-format` | string | No | `llm` (default) for [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md), a compact text format with one table for each node type and a table of relationships. `raw` for JSON. `gql` for a text table. |
 
 This query returns five projects in a group. Replace `my-group` with the full path of your group:
@@ -234,7 +234,7 @@ To index without blocking a shell command that has a short timeout, use these op
 | `--wait` | Wait for a running index, then index in the foreground. Waiting is the default. |
 | `--timeout <seconds>` | How long to wait for a running index or open readers before the command exits with code `75`. Default: `ORBIT_WAIT_TIMEOUT_MS` if set, else 600 seconds. |
 
-With `--async`, if open readers still hold the locks after up to 30 seconds, the command exits with code `75` and prints the `log` file path to stderr.
+With `--async`, if open readers still hold the locks after up to 30 seconds, the command exits with code `75` and prints the `log` file path to `stderr`.
 The background index keeps waiting, so you don't need to run it again.
 
 Commands that read the local graph also wait for a running index, up to 10 minutes, then exit with code `75`.
@@ -277,9 +277,9 @@ src/main.py
 - `grep` and `context` index files that you edited after the last index.
   If indexing an edited file takes longer than two seconds or fails, `grep` marks the file `(edited since index)`
   and does not show its definitions. For more information, see [troubleshooting](troubleshooting.md#files-marked-edited-since-index).
-- In a clone of a GitLab project, a search without paths also searches the merge requests, issues, and comments
-  of the group of the `origin` remote, and prints them after the local results.
-  To search only GitLab, start the query with `mr:`, `issue:`, `commit:`, or `comment:`.
+- A search without paths searches only local code.
+  To search the merge requests, issues, and comments of the group of the `origin` remote,
+  start the query with `mr:`, `issue:`, `commit:`, or `comment:`.
 
 To read the source of a definition and its callers, pass its name to `context`:
 
@@ -323,7 +323,7 @@ The CLI reads these environment variables:
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Success. |
-| `1` | Other error, for example a missing credential, or HTTP `402`, `422`, or `503`. See stderr. `grep` also exits with `1`, with no error message, when nothing matches. |
+| `1` | Other error, for example a missing credential, or HTTP `402`, `422`, or `503`. See `stderr`. `grep` also exits with `1`, with no error message, when nothing matches. |
 | `2` | A command-line usage error, or HTTP `404`: the path does not exist, or the endpoint is not available. `status` also exits with `2` when your user has no access to GitLab Orbit. |
 | `3` | HTTP `401`. The token is missing or expired. |
 | `4` | HTTP `403`. No group with GitLab Orbit turned on is available to you, or the API denied access for another reason. |

@@ -6,6 +6,7 @@ use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Compact, Node, Storage, Tree};
 
 use super::matching::matches;
+use super::rules::RewriteStage;
 use super::types::{Cap, EdgeCtx, Out, Pat, Rewrite, TagEntry, Text, Tf};
 
 /// How captured subtrees enter a template. The target is about to be removed,
@@ -228,6 +229,41 @@ pub fn apply_rewrites(
     sentinels: &[&Sentinel],
 ) -> Result<(), Killed> {
     apply_rewrites_inner(t, lang, rules, false, None, sentinels, apply_structure).map(drop)
+}
+
+/// Applies a stage once, or until a pass replaces no node when it is
+/// `repeat`. The sentinels bound a stage that never settles.
+pub fn apply_stage(
+    t: &mut Tree,
+    lang: &Lang,
+    stage: &RewriteStage,
+    sentinels: &[&Sentinel],
+) -> Result<(), Killed> {
+    if !stage.repeat {
+        return apply_rewrites(t, lang, &stage.rules, sentinels);
+    }
+    loop {
+        let replaced = std::cell::Cell::new(false);
+        apply_rewrites_inner(
+            t,
+            lang,
+            &stage.rules,
+            false,
+            None,
+            sentinels,
+            |t, lang, target, rule, caps, edge_ctx| {
+                let fired = apply_structure(t, lang, target, rule, caps, edge_ctx);
+                if fired && t.storage.is_removed(target) {
+                    replaced.set(true);
+                }
+                fired
+            },
+        )?;
+        if !replaced.get() {
+            return Ok(());
+        }
+        sentinels.iter().try_for_each(|s| s.check())?;
+    }
 }
 
 pub fn apply_rewrites_with_edges(

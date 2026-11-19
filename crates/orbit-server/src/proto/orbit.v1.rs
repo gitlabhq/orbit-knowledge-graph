@@ -183,6 +183,12 @@ pub struct SchemaProperty {
     /// human-readable description from the ontology
     #[prost(string, tag = "5")]
     pub description: ::prost::alloc::string::String,
+    /// whether clients may text-search the property with CONTAINS, STARTS WITH, or ENDS WITH; false for enum, virtual, admin_only, non-filterable, non-text, and like_allowed: false properties; populated when expanded
+    #[prost(bool, optional, tag = "6")]
+    pub text_searchable: ::core::option::Option<bool>,
+    /// returned in neighbor and path results and when a query selects no columns; false for admin_only properties; populated when expanded
+    #[prost(bool, optional, tag = "7")]
+    pub default_column: ::core::option::Option<bool>,
 }
 /// A named relationship type with its valid source/target combinations.
 #[derive(Clone, PartialEq, ::prost::Message)]

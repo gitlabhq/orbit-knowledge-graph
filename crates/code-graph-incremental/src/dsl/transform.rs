@@ -351,6 +351,7 @@ impl Tf {
                 .count();
                 lang.syms.intern(&index.to_string())
             }
+            Tf::Default(_) => lang.syms.intern(&self.apply_to_str(t.text_at(id, lang))),
             Tf::Pipeline(steps) => {
                 let mut s = t.text_at(id, lang).to_string();
                 for step in steps {

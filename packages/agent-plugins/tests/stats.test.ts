@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { cypherSegments, hopsOf, queryOf } from '../core/cypher.ts'
+import { cypherSegments, hopsOf, queryOf, variablesOf } from '../core/cypher.ts'
 import { apiCallsFor, compact, countedTotal, graphStatus, grouped, identityLookups, parseResponse, scopeIdentity, type ScopeTotal } from '../core/stats.ts'
 
 test('the llm format counts nodes by entity and edges', () => {
@@ -19,6 +19,28 @@ test('the llm format counts nodes by entity and edges', () => {
 test('the raw JSON format counts nodes and edges', () => {
   const text = JSON.stringify({ result: { nodes: [{ type: 'User' }, { type: 'User' }], edges: [{}] } })
   expect(parseResponse(text)).toMatchObject({ nodes: 2, edges: 1, byEntity: { User: 2 } })
+})
+
+const rawAggregation = (body: object) => JSON.stringify({ result: { query_type: 'aggregation', nodes: [], edges: [], ...body } })
+
+test('a grouped raw JSON aggregation counts its rows instead of reading as an empty traversal', () => {
+  const text = rawAggregation({
+    columns: [{ name: 'n', function: 'count', target: 'mr' }],
+    group_columns: [{ name: 'mr_state', kind: 'property', node: 'mr', property: 'state' }],
+    rows: [{ mr_state: 'merged', n: 2450 }, { mr_state: 'closed', n: 690 }, { mr_state: 'opened', n: 76 }],
+  })
+  expect(parseResponse(text)).toMatchObject({ kind: 'aggregation', grouped: true, nodes: 0, aggregated: 3216 })
+})
+
+test('an ungrouped raw JSON aggregation leaves out a DISTINCT count', () => {
+  const text = rawAggregation({
+    columns: [
+      { name: 'count_mr', function: 'count', target: 'mr' },
+      { name: 'count_distinct_mr_author_id', function: 'count', target: 'mr', property: 'author_id' },
+    ],
+    rows: [{ count_mr: 3222, count_distinct_mr_author_id: 111 }],
+  })
+  expect(parseResponse(text)).toMatchObject({ kind: 'aggregation', grouped: false, aggregated: 3222, counted: [{ target: 'mr', total: 3222 }] })
 })
 
 test('an aggregation counts the nodes its count columns cover', () => {
@@ -136,6 +158,44 @@ test('the query is read from the command, quotes undone', () => {
   expect(queryOf('echo "glab orbit query \\"MATCH (n) RETURN n\\""')).toBe('')
 })
 
+test('the query of a --file - call is read from its heredoc envelope', () => {
+  const query = "MATCH (p:Project {full_path: 'a/b'})<-[:IN_PROJECT]-(mr:MergeRequest) RETURN count(mr) AS n"
+  expect(queryOf(`orbit query --file - <<'EOF2'\n${JSON.stringify({ query })}\nEOF2`)).toBe(query)
+  expect(queryOf(`glab orbit query --response-format raw --file - <<EOF\n${JSON.stringify({ query })}\nEOF\n`)).toBe(query)
+  expect(queryOf(`orbit query --file - <<-EOF\n\t${JSON.stringify({ query })}\n\tEOF`)).toBe(query)
+})
+
+test('a --file - query is read from the heredoc of its own command', () => {
+  const users = JSON.stringify({ query: 'MATCH (u:User) RETURN u' })
+  const mrs = JSON.stringify({ query: 'MATCH (mr:MergeRequest) RETURN mr' })
+  expect(queryOf(`cat > notes.json <<'EOF'\n${users}\nEOF\norbit query --file - <<'EOF'\n${mrs}\nEOF`)).toBe('MATCH (mr:MergeRequest) RETURN mr')
+  expect(queryOf(`orbit query --file - <<'END-JSON'\n${mrs}\nEND-JSON`)).toBe('MATCH (mr:MergeRequest) RETURN mr')
+  expect(queryOf(`cat <<'EOF'\n${users}\nEOF\norbit query --file - < q.json`)).toBe('')
+  expect(queryOf(`cat > notes.json <<'EOF'\n${users}\nEOF\norbit query --file -`)).toBe('')
+  expect(queryOf(`orbit query --file - <<'EOF' < q.json\n${mrs}\nEOF`)).toBe('')
+  expect(queryOf(`orbit query --file - <<EOF\n${mrs}\n\tEOF`)).toBe('')
+})
+
+test('a --file - query is read from a bare cat heredoc piped into it, or from a here-string', () => {
+  const mrs = JSON.stringify({ query: 'MATCH (mr:MergeRequest) RETURN mr' })
+  expect(queryOf(`cat <<'EOF' | orbit query --file -\n${mrs}\nEOF`)).toBe('MATCH (mr:MergeRequest) RETURN mr')
+  expect(queryOf(`cat - <<EOF | glab orbit query --file -\n${mrs}\nEOF`)).toBe('MATCH (mr:MergeRequest) RETURN mr')
+  expect(queryOf(`orbit query --file - <<< '${mrs}'`)).toBe('MATCH (mr:MergeRequest) RETURN mr')
+  expect(queryOf(`cat notes.json <<'EOF' | orbit query --file -\n${mrs}\nEOF`)).toBe('')
+  expect(queryOf(`cat <<'EOF' | jq . | orbit query --file -\n${mrs}\nEOF`)).toBe('')
+  expect(queryOf(`cat <<'EOF' | orbit query --file - < q.json\n${mrs}\nEOF`)).toBe('')
+  expect(queryOf(`orbit query --file q.json <<< '${mrs}'`)).toBe('')
+  expect(queryOf(`orbit query --file - < '${mrs}'`)).toBe('')
+})
+
+test('a --file call with no readable envelope has no query', () => {
+  expect(queryOf('orbit query --file -')).toBe('')
+  expect(queryOf('cat q.json | orbit query --file -')).toBe('')
+  expect(queryOf("orbit query --file - <<'EOF'\nnot json\nEOF")).toBe('')
+  expect(queryOf(`orbit query --file - <<'EOF'\n${JSON.stringify({ query: 7 })}\nEOF`)).toBe('')
+  expect(queryOf(`orbit query --file q.json <<'EOF'\n${JSON.stringify({ query: 'MATCH (n) RETURN n' })}\nEOF`)).toBe('')
+})
+
 test('the graph total sums every entity in every domain of graph-status', () => {
   const json = JSON.stringify({
     indexing: { state: 'READY' },
@@ -185,6 +245,29 @@ test('API calls replaced follow the GraphQL minimum: pages of 100, joins nested'
   expect(apiCallsFor(total)).toBe(1)
   expect(apiCallsFor(parseResponse('domains[1]:\n  - name: code_review'))).toBe(0)
   expect(apiCallsFor(parseResponse(JSON.stringify({ result: { nodes: [{ type: 'User' }], edges: [] } })))).toBe(1)
+})
+
+test('a total costs one call only when its GraphQL list has a count field, otherwise pages of 100', () => {
+  const total = (target: string, n: number) =>
+    parseResponse(`query_type: aggregation\ncolumns[1]{name,function,target}:\n  n,count,${target}\nrows[1]{n}:\n  ${n}\npagination:\n  has_more: false\n`)
+  const members = 'MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 9970}) RETURN count(DISTINCT u) AS n'
+  expect(total('u', 3357).counted).toEqual([{ target: 'u', total: 3357 }])
+  expect(apiCallsFor(total('u', 3357), members)).toBe(34)
+  expect(apiCallsFor(total('u', 3357), 'MATCH (g:Group {id: 9970})<-[:MEMBER_OF]-(u:User) RETURN count(u) AS n')).toBe(34)
+  expect(apiCallsFor(total('u', 3357), 'MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN count(DISTINCT u) AS n')).toBe(1)
+  expect(apiCallsFor(total('mr', 27), 'MATCH (u:User {id: 1})-[:REVIEWER]->(mr:MergeRequest) RETURN count(mr) AS n')).toBe(1)
+  expect(apiCallsFor(total('c', 1250), 'MATCH (c:Commit)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN count(c) AS n')).toBe(13)
+  expect(apiCallsFor(total('u', 3357))).toBe(1)
+})
+
+test('pattern variables carry their label and the relationship types next to them', () => {
+  const vars = variablesOf(
+    "MATCH (u)-[r:MEMBER_OF|:AUTHORED*1..2 {since: 1}]->(g:Group {id: 9970}), (u:User)<-[:REVIEWER]-(mr) WHERE mr.title = '(u:Commit)' RETURN count(u) AS n",
+  )
+  expect(vars.get('u')).toEqual({ label: 'User', relationships: new Set(['MEMBER_OF', 'AUTHORED', 'REVIEWER']) })
+  expect(vars.get('g')).toEqual({ label: 'Group', relationships: new Set(['MEMBER_OF', 'AUTHORED']) })
+  expect(vars.get('mr')).toEqual({ label: '', relationships: new Set(['REVIEWER']) })
+  expect(variablesOf("CALL db.schema('User')").size).toBe(0)
 })
 
 const group = (key: string, total: number, id: string, path: string): ScopeTotal => ({ key, total, identity: { kind: 'group', id, path } })

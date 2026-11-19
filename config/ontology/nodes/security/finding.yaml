@@ -118,6 +118,7 @@ pipelines:
       tables: [siphon_security_findings]
       order_by: [traversal_path, id, partition_number]
       query: finding.sql.j2
+      partition_count: 5
     transform:
       type: datafusion
       edges:

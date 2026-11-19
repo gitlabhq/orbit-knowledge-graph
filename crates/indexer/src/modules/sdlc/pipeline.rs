@@ -572,7 +572,7 @@ mod tests {
         plan.prepare()
             .with(crate::modules::sdlc::plan::WatermarkFilter {
                 column: &plan.watermark_column,
-                last: DateTime::<Utc>::UNIX_EPOCH,
+                floor: None,
                 current: test_watermark(),
             })
     }

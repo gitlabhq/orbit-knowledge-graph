@@ -40,18 +40,18 @@ check "webserver probe port" "127.0.0.1:9100" "$(yq '.probe_server.bind_address'
 # restore_file_skips_zero: a recorded zero (killed session) restores to 1, others verbatim.
 SCALED=()
 kc() { SCALED+=("$*"); }
-printf 'gkg-webserver=1\ngkg-indexer-sdlc=0\ngkg-dispatcher=2\n' >"$TMP/state"
+printf 'orbit-webserver=1\norbit-indexer-sdlc=0\norbit-dispatcher=2\n' >"$TMP/state"
 restore_from_state_file "$TMP/state" 2>/dev/null
-check "webserver restored" "-n gitlab scale deploy/gkg-webserver --replicas=1" "${SCALED[0]}"
-check "zero becomes one" "-n gitlab scale deploy/gkg-indexer-sdlc --replicas=1" "${SCALED[1]}"
-check "dispatcher restored" "-n gitlab scale deploy/gkg-dispatcher --replicas=2" "${SCALED[2]}"
+check "webserver restored" "-n gitlab scale deploy/orbit-webserver --replicas=1" "${SCALED[0]}"
+check "zero becomes one" "-n gitlab scale deploy/orbit-indexer-sdlc --replicas=1" "${SCALED[1]}"
+check "dispatcher restored" "-n gitlab scale deploy/orbit-dispatcher --replicas=2" "${SCALED[2]}"
 check "state file removed" "no" "$([[ -f "$TMP/state" ]] && echo yes || echo no)"
 
 # endpointslice carries the host ip and the service port name.
 slice="$(endpointslice_yaml 192.168.106.1)"
 check "slice address" "192.168.106.1" "$(yq '.endpoints[0].addresses[0]' <<<"$slice")"
 check "slice port name" "grpc" "$(yq '.ports[0].name' <<<"$slice")"
-check "slice service label" "gkg-webserver" "$(yq '.metadata.labels."kubernetes.io/service-name"' <<<"$slice")"
+check "slice service label" "orbit-webserver" "$(yq '.metadata.labels."kubernetes.io/service-name"' <<<"$slice")"
 
 # host_ip honours the override without touching the cluster.
 check "host ip override" "10.0.0.9" "$(ORBIT_DEV_HOST_IP=10.0.0.9 host_ip)"

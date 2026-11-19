@@ -1,0 +1,5 @@
+# Documentation
+- source: /docs/docs-gitlab-com/(.+?/)_index\.md/  # docs/docs-gitlab-com/self-managed/_index.md
+  public: '\1'                                     # self-managed/
+- source: /docs/docs-gitlab-com/(.+?)\.md/         # docs/docs-gitlab-com/cli.md
+  public: '\1/'                                    # cli/

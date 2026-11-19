@@ -3,6 +3,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 log "E2E Setup (SHA: $E2E_SHA)"
 
+if [[ -z "$E2E_EXTERNAL_GITLAB_NS" ]]; then
 "$E2E_DIR/scripts/cleanup-stale-namespaces.sh"
 
 # Clean cluster-scoped resources orphaned by previous e2e runs whose owning
@@ -44,6 +45,8 @@ for r in json.load(sys.stdin).get('items', []):
   done
 done
 
+fi
+
 # Generate random credentials
 log "Generating secrets"
 : "${E2E_JWT_KEY:=$(openssl rand -base64 32)}"
@@ -66,8 +69,9 @@ export E2E_PG_GITLAB_PASS E2E_PG_POSTGRES_PASS E2E_PG_REPLICATION_PASS E2E_REDIS
 
 # Root CA for gRPC TLS (pre-existing cluster resource from cert-manager)
 log "Extracting root CA from cert-manager"
-export E2E_ROOT_CA_B64=$($KC get secret root-ca-secret -n cert-manager \
-  -o jsonpath='{.data.ca\.crt}')
+: "${E2E_ROOT_CA_B64:=$($KC get secret root-ca-secret -n cert-manager \
+  -o jsonpath='{.data.ca\.crt}')}"
+export E2E_ROOT_CA_B64
 
 # Regenerate siphon CDC config from gitlab-org/gitlab SSOT at the pinned ref.
 # Output (cdc-producer.yaml, cdc-consumer.yaml) is consumed by values/siphon.yaml.gotmpl.
@@ -76,7 +80,11 @@ log "Syncing siphon CDC tables from SSOT"
 
 # Both self-gate on their prerequisites, so they overlap the sync. Watermark
 # stays after sync: it enumerates tables the siphon consumer creates.
-"$E2E_DIR/scripts/bootstrap-instance.sh" &
+if [[ -n "$E2E_EXTERNAL_GITLAB_NS" ]]; then
+  true &
+else
+  "$E2E_DIR/scripts/bootstrap-instance.sh" &
+fi
 BOOTSTRAP_PID=$!
 "$E2E_DIR/scripts/patch-ch-dicts.sh" &
 DICTS_PID=$!

@@ -5,15 +5,18 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```no_run
 //! use ontology::Ontology;
 //!
+//! # fn load() -> Result<(), ontology::OntologyError> {
 //! // Load from embedded files (compiled into binary)
 //! let ontology = Ontology::load_embedded()?;
 //!
 //! // Or load from a directory on disk
 //! let ontology = Ontology::load_from_dir("config/ontology")?;
 //! let user = ontology.get_node("User").expect("User node exists");
+//! # Ok(())
+//! # }
 //! ```
 
 pub mod archive;
@@ -2735,6 +2738,44 @@ style:
                 node.name
             );
         }
+    }
+
+    #[test]
+    fn text_searchable_and_default_column_follow_field_rules() {
+        let ontology = Ontology::load_embedded().expect("embedded ontology loads");
+        let field = |node: &str, name: &str| {
+            ontology
+                .get_node(node)
+                .and_then(|n| n.fields.iter().find(|f| f.name == name))
+                .unwrap_or_else(|| panic!("{node}.{name}"))
+        };
+        for (node, name, searchable) in [
+            ("User", "username", true),
+            ("User", "email", false),
+            ("Vulnerability", "title", false),
+            ("File", "content", false),
+            ("Pipeline", "ref", true),
+            ("Pipeline", "status", false),
+            ("Pipeline", "id", false),
+        ] {
+            assert_eq!(
+                field(node, name).is_text_searchable(),
+                searchable,
+                "{node}.{name}"
+            );
+        }
+
+        let ontology = Ontology::load_embedded()
+            .expect("embedded ontology loads")
+            .with_default_columns("User", ["id", "username", "email"]);
+        let user = ontology.get_node("User").expect("User exists");
+        let flagged: Vec<&str> = user
+            .fields
+            .iter()
+            .filter(|f| user.is_default_column(f))
+            .map(|f| f.name.as_str())
+            .collect();
+        assert_eq!(flagged, ["id", "username"]);
     }
 
     #[test]

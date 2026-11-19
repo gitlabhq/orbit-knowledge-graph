@@ -37,6 +37,28 @@ use pipeline::Pipeline;
 
 const SDLC_CONCURRENCY_GROUP: &str = IndexerModule::Sdlc.concurrency_group();
 
+#[cfg(any(test, feature = "testkit"))]
+pub fn sql_transformations(ontology: &ontology::Ontology) -> Result<Vec<Transformation>, String> {
+    let plans = plan::build_plans(
+        ontology,
+        plan::Sizing {
+            global_batch_size: 1,
+            namespaced_batch_size: 1,
+            overrides: &Default::default(),
+        },
+    )
+    .map_err(|err| err.to_string())?;
+    Ok(plans
+        .global
+        .into_iter()
+        .chain(plans.namespaced)
+        .flat_map(|plan| match plan.transform {
+            plan::TransformSpec::DataFusion(transforms) => transforms,
+            plan::TransformSpec::Rust(_) => Vec::new(),
+        })
+        .collect())
+}
+
 pub fn sdlc_dispatch_topic_policy() -> SubscriptionConfig {
     SubscriptionConfig {
         concurrency_group: Some(SDLC_CONCURRENCY_GROUP.to_string()),

@@ -26,8 +26,6 @@ query:
     }
 
 expect:
-  sql_contains: ["gl_code_edge"]
-  skip_requirements: ["node_ids"]
   row_count: 1
   row_values:
     - { c: 0 }

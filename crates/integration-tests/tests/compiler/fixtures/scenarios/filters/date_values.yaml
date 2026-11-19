@@ -1,0 +1,19 @@
+---
+cases:
+  - name: date_field_compares_with_timestamp_field
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id IN [4000, 99031, 99032, 99033] AND wi.due_date >= wi.created_at
+        RETURN wi.title, wi.due_date LIMIT 10
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - nullIf(wi.due_date, toDate32('1970-01-01')) >= nullIf(wi.created_at, toDateTime64('1970-01-01 00:00:00', 6, 'UTC'))
+          not_contains: []
+    missing_frontends:
+      json: The original query scenario supplies only GQL.

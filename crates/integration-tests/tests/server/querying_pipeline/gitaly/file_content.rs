@@ -130,11 +130,65 @@ fn multi_blob_response(blobs: &[(String, Vec<u8>)]) -> Vec<u8> {
                 oid: oid.clone(),
                 size: content.len() as i64,
                 data: content.clone(),
-                path: Vec::new(),
+                path: oid.split_once(':').map_or("", |(_, p)| p).into(),
             }],
         }));
     }
     buf
+}
+
+/// Like Gitaly, lists a blob shared by several paths only once.
+fn gitaly_like_response(revisions: &[String], content_of: impl Fn(&str) -> Vec<u8>) -> Vec<u8> {
+    let mut seen = std::collections::HashSet::new();
+    let mut buf = Vec::new();
+    for revision in revisions {
+        let path = revision.split_once(':').map_or("", |(_, p)| p);
+        let content = content_of(path);
+        if !seen.insert(content.clone()) {
+            continue;
+        }
+        buf.extend(encode_frame(&ListBlobsResponse {
+            blobs: vec![BlobChunk {
+                oid: format!("oid-{}", seen.len()),
+                size: content.len() as i64,
+                data: content,
+                path: path.as_bytes().to_vec(),
+            }],
+        }));
+    }
+    buf
+}
+
+fn content_with_duplicates(path: &str) -> Vec<u8> {
+    match path {
+        "a/same.txt" | "b/same.txt" => b"identical content\n".to_vec(),
+        "pkg/__init__.py" | "tests/__init__.py" => Vec::new(),
+        other => format!("// content of {other}\n").into_bytes(),
+    }
+}
+
+fn duplicate_rows() -> Vec<PropertyRow> {
+    let mut paths: Vec<String> = (1..=40).map(|i| format!("src/File{i:02}.java")).collect();
+    paths.insert(7, "b/same.txt".into());
+    paths.insert(3, "a/same.txt".into());
+    paths.push("pkg/__init__.py".into());
+    paths.insert(20, "tests/__init__.py".into());
+    paths.iter().map(|p| file_row(1, "main", p)).collect()
+}
+
+fn assert_each_row_has_its_own_content(rows: &[PropertyRow], results: &[Option<ColumnValue>]) {
+    assert_eq!(results.len(), rows.len());
+    for (row, result) in rows.iter().zip(results) {
+        let Some(ColumnValue::String(path)) = row.get("path") else {
+            panic!("row without path");
+        };
+        let expected = String::from_utf8(content_with_duplicates(path)).unwrap();
+        assert_eq!(
+            result,
+            &Some(ColumnValue::String(expected)),
+            "wrong content for {path}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -234,9 +288,9 @@ async fn groups_by_project_id() {
     let projects_called = Arc::new(std::sync::Mutex::new(Vec::new()));
     let tracker = projects_called.clone();
 
-    let mock = mock_gitlab_server(move |project_id, _revisions| {
+    let mock = mock_gitlab_server(move |project_id, revisions| {
         tracker.lock().unwrap().push(project_id);
-        single_blob_response("abc", b"content")
+        gitaly_like_response(&revisions, |p| p.as_bytes().to_vec())
     })
     .await;
 
@@ -491,4 +545,105 @@ async fn same_path_different_projects_fetched_separately() {
     let mut called = projects_called.lock().unwrap().clone();
     called.sort();
     assert_eq!(called, vec![1, 2]);
+}
+
+#[tokio::test]
+async fn files_with_identical_content_each_get_their_own_content() {
+    let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let tracker = calls.clone();
+    let mock = mock_gitlab_server(move |_project_id, revisions| {
+        tracker.lock().unwrap().push(revisions.len());
+        gitaly_like_response(&revisions, content_with_duplicates)
+    })
+    .await;
+
+    let service = GitalyContentService::new(mock.client.clone());
+    let rows = duplicate_rows();
+    let row_refs: Vec<&PropertyRow> = rows.iter().collect();
+
+    let results = service
+        .resolve_batch("blob_content", &row_refs, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_each_row_has_its_own_content(&rows, &results);
+    let mut calls = calls.lock().unwrap().clone();
+    calls.sort();
+    assert_eq!(
+        calls,
+        vec![2, rows.len()],
+        "one batch, then one batch of the files whose blob was listed under another path"
+    );
+}
+
+#[tokio::test]
+async fn files_resolve_by_path_when_blobs_arrive_out_of_order() {
+    let mock = mock_gitlab_server(|_project_id, revisions| {
+        let mut reversed = revisions.clone();
+        reversed.reverse();
+        gitaly_like_response(&reversed, content_with_duplicates)
+    })
+    .await;
+
+    let service = GitalyContentService::new(mock.client.clone());
+    let rows = duplicate_rows();
+    let row_refs: Vec<&PropertyRow> = rows.iter().collect();
+
+    let results = service
+        .resolve_batch("blob_content", &row_refs, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_each_row_has_its_own_content(&rows, &results);
+}
+
+#[tokio::test]
+async fn same_path_at_two_revisions_gets_each_revision_content() {
+    let mock = mock_gitlab_server(|_project_id, revisions| {
+        gitaly_like_response(&revisions, |_| revisions[0].clone().into_bytes())
+    })
+    .await;
+
+    let service = GitalyContentService::new(mock.client.clone());
+    let row1 = file_row(1, "sha1", "lib.rs");
+    let row2 = file_row(1, "sha2", "lib.rs");
+
+    let results = service
+        .resolve_batch("blob_content", &[&row1, &row2], &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        results,
+        vec![
+            Some(ColumnValue::String("sha1:lib.rs".into())),
+            Some(ColumnValue::String("sha2:lib.rs".into())),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn three_identical_files_take_one_batch_each() {
+    let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let tracker = calls.clone();
+    let mock = mock_gitlab_server(move |_project_id, revisions| {
+        tracker.lock().unwrap().push(revisions.len());
+        gitaly_like_response(&revisions, |_| b"same".to_vec())
+    })
+    .await;
+
+    let service = GitalyContentService::new(mock.client.clone());
+    let rows: Vec<PropertyRow> = ["a.txt", "b.txt", "c.txt"]
+        .iter()
+        .map(|p| file_row(1, "main", p))
+        .collect();
+    let row_refs: Vec<&PropertyRow> = rows.iter().collect();
+
+    let results = service
+        .resolve_batch("blob_content", &row_refs, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_eq!(results, vec![Some(ColumnValue::String("same".into())); 3]);
+    assert_eq!(*calls.lock().unwrap(), vec![3, 2, 1]);
 }

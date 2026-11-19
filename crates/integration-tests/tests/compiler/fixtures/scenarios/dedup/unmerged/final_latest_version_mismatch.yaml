@@ -1,0 +1,18 @@
+---
+cases:
+  - name: A FINAL read drops the merge request when only an old version matches
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000}) WHERE mr.source_branch = 'feature-zz' RETURN mr.title, mr.source_branch, p LIMIT 10
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS mr FINAL
+          not_contains:
+            - tuple(mr.traversal_path, mr.id) IN
+    missing_frontends:
+      json: The original query scenario supplies only GQL.

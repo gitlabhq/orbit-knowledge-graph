@@ -29,12 +29,12 @@ query:
     MATCH (mr:MergeRequest)-[:HAS_DIFF]->(diff:MergeRequestDiff)-[:HAS_FILE]->(df:MergeRequestDiffFile) WHERE mr.project_id = 1000 RETURN mr.project_id, diff, df LIMIT 50
 
 expect:
-  sql_contains: ["gl_project AS _orbit_scope WHERE"]
   node_count: 4
-  skip_requirements: ["filter:project_id"]
   nodes:
     MergeRequest:
       ids: [2000]
+      filters:
+        project_id: 1000
     MergeRequestDiff:
       ids: [5000]
     MergeRequestDiffFile:

@@ -29,6 +29,7 @@ use std::hash::{Hash, Hasher};
 
 use crate::v2::types::{DefKind, ImportBindingKind, ImportMode, Range};
 use bumpalo::Bump;
+use orbit_utils::markdown::FrontMatterValues;
 use petgraph::graph::NodeIndex;
 use rust_lapper::{Interval, Lapper};
 use rustc_hash::{FxHashMap, FxHasher};
@@ -283,7 +284,6 @@ pub struct GraphDef {
     pub kind: DefKind,
     pub name: StrId,
     pub fqn: StrId,
-    pub fqn_sep: &'static str,
     pub range: Range,
     pub is_top_level: bool,
     pub metadata: Option<Box<GraphDefMeta>>,
@@ -298,6 +298,7 @@ pub struct GraphDefMeta {
     pub decorators: SmallVec<[StrId; 2]>,
     pub companion_of: Option<StrId>,
     pub is_exported: bool,
+    pub front_matter: Option<Box<FrontMatterValues>>,
 }
 
 #[derive(Debug, Clone)]
@@ -327,6 +328,7 @@ impl GraphDef {
                 decorators: m.decorators.iter().map(|s| pool.alloc(s)).collect(),
                 companion_of: m.companion_of.as_deref().map(|s| pool.alloc(s)),
                 is_exported: m.is_exported,
+                front_matter: m.front_matter.clone(),
             })
         });
         Self {
@@ -334,7 +336,6 @@ impl GraphDef {
             kind: def.kind,
             name: pool.alloc(&def.name),
             fqn: pool.alloc(def.fqn.as_str()),
-            fqn_sep: def.fqn.separator(),
             range: def.range,
             is_top_level: def.is_top_level,
             metadata,
@@ -714,6 +715,7 @@ mod tests {
                 decorators: vec![],
                 companion_of: None,
                 is_exported: true,
+                front_matter: None,
             })),
         };
         let gdef = GraphDef::from_canonical(&cdef, &mut pool);

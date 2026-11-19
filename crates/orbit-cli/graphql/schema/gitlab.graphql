@@ -119528,6 +119528,11 @@ type OrbitSchemaProperty @granularScope(skipReason: "parent_authorizes") {
   dataType: String!
 
   """
+  Indicates whether Orbit returns the property in neighbor and path results, and when a query selects no properties. Null when the Orbit server does not send it.
+  """
+  defaultColumn: Boolean
+
+  """
   Allowed values of an enum property. Empty for other properties.
   """
   enumValues: [String!]!
@@ -119541,6 +119546,11 @@ type OrbitSchemaProperty @granularScope(skipReason: "parent_authorizes") {
   Indicates whether the property can be empty.
   """
   nullable: Boolean!
+
+  """
+  Indicates whether queries can filter the property with `CONTAINS`, `STARTS WITH`, or `ENDS WITH`. Null when the Orbit server does not send it.
+  """
+  textSearchable: Boolean
 }
 
 """

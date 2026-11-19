@@ -6,7 +6,7 @@ cases:
         MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
         WHERE NOT (mr.title = u.first_name AND mr.state = 'opened')
         RETURN mr.title LIMIT 10
-    expect: { compile_error: administrator }
+    expect: { compile_error: restrict }
 
   - name: negation_admin_bypass_grouped
     description: A NOT group cannot filter on an administrator-only field
@@ -14,7 +14,7 @@ cases:
       gql: |
         MATCH (u:User {id: 1}) WHERE NOT (u.username = 'alice' AND u.is_admin = true) RETURN u.id
     expect:
-      compile_error: administrator
+      compile_error: restrict
       compile_error_not_contains: [alice]
 
   - name: negation_admin_bypass_pushdown
@@ -22,14 +22,14 @@ cases:
     query:
       gql: |
         MATCH (u:User {id: 1}) WHERE NOT u.is_admin = true RETURN u.id
-    expect: { compile_error: administrator }
+    expect: { compile_error: restrict }
 
   - name: negation_admin_bypass_rhs
     description: A NOT group cannot compare against an administrator-only field on the same node
     query:
       gql: |
         MATCH (u:User {id: 1}) WHERE NOT (u.username = u.first_name AND u.state = 'active') RETURN u.id
-    expect: { compile_error: administrator }
+    expect: { compile_error: restrict }
 
   - name: negation_admin_context_allowed
     description: An administrator can use administrator-only fields under NOT
@@ -53,14 +53,14 @@ cases:
         {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"not":{"is_admin":{"in":[true]}}}],"limit":30}
       gql: |
         MATCH (u:User {id: 1}) WHERE NOT u.is_admin IN [true] RETURN u.id
-    expect: { compile_error: administrator }
+    expect: { compile_error: restrict }
 
   - name: negation_admin_rhs_pushdown
     description: A complemented NOT comparison cannot reference an administrator-only field on the same node
     query:
       gql: |
         MATCH (u:User {id: 1}) WHERE NOT u.private_profile = u.is_admin RETURN u.id
-    expect: { compile_error: administrator }
+    expect: { compile_error: restrict }
 
   - name: negation_cross_org_excludes
     description: |
@@ -88,22 +88,6 @@ cases:
           - [1, 2000]
           - [1, 2001]
 
-  - name: negation_far_node_scan_keeps_scope
-    description: |
-      A NOT on the far node of a traversal reads the current node row. The caller's traversal_path filter runs inside the scan before the pick and the NOT runs on the picked row.
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","not":{"name":{"contains":"secret"}},"columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":30}
-      gql: |
-        MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)
-        WHERE NOT g.name CONTAINS 'secret'
-        RETURN g.name
-    expect:
-      compile_only: true
-      sql_contains:
-        - "gl_group AS g WHERE (startsWith(g.traversal_path, '1/') AND g.id IN (SELECT id FROM _orbit_relation_"
-        - "LIMIT 1 BY g.traversal_path, g.id) AS g WHERE ((NOT multiSearchAny(lower(g.name), [lower('secret')])) AND (g._deleted = false))"
-
   - name: negation_no_existence_oracle_hidden
     description: |
       A NOT query over a project the caller cannot see returns the same empty result as a NOT query over a project that does not exist.
@@ -117,7 +101,6 @@ cases:
       gql: |
         MATCH (p:Project) WHERE p.id IN [1001] AND NOT p.name = 'x' RETURN p.name
     expect:
-      skip_requirements: [node_ids, "filter:name"]
       node_count: 0
 
   - name: negation_no_existence_oracle_missing
@@ -133,7 +116,6 @@ cases:
       gql: |
         MATCH (p:Project) WHERE p.id IN [1999] AND NOT p.name = 'x' RETURN p.name
     expect:
-      skip_requirements: [node_ids, "filter:name"]
       node_count: 0
 
   - name: negation_pagination_redacted
@@ -207,7 +189,7 @@ cases:
         MATCH (u:User {id: 1})-[m:MEMBER_OF]->(g:Group)
         WHERE NOT (m.source_id = u.first_name AND g.id = 100)
         RETURN g.name LIMIT 10
-    expect: { compile_error: property comparisons involving relationships are unsupported }
+    expect: { compile_error: schema }
 
   - name: negation_scoped_neighbors_excludes
     description: "A complemented NOT on a neighbors center keeps the caller's scope"

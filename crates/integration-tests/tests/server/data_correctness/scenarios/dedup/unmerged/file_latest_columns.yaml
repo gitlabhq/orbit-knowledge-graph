@@ -15,7 +15,6 @@ cases:
         MATCH (f:File) WHERE f.project_id = 1000 AND f.commit_sha = 'aaa' RETURN f.id
 
     expect:
-      skip_requirements: ["filter:project_id", "filter:commit_sha"]
       node_count: 0
 
   - name: size_bytes_of_an_old_version
@@ -25,7 +24,6 @@ cases:
         MATCH (f:File) WHERE f.project_id = 1000 AND f.size_bytes = 10 RETURN f.id
 
     expect:
-      skip_requirements: ["filter:project_id", "filter:size_bytes"]
       node_count: 0
 
   - name: latest_values_match
@@ -35,7 +33,6 @@ cases:
         MATCH (f:File) WHERE f.project_id = 1000 AND f.commit_sha = 'bbb' AND f.size_bytes = 20 RETURN f.id, f.commit_sha, f.size_bytes
 
     expect:
-      skip_requirements: ["filter:project_id"]
       node_count: 1
       nodes:
         File:

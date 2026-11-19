@@ -130,7 +130,7 @@ stages:
         .map(|tree| {
             let mut tree: code_graph_incremental::tree::Tree = tree.into();
             for stage in &edits {
-                pattern::apply_rewrites(&mut tree, &env.lang, stage, &[]).unwrap();
+                pattern::apply_stage(&mut tree, &env.lang, stage, &[]).unwrap();
             }
             tree.prune();
             tree.into()
@@ -319,4 +319,88 @@ fn a_snapshot_from_another_format_version_is_refused_by_name() {
         error.to_string(),
         format!("snapshot format v99; this build reads v{SNAPSHOT_VERSION}")
     );
+}
+
+fn reindex_and_stage(
+    snapshot: &Path,
+    repo: &Path,
+    changed: Vec<String>,
+    removed: &[&str],
+) -> (Env, State) {
+    let (env, loaded) = State::load(snapshot, SupportLang::Markdown).unwrap();
+    for path in removed {
+        std::fs::remove_file(repo.join(path)).unwrap();
+    }
+    let changes = common::load(orbit_utils::vfs::sources::Diff {
+        root: repo,
+        paths: changed,
+    });
+    let resolved = templates::reindex(
+        Context::new(&env, changes),
+        loaded,
+        removed.iter().map(|s| s.to_string()).collect(),
+    )
+    .unwrap()
+    .into_value();
+    let staged = snapshot.with_extension("staged");
+    resolved
+        .state
+        .stage(&env, snapshot, &staged, Some(&resolved.touched))
+        .unwrap();
+    State::commit_staged(&staged, snapshot).unwrap();
+    (env, resolved.state)
+}
+
+fn links(state: &State) -> HashSet<(String, String)> {
+    state
+        .edges
+        .iter()
+        .filter(|edge| edge.kind == code_graph_incremental::edge::EdgeKind::Links)
+        .map(|edge| {
+            (
+                state.trees[edge.from_tree as usize].label.clone(),
+                state.trees[edge.to_tree as usize].label.clone(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn link_targets_removed_or_added_in_another_block_update_the_source_block() {
+    let block_of = |label: &str| twox_hash::XxHash3_64::oneshot(label.as_bytes()) % 2;
+    let other_block = |prefix: &str| {
+        (0..)
+            .map(|i| format!("{prefix}{i}.md"))
+            .find(|label| block_of(label) != block_of("index.md"))
+            .unwrap()
+    };
+    let (removed, added) = (other_block("gone"), other_block("new"));
+    let mut sources: Vec<(String, String)> = (0..100)
+        .map(|i| (format!("t{i}.md"), "# T\n".to_string()))
+        .collect();
+    sources.push((removed.clone(), "# Gone\n".to_string()));
+    sources.push((
+        "index.md".to_string(),
+        format!("[gone]({removed}) [new]({added}) [t](t0.md)\n"),
+    ));
+    let sources: Vec<(&str, &str)> = sources
+        .iter()
+        .map(|(path, content)| (path.as_str(), content.as_str()))
+        .collect();
+    let repo = tempfile::tempdir().unwrap();
+    write(repo.path(), &sources);
+    let env = Env::for_lang(SupportLang::Markdown).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let snapshot = dir.path().join("graph.bin");
+    index(&env, repo.path()).save(&env, &snapshot).unwrap();
+
+    let (_, state) = reindex_and_stage(&snapshot, repo.path(), Vec::new(), &[&removed]);
+    let (_, reloaded) = State::load(&snapshot, SupportLang::Markdown).unwrap();
+    assert_eq!(links(&reloaded), links(&state));
+
+    let changed = write(repo.path(), &[(&added, "# New\n")]);
+    let (_, state) = reindex_and_stage(&snapshot, repo.path(), changed, &[]);
+    let (_, reloaded) = State::load(&snapshot, SupportLang::Markdown).unwrap();
+    assert!(links(&state).contains(&("index.md".to_string(), added.clone())));
+    assert_eq!(links(&reloaded), links(&state));
 }

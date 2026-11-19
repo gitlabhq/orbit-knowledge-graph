@@ -1,0 +1,193 @@
+# Compiler fixtures
+
+Run `mise test:compiler`. The runner discovers YAML files recursively under
+`fixtures/`. Each fixture runs the production compiler pipeline for each
+frontend and backend, and checks the state that named phases leave behind. Most
+fixtures run through both JSON and GQL.
+
+Assertions live under `physical.<backend>.<phase>.<state field>`:
+
+```yaml
+physical:
+  clickhouse:
+    normalize:
+      input: {expect: ["(Limit 2 (Input traversal (...)))"]}
+    plan_clickhouse:
+      query_plan: {expect: ["(Scan Table(gl_user) AS u)"], point_lookup: true}
+    response_policy:
+      node: {expect: ["(Limit 3 (Project u.username AS u_username (_)))"]}
+    settings:
+      query_config: {equals: {transform_null_in: "0"}, absent: [join_order_algorithm]}
+    hydrate_plan:
+      hydration_plan: static
+    security:
+      node: {expect: ["(Filter false, ... (_))"]}
+    codegen:
+      output:
+        sql: {contains: [gl_merge_request], not_contains: [gl_edge]}
+        indexes: [{table: gl_merge_request, name: idx_title}]
+```
+
+Common targets have aliases, declared in one table in
+`integration-testkit/src/compiler/aliases.rs`:
+
+| Alias | Target |
+|---|---|
+| `logical` (top level) | `normalize.input`, or `plan_clickhouse.input` for hydration fixtures |
+| `planned`, `point_lookup` | `plan_clickhouse.query_plan` or `plan_duckdb.query_plan` |
+| `emitted` | `response_policy.node` on ClickHouse, `paginate.node` on DuckDB |
+| `final_ast` | `security.node` |
+| `hydration` | `hydrate_plan.hydration_plan` |
+| `settings` | `settings.query_config` |
+| `sql`, `indexes` | `codegen.output` |
+
+An alias and an explicit phase entry cannot set the same state field.
+
+A phase key must name a phase of that pipeline, and each state field must be one
+the phase writes. The runner rejects other keys. Each state field has one
+contract:
+
+| State field | Contract |
+|---|---|
+| `input` | Patterns on the logical tree |
+| `query_plan` | Patterns on the planned tree, and `point_lookup` |
+| `node` | Patterns on the SQL AST |
+| `query_config` | `exact`, `equals`, and `absent` on the resolved ClickHouse settings |
+| `hydration_plan` | `none`, `static`, or `dynamic` |
+| `output` | `sql` text checks, and `indexes` that the layout declares and the final query scans |
+
+The compiler fixtures binary loads the embedded query config, so `settings` sees the
+production settings, such as the query cache. The container suite runs EXPLAIN
+on the seeded ClickHouse for every fixture with `indexes`. It first adds an older
+decoy copy of each row in its own part, with string values that no fixture
+matches. With the table's other skip indexes ignored, each listed skip index must
+apply to a read of its table and prune granules. Other fixtures need no ClickHouse.
+
+After `paginate`, `Limit` shows the fetched rows (the page plus one probe row)
+and `Offset` shows the lowered SKIP. In `input`, `Limit` and `Offset` show the
+requested LIMIT and SKIP. `security` sets the user, with the same shape as a
+query scenario's `config.security`. Hydration fixtures run the hydration
+pipeline, which has no `normalize` or `paginate` phase.
+
+Set `ontology_overlay: denorm_approved` to load `config/seeds/overlays/denorm_approved/`
+for one fixture. Other fixtures keep the default ontology.
+
+Both `query.json` and `query.gql` are required. If a frontend cannot express the
+tested plan, declare its reason under `missing_frontends`. The runner rejects
+missing, blank, unknown, or redundant exception entries.
+
+```yaml
+missing_frontends:
+  json: The JSON frontend does not expose property-to-property comparisons.
+```
+
+When every language of a case compiles on a backend, the runner compares each
+language's compiled output with that of the first language, in name order,
+without a `language_differs` entry: the parameterized SQL,
+the bound parameter values and types, the hydration plan, and the result
+context. A failure names the first part that differs. If a language compiles to
+different output by design, declare its reason under `language_differs`. The
+runner rejects an entry that names no query language, has a blank reason, or
+names a language whose output matches on every backend.
+
+```yaml
+language_differs:
+  gql: GQL returns properties in RETURN order, which JSON cannot express.
+```
+
+A file can hold several fixtures in a `cases` list. Every other top-level key
+is a default for each case, and each case needs its own `name`.
+
+The fixtures cover access-path choices and their important eligibility guards.
+
+A fixture that the compiler must reject sets `rejected` under a backend:
+
+```yaml
+physical:
+  clickhouse:
+    rejected:
+      phase: gql_parse
+      reason: schema
+      contains: ["expected end of query, ORDER BY, SKIP, LIMIT, or DEBUG"]
+      not_contains: [EOI, function]
+```
+
+`phase` is the phase that returns the error, and `reason` is its rejection
+reason. `contains` and `not_contains` check the error message. Each field takes
+one value or a `{json, gql}` map. Phases at or after the rejecting phase cannot
+have assertions. Every rejection is also checked for a traversal path, an email
+address, a physical table name, and the private fixture markers.
+
+`rejections/` holds the error-message checks. Data-correctness scenarios check
+the rejection reason and leak checks, never the wording.
+
+`scenarios/` holds the compiler checks for the data-correctness scenarios. It
+mirrors the scenario tree: `scenarios/search/filter_starts_with.yaml` checks the
+query in `server/data_correctness/scenarios/search/filter_starts_with.yaml`.
+Production route cases stay in `edge_scans/production_variant_routes.yaml`.
+
+CTE assertions refer to top-level named query definitions, not execution order.
+Use one of these forms in a pattern block:
+
+```yaml
+ctes:
+  absent: true
+```
+
+```yaml
+ctes:
+  exact_order: [_candidate_p, _candidate_mr]
+```
+
+The exact order must list every top-level CTE and can use bound captures.
+Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
+`absent: false`, and combining both forms are rejected.
+
+## Coverage
+
+| Area | Fixtures |
+|---|---|
+| Stored reads, routes, metadata, and node fallback | `edge_scans/`, `relations/` |
+| FK-backed relationships and direction guards | `foreign_keys/` |
+| Chains, branches, convergence, and relation reuse | `relations/` |
+| Bounded expansion and incoming orientation | `variable_hops/` |
+| Aggregation inputs and latest-row behavior | `aggregation/` |
+| Neighbor access and routing | `neighbors/` |
+| Path-finding frontiers and scope | `path_finding/` |
+| Hydration projections and path filters | `hydration/` |
+| Filters and result projections | `filters/`, `projections/` |
+| SKIP/LIMIT windows, tie-breakers, and text budgets | `pagination/` |
+| Parameter values inlined into rendered SQL | `rendering/` |
+| DuckDB plans and generated SQL | `dialects/duckdb/` |
+
+## Coverage boundaries
+
+- JSON incoming variable hops have a dedicated fixture. GQL normalizes the
+  equivalent pattern into outgoing edges, so it exercises a different plan.
+- The testkit's `hydration_planning_selects_paths_before_sql_rendering` test
+  checks 256/257 dynamic paths, 257 static paths, and budget-driven mode changes.
+  The YAML fixture independently covers the large dynamic mode.
+- The explain view flattens associative OR expressions. Static prefix fixtures
+  verify predicate content, but do not assert the internal balanced-tree depth.
+- Virtual-property hydration and backend code-generation optimizations are
+  outside this harness.
+
+## Keep in Rust
+
+These assertions exceed the current YAML contract. Keep them active; they are
+not ignored tests or missing fixture migrations.
+
+| Tests | Reason |
+|---|---|
+| `lower::hydration::tests::large_dynamic_tp_sets_emit_array_exists` | Checks the number and length of bound array parameters, which explain does not expose |
+| `lower::hydration::tests::large_static_tp_sets_emit_or` | Pins 257 static predicates and rejects array mode; complements the dynamic YAML fixture |
+| `lower::hydration::tests::{dynamic,static}_tp_filter_precedes_id_filter` | Checks serialized predicate order; partial YAML item matching is unordered |
+| `compiler::hydration_planning_selects_paths_before_sql_rendering` | Exercises the 256/257 boundary and budget-driven mode selection together |
+| `compiler_legacy::ontology::hydration_widens_paths_to_segment_budget` | Checks bound path arrays, shared parameters, and ancestor coverage across generated paths |
+| Compiler scope, role, settings, virtual-property, and telemetry tests | Exercise phases or observable outputs outside compiler fixture assertions |
+| Compiler dialect and parameter-rendering tests | Check final backend SQL or parameter bindings, rather than the shared SQL AST |
+| Input deserialization, normalization, schema-limit, validation-error, GQL hashing, hydration-metadata, and DDL tests | Check contracts that a valid query through the harness does not reach |
+
+Keep a Rust test until a fixture checks every one of its assertions. For the
+compiler fixture layer and its limits, see
+[Plan-shape fixtures](../../../../docs/pages/engineering/testing/integration/compiler-and-code-graph.md#plan-tests).

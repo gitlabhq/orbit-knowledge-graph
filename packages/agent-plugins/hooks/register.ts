@@ -110,7 +110,7 @@ export const register: Register = (on) => {
         if (call.label === QUERY_LABEL && text !== null) {
           const parsed = parseResponse(text)
           stats.nodes += parsed.nodes + parsed.aggregated
-          stats.apiCalls += apiCallsFor(parsed)
+          stats.apiCalls += apiCallsFor(parsed, queryOf(command))
           stats.edges += parsed.edges + parsed.aggregated * hopsOf(queryOf(command))
           const lookUps: { key: string; flags: readonly string[] }[] = scopesOf(queryOf(command))
             .filter((scope) => !projectTotals.has(scope.key))

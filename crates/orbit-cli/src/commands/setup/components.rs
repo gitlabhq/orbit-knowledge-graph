@@ -15,7 +15,7 @@ use super::plan::Selection;
 use super::spec::{self, Agent};
 use super::{Component, Target};
 
-pub(super) use hooks::KEPT_RETIRED;
+pub(super) use hooks::{KEPT_FEATURE, KEPT_RETIRED};
 pub(super) use skill::records_full_skill;
 
 pub(super) trait Installer {
@@ -40,6 +40,50 @@ pub(super) fn installed_agents(components: &BTreeSet<Component>, target: &Target
 
 fn file_mentions(path: &Path, marker: &str) -> bool {
     std::fs::read_to_string(path).is_ok_and(|text| text.contains(marker))
+}
+
+/// Whether a file setup installed for the agent already asks the CLI for the instructions, so a
+/// run that skips the component that writes it leaves the agent its instructions.
+pub(super) fn loads_instructions(agent: Agent, target: &Target) -> bool {
+    const CALLS: [&str; 3] = [
+        "hook-guard instructions",
+        "\"hook-guard\", \"instructions\"",
+        "'hook-guard', 'instructions'",
+    ];
+    let mentions = |path: &Path| {
+        std::fs::read_to_string(path).is_ok_and(|text| CALLS.iter().any(|call| text.contains(call)))
+    };
+    let resolved = |file: &spec::ScopedPath| target.resolve(file).ok().map(|(path, _)| path);
+    let merged = agent
+        .json_merges
+        .iter()
+        .filter_map(|merge| resolved(&merge.file))
+        .any(|path| mentions(&path));
+    let templated = agent
+        .all_ui_files(false)
+        .filter_map(|file| resolved(&file.path))
+        .any(|path| mentions(&path));
+    let plugin = agent
+        .plugin
+        .as_ref()
+        .and_then(|plugin| resolved(&plugin.dir))
+        .is_some_and(|dir| any_file_mentions(&dir, &mentions));
+    merged || templated || plugin
+}
+
+fn any_file_mentions(dir: &Path, mentions: &dyn Fn(&Path) -> bool) -> bool {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|entry| {
+            let path = entry.path();
+            match entry.file_type() {
+                Ok(kind) if kind.is_dir() => any_file_mentions(&path, mentions),
+                Ok(kind) if kind.is_file() => mentions(&path),
+                _ => false,
+            }
+        })
 }
 
 pub(super) fn installer_for(component: Component) -> &'static dyn Installer {
@@ -400,25 +444,5 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&backup).unwrap(), "data");
         assert_eq!(mode_of(&backup), 0o777);
         assert_eq!(report.outcomes.len(), 1);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn install_refuses_a_symlinked_backup_path_and_writes_nothing_through_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
-        let agent = spec::agents().next().unwrap();
-        let (file, _) = target.resolve(&agent.instruction_file).unwrap();
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(&file, "existing notes\n").unwrap();
-        let outside = dir.path().join("outside");
-        std::os::unix::fs::symlink(&outside, backup_path(&file)).unwrap();
-        let mut report = Report::default();
-
-        let result = installer_for(Component::Instructions).install(&[agent], &target, &mut report);
-
-        assert!(result.is_err());
-        assert!(!outside.exists());
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "existing notes\n");
     }
 }

@@ -1,6 +1,6 @@
 {
   "name": "orbit",
-  "version": "1.0.0",
+  "version": "1.7.0",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.4.4",
@@ -9,8 +9,8 @@
       "packages/*"
     ],
     "catalog": {
-      "@gitlab-org/orbit-markdown": "0.12.1",
-      "@gitlab-org/orbit-site": "0.12.1",
+      "@gitlab-org/orbit-markdown": "0.17.0",
+      "@gitlab-org/orbit-site": "0.17.0",
       "@tanstack/react-router": "1.170.17",
       "@types/bun": "1.4.4",
       "@types/react": "19.2.17",

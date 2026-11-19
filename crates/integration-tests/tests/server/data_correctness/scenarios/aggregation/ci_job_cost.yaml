@@ -48,7 +48,6 @@ cases:
         ORDER BY seconds
         LIMIT 20
     expect:
-      skip_requirements: ["node_ids", "filter:project_id", "filter:source", "filter:created_at", "aggregation_sort", "aggregation"]
       row_count: 4
       row_values:
         - { day: "2024-01-15", runner_type: project_type, seconds: 30 }
@@ -63,6 +62,5 @@ cases:
         MATCH (pl:Pipeline {project_id: 1000, source: 'merge_request_event'})-[:HAS_JOB]->(j:Job)
         RETURN count(DISTINCT pl) AS pipelines, count(j) AS jobs
     expect:
-      skip_requirements: ["node_ids", "filter:project_id", "filter:source"]
       row_count: 1
       row_values: [{ pipelines: 2, jobs: 5 }]

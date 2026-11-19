@@ -9,6 +9,5 @@ query:
     MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000}) RETURN count(mr) AS mr_count, count(DISTINCT mr.state) AS state_count
 
 expect:
-  skip_requirements: [node_ids]
   row_count: 1
   row_values: [{ mr_count: 4, state_count: 2 }]

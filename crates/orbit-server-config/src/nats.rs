@@ -101,25 +101,25 @@ pub struct NatsConfiguration {
     /// Applied to Siphon dispatch consumers and to subscribe consumers on the
     /// versioned work streams, so a retired release's consumers reap
     /// themselves and stop vetoing release GC. A connected consumer's fetch
-    /// loop keeps it active. Clamped to a minimum of 60 seconds.
+    /// loop keeps it active. At least 60 seconds.
     #[schemars(range(min = 60))]
     pub consumer_inactive_threshold_secs: u64,
 
     /// How long another release's streams must show no activity (creation,
     /// publishes, attached consumers) before a starting dispatcher deletes
     /// them. A live release's dispatcher publishes every minute, so activity
-    /// doubles as liveness. Clamped to a minimum of 600 seconds.
+    /// doubles as liveness. At least 600 seconds.
     #[schemars(range(min = 600))]
     pub release_gc_idle_threshold_secs: u64,
 }
 
 impl NatsConfiguration {
     pub fn consumer_inactive_threshold(&self) -> Duration {
-        Duration::from_secs(self.consumer_inactive_threshold_secs.max(60))
+        Duration::from_secs(self.consumer_inactive_threshold_secs)
     }
 
     pub fn release_gc_idle_threshold(&self) -> Duration {
-        Duration::from_secs(self.release_gc_idle_threshold_secs.max(600))
+        Duration::from_secs(self.release_gc_idle_threshold_secs)
     }
 
     /// Returns true when TLS is configured -- either via cert paths or a `tls://` url scheme.

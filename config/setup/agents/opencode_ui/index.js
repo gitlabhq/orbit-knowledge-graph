@@ -190,17 +190,22 @@ function scanHeredocOperand(src, start) {
 function scanHeredocBody(src, start, heredoc) {
   let at = start;
   let substitutes = false;
+  const lines = [];
   while (at < src.length) {
     const newline = src.indexOf(`
 `, at);
-    const line = src.slice(at, newline < 0 ? src.length : newline);
+    const raw = src.slice(at, newline < 0 ? src.length : newline);
+    const line = heredoc.stripTabs ? raw.replace(/^\t+/, "") : raw;
     at = newline < 0 ? src.length : newline + 1;
-    if ((heredoc.stripTabs ? line.replace(/^\t+/, "") : line) === heredoc.delimiter)
-      return { end: at, closed: true, substitutes };
+    if (line === heredoc.delimiter)
+      return { end: at, closed: true, substitutes, body: lines.join(`
+`) };
     if (!heredoc.quoted && SUBSTITUTION.test(line))
       substitutes = true;
+    lines.push(line);
   }
-  return { end: at, closed: false, substitutes };
+  return { end: at, closed: false, substitutes, body: lines.join(`
+`) };
 }
 
 class Lexer {
@@ -352,22 +357,25 @@ class Lexer {
   }
   redirectOperator() {
     const operator = this.src[this.pos] === "<" ? "<" : ">";
-    this.pos += operator === "<" && this.src.startsWith("<<<", this.pos) ? 3 : 1;
+    const hereString = operator === "<" && this.src.startsWith("<<<", this.pos);
+    this.pos += hereString ? 3 : 1;
     if (operator === ">") {
       if (this.src[this.pos] === ">")
         this.pos++;
       if (this.src[this.pos] === "|" || this.src[this.pos] === "&")
         this.pos++;
     }
-    this.tokens.push({ kind: "redirect", operator });
+    this.tokens.push(hereString ? { kind: "redirect", operator, hereString } : { kind: "redirect", operator });
   }
   heredocOperator() {
     const stripTabs = this.src[this.pos + 2] === "-";
     const operandStart = this.pos + (stripTabs ? 3 : 2);
     const { delimiter, quoted, end } = scanHeredocOperand(this.src, operandStart + (this.src.slice(operandStart).match(/^[ \t]*/)?.[0].length ?? 0));
-    if (delimiter)
-      this.heredocs.push({ delimiter, stripTabs, quoted });
-    else
+    if (delimiter) {
+      const token = { kind: "heredoc", body: "" };
+      this.tokens.push(token);
+      this.heredocs.push({ delimiter, stripTabs, quoted, token });
+    } else
       this.unparsed = true;
     this.pos = end;
   }
@@ -392,6 +400,7 @@ class Lexer {
         this.tokens.push({ kind: "substitution" });
       if (!body.closed)
         this.unparsed = true;
+      heredoc.token.body = body.body;
       at = body.end;
     }
     this.pos = at - 1;
@@ -428,7 +437,7 @@ function displayName(name) {
   return /[,\s']/.test(text) ? `'${text.replaceAll("'", "\\'")}'` : text;
 }
 function emptyCommand(piped) {
-  return { piped, words: [], readsInput: false, writes: [], substitutes: false };
+  return { piped, words: [], readsInput: false, writes: [], substitutes: false, stdin: "" };
 }
 function isEmpty(command) {
   return !command.words.length && !command.writes.length && !command.substitutes;
@@ -440,6 +449,7 @@ function redirectTarget(tokens, from) {
   const token = tokens[at];
   return token?.kind === "word" ? { target: token.text, end: at } : { end: from - 1 };
 }
+var BARE_CAT = /^cat(?: -)?$/;
 function groupCommands(tokens) {
   const commands = [];
   let current = emptyCommand(false);
@@ -449,18 +459,24 @@ function groupCommands(tokens) {
       current.words.push(token.text);
     else if (token?.kind === "substitution")
       current.substitutes = true;
+    else if (token?.kind === "heredoc")
+      current.stdin = token.body;
     else if (token?.kind === "redirect") {
       const { target, end } = redirectTarget(tokens, i + 1);
-      if (token.operator === "<")
+      if (token.operator === "<") {
         current.readsInput = true;
-      else if (target !== undefined)
+        current.stdin = token.hereString ? target ?? "" : "";
+      } else if (target !== undefined)
         current.writes.push(target);
       current.substitutes ||= tokens.slice(i + 1, end + 1).some((skipped) => skipped.kind === "substitution");
       i = end;
     } else if (token?.kind === "separator") {
+      const previous = current;
       if (!isEmpty(current))
         commands.push(current);
       current = emptyCommand(token.pipe);
+      if (token.pipe && BARE_CAT.test(previous.words.join(" ")))
+        current.stdin = previous.stdin;
     }
   }
   if (!isEmpty(current))
@@ -508,8 +524,11 @@ function runnable(command) {
   const runs = groupCommands(tokens).map((simple) => ({ ...simple, words: withoutKeywords(simple.words) })).filter((run) => !isEmpty(run));
   return { runs, unparsed };
 }
-function orbitInvocations(command) {
-  return runnable(command).runs.map(({ words }) => orbitWords(words)).filter((words) => words !== null);
+function orbitRuns(command) {
+  return runnable(command).runs.flatMap(({ words, stdin }) => {
+    const orbit = orbitWords(words);
+    return orbit ? [{ words: orbit, stdin }] : [];
+  });
 }
 var SHELL_WORDS = new Set(["cd", "pushd", "popd", "true", ":", "fi", "done", "esac", "}"]);
 function isQuiet(program, args, run) {
@@ -574,6 +593,27 @@ function s(o, t) {
   return m;
 }
 
+function envelopeQuery(stdin) {
+  try {
+    const query = JSON.parse(stdin)?.query;
+    return typeof query === "string" ? query : "";
+  } catch {
+    return "";
+  }
+}
+function queryText(args, stdin) {
+  const file = args.indexOf("--file");
+  if (file >= 0)
+    return args[file + 1] === "-" ? envelopeQuery(stdin) : "";
+  for (let i = 0;i < args.length; i++) {
+    const arg = args[i] ?? "";
+    if (arg === "--response-format")
+      i++;
+    else if (!arg.startsWith("-"))
+      return arg;
+  }
+  return "";
+}
 var NO_ENTITIES = new Set;
 var UNIQUE_KEYS = new Set(["id", "full_path", "username"]);
 function entityOfKey(key, known) {
@@ -635,27 +675,25 @@ function entitiesOf(text, known = NO_ENTITIES) {
     }
   }
   const paths = [];
-  for (const segment of text.split(/\bMATCH\b/i).slice(1)) {
-    const pattern = segment.split(/\b(?:WHERE|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT|CALL)\b/i)[0] ?? "";
-    for (const part of splitTopLevel(pattern)) {
-      const nodes = [];
-      const pins = [];
-      const hops = [];
-      for (const m of part.matchAll(/\(([^)]*)\)|(<)?-(?:\[[^\]]*\])?-(>)?/g)) {
-        if (m[1] !== undefined) {
-          const [, name = "", label] = m[1].match(/^\s*(\w*)\s*(?::\s*(\w+))?/) ?? [];
-          const node = label || labels[name] || "any";
-          const inline = [...(m[1].match(/\{([^}]*)\}/)?.[1] ?? "").matchAll(/(\w+)\s*:/g)].map((k) => k[1] ?? "");
-          const where = name ? whereKeys[name] ?? [] : [];
-          const equals = name ? whereEquals[name] ?? [] : [];
-          nodes.push(node);
-          pins.push(pinOf([...inline, ...where], [...inline, ...equals], node, known));
-        } else
-          hops.push(m[2] ? "left" : m[3] ? "right" : "none");
+  for (const elements of patternsOf(text)) {
+    const nodes = [];
+    const pins = [];
+    const hops = [];
+    for (const element of elements) {
+      if (element.kind === "hop") {
+        hops.push(element.hop);
+        continue;
       }
-      const typed = nodes.map((type, i) => ({ type, one: pins[i]?.one ?? false }));
-      paths.push(...readFromPin(typed, pins) ?? readForward(typed, hops));
+      const { name, label, body } = element;
+      const node = label || labels[name] || "any";
+      const inline = [...(body.match(/\{([^}]*)\}/)?.[1] ?? "").matchAll(/(\w+)\s*:/g)].map((k) => k[1] ?? "");
+      const where = name ? whereKeys[name] ?? [] : [];
+      const equals = name ? whereEquals[name] ?? [] : [];
+      nodes.push(node);
+      pins.push(pinOf([...inline, ...where], [...inline, ...equals], node, known));
     }
+    const typed = nodes.map((type, i) => ({ type, one: pins[i]?.one ?? false }));
+    paths.push(...readFromPin(typed, pins) ?? readForward(typed, hops));
   }
   const unique = e(paths, (p) => p.text);
   const walks = unique.filter((p) => p.nodes.length > 1);
@@ -695,6 +733,28 @@ function readForward(nodes, hops) {
     start = i;
   }
   return paths;
+}
+function relationshipTypes(inside) {
+  const bare = inside.replace(/\{[^}]*\}/g, "");
+  const colon = bare.indexOf(":");
+  if (colon < 0)
+    return [];
+  return bare.slice(colon + 1).split("|").flatMap((type) => type.replace(/^\s*:?\s*/, "").match(/^\w+/)?.[0] ?? []);
+}
+function patternsOf(text) {
+  const patterns = [];
+  for (const segment of text.split(/\bMATCH\b/i).slice(1)) {
+    const pattern = segment.split(/\b(?:WHERE|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT|CALL)\b/i)[0] ?? "";
+    for (const part of splitTopLevel(pattern)) {
+      patterns.push([...part.matchAll(/\(([^)]*)\)|(<)?-(?:\[([^\]]*)\])?-(>)?/g)].map((m) => {
+        if (m[1] === undefined)
+          return { kind: "hop", hop: m[2] ? "left" : m[4] ? "right" : "none", types: relationshipTypes(m[3] ?? "") };
+        const [, name = "", label = ""] = m[1].match(/^\s*(\w*)\s*(?::\s*(\w+))?/) ?? [];
+        return { kind: "node", name, label, body: m[1] };
+      }));
+    }
+  }
+  return patterns;
 }
 function splitTopLevel(text) {
   const parts = [""];
@@ -763,9 +823,11 @@ var VALUE_FLAGS = new Set([
   "--budget",
   "--timeout"
 ]);
+var SQL_VALUE_FLAGS = new Set(["-f", "-F", "--format"]);
 var VALUE_FLAGS_BY_KEY = {
-  grep: new Set(["-A", "-B", "-C", "-m", "-g", "--glob", "--include", "--exclude", "--exclude-dir", "-t", "--type", "-T", "--type-not", "-M", "--max-columns"]),
-  "workspace sql": new Set(["-f", "-F", "--format"])
+  grep: new Set(["-A", "--after-context", "-B", "--before-context", "-C", "--context", "-m", "--max-count", "-g", "--glob", "--include", "--exclude", "--exclude-dir", "-t", "--type", "-T", "--type-not", "-M", "--max-columns"]),
+  "workspace sql": SQL_VALUE_FLAGS,
+  sql: SQL_VALUE_FLAGS
 };
 var SHOWS_ARGUMENT = new Set(["grep", "context", "workspace sql", "sql", "schema", "ontology", "graph-status", "skills", "skill"]);
 function labelFor(table, key) {
@@ -786,14 +848,13 @@ function firstArg(args, valueFlags) {
   }
   return "";
 }
-function detailFor(key, args, known) {
+function detailFor(key, args, known, query) {
   if (key === "query") {
-    const text = args.join(" ");
-    const schema = text.match(/CALL\s+db\.schema\(\s*'?(\w*)/i);
+    const schema = query.match(/CALL\s+db\.schema\(\s*'?(\w*)/i);
     if (schema)
       return schema[1] ?? "";
-    const file = args.indexOf("--file");
-    return entitiesOf(text, known) || (file >= 0 ? args[file + 1] ?? "" : "");
+    const file = args[args.indexOf("--file") + 1] ?? "";
+    return entitiesOf(query, known) || (args.includes("--file") && file !== "-" ? file : "");
   }
   if (!SHOWS_ARGUMENT.has(key))
     return "";
@@ -814,18 +875,18 @@ var CHANGES_STATE = new Set([
   "orbit workspace reset",
   "orbit config set"
 ]);
-function invocationOf(words, known) {
+function invocationOf({ words, stdin }, known) {
   if (words.length === 0 || words.some((arg) => arg === "--help" || arg === "-h"))
     return null;
   const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined);
   if (!sub)
     return { call: null, name: "orbit " + displayName(words[0] ?? "") };
-  const isSchemaQuery = sub.key === "query" && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg));
-  const label = isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY;
-  return { call: callOf(label, detailFor(sub.key, sub.args, known)), name: "orbit " + sub.key };
+  const query = sub.key === "query" ? queryText(sub.args, stdin) : "";
+  const label = /^\s*CALL\s+db\.schema\(/i.test(query) ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY;
+  return { call: callOf(label, detailFor(sub.key, sub.args, known, query)), name: "orbit " + sub.key };
 }
 function describeCommand(command, known = NO_ENTITIES) {
-  const invocations = orbitInvocations(command).flatMap((words) => invocationOf(words, known) ?? []);
+  const invocations = orbitRuns(command).flatMap((run) => invocationOf(run, known) ?? []);
   const calls = invocations.flatMap(({ call }) => call ?? []);
   const [first] = calls;
   if (!first)
@@ -856,10 +917,21 @@ function describeOrbitCall(tool, input, known = NO_ENTITIES) {
 }
 
 function parseResponse(text) {
-  const out = { nodes: 0, edges: 0, byEntity: {}, aggregated: 0, kind: "other", grouped: false };
+  const out = { nodes: 0, edges: 0, byEntity: {}, aggregated: 0, kind: "other", grouped: false, counted: [] };
   const raw = text.trim().startsWith("{") ? tryJson(text) : null;
   if (raw) {
     const r = raw["result"] ?? raw;
+    if (r.query_type === "aggregation") {
+      out.kind = "aggregation";
+      out.grouped = Array.isArray(r.group_columns) && r.group_columns.length > 0;
+      const rows = Array.isArray(r.rows) ? r.rows : [];
+      out.counted = plainCounts(Array.isArray(r.columns) ? r.columns : []).map(({ name = "", target = "" }) => ({
+        target,
+        total: s(rows, (row) => typeof row[name] === "number" ? row[name] : 0)
+      }));
+      out.aggregated = Math.max(0, ...out.counted.map((count) => count.total));
+      return out;
+    }
     const nodes = Array.isArray(r.nodes) ? r.nodes : [];
     out.byEntity = f(nodes, (node) => String(node.type));
     out.nodes = nodes.length;
@@ -871,7 +943,7 @@ function parseResponse(text) {
   if (/^query_type:\s*aggregation/m.test(text)) {
     out.kind = "aggregation";
     out.grouped = /^group_columns\[[1-9]\d*\]/m.test(text);
-    const counts = plainCountNames(text);
+    const counts = plainCounts(columnFields(text));
     const header = text.match(/^rows\[\d+\]\{([^}]*)\}:\s*$/m);
     if (!header || header.index === undefined || counts.length === 0)
       return out;
@@ -880,8 +952,11 @@ function parseResponse(text) {
     const lines = rows.split(`
 `).map((line) => line.trim().split(","));
     const cellValue = (cells, i) => /^\d+$/.test(cells[i] ?? "") ? Number(cells[i]) : 0;
-    const totals = names.flatMap((name, i) => counts.includes(name) ? [s(lines, (cells) => cellValue(cells, i))] : []);
-    out.aggregated = Math.max(0, ...totals);
+    out.counted = counts.flatMap(({ name = "", target = "" }) => {
+      const i = names.indexOf(name);
+      return i < 0 ? [] : [{ target, total: s(lines, (cells) => cellValue(cells, i)) }];
+    });
+    out.aggregated = Math.max(0, ...out.counted.map((count) => count.total));
     return out;
   }
   if (/^query_type:\s*traversal/m.test(text))
@@ -908,9 +983,10 @@ function columnFields(text) {
   }
   return body.split(/^\s+- /m).slice(1).map((item) => Object.fromEntries([...item.matchAll(/^\s*(?:- )?(\w+):\s*(.*)$/gm)].map((m) => [m[1] ?? "", m[2]?.trim()])));
 }
-function plainCountNames(text) {
-  return columnFields(text).filter(({ function: fn, name, target = "", property }) => fn === "count" && name && (!property || name === `count_${target}_${property}`)).map((column) => column["name"] ?? "");
+function plainCounts(columns) {
+  return columns.filter(({ function: fn, name, target = "", property }) => fn === "count" && name && (!property || name === `count_${target}_${property}`));
 }
+var COUNTABLE_LISTS = new Set(["MergeRequest", "WorkItem", "Pipeline", "Job", "Runner", "Project", "Group", "Label", "Note", "Package", "User", "Vulnerability"]);
 function tryJson(text) {
   try {
     const value = JSON.parse(text);

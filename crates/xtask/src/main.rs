@@ -5,9 +5,11 @@ mod code_indexing_benchmark;
 mod dashboards;
 mod ddl;
 mod integration_lanes;
+#[cfg(feature = "loadtest")]
 mod loadtest;
 mod metrics_catalog;
 mod migration_ledger;
+mod proto;
 mod query_docs;
 mod schema;
 mod synth;
@@ -44,6 +46,9 @@ enum Command {
         #[command(subcommand)]
         command: SynthCommand,
     },
+    /// Regenerate the prost types and descriptor set for the server
+    /// configuration schema.
+    ProtoConfig,
     /// Generate JSON Schema for the server configuration.
     Schema {
         /// Write schema to a file instead of stdout.
@@ -115,6 +120,7 @@ enum Command {
     /// optional ClickHouse server-side work per query).
     ///
     /// Requires GKG_JWT_SECRET (base64-encoded HMAC key, same as the server).
+    #[cfg(feature = "loadtest")]
     Loadtest {
         /// gRPC endpoint of the Orbit server (plaintext HTTP/2).
         #[arg(long, env = "ORBIT_ENDPOINT", default_value = "http://127.0.0.1:50054")]
@@ -379,6 +385,7 @@ async fn main() -> Result<()> {
                 ddl::run_local(ontology)
             }
         },
+        Command::ProtoConfig => proto::run(),
         Command::Schema { output } => schema::run(output),
         Command::MigrationLedger { command } => match command {
             MigrationLedgerCommand::Bump {
@@ -396,6 +403,7 @@ async fn main() -> Result<()> {
         Command::Dashboards { dir, check } => dashboards::run(dir, check),
         Command::IntegrationLanes { check } => integration_lanes::run(check),
         Command::QueryDocs { doc, check } => query_docs::run(doc, check),
+        #[cfg(feature = "loadtest")]
         Command::Loadtest {
             endpoint,
             concurrency,

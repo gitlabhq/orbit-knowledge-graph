@@ -32,8 +32,10 @@ the other ways to install the CLI.
 ### 2. Connect AI agents
 
 The `glab orbit setup` command finds the AI agents on your machine: Claude
-Code, Codex, GitLab Duo, OpenCode, and pi. It adds Orbit instructions and the
-Orbit skill to each agent. Then it indexes the current repository. The
+Code, Codex, GitLab Duo, OpenCode, and pi. It installs the Orbit skill and the
+plugin, hook, or extension each agent uses. That integration loads the Orbit
+instructions from the CLI when a session starts. Then setup indexes the current
+repository. The
 `glab orbit uninstall` command removes what setup wrote, except files you
 edited since.
 
@@ -61,8 +63,8 @@ The main commands that read the local graph are:
 
 - `glab orbit grep` works like grep. It shows each match inside its enclosing
   definition, with that definition's callers and callees. When authenticated
-  with `glab`, it also searches the issues, merge requests, and notes of the
-  top-level group behind `origin`.
+  with `glab`, a GitLab kind such as `mr:` or `issue:` searches the top-level
+  group behind `origin`; a plain search covers local code only.
 - `glab orbit context` expands a definition, a file, a line range, or a
   folder. When authenticated with `glab`, it also reads GitLab targets such as
   `mr:42`, `issue:7`, and `pipeline:123`.

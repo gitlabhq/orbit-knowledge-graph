@@ -94,6 +94,7 @@ pub struct ParseFullResult {
     /// After graph finalize, the pipeline resolves these targets and
     /// patches the reaching values.
     pub unresolved_aliases: Vec<(usize, String)>,
+    pub links: crate::v2::types::FileLinks,
     pub phase_cpu: PhaseCpu,
 }
 
@@ -603,6 +604,28 @@ impl LanguageSpec {
     ) -> Result<ParseFullResult, ParseFullError> {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
 
+        if let crate::v2::dsl::types::LanguageParser::Custom(custom) = self.parser {
+            let parse_start = cpu_time::ThreadTime::now();
+            let parsed = custom(source_str, file_path, timeouts.parse).map_err(|detail| {
+                ParseFullError::Aborted {
+                    phase: crate::v2::error::AbortPhase::Parse,
+                    detail,
+                }
+            })?;
+            return Ok(ParseFullResult {
+                definitions: parsed.definitions,
+                imports: parsed.imports,
+                refs: parsed.refs,
+                inferred_returns: Vec::new(),
+                unresolved_aliases: Vec::new(),
+                links: parsed.links,
+                phase_cpu: PhaseCpu {
+                    parse: parse_start.elapsed(),
+                    ..PhaseCpu::default()
+                },
+            });
+        }
+
         let parse_start = cpu_time::ThreadTime::now();
         let ast = language
             .parse_ast(source_str, timeouts.parse)
@@ -802,6 +825,7 @@ impl LanguageSpec {
             refs,
             inferred_returns,
             unresolved_aliases,
+            links: Default::default(),
             phase_cpu: PhaseCpu {
                 parse: parse_cpu,
                 walk: walk_cpu,

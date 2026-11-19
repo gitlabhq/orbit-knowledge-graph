@@ -21,8 +21,8 @@ stale-mr-sweep:
   # gate it; on the solo schedule this is the only job anyway.
   needs: []
   variables:
-    STALE_IDLE_DAYS: "14"
-    STALE_GRACE_DAYS: "3"
+    STALE_IDLE_DAYS: "5"
+    STALE_GRACE_DAYS: "2"
     STALE_LABEL_PREFIX: "stale"
     STALE_EXCLUDE_LABEL: "Community contribution"
     DRY_RUN: "false"

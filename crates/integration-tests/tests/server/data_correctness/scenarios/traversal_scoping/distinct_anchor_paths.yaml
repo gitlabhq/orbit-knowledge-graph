@@ -22,10 +22,11 @@ query:
 
 expect:
   node_count: 2
-  skip_requirements: ["filter:project_id"]
   nodes:
     MergeRequest:
       ids: [2000]
+      filters:
+        project_id: 1000
     WorkItem:
       ids: [4002]
   edges:

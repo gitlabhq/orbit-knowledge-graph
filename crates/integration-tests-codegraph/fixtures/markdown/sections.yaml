@@ -1,0 +1,64 @@
+name: "Markdown: headings become nested Section definitions; front matter is not a section"
+
+fixtures:
+  - path: docs/adr/001_use_clickhouse.md
+    content: |
+      ---
+      title: Use ClickHouse
+      status: accepted
+      ---
+
+      # Use ClickHouse
+
+      ## Context
+
+      We need columnar storage.
+
+      ## Decision
+
+      ### Consequences
+
+      More ops work.
+
+  - path: skills/orbit/SKILL.md
+    content: |
+      ---
+      name: orbit
+      description: Query the knowledge graph.
+      ---
+
+      # Orbit
+
+      ## Usage
+
+  - path: src/main.py
+    content: |
+      def main():
+          pass
+
+tests:
+  - name: "markdown files get the markdown language"
+    query: |
+      MATCH (f:File)
+      WHERE f.language = 'markdown'
+      RETURN f.path AS path
+    assert:
+      - { row_count: 2 }
+
+  - name: "every heading is a Section with a nested fqn"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Section'
+      RETURN d.fqn AS fqn, d.name AS name, d.file_path AS file
+    assert:
+      - { row_count: 6 }
+      - { row: { fqn: "001_use_clickhouse#Use ClickHouse#Decision#Consequences", name: "Consequences" } }
+      - { row: { fqn: "SKILL#Orbit#Usage", file: "skills/orbit/SKILL.md" } }
+
+  - name: "front matter keys do not become sections"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['title: Use ClickHouse', 'name: orbit', 'status: accepted']
+      RETURN d.fqn AS fqn
+    assert:
+      - { empty: true }

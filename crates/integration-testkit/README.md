@@ -17,10 +17,10 @@ Shared test infrastructure for integration tests that need a real ClickHouse ins
 - **Arrow extractors**: `get_string_column`, `get_int64_column`, `get_uint64_column`,
   `get_boolean_column` for pulling typed columns out of `RecordBatch`.
 - **`ResponseView`**: Typed wrapper over `GraphResponse` for asserting query pipeline
-  output. Includes assertion enforcement that catches under-tested queries.
+  output.
 - **`query_scenario`**: Runs YAML query scenarios through the full query pipeline.
 - **`scenario`**: Runs YAML indexer scenarios: seeds source rows, runs handlers, and checks the graph.
-- **`plan_shape`**: Compiles plan-shape fixtures and checks the selected plan.
+- **`compiler`**: Compiles compiler fixtures and checks the state that pipeline phases leave behind.
 
 ## Prerequisites
 
@@ -129,72 +129,27 @@ async fn writes_extra_data_then_queries(ctx: &TestContext) {
 ## ResponseView
 
 `ResponseView` wraps the `GraphResponse` returned by the query pipeline and provides
-typed helpers for looking up nodes, edges, and paths. It also enforces that tests
-actually assert the query features they exercise.
+typed helpers for looking up nodes, edges, and paths.
 
 ### Creating a view
 
-The only public constructor is `for_query`, which takes the compiled `Input` AST
-and the formatted `GraphResponse`:
+Use `for_query` with the compiled `Input` and the formatted `GraphResponse`:
 
 ```rust
 use integration_testkit::visitor::{ResponseView, NodeExt};
-use compiler::{compile, Frontend};
-
-let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
-// ... run pipeline, get response ...
 let resp = ResponseView::for_query(&compiled.input, response);
 ```
 
-On construction, `for_query` validates two structural invariants:
+`for_query` derives requirements from the query: an order check for `order_by`, a
+filter check per filtered field, edge checks per relationship type, and path,
+aggregation, sort, and `SKIP` checks. It keeps only the requirements the response
+can show: a filter check needs a returned node with a non-null value for the field,
+an order check needs two nodes, and an empty response needs nothing. The view
+panics on drop when a kept requirement has no matching assertion.
 
-- The response's `query_type` matches the input (e.g. a traversal query must produce
-  a `"traversal"` response).
-- Single-node traversal and aggregation responses have zero edges (the formatter
-  never produces edges for these query shapes).
-
-### Assertion enforcement
-
-`for_query` inspects the `Input` AST and derives a set of requirements — one per
-query feature that needs to be asserted. When the `ResponseView` is dropped, it
-panics if any requirement was not satisfied.
-
-The mapping from query features to requirements:
-
-| Query feature | Requirement | Satisfied by |
-|---|---|---|
-| `order_by` | `OrderBy` | `assert_node_order` |
-| `filters: {field: ...}` | `Filter { field }` (one per field) | `assert_filter(entity, field, pred)` |
-| `node_ids: [...]` | `NodeIds` | `node_ids`, `assert_node_order`, `assert_node_count` |
-| `query_type: aggregation` | `Aggregation` | `assert_aggregation_value_i64`, `assert_row_value_i64`, `assert_group_row_value_i64` |
-| `group_by: ["<node>"]` | `Aggregation` | `assert_group_node_count`, `assert_group_node_ids`, `assert_group_node_row`, `assert_group_row_value_i64` |
-| `group_by: ["<node>.<property>"]` | `Aggregation` | `assert_group_column`, `assert_row_count`, `assert_row_value_i64`, `assert_row_value_str` |
-| `aggregation_sort` | `AggregationSort` | `assert_group_node_order` |
-| `query_type: path_finding` | `PathFinding` | `path_ids` |
-| `query_type: neighbors` | `Neighbors` | `edges_of_type`, `assert_edge_exists`, `assert_edge_absent` |
-| `relationships: [{type: T}]` | `Relationship { edge_type: T }` (one per type) | `edges_of_type`, `assert_edge_exists`, `assert_edge_absent` |
-| `range` | `Range` | `assert_node_count` |
-
-Requirements are granular: a query with two filter fields produces two `Filter`
-requirements, and the test must call `assert_filter` for each. A traversal with
-two relationship types produces two `Relationship` requirements.
-
-If a test drops a `ResponseView` without satisfying all requirements, the drop
-panics with a message listing exactly what's missing:
-
-```plaintext
-ResponseView dropped with unsatisfied assertion requirements:
-Filter on 'state' (call assert_filter for 'state')
-OrderBy (query has order_by — call assert_node_order)
-```
-
-### Escape hatch
-
-For edge cases where a test intentionally skips an assertion:
-
-```rust
-resp.skip_requirement(Requirement::OrderBy);
-```
+In query scenarios, `nodes.<Entity>.filters` checks a filter. `rows` also checks
+every field they list when they cover every returned node of the entity.
+`row_values` checks the sort when it lists every row.
 
 ### Example: single-entity traversal with filter and ordering
 
@@ -208,14 +163,11 @@ async fn search_filter_eq(ctx: &TestContext) {
         "limit": 10
     }"#, &allow_all()).await;
 
-    // Satisfies Filter{field:"state"}
     resp.assert_filter("User", "state", |n| {
         n.prop_str("state") == Some("blocked")
     });
-    // Satisfies OrderBy + NodeIds
     resp.assert_node_order("User", &[5]);
 }
-// Drop checks: all requirements satisfied, no panic.
 ```
 
 ### Example: traversal with edges
@@ -232,7 +184,6 @@ async fn traversal_edges(ctx: &TestContext) {
         "limit": 10
     }"#, &allow_all()).await;
 
-    // Satisfies Relationship{edge_type:"MEMBER_OF"}
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_referential_integrity();
 }
@@ -327,11 +278,14 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 
 | Field | Type | Description |
 |---|---|---|
-| `extra_seed` | `Seed` | Additional rows to insert; triggers a DB fork |
+| `seed` | string | A named dataset in `presets/seed.yaml`. The scenario runs on a database that holds only that dataset, without the base seed |
+| `extra_seed` | `Seed` | Additional rows to insert on top of the base seed or `seed` |
 | `unmerged_seed` | bool | Default `false`. For extra seed rows, stop background merges on their tables, disable insert optimization, insert each row as its own part, and skip `OPTIMIZE`. Uses physical table names, such as `gl_project`. |
 | `security` | preset name or inline `SecurityOverride` | Authorization context |
 | `redaction` | preset name or inline `RedactionConfig` | Entity-level redaction |
 | `duckdb` | bool | Default `false`. Also run the scenario in local mode on an embedded DuckDB, through `run_duckdb_dir` in `cargo test --test local`. The runner creates the local tables from the ontology, inserts the preset and `extra_seed` rows of those tables, and applies the same `expect`. Local mode has no security or redaction, so use it only for scenarios on local entities, such as `Definition` and `File`, with CALLS rows in `gl_edge`. |
+
+Scenarios with the same `seed`, `extra_seed`, `unmerged_seed`, and `ontology_overlay` share one database. The runner builds it for the first case and drops it after the last. A scenario whose steps add seed rows gets its own database.
 
 #### `config.security` — `SecurityOverride`
 
@@ -362,11 +316,10 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `edges` | {TYPE: [[from, to]]} | Exact edge set |
 | `edge_exists` | {TYPE: [edge]} | Subset check; each edge is an ID pair or a typed object |
 | `edge_absent` | {TYPE: [edge]} | Negative check; each edge is an ID pair or a typed object |
+| `edge_prop_absent` | [depth / path_id / step] | No edge in the response has any listed field |
 | `edge_count` | {TYPE: N} | Per-type edge count |
 | `referential_integrity` | bool | All edge endpoints have nodes |
 | `has_more` | bool | Pagination flag |
-| `gql_columns` | {column: [cell]} | Exact cells of a `gql` format table column, in row order |
-| `gql_column_names` | [column] | Exact `gql` format table header, in order |
 
 Typed edge objects use `{from: User, from_id: 1, to: Group, to_id: 100}`.
 They check endpoint types as well as IDs. Pair arrays such as `[1, 100]` check
@@ -381,6 +334,7 @@ only IDs and the relationship type.
 | `empty_aggregation` | bool | Assert empty aggregation result |
 | `row_count` | N | Ungrouped aggregation row count |
 | `row_values` | [{col: val}] | Ungrouped aggregation values by index |
+| `aggregation_columns` | [{name, function, target, property}] | The exact, ordered aggregation `columns`; a missing `property` means the column has none |
 
 **Paths:**
 
@@ -391,19 +345,25 @@ only IDs and the relationship type.
 | `path_edges` | `[[{from, from_id, type, to, to_id, step}]]` | Per-path edge structure (all fields optional) |
 | `path_endpoint_absent` | [Entity] | Entities excluded from path edges |
 
+**Formats:**
+
+`format` maps an output format, `toon` or `gql`, to checks on that encoding of the result:
+
+| Field | Type | Description |
+|---|---|---|
+| `contains` | [string] | The encoded text contains every fragment |
+| `ends_with` | string | The encoded text ends with this suffix |
+| `absent` | [key] | The decoded value has none of these top-level keys |
+| `value` | object | A partial match on the decoded value: objects may have extra keys, arrays match item by item |
+
+Each format also checks its format name and version. TOON decodes to its JSON value, must be the canonical encoding, and, for queries other than aggregations, must have the same node and edge counts as the graph response. GQL decodes to `{header, rows, columns}` from its result table: `header` lists the column names, `rows` holds the cells by row, and `columns` maps each column name to its cells. Every format runs for every query language of the case, because a JSON query can also ask for GQL output. A new format is one module in `src/query_scenario/output_format/` that implements `Encoding`, plus one `OutputFormat` variant.
+
 **Compilation:**
 
 | Field | Type | Description |
 |---|---|---|
-| `compile_only` | bool | Only compile, skip execution |
-| `compile_error` | bool / string / {frontend: string} | Expect compile failure |
-| `compile_error_contains` | [string] / {frontend: [string]} | Error must contain every listed fragment |
-| `compile_error_not_contains` | [string] / {frontend: [string]} | Error must NOT contain |
-| `sql_contains` | [string] | Rendered SQL must contain these |
-| `sql_not_contains` | [string] | Rendered SQL must NOT contain these |
-| `indexes_used` | [{table, index}] | ClickHouse skip indexes that `EXPLAIN indexes = 1` must apply on the named table (`gl_user`, matched against the `ReadFromMergeTree` step) and that must each prune granules. Seed non-matching rows with `unmerged_seed` so there are parts to prune |
-| `hydration` | `none` / `static` / `dynamic` | Kind of hydration plan the compiler produced |
-| `settings` | {name: value} | ClickHouse SETTINGS pairs the compiled query carries, for example `{ use_query_cache: 0 }`. A `null` value asserts the setting is absent. The pairs come from the process-wide query settings; the `query_settings_scenarios` test loads the production defaults |
+| `compile_error` | reason / {key: reason} | Expect the compiler to reject the query for this reason. A key is a backend (`clickhouse`, `duckdb`) or a frontend (`json`, `gql`); a backend key wins. Reasons: `parse`, `schema`, `reference`, `ontology`, `authorization`, `restrict`, `ontology_internal`, `depth`, `limit`, `security`, `lowering`, `codegen`, `pipeline` |
+| `compile_error_not_contains` | [regex] | The error message must not match any listed regex, for a literal from this query. Requires `compile_error`. Every compile error is also checked for a traversal path, an email address, a physical table name, and the fixtures' private markers |
 
 **Pagination:**
 
@@ -417,7 +377,6 @@ only IDs and the relationship type.
 | Field | Type | Description |
 |---|---|---|
 | `repeat_count` | N | Recompile and run N times; compare node order within each entity type, properties, edges, aggregation rows, and pagination |
-| `skip_requirements` | [string] | Skip enforcement checks |
 
 #### `NodeExpect`
 

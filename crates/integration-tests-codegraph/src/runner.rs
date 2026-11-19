@@ -13,7 +13,7 @@ use duckdb_client::DuckDbClient;
 
 use super::validator::{load_suite, report, run_suite, write_suite_files};
 
-const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+const LOCAL_DDL: &str = include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/graph_local.sql"));
 
 pub fn create_test_db() -> anyhow::Result<DuckDbClient> {
     let client =
@@ -134,6 +134,8 @@ pub fn run_yaml_suite(yaml: &str) {
                 faults: Mutex::new(Vec::new()),
                 file_timings: Mutex::new(Vec::new()),
                 language_timings: Mutex::new(Vec::new()),
+                file_links: Mutex::new(Vec::new()),
+                inventory: None,
             });
             let (tx, rx) = crossbeam_channel::unbounded();
             let on_batch = {

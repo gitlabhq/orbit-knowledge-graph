@@ -336,6 +336,7 @@ mod tests {
         Arc::new(AnalyticsConfig {
             enabled: Some(true),
             collector_url: "https://collector.example".to_string(),
+            local_collector_url: String::new(),
             deployment: DeploymentConfig {
                 kind: DeploymentKind::Com,
                 environment: DeploymentEnvironment::Production,

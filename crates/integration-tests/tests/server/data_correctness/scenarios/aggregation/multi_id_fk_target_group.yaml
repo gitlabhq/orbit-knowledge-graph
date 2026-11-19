@@ -31,4 +31,3 @@ expect:
       ids: [1000]
       rows:
         - { entity: Project, id: 1000, values: { n: 2 } }
-  skip_requirements: [node_ids, "filter:username"]

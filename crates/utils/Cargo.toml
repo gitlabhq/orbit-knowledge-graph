@@ -4,13 +4,18 @@ version.workspace = true
 edition = "2024"
 license = "LicenseRef-EE"
 
+[features]
+markdown = ["dep:comrak", "dep:percent-encoding"]
+
 [dependencies]
+comrak = { workspace = true, optional = true }
 dunce = { workspace = true }
 flate2 = { workspace = true }
 ignore = { workspace = true }
 lz4_flex = { workspace = true }
 memchr = { workspace = true }
 orbit-log-fields = { workspace = true }
+percent-encoding = { workspace = true, optional = true }
 regex = { workspace = true }
 rayon = { workspace = true }
 rustc-hash = { workspace = true }

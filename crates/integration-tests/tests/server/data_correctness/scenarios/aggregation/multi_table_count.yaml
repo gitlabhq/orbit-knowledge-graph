@@ -19,6 +19,5 @@ query:
     RETURN count(b) AS n
 
 expect:
-  skip_requirements: [node_ids]
   row_count: 1
   row_values: [{ n: 2 }]

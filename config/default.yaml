@@ -1,14 +1,15 @@
 # Single source of truth for every server setting. Compiled into gkg-server (include_str!) as the
 # lowest configuration layer, so the binary never depends on this file being present at runtime.
-# Every section and scalar the server reads is declared here; the Rust config structs carry no
-# fallback values, so removing a key from this file fails startup with a "missing field" error.
+# Every section and scalar the server reads is declared here; the schema
+# (crates/orbit-server-config/proto/orbit/config/v1/config.proto) marks each one required, so
+# removing a key from this file fails startup with a "value is required" error.
 #
 # Overrides, in increasing priority: the overlay file (--config <path>, else config/config.yaml
 # when present), and K8s secret files under /etc/secrets/.
 #
 # The values below are deployment defaults: what any environment gets when nothing overrides them.
 # They must equal the settings a production pod would run on, so this file can underlay a partial
-# Helm ConfigMap without changing behaviour. config-rs deep-merges maps, so a map entry here that
+# Helm ConfigMap without changing behaviour. The loader deep-merges maps, so a map entry here that
 # the ConfigMap does not set leaks into production; keep the maps below empty unless the entry is a
 # genuine universal default. Local-development-only tuning lives in config/dev.yaml, which the mise
 # dev tasks merge into the generated .dev/<mode>.yaml, not here.
@@ -157,27 +158,38 @@ schedule:
   tasks:
     global:
       cron: "0 */1 * * * *"
+      run_timeout_secs: 300
     namespace:
       cron: "*/30 * * * * *"
+      run_timeout_secs: 600
       sweep_interval_secs: 3600
     siphon:
       events_stream_name: "siphon_stream_main_db"
       batch_size: 100
     code-backfill:
       cron: "0 */1 * * * *"
+      run_timeout_secs: 3600
       publish_window: 200000
       stale_sweeps_per_tick: 10
     table-cleanup:
       cron: "0 0 3 * * 0"
+      run_timeout_secs: 7200
     namespace-deletion:
       cron: "0 0 3 * * *"
+      run_timeout_secs: 43200
     migration-completion:
       cron: "0 */1 * * * *"
+      run_timeout_secs: 3600
     stale-edge-reconciliation:
       cron: "0 */30 * * * *"
+      run_timeout_secs: 3600
       lookback_secs: 3600
     namespace-freshness:
       cron: "0 */5 * * * *"
+      run_timeout_secs: 1800
+    graph-stats:
+      cron: "0 30 4 * * *"
+      run_timeout_secs: 1800
 
 health_check:
   bind_address: "0.0.0.0:4201"
@@ -225,6 +237,7 @@ schema:
 analytics:
   enabled: null                          # true | false; null follows the GitLab product usage data setting
   collector_url: ""                      # e.g. "https://snowplowprd.trx.gitlab.net" (no path; tracker appends /com.snowplowanalytics.snowplow/tp2)
+  local_collector_url: ""                # self-managed only: the local Data Insights Platform; gets every event whatever `enabled` says
   deployment:
     type: self_managed        # com | dedicated | self_managed
     environment: development  # development | staging | production

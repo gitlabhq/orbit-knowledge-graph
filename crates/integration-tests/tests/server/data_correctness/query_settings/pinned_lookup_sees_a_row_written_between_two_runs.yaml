@@ -9,7 +9,6 @@ steps:
       json: '{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[999]}],"limit":10}'
       gql: "MATCH (g:Group {id: 999}) RETURN g LIMIT 10"
     expect:
-      skip_requirements: [node_ids]
       node_count: 0
 
   - seed:

@@ -1,6 +1,10 @@
 use rustc_hash::FxHashMap;
 use std::{borrow::Cow, fmt};
 
+pub fn quote_ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
 /// Wraps a string in quotes, escaping backslash, quote, newline, carriage return,
 /// and tab.
 ///

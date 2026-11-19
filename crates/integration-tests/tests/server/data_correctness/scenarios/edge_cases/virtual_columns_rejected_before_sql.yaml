@@ -12,7 +12,7 @@ cases:
       gql: |
         MATCH (f:File) WHERE f.id >= 1 AND f.id <= 100000 AND f.content = 'x' RETURN f LIMIT 5
     expect:
-      compile_error_contains: [content]
+      compile_error: { clickhouse: schema, duckdb: ontology }
 
   - name: order_by
     description: Sorting by File.content rejects before SQL in local and remote mode
@@ -22,7 +22,7 @@ cases:
       gql: |
         MATCH (f:File) WHERE f.id >= 1 AND f.id <= 100000 RETURN f ORDER BY f.content LIMIT 5
     expect:
-      compile_error_contains: [content]
+      compile_error: { clickhouse: schema, duckdb: ontology }
 
   - name: group_by
     description: Grouping by File.content rejects before SQL in local and remote mode
@@ -30,4 +30,4 @@ cases:
       gql: |
         MATCH (f:File) WHERE f.id >= 1 AND f.id <= 100000 RETURN f.content, count(f) AS n
     expect:
-      compile_error_contains: [content]
+      compile_error: { clickhouse: schema, duckdb: ontology }

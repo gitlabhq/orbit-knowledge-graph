@@ -189,6 +189,44 @@ class Cli(unittest.TestCase):
             finally:
                 os.chdir(previous)
 
+    def test_diff_fetches_a_head_the_clone_lacks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            origin = Path(directory) / "origin"
+            clone = Path(directory) / "clone"
+            origin.mkdir()
+            clone.mkdir()
+
+            def git(cwd, *args):
+                return subprocess.run(
+                    ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+                ).stdout.strip()
+
+            git(origin, "init")
+            git(origin, "config", "user.email", "test@example.com")
+            git(origin, "config", "user.name", "Test")
+            git(origin, "config", "uploadpack.allowAnySHA1InWant", "true")
+            (origin / "AGENTS.md").write_text("Base.\n")
+            git(origin, "add", "AGENTS.md")
+            git(origin, "commit", "-m", "base")
+            base = git(origin, "rev-parse", "HEAD")
+            (origin / "AGENTS.md").write_text("Head.\n")
+            git(origin, "commit", "-am", "head")
+            head = git(origin, "rev-parse", "HEAD")
+
+            git(clone, "init")
+            git(clone, "remote", "add", "origin", str(origin))
+            git(clone, "fetch", "origin", base, "--depth=1")
+            git(clone, "checkout", "--detach", base)
+            (clone / "AGENTS.md").write_text("Train tip.\n")
+
+            previous = Path.cwd()
+            try:
+                os.chdir(clone)
+                with patch.dict(os.environ, {"CI_MERGE_REQUEST_SOURCE_BRANCH_SHA": head}):
+                    self.assertEqual(changed_files(base), ["AGENTS.md"])
+            finally:
+                os.chdir(previous)
+
 
 class SentenceRules(unittest.TestCase):
     def test_urls_decimals_and_references_do_not_split(self):

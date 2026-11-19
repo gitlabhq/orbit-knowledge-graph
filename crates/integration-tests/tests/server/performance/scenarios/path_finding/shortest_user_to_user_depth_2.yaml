@@ -11,6 +11,3 @@ query:
       "path": {"type": "shortest", "from": "u1", "to": "u2", "max_depth": 2,
                "rel_types": ["MEMBER_OF", "CONTAINS", "IN_PROJECT"]}
     }
-
-expect:
-  compile_only: true

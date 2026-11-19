@@ -29,7 +29,6 @@ query:
 
 expect:
   node_count: 2
-  skip_requirements: ["filter:status"]
   referential_integrity: true
   edge_exists:
     AUTO_CANCELED_BY: [[14200, 14201]]

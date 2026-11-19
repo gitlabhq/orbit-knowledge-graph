@@ -6,7 +6,7 @@ replicas: {{ $replicas }}
 # A replica that comes back on an empty disk has lost its database metadata, so
 # the cluster keeps its data across the pod kills in ch-chaos.sh.
 persistence:
-  enabled: {{ gt $replicas 1 }}
+  enabled: {{ or (gt $replicas 1) (eq (env "E2E_CH_PERSISTENCE") "true") }}
   size: 20Gi
 
 users:

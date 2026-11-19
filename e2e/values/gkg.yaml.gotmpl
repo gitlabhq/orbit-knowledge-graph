@@ -1,21 +1,24 @@
 {{ $sha := requiredEnv "E2E_SHA" }}
+{{ $gitlabNs := env "E2E_EXTERNAL_GITLAB_NS" | default (printf "e2e-%s-gitlab" $sha) }}
 {{ $v := fromYaml (readFile "../config/versions.yaml") }}
 {{ $gkgImage := env "E2E_GKG_IMAGE" | default $v.gkg.image.repository }}
 {{ $gkgTag := env "E2E_GKG_TAG" | default $v.gkg.image.tag }}
 
+{{- if not (env "E2E_EXTERNAL_GITLAB_NS") }}
 extraResources:
   - apiVersion: cert-manager.io/v1
     kind: Certificate
     metadata:
-      name: gkg-grpc-tls
+      name: orbit-webserver-tls
     spec:
-      secretName: gkg-grpc-tls
+      secretName: orbit-webserver-tls
       duration: 8760h
       issuerRef:
         name: e2e-ca
         kind: ClusterIssuer
       dnsNames:
         - orbit-webserver.e2e-{{ $sha }}-gkg.svc.cluster.local
+{{- end }}
 
 image:
   repository: {{ $gkgImage }}
@@ -150,11 +153,11 @@ nats:
     enabled: false
 
 gitlab:
-  baseUrl: "http://gitlab-webservice-default.e2e-{{ $sha }}-gitlab.svc.cluster.local:8181"
+  baseUrl: "http://gitlab-webservice-default.{{ $gitlabNs }}.svc.cluster.local:8181"
 
 tls:
   enabled: true
-  existingSecret: "gkg-grpc-tls"
+  existingSecret: "orbit-webserver-tls"
 
 metrics:
   prometheus:

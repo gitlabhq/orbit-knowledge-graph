@@ -234,6 +234,15 @@ pub(crate) fn is_cancelled(error: &anyhow::Error) -> bool {
         .is_some_and(|io| io.kind() == std::io::ErrorKind::Interrupted)
 }
 
+/// A single-choice picker that starts on `initial`, the key of one of `choices`.
+pub(crate) fn select(prompt: &str, choices: &[Choice], initial: &str) -> Result<String> {
+    let mut picker = cliclack::select(prompt);
+    for choice in choices {
+        picker = picker.item(choice.key.as_str(), &choice.label, &choice.hint);
+    }
+    Ok(picker.initial_value(initial).interact()?.to_string())
+}
+
 pub(crate) fn multiselect(
     prompt: &str,
     choices: &[Choice],

@@ -30,6 +30,7 @@ pub enum SkipReason {
     LineTooLong,
     NonRegularFile,
     LfsPointer,
+    ExcludedDirectory,
 }
 
 /// Broad content class.

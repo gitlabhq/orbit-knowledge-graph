@@ -2,6 +2,8 @@ pub mod archive;
 pub mod clickhouse;
 pub mod fs;
 pub mod fs_walk;
+#[cfg(feature = "markdown")]
+pub mod markdown;
 pub mod observability;
 pub mod query_types;
 pub mod safe_fs;

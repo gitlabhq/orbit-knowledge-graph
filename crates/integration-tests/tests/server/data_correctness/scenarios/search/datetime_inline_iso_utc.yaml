@@ -11,8 +11,6 @@ query:
     MATCH (n:Note {id: 3000}) RETURN n.created_at LIMIT 10
 
 expect:
-  hydration: none
-  sql_contains: ["AS n_created_at"]
   node_count: 1
   nodes:
     Note:

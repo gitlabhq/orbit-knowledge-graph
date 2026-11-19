@@ -30,7 +30,6 @@ cases:
       gql: |
         MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {star_count: 1}), (n:Note)-[:IN_PROJECT]->(p) RETURN count(n) AS c
     expect:
-      skip_requirements: ["filter:star_count"]
       row_count: 1
       row_values: [{ c: 0 }]
 
@@ -40,6 +39,5 @@ cases:
       gql: |
         MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {star_count: 2}), (n:Note)-[:IN_PROJECT]->(p) RETURN count(n) AS c
     expect:
-      skip_requirements: ["filter:star_count"]
       row_count: 1
       row_values: [{ c: 4 }]

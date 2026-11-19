@@ -22,7 +22,7 @@ DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 RUSTC_WRAPPER = "{% if env.RUSTC_WRAPPER is defined %}{{env.RUSTC_WRAPPER}}{% elif env.CI is defined %}{% else %}sccache{% endif %}"
 
 [tools]
-"rust" = { version = "1.98.1", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu", postinstall = "bash ./scripts/checks/check-rust-toolchain.sh --write" }
+"rust" = { version = "1.100.0", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu", postinstall = "bash ./scripts/checks/check-rust-toolchain.sh --write" }
 "cargo:cargo-nextest" = "0.9.123"
 "cargo:cargo-edit" = "0.13.8"
 "cargo:cargo-audit" = "0.22.0"
@@ -139,16 +139,16 @@ run = "./scripts/dev/run-unit-tests.sh"
 description = "Run unit tests (--lib, the xtask and orbit binaries, and the code-graph-incremental integration targets; no Docker)"
 
 [tasks."test:local"]
-run = "cargo nextest run --test local"
+run = "cargo nextest run --test local --test compiler"
 description = "Run local integration tests — compiler + querying pipeline (no Docker)"
 
 [tasks."test:scripts"]
 run = "for t in scripts/dev/tests/*_test.sh scripts/fuzz/*_test.sh; do bash \"$t\" || exit 1; done"
 description = "Run the shell tests for the local development scripts (no cluster needed)"
 
-[tasks."test:plan-shape"]
-run = "cargo test -p integration-tests --test local compiler::plan_shape -- --nocapture"
-description = "Check logical input and selected physical plans against YAML fixtures"
+[tasks."test:compiler"]
+run = "cargo test -p integration-tests --test compiler -- --nocapture"
+description = "Check compiler phase state against YAML fixtures (no Docker)"
 
 [tasks."test:integration:codegraph"]
 run = "cargo nextest run -p integration-tests-codegraph --no-capture"
@@ -163,13 +163,18 @@ dir = "packages/agent-plugins"
 run = ["bun run typecheck", "bun run test", "bun run test:claude", "bun run test:differential --count 100", "bun run build"]
 description = "Typecheck, test, and build the Claude Code and OpenCode plugins; needs Claude Code 2.1.287+"
 
+[tasks."test:agent-plugins-nightly"]
+dir = "packages/agent-plugins-nightly"
+run = "bun run test"
+description = "Test the nightly plugins that `ORBIT_NIGHTLY=1 orbit setup` installs"
+
 [tasks."test:integration"]
 run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers --test indexer_containers --no-fail-fast --retries 0"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run container tests (requires the Colima `gkg` profile: `colima start gkg --memory 12`)"
 
 [tasks."test:integration:server"]
-run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(redaction_integration) | test(graph_formatter)'"
+run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(graph_formatter)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run server integration tests (data correctness, redaction, graph formatter)"
 
@@ -230,8 +235,11 @@ run = [
 description = "Check log, span and print call sites against the red data rules (scripts/linting/logs)"
 
 [tasks."lint:deps"]
-run = "cargo shear"
-description = "Check for unused workspace and crate dependencies"
+run = [
+  "cargo shear",
+  "python3 scripts/checks/check_workspace_deps.py --registry-only",
+]
+description = "Check for unused dependencies and crate-local dependency declarations"
 
 [tasks."lint:code:fix"]
 run = [
@@ -301,6 +309,10 @@ description = "Run a measured code indexing benchmark"
 extends = "bench:engine"
 vars = { action = "smoke" }
 description = "Run one code indexing pass against each benchmark repository"
+
+[tasks."proto:config"]
+run = "cargo xtask proto-config"
+description = "Regenerate the config prost types and descriptor set"
 
 [tasks."proto:go"]
 run = "scripts/dev/proto-go.sh generate"
@@ -455,6 +467,10 @@ description = "Regenerate crates/orbit-observability/orbit-dashboards/gkg-metric
 [tasks."metrics:catalog:check"]
 run = "cargo xtask metrics-catalog --check"
 description = "Fail if the committed metrics catalog is out of date"
+
+[tasks."fips:duckdb:check"]
+run = "uv run --quiet scripts/checks/fips/duckdb-mbedtls/check.py"
+description = "Check that DuckDB reaches mbedtls only through the reviewed entry points"
 
 [tasks."dashboards"]
 run = "cargo xtask dashboards"

@@ -15,6 +15,5 @@ query:
     RETURN count(mr.merged_at) AS n
 
 expect:
-  skip_requirements: [node_ids]
   row_count: 1
   row_values: [{ n: 1 }]

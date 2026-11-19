@@ -66,6 +66,9 @@ pre-commit:
       glob:
         - "mise.toml"
         - "rust-toolchain.toml"
+    - name: workspace-deps
+      run: python3 scripts/checks/check_workspace_deps.py --registry-only
+      glob: "**/Cargo.toml"
     - name: skill-version-bump
       run: python3 scripts/checks/check-skill-version-bump.py --ci --staged
       glob: "skills/**/*"

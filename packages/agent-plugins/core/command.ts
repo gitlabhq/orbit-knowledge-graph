@@ -16,10 +16,10 @@ export function displayName(name: string): string {
   return /[,\s']/.test(text) ? `'${text.replaceAll("'", "\\'")}'` : text
 }
 
-type SimpleCommand = { piped: boolean; words: string[]; readsInput: boolean; writes: string[]; substitutes: boolean }
+type SimpleCommand = { piped: boolean; words: string[]; readsInput: boolean; writes: string[]; substitutes: boolean; stdin: string }
 
 function emptyCommand(piped: boolean): SimpleCommand {
-  return { piped, words: [], readsInput: false, writes: [], substitutes: false }
+  return { piped, words: [], readsInput: false, writes: [], substitutes: false, stdin: '' }
 }
 
 function isEmpty(command: SimpleCommand): boolean {
@@ -33,6 +33,8 @@ function redirectTarget(tokens: readonly Token[], from: number): { target?: stri
   return token?.kind === 'word' ? { target: token.text, end: at } : { end: from - 1 }
 }
 
+const BARE_CAT = /^cat(?: -)?$/
+
 function groupCommands(tokens: readonly Token[]): SimpleCommand[] {
   const commands: SimpleCommand[] = []
   let current = emptyCommand(false)
@@ -40,15 +42,20 @@ function groupCommands(tokens: readonly Token[]): SimpleCommand[] {
     const token = tokens[i]
     if (token?.kind === 'word') current.words.push(token.text)
     else if (token?.kind === 'substitution') current.substitutes = true
+    else if (token?.kind === 'heredoc') current.stdin = token.body
     else if (token?.kind === 'redirect') {
       const { target, end } = redirectTarget(tokens, i + 1)
-      if (token.operator === '<') current.readsInput = true
-      else if (target !== undefined) current.writes.push(target)
+      if (token.operator === '<') {
+        current.readsInput = true
+        current.stdin = token.hereString ? (target ?? '') : ''
+      } else if (target !== undefined) current.writes.push(target)
       current.substitutes ||= tokens.slice(i + 1, end + 1).some((skipped) => skipped.kind === 'substitution')
       i = end
     } else if (token?.kind === 'separator') {
+      const previous = current
       if (!isEmpty(current)) commands.push(current)
       current = emptyCommand(token.pipe)
+      if (token.pipe && BARE_CAT.test(previous.words.join(' '))) current.stdin = previous.stdin
     }
   }
   if (!isEmpty(current)) commands.push(current)
@@ -97,10 +104,17 @@ function runnable(command: string): { runs: SimpleCommand[]; unparsed: boolean }
   return { runs, unparsed }
 }
 
+export type OrbitRun = { words: string[]; stdin: string }
+
+export function orbitRuns(command: string): OrbitRun[] {
+  return runnable(command).runs.flatMap(({ words, stdin }) => {
+    const orbit = orbitWords(words)
+    return orbit ? [{ words: orbit, stdin }] : []
+  })
+}
+
 export function orbitInvocations(command: string): string[][] {
-  return runnable(command)
-    .runs.map(({ words }) => orbitWords(words))
-    .filter((words) => words !== null)
+  return orbitRuns(command).map(({ words }) => words)
 }
 
 const SHELL_WORDS = new Set(['cd', 'pushd', 'popd', 'true', ':', 'fi', 'done', 'esac', '}'])

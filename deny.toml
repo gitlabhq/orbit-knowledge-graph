@@ -11,25 +11,12 @@ db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "warn"
 ignore = [
-    # rustls-pemfile unmaintained - transitive dep from object_store -> datafusion
-    # Remove when object_store drops rustls-pemfile (check: cargo tree -i rustls-pemfile)
-    "RUSTSEC-2025-0134",
-    # atomic-polyfill is pulled in transitively by rust-analyzer's postcard/proc-macro stack.
-    # We disable the proc-macro server in the Rust v2 indexing path, and there is no safe
-    # upgrade available until upstream refreshes that dependency chain.
-    "RUSTSEC-2023-0089",
-    # rsa reaches the workspace only through reqsign -> opendal -> lance-io (code-graph
-    # integration tests); the server signs JWTs with HS256 on aws-lc-rs and links no rsa.
-    "RUSTSEC-2023-0071",
-    # paste unmaintained - transitive dep from clickhouse crate
-    "RUSTSEC-2024-0436",
-    # proc-macro-error2 unmaintained - transitive dep from tabled_derive
-    "RUSTSEC-2026-0173",
-    # quick-xml < 0.41 DoS advisories — transitive via reqsign/opendal under lance-graph.
-    # No safe upgrade until upstream bumps quick-xml >= 0.41. See #18.
-    # Remove when upstream updates (check: cargo tree -i quick-xml)
-    "RUSTSEC-2026-0194", # quadratic attribute-name duplicate check
-    "RUSTSEC-2026-0195", # unbounded NsReader namespace-declaration allocation
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained with no safe upgrade; direct workspace dep and transitive via arrow" },
+    # astral-tokio-tar unmaintained - dev-only via testcontainers, reached through
+    # integration-testkit and testcontainers-modules (nats-client, integration-tests).
+    # No safe upgrade available. Remove when testcontainers drops it
+    # (check: cargo tree -i astral-tokio-tar)
+    "RUSTSEC-2026-0440",
     # zstd 0.13.3 / zstd-safe 7.2.4 stay in the lock for tonic 0.14.6 (gRPC compression) and
     # arrow-ipc/parquet 58. They call only zstd::stream::read::{Encoder, Decoder}::new and the
     # bulk API, which neither advisory affects: 0391 needs raw with_context, 0403 needs the
@@ -59,7 +46,6 @@ allow = [
     "CDLA-Permissive-2.0",
     "LicenseRef-EE",
     "OpenSSL", # aws-lc-sys and aws-lc-fips-sys via rustls
-    "bzip2-1.0.6", # libbz2-rs-sys via datafusion -> async-compression
     "0BSD", # mock_instant via lance-graph
     "BSL-1.0", # xxhash-rust via lance-graph
 ]
@@ -169,6 +155,5 @@ unknown-registry = "deny"
 unknown-git = "warn"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
-    "https://gitlab.com/gitlab-org/rust/gitalisk.git",
     "https://gitlab.com/gitlab-org/rust/labkit-rs.git",
 ]

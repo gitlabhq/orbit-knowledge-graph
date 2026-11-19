@@ -25,7 +25,6 @@ query:
     RETURN g{.id, .name}, count(mr) AS approval_count LIMIT 20
 
 expect:
-  skip_requirements: ["node_ids"]
   groups:
     g:
       entity: Group

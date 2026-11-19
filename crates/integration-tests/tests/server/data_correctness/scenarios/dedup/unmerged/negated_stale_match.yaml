@@ -19,7 +19,6 @@ cases:
       gql: |
         MATCH (mr:MergeRequest) WHERE mr.id IN [9850, 9851] AND NOT mr.state = 'closed' RETURN mr.title, mr.state LIMIT 10
     expect:
-      skip_requirements: ["filter:state"]
       node_count: 1
       nodes:
         MergeRequest:

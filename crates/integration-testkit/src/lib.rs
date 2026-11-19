@@ -1,8 +1,8 @@
 mod assertions;
 pub mod cli;
+pub mod compiler;
 mod context;
 pub mod mock_redaction;
-pub mod plan_shape;
 pub mod query_scenario;
 pub mod scenario;
 mod seed;
@@ -39,14 +39,19 @@ pub fn load_ontology_overlay(name: &str) -> ontology::Ontology {
         .unwrap_or_else(|e| panic!("ontology overlay '{name}' failed to load: {e}"))
 }
 
+static ONTOLOGY: std::sync::LazyLock<std::sync::Arc<ontology::Ontology>> =
+    std::sync::LazyLock::new(|| {
+        let ont = load_unprefixed_ontology();
+        let prefix = &*TABLE_PREFIX;
+        if prefix.is_empty() {
+            std::sync::Arc::new(ont)
+        } else {
+            std::sync::Arc::new(ont.with_schema_version_prefix(prefix))
+        }
+    });
+
 pub fn load_ontology() -> std::sync::Arc<ontology::Ontology> {
-    let ont = load_unprefixed_ontology();
-    let prefix = &*TABLE_PREFIX;
-    if prefix.is_empty() {
-        std::sync::Arc::new(ont)
-    } else {
-        std::sync::Arc::new(ont.with_schema_version_prefix(prefix))
-    }
+    std::sync::Arc::clone(&ONTOLOGY)
 }
 
 pub fn derive_clickhouse_data_model(
@@ -93,20 +98,23 @@ pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::Lazy
     Box::leak(sql.into_boxed_str())
 });
 
+pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else if let Some(message) = payload.downcast_ref::<&str>() {
+        message.to_string()
+    } else {
+        "panic (see stderr)".to_string()
+    }
+}
+
 pub async fn collect_subtest_results(handles: Vec<(String, tokio::task::JoinHandle<()>)>) {
     let mut failed: Vec<String> = Vec::new();
     for (name, handle) in handles {
         match handle.await {
             Ok(()) => {}
             Err(e) if e.is_panic() => {
-                let payload = e.into_panic();
-                let msg = if let Some(s) = payload.downcast_ref::<String>() {
-                    s.clone()
-                } else if let Some(s) = payload.downcast_ref::<&str>() {
-                    s.to_string()
-                } else {
-                    "panic (see stderr)".to_string()
-                };
+                let msg = panic_message(&*e.into_panic());
                 failed.push(format!("{}: {}", name, msg));
             }
             Err(_) => {

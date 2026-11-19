@@ -13,7 +13,6 @@ cases:
       gql: |
         MATCH (u:User)-->(n) WHERE u.id IN [2, 3] RETURN u, n
     expect:
-      hydration: dynamic
       node_count: 2
       nodes:
         User: { ids: [2], absent: [3] }

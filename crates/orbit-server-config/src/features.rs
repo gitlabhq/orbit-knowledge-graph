@@ -11,8 +11,11 @@ use std::sync::OnceLock;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, strum::VariantNames,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum Feature {
     CodeGraphIncremental,
 }
@@ -35,8 +38,6 @@ impl FeatureScope {
     }
 }
 
-/// An unrecognized key fails deserialization as an unknown [`Feature`] variant,
-/// rather than being silently ignored.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
 pub struct FeaturesConfig(HashMap<Feature, FeatureScope>);

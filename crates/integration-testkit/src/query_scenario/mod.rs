@@ -2,8 +2,10 @@
 //! tests but exercises the full query path: compile, execute, redact,
 //! hydrate, paginate, format, assert.
 
+mod datasets;
 mod duckdb;
 mod format;
+mod output_format;
 mod pagination;
 #[cfg(test)]
 mod regression;
@@ -13,15 +15,14 @@ use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::Path;
 use std::sync::Arc;
 
-use format::ExpectedIndex;
+use datasets::{Database, Datasets};
 use futures::FutureExt;
 use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
-use query_engine::compiler::passes::codegen::clickhouse::cte_statements;
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ParameterizedQuery,
-    ResultContext, SecurityContext,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ResultContext,
+    SecurityContext,
 };
-use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter};
+use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineStage, QueryPipelineContext, TypeMap,
 };
@@ -35,16 +36,18 @@ use response::{
 use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
 use crate::scenario::{self, Seed};
-use crate::visitor::{NodeExt, Requirement, ResponseView};
+use crate::visitor::{NodeExt, ResponseView};
 use crate::{
     SeededColumnResolver, collect_subtest_results, derive_clickhouse_data_model, load_ontology,
 };
 
 pub use duckdb::run_duckdb_dir;
+pub(crate) use format::rejection_reason;
 pub use format::{
     PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, QueryStep, RedactionConfig,
     ScenarioConfig, SecurityOverride,
 };
+pub(crate) use response::shown_private_detail;
 
 use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage};
 use orbit_server::redaction::QueryResult;
@@ -58,7 +61,9 @@ pub fn validate_parse(root: &str) {
     scenario::discover(root, &mut files);
     assert!(!files.is_empty(), "no files found under {}", root.display());
     for file in &files {
-        scenario::read_cases::<QueryScenario>(file);
+        for (name, scenario) in read_scenarios(root, file) {
+            scenario.into_steps(&name);
+        }
     }
 }
 
@@ -152,18 +157,31 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
         .unwrap_or(8);
     let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
     let ctx = Arc::new(ctx.clone());
+    let scenarios: Vec<_> = scenarios
+        .into_iter()
+        .map(|(name, scenario)| {
+            let (config, steps) = scenario.into_steps(&name);
+            let database = Database::for_scenario(&config, &steps, &name);
+            (name, config, steps, database)
+        })
+        .collect();
+    let datasets = Arc::new(Datasets::new(
+        scenarios.iter().map(|(.., database)| database),
+    ));
 
     let mut handles = Vec::new();
-    for (name, scenario) in scenarios {
+    for (name, config, steps, database) in scenarios {
         let semaphore = Arc::clone(&semaphore);
         let ctx = Arc::clone(&ctx);
         let presets = Arc::clone(&presets);
+        let datasets = Arc::clone(&datasets);
         let task_name = name.clone();
         let handle = tokio::task::spawn(async move {
             let _permit = semaphore.acquire_owned().await.unwrap();
             let started = std::time::Instant::now();
             eprintln!("--- {task_name}");
-            run_scenario(&ctx, scenario, &task_name, &presets).await;
+            let scenario = (config, steps, database);
+            run_scenario(&ctx, &datasets, scenario, &task_name, &presets).await;
             eprintln!("    {task_name} {:.2?}", started.elapsed());
         });
         handles.push((name, handle));
@@ -172,28 +190,38 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     collect_subtest_results(handles).await;
 }
 
-async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, presets: &Path) {
-    let (config, steps) = scenario.into_steps();
-    let database = (!config.extra_seed.is_empty()
-        || config.ontology_overlay.is_some()
-        || steps.iter().any(|step| !step.seed.is_empty()))
-    .then(|| scenario::database_name(name));
-    let outcome = AssertUnwindSafe(run_case(
-        ctx,
-        &config,
-        &steps,
-        name,
-        presets,
-        database.as_deref(),
-    ))
+async fn run_scenario(
+    ctx: &TestContext,
+    datasets: &Datasets,
+    (config, steps, database): (ScenarioConfig, Vec<QueryStep>, Database),
+    name: &str,
+    presets: &Path,
+) {
+    let outcome = AssertUnwindSafe(async {
+        let ctx = match &database {
+            Database::Base => ctx.clone(),
+            Database::Shared(dataset) => {
+                datasets
+                    .acquire(
+                        dataset,
+                        datasets::prepare(ctx, &config, dataset, presets, name),
+                    )
+                    .await
+            }
+            Database::Private(fork) => datasets::prepare(ctx, &config, fork, presets, name).await,
+        };
+        run_case(&ctx, &config, &steps, name, presets).await;
+    })
     .catch_unwind()
     .await;
-    let cleanup = if let Some(database) = database {
-        AssertUnwindSafe(ctx.drop_fork(&database))
-            .catch_unwind()
-            .await
-    } else {
-        Ok(())
+    let cleanup = match &database {
+        Database::Base => Ok(()),
+        Database::Shared(dataset) => {
+            AssertUnwindSafe(datasets.release(ctx, dataset))
+                .catch_unwind()
+                .await
+        }
+        Database::Private(fork) => AssertUnwindSafe(ctx.drop_fork(fork)).catch_unwind().await,
     };
     if let Err(failure) = outcome.and(cleanup) {
         resume_unwind(failure);
@@ -206,61 +234,7 @@ async fn run_case(
     steps: &[QueryStep],
     name: &str,
     presets: &Path,
-    database: Option<&str>,
 ) {
-    let ctx = if let Some(database) = database {
-        let forked = ctx.fork(database).await;
-        if let Some(overlay) = &cfg.ontology_overlay {
-            let ontology = crate::load_ontology_overlay(overlay);
-            let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology).unwrap();
-            let credentials = orbit_migrations::schema::DictionaryCredentials {
-                database: forked.config.database.clone(),
-                user: forked.config.username.clone(),
-                password: forked.config.password.clone(),
-            };
-            orbit_migrations::execute::create_all_versioned_tables(
-                &forked.create_client(),
-                &schema,
-                &credentials,
-                &crate::TABLE_PREFIX,
-            )
-            .await
-            .unwrap();
-        }
-        let columns = crate::scenario::seed::fetch_table_columns(&forked).await;
-        let mut settings = Default::default();
-        if cfg.unmerged_seed {
-            for table in cfg.extra_seed.keys() {
-                let table = crate::scenario::seed::prefix_graph_table(table);
-                assert!(
-                    columns.contains_key(&table),
-                    "{name}: unknown table '{table}'"
-                );
-                forked.execute(&format!("SYSTEM STOP MERGES {table}")).await;
-            }
-            settings = std::collections::BTreeMap::from([(
-                "optimize_on_insert".to_string(),
-                serde_json::json!(0),
-            )]);
-        }
-        if cfg.unmerged_seed {
-            for (table, rows) in &cfg.extra_seed {
-                for row in rows {
-                    let seed = Seed::from([(table.clone(), vec![row.clone()])]);
-                    crate::scenario::seed::apply_seed(&forked, &seed, &settings, &columns, name)
-                        .await;
-                }
-            }
-        } else {
-            crate::scenario::seed::apply_seed(&forked, &cfg.extra_seed, &settings, &columns, name)
-                .await;
-            forked.optimize_if_needed().await;
-        }
-        forked
-    } else {
-        ctx.clone()
-    };
-
     let security_override = resolve_preset("security", &cfg.security, presets, name);
     let redaction_with_default = cfg
         .redaction
@@ -282,15 +256,9 @@ async fn run_case(
 
     for (index, step) in steps.iter().enumerate() {
         if !step.seed.is_empty() {
-            let columns = crate::scenario::seed::fetch_table_columns(&ctx).await;
-            crate::scenario::seed::apply_seed(
-                &ctx,
-                &step.seed,
-                &Default::default(),
-                &columns,
-                name,
-            )
-            .await;
+            let columns = crate::scenario::seed::fetch_table_columns(ctx).await;
+            crate::scenario::seed::apply_seed(ctx, &step.seed, &Default::default(), &columns, name)
+                .await;
             ctx.optimize_if_needed().await;
         }
         let name = &step_label(name, index, steps.len());
@@ -299,7 +267,7 @@ async fn run_case(
                 .parse::<Frontend>()
                 .unwrap_or_else(|_| panic!("{name}: unknown query language '{frontend_key}'"));
             run_frontend(
-                (&ctx, &data_model, &ontology),
+                (ctx, &data_model, &ontology),
                 (frontend, frontend_key),
                 query_str,
                 &security,
@@ -337,17 +305,10 @@ async fn run_frontend(
     expect.validate_pages_exclusive(label);
 
     let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
-    let Some(compiled) = assert_compilation(compiled, expect, frontend_key, label) else {
+    let Some(compiled) = assert_compilation(compiled, expect, ("clickhouse", frontend_key), label)
+    else {
         return;
     };
-
-    if expect.compile_only {
-        return;
-    }
-
-    if !expect.indexes_used.is_empty() {
-        assert_indexes_used(ctx, &compiled, &expect.indexes_used, label).await;
-    }
 
     if !expect.pages.is_empty() {
         run_pages(
@@ -373,15 +334,12 @@ async fn run_frontend(
         redaction,
     )
     .await;
-    let baseline = assert_output(&output, frontend, expect, label);
+    let baseline = assert_output(&output, expect, label);
     let count = repeat_count(expect, label);
     for run in 2..=count {
         let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
-        let compiled = assert_compilation(compiled, expect, frontend_key, label)
+        let compiled = assert_compilation(compiled, expect, ("clickhouse", frontend_key), label)
             .expect("repeated query should compile");
-        if !expect.indexes_used.is_empty() {
-            assert_indexes_used(ctx, &compiled, &expect.indexes_used, label).await;
-        }
         let output = execute_output(
             ctx,
             frontend,
@@ -391,115 +349,8 @@ async fn run_frontend(
             redaction,
         )
         .await;
-        let rerun = assert_output(&output, frontend, expect, label);
+        let rerun = assert_output(&output, expect, label);
         assert_repeated_response(&baseline, &rerun, run, label);
-    }
-}
-
-async fn assert_indexes_used(
-    ctx: &TestContext,
-    compiled: &CompiledQueryContext,
-    expected: &[ExpectedIndex],
-    label: &str,
-) {
-    let query = &compiled.base;
-    let plan = ctx.explain_plan(query).await;
-    let ctes = cte_statements(&compiled.ast).expect("CTE statements render");
-    for ExpectedIndex { table, index } in expected {
-        let mut cte_plans = Vec::new();
-        let mut scans = Vec::new();
-        read_from_merge_tree(&plan, table, &mut scans);
-        if !scans.iter().any(|scan| skip_index(scan, index).is_some()) {
-            for (_, sql, params) in &ctes {
-                let statement = ParameterizedQuery {
-                    sql: sql.clone(),
-                    params: params.clone(),
-                    result_context: query.result_context.clone(),
-                    query_config: query.query_config.clone(),
-                    dialect: query.dialect,
-                };
-                cte_plans.push(ctx.explain_plan(&statement).await);
-            }
-            for cte_plan in &cte_plans {
-                read_from_merge_tree(cte_plan, table, &mut scans);
-            }
-        }
-        assert!(
-            !scans.is_empty(),
-            "{label}: no ReadFromMergeTree step for table {table}"
-        );
-        assert!(
-            scans.iter().any(|scan| skip_index(scan, index).is_some()),
-            "{label}: skip index {index} not applied on any {table} scan"
-        );
-        assert!(
-            scans.iter().any(|scan| index_pruned(scan, index)),
-            "{label}: skip index {index} did not prune granules on any {table} scan"
-        );
-    }
-}
-
-fn index_pruned(value: &serde_json::Value, index: &str) -> bool {
-    let pruned = |entry: &serde_json::Value| {
-        let initial = entry["Initial Granules"].as_u64().unwrap_or(0);
-        let selected = entry["Selected Granules"].as_u64().unwrap_or(initial);
-        selected < initial
-    };
-    skip_index(value, index).is_some()
-        && [index, "<Combined skip indexes>"]
-            .iter()
-            .any(|name| skip_index(value, name).is_some_and(pruned))
-}
-
-fn unversioned_table(description: &str) -> &str {
-    let table = description.rsplit('.').next().unwrap_or(description);
-    match table
-        .strip_prefix('v')
-        .and_then(|rest| rest.split_once('_'))
-    {
-        Some((version, unversioned)) if version.chars().all(|c| c.is_ascii_digit()) => unversioned,
-        _ => table,
-    }
-}
-
-fn read_from_merge_tree<'a>(
-    value: &'a serde_json::Value,
-    table: &str,
-    scans: &mut Vec<&'a serde_json::Value>,
-) {
-    match value {
-        serde_json::Value::Object(map) => {
-            let is_scan = map.get("Node Type").and_then(serde_json::Value::as_str)
-                == Some("ReadFromMergeTree");
-            let scans_table = map
-                .get("Description")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|description| unversioned_table(description) == table);
-            if is_scan && scans_table {
-                scans.push(value);
-            }
-            map.values()
-                .for_each(|child| read_from_merge_tree(child, table, scans));
-        }
-        serde_json::Value::Array(items) => items
-            .iter()
-            .for_each(|child| read_from_merge_tree(child, table, scans)),
-        _ => {}
-    }
-}
-
-fn skip_index<'a>(value: &'a serde_json::Value, name: &str) -> Option<&'a serde_json::Value> {
-    match value {
-        serde_json::Value::Object(map) => {
-            if map.get("Type").and_then(serde_json::Value::as_str) == Some("Skip")
-                && map.get("Name").and_then(serde_json::Value::as_str) == Some(name)
-            {
-                return Some(value);
-            }
-            map.values().find_map(|v| skip_index(v, name))
-        }
-        serde_json::Value::Array(items) => items.iter().find_map(|v| skip_index(v, name)),
-        _ => None,
     }
 }
 
@@ -536,7 +387,7 @@ async fn run_pages(
             redaction,
         )
         .await;
-        let response = assert_output(&output, frontend, page_expect, &page_label);
+        let response = assert_output(&output, page_expect, &page_label);
         let response = serde_json::from_value(response).expect("response should deserialize");
         collected.push(&response);
         assert_page_bounds(&response, i, expect.pages.len(), &page_label);
@@ -689,33 +540,7 @@ fn assert_response(input: &Input, response: serde_json::Value, expect: &QueryExp
     apply_expect(&ResponseView::for_query(input, response), expect, label);
 }
 
-fn assert_gql_table(output: &PipelineOutput, expect: &QueryExpect, label: &str) {
-    if expect.gql_columns.is_empty() && expect.gql_column_names.is_empty() {
-        return;
-    }
-    let (header, rows) = GqlFormatter.table(output);
-    if !expect.gql_column_names.is_empty() {
-        assert_eq!(
-            header, expect.gql_column_names,
-            "{label}: gql column names mismatch"
-        );
-    }
-    for (name, values) in &expect.gql_columns {
-        let index = header
-            .iter()
-            .position(|column| column == name)
-            .unwrap_or_else(|| panic!("{label}: gql table has no column {name}: {header:?}"));
-        let actual: Vec<&str> = rows.iter().map(|row| row[index].as_str()).collect();
-        assert_eq!(actual, *values, "{label}: gql column {name} mismatch");
-    }
-}
-
 fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
-    for req_name in &expect.skip_requirements {
-        if let Some(req) = parse_requirement(req_name) {
-            view.skip_requirement(req);
-        }
-    }
     if let Some(n) = expect.node_count {
         view.assert_node_count(n);
     }
@@ -750,6 +575,27 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                     continue;
                 }
                 assert_property(found, prop, expected, entity, id, label);
+            }
+        }
+        let row_ids: std::collections::HashSet<i64> = ne
+            .rows
+            .iter()
+            .filter_map(|row| row["id"].as_i64())
+            .collect();
+        let rows_cover_every_node = view
+            .nodes_of_type(entity)
+            .iter()
+            .all(|node| row_ids.contains(&node.id));
+        if let Some(first) = ne.rows.first().filter(|_| rows_cover_every_node) {
+            for field in first.keys().filter(|field| {
+                *field != "id" && ne.rows.iter().all(|row| row.contains_key(*field))
+            }) {
+                view.assert_filter(entity, field, |node| {
+                    ne.rows.iter().any(|row| {
+                        row["id"].as_i64() == Some(node.id)
+                            && property_matches(node, field, &row[field.as_str()], label)
+                    })
+                });
             }
         }
         for prop in &ne.prop_present {
@@ -883,6 +729,31 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     if expect.empty_aggregation {
         view.assert_empty_aggregation();
     }
+    if let Some(columns) = &expect.aggregation_columns {
+        assert_eq!(
+            view.response.columns.as_deref().unwrap_or_default(),
+            columns.as_slice(),
+            "{label}: aggregation columns mismatch"
+        );
+    }
+    for field in &expect.edge_prop_absent {
+        assert!(
+            ["depth", "path_id", "step"].contains(&field.as_str()),
+            "{label}: edge_prop_absent takes depth, path_id, or step, got {field}"
+        );
+        for edge in view.edges() {
+            let present = match field.as_str() {
+                "depth" => edge.depth.is_some(),
+                "path_id" => edge.path_id.is_some(),
+                _ => edge.step.is_some(),
+            };
+            assert!(
+                !present,
+                "{label}: {} edge {} {} -> {} {} has {field}",
+                edge.edge_type, edge.from, edge.from_id, edge.to, edge.to_id
+            );
+        }
+    }
     for (name, node_dot_prop) in &expect.group_columns {
         let (node, property) = node_dot_prop.split_once('.').unwrap_or_else(|| {
             panic!("{label}: group_columns value must be 'node.property', got '{node_dot_prop}'")
@@ -1008,20 +879,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     if let Some(n) = expect.row_count {
         view.assert_row_count(n);
     }
-    for (i, row) in expect.row_values.iter().enumerate() {
-        for (col, expected) in row {
-            match expected {
-                serde_json::Value::Number(n) if n.is_i64() => {
-                    view.assert_row_value_i64(i, col, n.as_i64().unwrap());
-                }
-                serde_json::Value::String(s) => {
-                    view.assert_row_value_str(i, col, s);
-                }
-                serde_json::Value::Null => view.assert_row_value_null(i, col),
-                _ => panic!("{label}: unsupported row_values type for {col}"),
-            }
-        }
-    }
+    view.assert_row_values(&expect.row_values, label);
     if let Some(expected) = expect.has_more {
         let pagination = view.response.pagination.as_ref();
         assert!(
@@ -1106,34 +964,39 @@ fn try_expand_repeat(obj: &serde_json::Map<String, serde_json::Value>) -> Option
 }
 
 fn assert_property(
-    node: &dyn NodeExt,
+    node: &query_engine::formatters::GraphNode,
     prop: &str,
     expected: &serde_json::Value,
     entity: &str,
     id: i64,
     label: &str,
 ) {
+    assert!(
+        property_matches(node, prop, expected, label),
+        "{label}: {entity}/{id}.{prop} expected {expected}, got {:?}",
+        node.properties.get(prop)
+    );
+}
+
+fn property_matches(
+    node: &query_engine::formatters::GraphNode,
+    prop: &str,
+    expected: &serde_json::Value,
+    label: &str,
+) -> bool {
     match expected {
-        serde_json::Value::String(s) => node.assert_str(prop, s),
+        serde_json::Value::String(s) => node.prop_str(prop) == Some(s.as_str()),
         serde_json::Value::Object(m) if m.contains_key("repeat") => {
             let expanded = try_expand_repeat(m).unwrap_or_else(|| {
-                panic!("{label}: {entity}/{id}.{prop}: invalid repeat object, expected {{repeat: \"str\", count: N}}")
+                panic!(
+                    "{label}: {prop}: invalid repeat object, expected {{repeat: \"str\", count: N}}"
+                )
             });
-            node.assert_str(prop, &expanded);
+            node.prop_str(prop) == Some(expanded.as_str())
         }
-        serde_json::Value::Number(n) if n.is_i64() => {
-            node.assert_i64(prop, n.as_i64().unwrap());
-        }
-        serde_json::Value::Bool(b) => {
-            assert_eq!(
-                node.prop_bool(prop),
-                Some(*b),
-                "{label}: {entity}/{id}.{prop} expected {b}",
-            );
-        }
-        serde_json::Value::Null => {
-            node.assert_prop(prop, &serde_json::Value::Null);
-        }
+        serde_json::Value::Number(n) if n.is_i64() => node.prop_i64(prop) == n.as_i64(),
+        serde_json::Value::Bool(b) => node.prop_bool(prop) == Some(*b),
+        serde_json::Value::Null => node.properties.get(prop) == Some(&serde_json::Value::Null),
         _ => panic!("{label}: unsupported property value type for {prop}"),
     }
 }
@@ -1162,7 +1025,7 @@ fn resolve_preset<T: Clone + serde::de::DeserializeOwned>(
     }
 }
 
-fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
+pub(crate) fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
     let Some(ov) = overrides else {
         return SecurityContext::new(1, vec!["1/".into()]).unwrap();
     };
@@ -1202,30 +1065,6 @@ fn build_redaction(config: &Option<RedactionConfig>) -> MockRedactionService {
         }
     }
     svc
-}
-
-fn parse_requirement(name: &str) -> Option<Requirement> {
-    if let Some(field) = name.strip_prefix("filter:") {
-        return Some(Requirement::Filter {
-            field: field.to_string(),
-        });
-    }
-    if let Some(edge_type) = name.strip_prefix("relationship:") {
-        return Some(Requirement::Relationship {
-            edge_type: edge_type.to_string(),
-        });
-    }
-    match name {
-        "node_ids" => Some(Requirement::NodeIds),
-        "node_count" => Some(Requirement::NodeCount),
-        "order_by" => Some(Requirement::OrderBy),
-        "skip" => Some(Requirement::Skip),
-        "aggregation" => Some(Requirement::Aggregation),
-        "aggregation_sort" => Some(Requirement::AggregationSort),
-        "neighbors" => Some(Requirement::Neighbors),
-        "path_finding" => Some(Requirement::PathFinding),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

@@ -11,9 +11,9 @@ use std::path::PathBuf;
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
-    let config_dir = PathBuf::from(std::env::var("CONFIG_DIR").unwrap_or_else(|_| {
+    let config_dir = PathBuf::from(std::env::var("ORBIT_CONFIG_DIR").unwrap_or_else(|_| {
         panic!(
-            "CONFIG_DIR must be set via .cargo/config.toml [env] when building the indexer crate"
+            "ORBIT_CONFIG_DIR must be set via .cargo/config.toml [env] when building the indexer crate"
         )
     }));
 

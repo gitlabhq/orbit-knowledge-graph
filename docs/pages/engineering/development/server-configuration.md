@@ -5,14 +5,24 @@
 
 ## Load order
 
-1. The embedded `config/default.yaml`. It declares every key, so a removed key stops startup.
+1. The embedded `config/default.yaml`. It declares every key, and the schema marks each one
+   required, so a removed key stops startup with a "value is required" error.
 2. One overlay file: `--config <path>`, or else `config/config.yaml` when it exists.
 3. Secret files under `/etc/secrets/`, for example `/etc/secrets/billing/quota/api_token`.
 
 The server reads only two environment variables: `RUST_LOG`, when `metrics.log_level` is
-unset, and `GKG_VERSION`. To add a setting, add the field to
-`crates/orbit-server-config/` and its value to `config/default.yaml`. For the local overlay
-files, see [local development](local-development.md).
+unset, and `GKG_VERSION`. For the local overlay files, see
+[local development](local-development.md).
+
+The loader merges the layers into one document. It rejects enum names and closed-section keys the
+schema does not declare, then decodes and validates the document, reporting every violation at once.
+
+To add a setting, add:
+
+- a field to `crates/orbit-server-config/proto/orbit/config/v1/config.proto`, marked
+  `(buf.validate.field).required = true` unless it is optional, then run `mise proto:config`
+- a field to the Rust struct in `crates/orbit-server-config/`, and its arm in `convert.rs`
+- its value in `config/default.yaml`
 
 ## Modes
 
@@ -25,6 +35,13 @@ Select the mode with `--mode`. The default is `webserver`.
 | `dispatch-indexing` | Scheduler that publishes indexing requests | `nats`, `schedule`, `graph`, `datalake`, `schema` |
 | `health-check` | Kubernetes workload, ClickHouse and NATS queue health | `health_check`, `graph`, `datalake`, `nats` |
 | `clickhouse-setup` | Applies `config/clickhouse-setup.sql`, then exits | `clickhouse_setup`, `graph`, `datalake` |
+
+## Checking a configuration file
+
+`gkg-server check-config --config <path>` loads the file over the embedded defaults as startup does,
+then exits without starting a server. It rejects an unknown key in any section and reads no secret
+files. A valid file exits 0 with no output. An invalid one prints the errors and exits 1. The check
+skips the rules a single mode applies at startup, such as the `grpc` ranges and quota credentials.
 
 ## NATS
 
@@ -154,6 +171,7 @@ KV lock makes sure that only one dispatcher runs a task per interval.
 
 | Key | Effect |
 | --- | --- |
+| `schedule.tasks.<task>.run_timeout_secs` | Longest time for one run. After it, the scheduler stops the run and the task starts again on its next tick. `0` removes the limit. |
 | `schedule.tasks.namespace.sweep_interval_secs` | Age of the last full sweep before the next one |
 | `schedule.tasks.stale-edge-reconciliation.lookback_secs` | Time window that each run scans again |
 | `schedule.tasks.code-backfill.publish_window` | Projects per publish batch and per run |
@@ -230,17 +248,19 @@ Check: the pods are ready and Prometheus scrapes `/-/metrics`.
 
 ### Query settings
 
-`query.default` applies to all queries. A query type key, for example `query.aggregation`,
-overrides it for that type.
+`query.default` applies to all queries. A query type key under `query.overrides`, for example
+`query.overrides.aggregation`, overrides it for that type.
 
 | Key | Effect |
 | --- | --- |
-| `query.<type>.max_execution_time` | ClickHouse `max_execution_time` in seconds |
-| `query.<type>.max_memory_usage`, `max_bytes_to_read`, `max_rows_to_read` | ClickHouse limits |
-| `query.<type>.max_rows_in_set` | Limit of an `IN` subquery |
-| `query.<type>.max_ast_elements`, `max_expanded_ast_elements`, `max_ast_depth` | ClickHouse query size limits |
-| `query.<type>.use_query_cache` | ClickHouse query cache. Indexing reads and queries that pin every node by ID skip it. |
-| `query.<type>.query_cache_ttl` | Maximum age of a cached result in seconds |
+| `query.<scope>.max_execution_time` | ClickHouse `max_execution_time` in seconds |
+| `query.<scope>.max_memory_usage`, `max_bytes_to_read`, `max_rows_to_read` | ClickHouse limits |
+| `query.<scope>.max_rows_in_set` | Limit of an `IN` subquery |
+| `query.<scope>.max_ast_elements`, `max_expanded_ast_elements`, `max_ast_depth` | ClickHouse query size limits |
+| `query.<scope>.use_query_cache` | ClickHouse query cache. Indexing reads and queries that pin every node by ID skip it. |
+| `query.<scope>.query_cache_ttl` | Maximum age of a cached result in seconds |
+
+`<scope>` is `default` or `overrides.<type>`.
 
 ## Schema
 
@@ -266,7 +286,7 @@ overrides it for that type.
 | `billing.enabled` | Snowplow billing events |
 | `billing.collector_url` | Billing collector. GitLab Self-Managed and GitLab Dedicated use the host of the Cloud Connector token audience. |
 | `billing.auth_mode` | `oidc` (GitLab.com workload identity) or `cloud_connector` (GitLab Self-Managed and GitLab Dedicated) |
-| `billing.quota.enabled` | Check metered queries (`mcp`, `rest`) against CustomersDot before they run |
+| `billing.quota.enabled` | Check every query against CustomersDot before it runs |
 | `billing.quota.customers_dot_url` | CustomersDot URL |
 | `billing.quota.auth_mode` | `admin_token` (GitLab.com) or `license_checksum` (GitLab Self-Managed and GitLab Dedicated) |
 | `billing.quota.api_user`, `billing.quota.api_token` | CustomersDot credentials for `admin_token`, from `/etc/secrets/billing/quota/` |

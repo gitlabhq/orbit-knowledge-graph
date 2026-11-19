@@ -1,3 +1,11 @@
+WITH late AS (
+  SELECT source_id AS id, max({{watermark_column}}) AS watermark
+  FROM siphon_routes
+  WHERE startsWith(traversal_path, {traversal_path:String})
+    AND source_type = 'Project'
+    AND {{watermark_column}} > {last_watermark:String} AND {{watermark_column}} <= {watermark:String}
+    AND {is_incremental:Bool}
+  GROUP BY source_id )
 SELECT
   project.id AS id,
   project.name AS name,
@@ -14,7 +22,16 @@ SELECT
   traversal_paths.current_path AS traversal_path,
   project.{{version_column}} AS _version,
   project.{{deleted_column}} AS _deleted
-FROM siphon_projects project
+FROM (
+  SELECT * FROM siphon_projects
+  WHERE id NOT IN (SELECT id FROM late)
+  UNION ALL
+  (SELECT p.* REPLACE (late.watermark AS {{watermark_column}})
+  FROM siphon_projects p
+  INNER JOIN late ON p.id = late.id
+  WHERE p.id IN (SELECT id FROM late)
+  ORDER BY p.id, p.{{version_column}} DESC
+  LIMIT 1 BY p.id) ) project
 INNER JOIN (
   SELECT
     id,

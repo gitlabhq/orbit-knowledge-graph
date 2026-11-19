@@ -769,11 +769,20 @@ fn setup_skill(
     project: &tempfile::TempDir,
     skill_args: &[&str],
 ) -> (Output, std::path::PathBuf) {
+    setup_agent("codex", base_url, project, skill_args)
+}
+
+fn setup_agent(
+    agent: &str,
+    base_url: Option<&str>,
+    project: &tempfile::TempDir,
+    skill_args: &[&str],
+) -> (Output, std::path::PathBuf) {
     let cache = tempfile::tempdir().unwrap();
     let dir = project.path().to_str().unwrap();
     let mut args = vec![
         "setup",
-        "codex",
+        agent,
         "--yes",
         "--skip",
         "instructions",
@@ -896,25 +905,13 @@ fn error_reply(status: u16) -> Reply {
 }
 
 fn setup_instructions(base_url: Option<&str>) -> (Output, String) {
+    hook_instructions(base_url, &["hook-guard", "instructions"])
+}
+
+fn hook_instructions(base_url: Option<&str>, args: &[&str]) -> (Output, String) {
     let project = tempfile::tempdir().unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let dir = project.path().to_str().unwrap();
-    let mut command = hermetic_orbit(
-        &cache,
-        &[
-            "setup",
-            "codex",
-            "--yes",
-            "--skip",
-            "hooks",
-            "--skip",
-            "skill",
-            "--no-index",
-            "--project",
-            "--dir",
-            dir,
-        ],
-    );
+    let mut command = hermetic_orbit(&cache, args);
     command.current_dir(project.path());
     if let Some(base_url) = base_url {
         command
@@ -923,22 +920,18 @@ fn setup_instructions(base_url: Option<&str>) -> (Output, String) {
             .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test");
     }
     let output = command.output().unwrap();
-    let instructions = walk_files(project.path())
-        .into_iter()
-        .map(|path| std::fs::read_to_string(path).unwrap_or_default())
-        .find(|text| text.contains("orbit:setup:begin"))
-        .unwrap_or_else(|| panic!("no instruction block written: {}", stderr(&output)));
+    let instructions = String::from_utf8_lossy(&output.stdout).into_owned();
     (output, instructions)
 }
 
 fn assert_local_only(output: &Output, instructions: &str) {
     assert!(output.status.success(), "{}", stderr(output));
     assert!(
-        instructions.contains("grep` must be used"),
+        instructions.contains("grep` must be used for search"),
         "{instructions}"
     );
     assert!(
-        !instructions.contains("query` must be used"),
+        !instructions.contains("query` must be used for counts"),
         "{instructions}"
     );
     assert!(!instructions.contains("Schema for"), "{instructions}");
@@ -948,7 +941,7 @@ fn assert_local_only(output: &Output, instructions: &str) {
 fn assert_remote_without_schema(output: &Output, instructions: &str) {
     assert!(output.status.success(), "{}", stderr(output));
     assert!(
-        instructions.contains("query` must be used"),
+        instructions.contains("query` must be used for counts"),
         "{instructions}"
     );
     assert!(!instructions.contains("Schema for"), "{instructions}");
@@ -999,12 +992,125 @@ const SERVICE_STATUS: &str =
     r#"{"data":{"orbit":{"serviceStatus":{"state":"HEALTHY","version":"1","components":[]}}}}"#;
 
 #[test]
-fn setup_instructions_leave_the_schema_to_failing_queries() {
+fn the_gitlab_flag_gives_a_hook_without_a_credential_the_remote_text() {
+    let (output, instructions) =
+        hook_instructions(None, &["hook-guard", "instructions", "--gitlab"]);
+    assert_remote_without_schema(&output, &instructions);
+}
+
+#[test]
+fn the_gitlab_flag_does_not_override_a_hook_that_has_a_credential() {
+    let (url, server) = mock_server(vec![error_reply(403)]);
+    let (output, instructions) =
+        hook_instructions(Some(&url), &["hook-guard", "instructions", "--gitlab"]);
+    server.join().unwrap();
+    assert_local_only(&output, &instructions);
+}
+
+fn session_start_hook(hooks_file: &std::path::Path) -> String {
+    let hooks = std::fs::read_to_string(hooks_file).unwrap();
+    let hooks: serde_json::Value = serde_json::from_str(&hooks).unwrap();
+    let entries = hooks["hooks"]["SessionStart"].as_array().unwrap();
+    assert_eq!(entries.len(), 1, "{hooks}");
+    entries[0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn a_signed_in_duo_setup_gives_the_tokenless_session_hook_the_remote_text() {
+    let project = tempfile::tempdir().unwrap();
+    let hooks_file = project.path().join(".gitlab/duo/hooks.json");
+    let (url, server) = mock_server(vec![
+        tree_reply("1.0.0", "Remote v1"),
+        ok_reply(SERVICE_STATUS),
+    ]);
+    let (output, skills) = setup_agent("duo", Some(&url), &project, &[]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(server.join().unwrap().len(), 2);
+    assert!(skills.join("orbit/references/remote.md").is_file());
+
+    let command = session_start_hook(&hooks_file);
+    assert_eq!(command, "orbit hook-guard instructions --gitlab");
+    let args: Vec<&str> = command.split(' ').skip(1).collect();
+    let (output, instructions) = hook_instructions(None, &args);
+    assert_remote_without_schema(&output, &instructions);
+
+    let (output, _) = setup_agent("duo", None, &project, &[]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        session_start_hook(&hooks_file),
+        "orbit hook-guard instructions"
+    );
+}
+
+#[test]
+fn a_signed_in_codex_setup_keeps_the_session_hook_command() {
+    let project = tempfile::tempdir().unwrap();
+    let (url, server) = mock_server(vec![ok_reply(SERVICE_STATUS)]);
+    let (output, _) = setup_skill(Some(&url), &project, &[]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    server.join().unwrap();
+    assert_eq!(
+        session_start_hook(&project.path().join(".codex/hooks.json")),
+        "orbit hook-guard instructions"
+    );
+}
+
+#[test]
+fn setup_instructions_keep_the_bundled_query_line_without_a_schema() {
     let (url, server) = mock_server(vec![ok_reply(SERVICE_STATUS)]);
     let (output, instructions) = setup_instructions(Some(&url));
     let requests = server.join().unwrap();
     assert_remote_without_schema(&output, &instructions);
+    assert!(
+        !instructions.contains("Connected providers"),
+        "{instructions}"
+    );
     assert_eq!(request_paths(&requests), ["/api/graphql"]);
+}
+
+#[test]
+fn setup_instructions_list_the_servers_entities_and_cache_them() {
+    let schema = |names: &str| {
+        format!(
+            r#"{{"data":{{"orbit":{{"serviceStatus":{{"state":"HEALTHY"}},"schema":{{"nodes":{{"nodes":[{names}]}}}}}}}}}}"#
+        )
+    };
+    let (url, server) = mock_server(vec![
+        ok_reply(&schema(
+            r#"{"name":"Project"},{"name":"bad name"},{"name":"Widget"}"#,
+        )),
+        ok_reply(&schema(r#"{"name":"Gadget"}"#)),
+    ]);
+    let (cache, project) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    for _ in 0..2 {
+        let output = hermetic_orbit(&cache, &["hook-guard", "instructions"])
+            .current_dir(project.path())
+            .env("ORBIT_DATA_DIR", cache.path())
+            .env("ORBIT_API_BASE_URL", &url)
+            .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
+            .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
+            .output()
+            .unwrap();
+        let instructions = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            instructions
+                .trim_end()
+                .ends_with("- gitlab: Project, Widget"),
+            "{instructions}"
+        );
+        assert_eq!(
+            instructions.matches("MANDATORY").count(),
+            4,
+            "{instructions}"
+        );
+    }
+    assert_eq!(
+        request_paths(&server.join().unwrap()),
+        ["/api/graphql", "/api/graphql"]
+    );
 }
 
 #[test]
@@ -1229,5 +1335,68 @@ fn misconfigured_url_reports_its_own_reason_for_another_skill() {
         stderr(&output).contains("ORBIT_API_BASE_URL"),
         "{}",
         stderr(&output)
+    );
+}
+
+#[test]
+fn grep_searches_any_server_entity_through_graph_queries() {
+    let schema = r#"{"data":{"orbit":{"schema":{
+        "nodes":{"nodes":[
+          {"name":"Pipeline","properties":{"nodes":[
+            {"name":"id","textSearchable":false,"defaultColumn":true},
+            {"name":"ref","textSearchable":true,"defaultColumn":true},
+            {"name":"sha","textSearchable":true,"defaultColumn":false}]}},
+          {"name":"Vulnerability","properties":{"nodes":[
+            {"name":"title","textSearchable":null,"defaultColumn":null}]}}]},
+        "edges":{"nodes":[{"name":"IN_PROJECT","endpoints":{"nodes":[
+          {"source":{"name":"Pipeline"},"target":{"name":"Project"}}]}}]}}}}}"#;
+    let project = r#"{"data":{"project":{"id":"gid://gitlab/Project/7"},"group":null}}"#;
+    let hit = r#"{"result":{"nodes":[{"type":"Pipeline","id":"42","ref":"main"}]}}"#;
+    let rejected = Reply {
+        status: 400,
+        reason: "Bad Request",
+        etag: None,
+        body: r#"{"code":"compile_error","message":"schema violation: search pattern must be at least 3 characters, got 2"}"#.to_string(),
+    };
+    let mut replies: Vec<Reply> = [schema, project, hit, hit, project, hit, hit, project]
+        .into_iter()
+        .map(ok_reply)
+        .collect();
+    replies.extend([rejected.clone(), rejected]);
+    let (url, server) = mock_server(replies);
+    let (cache, dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let grep = |query: &str| {
+        hermetic_orbit(&cache, &["grep", query])
+            .current_dir(dir.path())
+            .env("ORBIT_DATA_DIR", cache.path())
+            .env("ORBIT_API_BASE_URL", &url)
+            .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
+            .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
+            .output()
+            .unwrap()
+    };
+    let found = grep("gitlab:pipeline:main repo:g/p");
+    assert_eq!(
+        String::from_utf8_lossy(&found.stdout),
+        "GitLab Pipeline \"main\" in 127.0.0.1/g/p:\nPipeline[42] ref=main\n",
+        "{}",
+        stderr(&found)
+    );
+    let unknown = grep("gitlab:vulnerability:main repo:g/p");
+    assert!(
+        stderr(&unknown).contains("needs GitLab 19.6"),
+        "{}",
+        stderr(&unknown)
+    );
+    assert_eq!(grep("gitlab:pipeline:main repo:g/p").stdout, found.stdout);
+    let short = grep("gitlab:pipeline:ab repo:g/p");
+    assert_eq!(
+        stderr(&short),
+        "orbit: not searched: \"ab\" (search pattern must be at least 3 characters, got 2)\n"
+    );
+    let paths = request_paths(&server.join().unwrap());
+    assert_eq!(
+        paths.iter().filter(|path| *path == "/api/graphql").count(),
+        4
     );
 }

@@ -1,0 +1,64 @@
+cases:
+  - name: Uncovered filters keep the node scan alongside covered edge tags
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"definition_type":"function","name":"compile"}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
+      gql: |
+        MATCH (a:Definition {definition_type: 'function', name: 'compile'})-[:CALLS]->(b:Definition) RETURN a, b
+    logical:
+      expect: ["(Filter a.definition_type = 'function', a.name = 'compile' (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter a._deleted = false (Deduplicate LimitBy ... (Filter a.definition_type = 'function', a.name = 'compile' (Scan Table(gl_definition) AS a))))
+            - (Filter _orbit_edge_0.source_tags HAS ANY ['definition_type:function'], ... (_))
+        emitted:
+          expect:
+            - (Filter a.definition_type = 'function', a.name = 'compile', Lower(a.name) = Lower('compile') (Scan Table(gl_definition) AS a))
+            - (Deduplicate LimitBy ... (_))
+            - (Filter ArrayContains(_orbit_edge_0.source_tags, 'definition_type:function'), ... (_))
+            - (Join ON a.id = _orbit_edge_0.source_id (_) (Bind a (_)))
+          reject: ["(CTE _filter_a (_))"]
+
+  - name: A node filter that the relationship does not tag stays on the node read
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":{"eq":"opened"}}},{"id":"cl","entity":"Label","filters":{"title":{"eq":"Community contribution"}}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"cl"}],"aggregations":[{"count":"mr","as":"c"}]}
+      gql: |
+        MATCH (mr:MergeRequest {state: 'opened'})-[:HAS_LABEL]->(cl:Label {title: 'Community contribution'}) RETURN count(mr) AS c
+    logical:
+      expect: ["(Filter mr.state = 'opened' (NodeScan MergeRequest AS mr))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(CTE _ (Project mr.id AS id (Filter mr.state = 'opened', ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))))"]
+          reject: ["(Filter _orbit_edge_0.source_tags HAS ANY ['state:opened'], ... (_))"]
+
+  - name: MENTIONS edges carry no work item tags, so the state filter stays on the node read
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"a","entity":"WorkItem","filters":{"state":{"eq":"opened"}}},{"id":"b","entity":"WorkItem"}],"relationships":[{"type":"MENTIONS","from":"a","to":"b"}],"aggregations":[{"count":"a","as":"n"}]}
+      gql: |
+        MATCH (a:WorkItem {state: 'opened'})-[:MENTIONS]->(b:WorkItem) RETURN count(a) AS n
+    logical:
+      expect: ["(Filter a.state = 'opened' (NodeScan WorkItem AS a))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(CTE _ (Project a.id AS id (Filter a.state = 'opened', ... (Deduplicate Final (Scan Table(gl_work_item) AS a)))))"]
+          reject: ["(Filter _orbit_edge_0.source_tags HAS ANY ['state:opened'], ... (_))"]
+
+  - name: HAS_NOTE edges carry no merge request tags, so the state filter stays on the node read
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"a","entity":"MergeRequest","filters":{"state":{"eq":"opened"}}},{"id":"b","entity":"Note"}],"relationships":[{"type":"HAS_NOTE","from":"a","to":"b"}],"aggregations":[{"count":"a","as":"n"}]}
+      gql: |
+        MATCH (a:MergeRequest {state: 'opened'})-[:HAS_NOTE]->(b:Note) RETURN count(a) AS n
+    logical:
+      expect: ["(Filter a.state = 'opened' (NodeScan MergeRequest AS a))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(CTE _ (Project a.id AS id (Filter a.state = 'opened', ... (Deduplicate Final (Scan Table(gl_merge_request) AS a)))))"]
+          reject: ["(Filter _orbit_edge_0.source_tags HAS ANY ['state:opened'], ... (_))"]

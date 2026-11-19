@@ -9,6 +9,7 @@ use ontology::{
 };
 
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_utils::strings::quote_ident;
 
 use super::SOURCE_DATA_TABLE;
 
@@ -431,21 +432,24 @@ fn node_columns(fields: &[ontology::Field]) -> Vec<NodeColumn> {
 
 fn node_transform_sql(columns: &[NodeColumn]) -> String {
     let mut select_list: Vec<String> = columns.iter().map(node_column_sql).collect();
-    select_list.push(VERSION_COLUMN.to_string());
-    select_list.push(DELETED_COLUMN.to_string());
+    select_list.push(quote_ident(VERSION_COLUMN));
+    select_list.push(quote_ident(DELETED_COLUMN));
     format!("SELECT {} FROM {SOURCE_DATA_TABLE}", select_list.join(", "))
 }
 
 fn node_column_sql(column: &NodeColumn) -> String {
     match column {
-        NodeColumn::Identity(name) => name.clone(),
-        NodeColumn::Rename { source, target } => format!("{source} AS {target}"),
+        NodeColumn::Identity(name) => quote_ident(name),
+        NodeColumn::Rename { source, target } => {
+            format!("{} AS {}", quote_ident(source), quote_ident(target))
+        }
         NodeColumn::IntEnum {
             source,
             target,
             values,
             nullable,
         } => {
+            let (source, target) = (quote_ident(source), quote_ident(target));
             let cases: Vec<String> = values
                 .iter()
                 .map(|(key, value)| format!("WHEN {source} = {key} THEN '{value}'"))
@@ -493,16 +497,19 @@ fn low_cardinality_columns(columns: &[ontology::StorageColumn]) -> HashSet<Strin
 
 fn edge_id_sql(id: &EdgeId) -> String {
     match id {
-        EdgeId::Column(column) => column.clone(),
-        EdgeId::ArrayElement { column, field } => format!("unnest({column})['{field}']"),
+        EdgeId::Column(column) => quote_ident(column),
+        EdgeId::ArrayElement { column, field } => {
+            format!("unnest({})['{field}']", quote_ident(column))
+        }
     }
 }
 
 fn edge_kind_sql(kind: &EdgeKind) -> String {
     match kind {
         EdgeKind::Literal(value) => format!("'{value}'"),
-        EdgeKind::Column { column, mapping } if mapping.is_empty() => column.clone(),
+        EdgeKind::Column { column, mapping } if mapping.is_empty() => quote_ident(column),
         EdgeKind::Column { column, mapping } => {
+            let column = quote_ident(column);
             let cases: Vec<String> = mapping
                 .iter()
                 .map(|(from, to)| format!("WHEN {column} = '{from}' THEN '{to}'"))
@@ -514,15 +521,15 @@ fn edge_kind_sql(kind: &EdgeKind) -> String {
 
 fn edge_filter_sql(filter: &EdgeFilter) -> String {
     match filter {
-        EdgeFilter::IsNotNull(column) => format!("({column} IS NOT NULL)"),
-        EdgeFilter::ArrayNotEmpty(column) => format!("(cardinality({column}) > 0)"),
+        EdgeFilter::IsNotNull(column) => format!("({} IS NOT NULL)", quote_ident(column)),
+        EdgeFilter::ArrayNotEmpty(column) => format!("(cardinality({}) > 0)", quote_ident(column)),
         EdgeFilter::TypeIn { column, types } => {
             let types_list = types
                 .iter()
                 .map(|t| format!("'{t}'"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{column} IN ({types_list})")
+            format!("{} IN ({types_list})", quote_ident(column))
         }
         EdgeFilter::VariantIn {
             source_kind,
@@ -585,6 +592,11 @@ fn build_edge_transform_sql(
     }
     if !sort_key.is_empty() {
         sql.push_str(" ORDER BY ");
+        let sort_key: Vec<String> = sort_key
+            .iter()
+            .map(String::as_str)
+            .map(quote_ident)
+            .collect();
         sql.push_str(&sort_key.join(", "));
     }
     sql
@@ -600,7 +612,7 @@ fn edge_select_list(
     denormalized: &[DenormalizedColumnProjection],
 ) -> Vec<String> {
     let traversal_path = if namespaced {
-        "traversal_path".to_string()
+        quote_ident("traversal_path")
     } else {
         "'0/' AS traversal_path".to_string()
     };
@@ -612,8 +624,8 @@ fn edge_select_list(
         format!("'{relationship_kind}' AS relationship_kind"),
         format!("{target_id} AS target_id"),
         format!("{target_kind} AS target_kind"),
-        VERSION_COLUMN.to_string(),
-        DELETED_COLUMN.to_string(),
+        quote_ident(VERSION_COLUMN),
+        quote_ident(DELETED_COLUMN),
     ];
 
     let mut tag_groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -625,9 +637,9 @@ fn edge_select_list(
                     .map(|(key, value)| {
                         format!(
                             "WHEN {} = {} THEN '{}'",
-                            d.source_column,
+                            quote_ident(&d.source_column),
                             key,
-                            value.replace('\'', "\\'")
+                            value.replace('\'', "''")
                         )
                     })
                     .collect();
@@ -635,13 +647,13 @@ fn edge_select_list(
                     "CASE WHEN {col} IS NULL THEN '{key}:null' ELSE concat('{key}:', CASE {cases} ELSE CAST({col} AS VARCHAR) END) END",
                     key = d.tag_key,
                     cases = cases.join(" "),
-                    col = d.source_column
+                    col = quote_ident(&d.source_column)
                 )
             }
             None => format!(
                 "CASE WHEN {col} IS NULL THEN '{key}:null' ELSE concat('{key}:', CAST({col} AS VARCHAR)) END",
                 key = d.tag_key,
-                col = d.source_column
+                col = quote_ident(&d.source_column)
             ),
         };
         tag_groups
@@ -653,8 +665,8 @@ fn edge_select_list(
     // Both tag columns always emitted (empty when unused) so the Arrow schema matches the edge table.
     for col_name in &["source_tags", "target_tags"] {
         let expr = match tag_groups.remove(*col_name) {
-            Some(tag_exprs) => format!("make_array({})", tag_exprs.join(", ")),
-            None => "make_array()".to_string(),
+            Some(tag_exprs) => format!("CAST([{}] AS VARCHAR[])", tag_exprs.join(", ")),
+            None => "CAST([] AS VARCHAR[])".to_string(),
         };
         cols.push(format!("{expr} AS {col_name}"));
     }
@@ -691,9 +703,15 @@ mod tests {
         ];
 
         let sql = node_transform_sql(&columns);
-        assert!(sql.contains("admin AS is_admin"), "sql: {sql}");
-        assert!(sql.contains("WHEN state = 0 THEN 'active'"), "sql: {sql}");
-        assert!(sql.contains("ELSE 'unknown' END AS state"), "sql: {sql}");
+        assert!(sql.contains(r#""admin" AS "is_admin""#), "sql: {sql}");
+        assert!(
+            sql.contains(r#"WHEN "state" = 0 THEN 'active'"#),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains(r#"ELSE 'unknown' END AS "state""#),
+            "sql: {sql}"
+        );
     }
 
     #[test]
@@ -709,9 +727,9 @@ mod tests {
         }];
 
         let sql = node_transform_sql(&columns);
-        assert!(sql.contains("WHEN failure_reason IS NULL THEN NULL"));
-        assert!(sql.contains("WHEN failure_reason = 1 THEN 'script_failure'"));
-        assert!(sql.contains("ELSE 'unknown' END AS failure_reason"));
+        assert!(sql.contains(r#"WHEN "failure_reason" IS NULL THEN NULL"#));
+        assert!(sql.contains(r#"WHEN "failure_reason" = 1 THEN 'script_failure'"#));
+        assert!(sql.contains(r#"ELSE 'unknown' END AS "failure_reason""#));
     }
 
     #[test]
@@ -741,7 +759,7 @@ mod tests {
         }));
     }
 
-    // DataFusion 54 resolves `<string column> = <int literal>` by coercing the column,
+    // DuckDB resolves `<string column> = <int literal>` by casting the column,
     // so an ordinal comparison against a string enum fails the cast at runtime.
     #[test]
     fn string_enum_denormalized_tag_never_compares_against_int_ordinals() {
@@ -778,9 +796,9 @@ mod tests {
             &projections,
         )
         .join(", ");
-        assert!(!sql.contains("user_state = 0"), "sql: {sql}");
+        assert!(!sql.contains(r#""user_state" = 0"#), "sql: {sql}");
         assert!(
-            sql.contains("concat('state:', CAST(user_state AS VARCHAR))"),
+            sql.contains(r#"concat('state:', CAST("user_state" AS VARCHAR))"#),
             "sql: {sql}"
         );
     }
@@ -794,11 +812,11 @@ mod tests {
             .unwrap()
             .sql;
 
-        assert!(sql.contains("owner_id AS source_id"));
+        assert!(sql.contains(r#""owner_id" AS source_id"#));
         assert!(sql.contains("'User' AS source_kind"));
-        assert!(sql.contains("id AS target_id"));
+        assert!(sql.contains(r#""id" AS target_id"#));
         assert!(sql.contains("'Group' AS target_kind"));
-        assert!(sql.contains("(owner_id IS NOT NULL)"));
+        assert!(sql.contains(r#"("owner_id" IS NOT NULL)"#));
     }
 
     #[test]
@@ -834,10 +852,10 @@ mod tests {
             .unwrap()
             .sql;
         assert!(
-            sql.contains("WHEN noteable_type = 'Issue' THEN 'WorkItem'"),
+            sql.contains(r#"WHEN "noteable_type" = 'Issue' THEN 'WorkItem'"#),
             "sql: {sql}"
         );
-        assert!(sql.contains("ELSE noteable_type END"), "sql: {sql}");
+        assert!(sql.contains(r#"ELSE "noteable_type" END"#), "sql: {sql}");
     }
 
     #[test]
@@ -864,8 +882,14 @@ mod tests {
             .pop()
             .unwrap()
             .sql;
-        assert!(sql.contains("unnest(assignees)['user_id']"), "sql: {sql}");
-        assert!(sql.contains("(cardinality(assignees) > 0)"), "sql: {sql}");
+        assert!(
+            sql.contains(r#"unnest("assignees")['user_id']"#),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains(r#"(cardinality("assignees") > 0)"#),
+            "sql: {sql}"
+        );
     }
 
     fn literal_mapping(
