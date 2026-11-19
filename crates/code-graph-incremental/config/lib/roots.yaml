@@ -1,4 +1,3 @@
-rulesets:
+stages:
   src_root:
-    - match: '(__dir "src" $$$REST)'
-      replace: '(__dir "src" (__source_root) $$$REST)'
+    - '(__dir "src" $$$REST)': '(__dir "src" (__source_root) $$$REST)'

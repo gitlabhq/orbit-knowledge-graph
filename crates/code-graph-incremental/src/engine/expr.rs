@@ -1,32 +1,64 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
+use super::pattern::Slots;
 use super::{Arg, FnId, Kind, Run, Store, Val, Vals, function, lookup, module_of};
 use crate::canonical::Canonical as C;
 use crate::error::LoadError;
 use crate::intern::Lang;
+use crate::tree::EdgeKind;
 
 pub enum Expr {
-    Cap(u16),
-    Text(u16),
+    Var(u16),
     Lit(Val),
     Empty,
     Data(u16),
     Union(Box<[Expr]>),
     Def(u16, Box<[Expr]>),
     Call(FnId, Box<[Expr]>),
+    Or(Box<Expr>, Box<Expr>),
+    First(Box<Expr>, u16, Box<Expr>),
+    Op(Op, Box<[Expr]>),
+}
+
+/// The engine's own operations over trees and the graph.
+#[derive(Clone, Copy)]
+pub enum Op {
+    /// Matches of a declared index directly in a scope.
+    Select(u32),
+    /// Matches of a declared index anywhere under a node.
+    SelectAll(u32),
+    /// Matches of a declared index in every file.
+    SelectProject(u32),
+    Enclose,
+    Follow(EdgeKind),
+    /// The targets of edges of a kind made at a node.
+    Site(EdgeKind),
+    File,
+}
+
+/// A `select` pattern and its key, shared by every phase so trees can keep
+/// one piece per index.
+#[derive(Clone, PartialEq)]
+pub struct IndexSpec {
+    pub pattern: String,
+    pub key: Option<String>,
 }
 
 pub struct Scope<'a> {
-    pub slots: &'a super::pattern::Slots,
+    pub slots: &'a RefCell<Slots>,
     pub modules: &'a [String],
     pub links: &'a super::Links,
     pub lang: &'a Lang,
     pub data: &'a HashMap<String, u16>,
     pub defs: &'a HashMap<String, (u16, usize)>,
+    pub indexes: &'a RefCell<Vec<IndexSpec>>,
     pub effects: bool,
+    /// In a language's redefinition: the shared definition and its arity.
+    pub shared: Option<(u16, usize)>,
 }
 
 impl Expr {
@@ -42,32 +74,52 @@ impl Expr {
 
     /// Every module function and YAML function this expression calls.
     pub fn calls(&self, f: &mut dyn FnMut(Result<FnId, u16>)) {
+        let each = |parts: &[Expr], f: &mut dyn FnMut(Result<FnId, u16>)| {
+            parts.iter().for_each(|p| p.calls(f))
+        };
         match self {
             Expr::Call(id, args) => {
                 f(Ok(*id));
-                args.iter().for_each(|a| a.calls(f));
+                each(args, f);
             }
             Expr::Def(def, args) => {
                 f(Err(*def));
-                args.iter().for_each(|a| a.calls(f));
+                each(args, f);
             }
-            Expr::Union(parts) => parts.iter().for_each(|p| p.calls(f)),
+            Expr::Union(parts) | Expr::Op(_, parts) => each(parts, f),
+            Expr::Or(a, b) | Expr::First(a, _, b) => {
+                a.calls(f);
+                b.calls(f);
+            }
             _ => {}
         }
     }
 
-    pub fn ends_in_effect(&self) -> bool {
-        matches!(self, Expr::Call(id, _) if function(*id).kind == Kind::Effect)
-    }
-
     pub fn eval<S: Store>(&self, cx: &mut Run<S>, caps: &[Vals]) -> Vals {
         match self {
-            Expr::Cap(slot) => caps[*slot as usize].clone(),
-            Expr::Text(slot) => caps[*slot as usize].clone(),
+            Expr::Var(slot) => caps[*slot as usize].clone(),
             Expr::Lit(val) => SmallVec::from_elem(*val, 1),
             Expr::Empty => Vals::new(),
             Expr::Data(at) => cx.data[usize::from(*at)].clone(),
             Expr::Union(parts) => parts.iter().flat_map(|p| p.eval(cx, caps)).collect(),
+            Expr::Or(a, b) => {
+                let found = a.eval(cx, caps);
+                match found.is_empty() {
+                    true => b.eval(cx, caps),
+                    false => found,
+                }
+            }
+            Expr::First(list, slot, body) => {
+                let mut local = caps.to_vec();
+                for v in list.eval(cx, caps) {
+                    local[usize::from(*slot)] = SmallVec::from_elem(v, 1);
+                    let found = body.eval(cx, &local);
+                    if !found.is_empty() {
+                        return found;
+                    }
+                }
+                Vals::new()
+            }
             Expr::Def(def, args) => {
                 let mut args: SmallVec<[Vals; 3]> = args.iter().map(|a| a.eval(cx, caps)).collect();
                 let heads = std::mem::take(&mut args[0]);
@@ -85,6 +137,10 @@ impl Expr {
             Expr::Call(id, args) => {
                 let args: SmallVec<[Vals; 3]> = args.iter().map(|a| a.eval(cx, caps)).collect();
                 apply(cx, *id, &args)
+            }
+            Expr::Op(op, args) => {
+                let args: SmallVec<[Vals; 3]> = args.iter().map(|a| a.eval(cx, caps)).collect();
+                cx.operate(*op, &args)
             }
         }
     }
@@ -148,6 +204,18 @@ impl<'s> Parser<'s, '_> {
         found
     }
 
+    /// `token` as a whole word, not the start of a longer name.
+    fn keyword(&mut self, token: &str) -> bool {
+        self.space();
+        let rest = self.rest();
+        let whole = rest.starts_with(token)
+            && !rest[token.len()..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_');
+        if whole {
+            self.at += token.len();
+        }
+        whole
+    }
+
     fn ident(&mut self) -> &'s str {
         let rest = self.rest();
         let len = rest
@@ -157,7 +225,25 @@ impl<'s> Parser<'s, '_> {
         &rest[..len]
     }
 
+    fn quoted(&mut self, quote: char) -> Result<&'s str, LoadError> {
+        let len = self
+            .rest()
+            .find(quote)
+            .ok_or_else(|| self.error("open string"))?;
+        let text = &self.rest()[..len];
+        self.at += len + 1;
+        Ok(text)
+    }
+
     fn expr(&mut self) -> Result<Expr, LoadError> {
+        let mut expr = self.pipe()?;
+        while self.keyword("or") {
+            expr = Expr::Or(Box::new(expr), Box::new(self.pipe()?));
+        }
+        Ok(expr)
+    }
+
+    fn pipe(&mut self) -> Result<Expr, LoadError> {
         let mut expr = self.term()?;
         while self.eat("|") {
             self.space();
@@ -166,21 +252,26 @@ impl<'s> Parser<'s, '_> {
         Ok(expr)
     }
 
-    fn capture(&mut self) -> Result<u16, LoadError> {
-        let name = self.ident();
-        self.scope
-            .slots
-            .get(name)
-            .ok_or_else(|| self.error("unknown capture"))
+    fn var(&mut self, name: &str) -> Option<u16> {
+        self.scope.slots.borrow().get(name)
     }
 
     fn term(&mut self) -> Result<Expr, LoadError> {
         self.space();
-        if self.eat("@$") {
-            return Ok(Expr::Text(self.capture()?));
+        if self.eat("(") {
+            let inner = self.expr()?;
+            return match self.eat(")") {
+                true => Ok(inner),
+                false => Err(self.error("expected )")),
+            };
         }
-        if self.eat("$$$") || self.eat("$") {
-            return Ok(Expr::Cap(self.capture()?));
+        let text = self.eat("@");
+        if self.eat("$$$") || self.eat("$") || text {
+            let name = self.ident();
+            return self
+                .var(name)
+                .map(Expr::Var)
+                .ok_or_else(|| self.error("unknown capture"));
         }
         if self.eat("%") {
             let name = self.ident();
@@ -188,12 +279,7 @@ impl<'s> Parser<'s, '_> {
             return at.map(Expr::Data).ok_or_else(|| self.error("unknown data"));
         }
         if self.eat("\"") {
-            let len = self
-                .rest()
-                .find('"')
-                .ok_or_else(|| self.error("open string"))?;
-            let text = &self.rest()[..len];
-            self.at += len + 1;
+            let text = self.quoted('"')?;
             return Ok(Expr::Lit(match text.parse::<C>() {
                 Ok(kind) => Val::Kind(kind as u16),
                 Err(_) => Val::Sym(self.scope.lang.syms.intern(text)),
@@ -210,27 +296,90 @@ impl<'s> Parser<'s, '_> {
                     word.parse().map_err(|_| self.error("number"))?,
                 )));
             }
-            _ => self.at = start,
+            _ => {}
         }
+        if let Some(slot) = self.var(word) {
+            return Ok(Expr::Var(slot));
+        }
+        self.at = start;
         self.call(None)
+    }
+
+    fn args(&mut self, piped: Option<Expr>) -> Result<Vec<Expr>, LoadError> {
+        let mut args: Vec<Expr> = piped.into_iter().collect();
+        if self.eat("(") && !self.eat(")") {
+            loop {
+                args.push(self.expr()?);
+                if self.eat(")") {
+                    break;
+                }
+                if !self.eat(",") {
+                    return Err(self.error("expected , or )"));
+                }
+            }
+        }
+        Ok(args)
     }
 
     fn call(&mut self, piped: Option<Expr>) -> Result<Expr, LoadError> {
         let start = self.at;
         let word = self.ident();
-        if let Some(&(def, arity)) = self.scope.defs.get(word) {
-            let mut args: Vec<Expr> = piped.into_iter().collect();
-            if self.eat("(") && !self.eat(")") {
-                loop {
+        match word {
+            "super" => {
+                let (def, arity) = self
+                    .scope
+                    .shared
+                    .ok_or_else(|| self.error("super outside a redefinition"))?;
+                let args = self.args(piped)?;
+                return match args.len() == arity {
+                    true => Ok(Expr::Def(def, args.into())),
+                    false => Err(self.error(&format!("super takes {arity} arguments"))),
+                };
+            }
+            "first" => return self.first(piped),
+            "select" | "select_all" => return self.select(word, piped),
+            "enclose" | "file" => {
+                let args = self.args(piped)?;
+                if args.len() != 1 {
+                    return Err(self.error(&format!("{word} takes 1 argument")));
+                }
+                let op = if word == "enclose" {
+                    Op::Enclose
+                } else {
+                    Op::File
+                };
+                return Ok(Expr::Op(op, args.into()));
+            }
+            "follow" | "sited" => {
+                let site = word == "sited";
+                let mut args: Vec<Expr> = piped.into_iter().collect();
+                if !self.eat("(") {
+                    return Err(self.error("follow(node, kind)"));
+                }
+                if args.is_empty() {
                     args.push(self.expr()?);
-                    if self.eat(")") {
-                        break;
-                    }
                     if !self.eat(",") {
-                        return Err(self.error("expected , or )"));
+                        return Err(self.error("follow(node, kind)"));
                     }
                 }
+                self.space();
+                let kind = self.ident();
+                let kind = edge_kind(kind)
+                    .ok_or_else(|| self.error(&format!("unknown edge kind {kind}")))?;
+                if !self.eat(")") {
+                    return Err(self.error("expected )"));
+                }
+                let op = if site {
+                    Op::Site(kind)
+                } else {
+                    Op::Follow(kind)
+                };
+                return Ok(Expr::Op(op, args.into()));
             }
+            _ => {}
+        }
+        if let Some(&(def, arity)) = self.scope.defs.get(word) {
+            let args = self.args(piped)?;
             if args.len() != arity {
                 return Err(self.error(&format!("{word} takes {arity} arguments")));
             }
@@ -252,7 +401,11 @@ impl<'s> Parser<'s, '_> {
                     .modules
                     .iter()
                     .find(|m| lookup(m, name).is_some())
-                    .ok_or_else(|| self.error(&format!("no module of this phase has {name}")))?;
+                    .ok_or_else(|| {
+                        self.error(&format!(
+                            "no definition, operation or module function {name}"
+                        ))
+                    })?;
                 (module.as_str(), name)
             }
         };
@@ -264,24 +417,10 @@ impl<'s> Parser<'s, '_> {
         let id = self.scope.links.to(id);
         let f = function(id);
         if f.kind == Kind::Effect && !self.scope.effects {
-            return Err(self.error(&format!(
-                "{module}.{name} has effects; use it in emit, enter or exit"
-            )));
+            return Err(self.error(&format!("{module}.{name} has effects")));
         }
-        let mut args: Vec<Expr> = piped.into_iter().collect();
-        if self.eat("(") && !self.eat(")") {
-            loop {
-                args.push(self.expr()?);
-                if self.eat(")") {
-                    break;
-                }
-                if !self.eat(",") {
-                    return Err(self.error("expected , or )"));
-                }
-            }
-        }
-        let gathers = f.sig.last() == Some(&Arg::Set) && args.len() > f.sig.len();
-        if gathers {
+        let mut args = self.args(piped)?;
+        if f.sig.last() == Some(&Arg::Set) && args.len() > f.sig.len() {
             let rest = args.split_off(f.sig.len() - 1);
             args.push(Expr::Union(rest.into()));
         }
@@ -290,4 +429,111 @@ impl<'s> Parser<'s, '_> {
         }
         Ok(Expr::Call(id, args.into()))
     }
+
+    /// `first(list, x => body)`: the first element whose body is not empty.
+    fn first(&mut self, piped: Option<Expr>) -> Result<Expr, LoadError> {
+        if !self.eat("(") {
+            return Err(self.error("first(list, x => body)"));
+        }
+        let list = match piped {
+            Some(list) => list,
+            None => {
+                let list = self.expr()?;
+                if !self.eat(",") {
+                    return Err(self.error("first(list, x => body)"));
+                }
+                list
+            }
+        };
+        self.space();
+        let name = self.ident().to_owned();
+        if !self.eat("=>") {
+            return Err(self.error("expected =>"));
+        }
+        let slot = self.scope.slots.borrow_mut().slot(&name);
+        let body = self.expr()?;
+        if !self.eat(")") {
+            return Err(self.error("expected )"));
+        }
+        Ok(Expr::First(Box::new(list), slot, Box::new(body)))
+    }
+
+    /// `select(scope, 'pattern' [by key], key)` and `select_all(region | project, …)`.
+    fn select(&mut self, word: &str, piped: Option<Expr>) -> Result<Expr, LoadError> {
+        if !self.eat("(") {
+            return Err(self.error("select(region, 'pattern', key)"));
+        }
+        let mut args: Vec<Expr> = Vec::new();
+        let mut project = false;
+        match piped {
+            Some(region) => args.push(region),
+            None if self.keyword("project") => project = true,
+            None => args.push(self.expr()?),
+        }
+        if !project && args.len() == 1 && !self.eat(",") {
+            return Err(self.error("expected , after the region"));
+        }
+        if project && !self.eat(",") {
+            return Err(self.error("expected , after project"));
+        }
+        if !self.eat("'") {
+            return Err(self.error("the pattern of a select is a quoted literal"));
+        }
+        let pattern = self.quoted('\'')?.to_owned();
+        let key = match self.keyword("by") {
+            true => {
+                let from = self.at;
+                let mut depth = 0i32;
+                while let Some(c) = self.rest().chars().next() {
+                    match c {
+                        '(' => depth += 1,
+                        ')' if depth == 0 => break,
+                        ')' => depth -= 1,
+                        ',' if depth == 0 => break,
+                        _ => {}
+                    }
+                    self.at += c.len_utf8();
+                }
+                Some(self.src[from..self.at].trim().to_owned())
+            }
+            false => None,
+        };
+        let spec = IndexSpec { pattern, key };
+        let id = {
+            let mut indexes = self.scope.indexes.borrow_mut();
+            match indexes.iter().position(|i| *i == spec) {
+                Some(at) => at,
+                None => {
+                    indexes.push(spec);
+                    indexes.len() - 1
+                }
+            }
+        } as u32;
+        if !self.eat(",") {
+            return Err(self.error("expected , before the key"));
+        }
+        args.push(self.expr()?);
+        if !self.eat(")") {
+            return Err(self.error("expected )"));
+        }
+        let op = match (word, project) {
+            ("select", false) => Op::Select(id),
+            ("select_all", false) => Op::SelectAll(id),
+            ("select_all", true) => Op::SelectProject(id),
+            _ => return Err(self.error("select takes a scope; use select_all for project")),
+        };
+        Ok(Expr::Op(op, args.into()))
+    }
+}
+
+pub fn edge_kind(name: &str) -> Option<EdgeKind> {
+    Some(match name {
+        "calls" => EdgeKind::Calls,
+        "defines" => EdgeKind::Defines,
+        "imports" => EdgeKind::Imports,
+        "extends" => EdgeKind::Extends,
+        "type_flow" => EdgeKind::TypeFlow,
+        "links" => EdgeKind::Links,
+        _ => return None,
+    })
 }

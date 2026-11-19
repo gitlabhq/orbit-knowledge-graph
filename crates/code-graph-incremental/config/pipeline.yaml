@@ -1,69 +1,18 @@
-enclosing: [__def]
-
-indexes:
-  - { match: '(__def $N:__defname)', key: $N, span: tree }
-  - { match: '(__def $N:__defname)', key: $N, span: scope }
-  - { match: '(__def $N:__default_export)', key: $N, span: tree }
-  - { match: '(__def #exports)', key: '$ROOT | tag("exports")', span: tree }
+scopes: [__def]
 
 phases:
-  - name: canonicalize
-    scope: tree
-    walk: fixpoint
-    outputs: [replace, append, tag]
-    modules: [text]
-    budget: { label: rewrite, tree: file_rewrite_ms }
-  - name: normalize
-    scope: tree
-    after: [canonicalize]
-    walk: fixpoint
-    outputs: [replace, append, tag]
-    modules: [text]
-    budget: { label: rewrite, tree: file_rewrite_ms }
+  - { name: canonicalize, over: tree, does: rewrite, budget: { label: rewrite, tree: file_rewrite_ms } }
+  - { name: normalize, over: tree, does: rewrite, budget: { label: rewrite, tree: file_rewrite_ms } }
   - name: link
-    scope: tree
-    after: [normalize]
-    walk: flow
-    outputs: [emit]
-    modules: [core, ssa, text]
-    bind: { core.read: ssa.read }
-    resolve: { imports: resolution, type_flow: resolution }
+    over: tree
+    does: edges
+    bind: { core.read: ssa.flow, ssa.value_of: core.value_of, ssa.valued: core.valued, ssa.source: source }
     budget: { tree: file_link_ms }
-  - name: project
-    scope: project
-    after: [link]
-    walk: fixpoint
-    outputs: [replace, append, tag]
-    modules: [text]
-  - name: imports
-    scope: family
-    after: [project]
-    walk: each
-    outputs: [emit]
-    modules: [scope, text]
+  - { name: project, over: project, does: rewrite }
   - name: resolve
-    scope: family
-    after: [imports]
-    walk: each
-    outputs: [emit]
-    modules: [core, scope, text]
-    bind: { core.read: scope.read }
-  - name: dispatch
-    scope: family
-    after: [resolve]
-    walk: fixpoint
-    outputs: [emit]
-    modules: [core, scope, text]
-    bind: { core.read: scope.read }
-  - name: display
-    scope: tree
-    after: [dispatch]
-    walk: each
-    outputs: [tag]
-    modules: [text]
-  - name: export
-    scope: graph
-    after: [display]
-    walk: each
-    outputs: [row]
-    modules: [text]
+    over: family
+    does: edges
+    until: stable
+    bind: { core.read: resolved }
+  - { name: display, over: graph, does: tags }
+  - { name: export, over: graph, does: rows }

@@ -1,6 +1,7 @@
 pub mod graph;
 mod names;
 mod values;
+mod walk;
 
 use std::rc::Rc;
 
@@ -9,8 +10,8 @@ use smallvec::SmallVec;
 
 use crate::canonical::Canonical as C;
 use crate::constants::WILDCARD;
-use crate::engine::{Cursor, Cx, Function, Module, Store, Val, Vals, of, one, truthy, yes};
-use crate::modules::{arg, function, node};
+use crate::engine::{Cursor, Cx, Function, Module, Store, Val, Vals, of, yes};
+use crate::modules::{function, node};
 pub use graph::{BlockId, SsaEngine, Value};
 
 pub struct Ssa;
@@ -60,6 +61,14 @@ pub struct State {
     wildcards: Rc<Vec<u32>>,
     pending: FxHashMap<u32, Pending>,
     bound: FxHashSet<u32>,
+    walking: bool,
+    walked: bool,
+    /// What each reference saw when the walk passed it.
+    seen: FxHashMap<u32, Vals>,
+    /// A deferred call's values, once the walk has seen every assignment.
+    late: FxHashMap<u32, Vals>,
+    /// The wildcard imports in force at each call.
+    wild_at: FxHashMap<u32, Rc<Vec<u32>>>,
 }
 
 impl Module for Ssa {
@@ -83,82 +92,38 @@ impl Module for Ssa {
         }
     }
 
-    fn finish<S: Store>(cx: &mut Cx<'_, '_, Self, S>) {
-        let s = cx.write();
-        s.graph.seal_remaining();
-        s.graph.remove_redundant_phi_sccs();
-    }
+    fn finish<S: Store>(_: &mut Cx<'_, '_, Self, S>) {}
 }
 
 static FUNCTIONS: &[Function<Ssa>] = &[
-    function!(Effect, "bind", [one, set, set], |cx, a| {
-        let from = arg(cx, a, 2);
-        cx.bind(node(cx, a, 0), &a[1], from);
-        yes(true)
-    }),
-    function!(Effect, "bind_import", [one, one, one, set], |cx, a| {
-        let type_only = a[3].first().and_then(|&v| cx.text(v)).unwrap_or(0);
-        cx.bind_import(node(cx, a, 0), truthy(&a[1]), truthy(&a[2]), type_only);
-        yes(true)
-    }),
-    function!(Effect, "enter_scope", [one, set, one], |cx, a| {
-        let label = a[1].first().and_then(|&v| cx.text(v));
-        cx.scope(node(cx, a, 0), label, truthy(&a[2]), None);
-        yes(true)
-    }),
-    function!(Effect, "enter_def", [one, one, set], |cx, a| {
-        let label = a[2].first().and_then(|&v| cx.text(v));
-        let scoped = truthy(&a[1]).then_some(label);
-        cx.enter_def(node(cx, a, 0), scoped);
-        yes(true)
-    }),
-    function!(Effect, "fork", [set], |cx, a| {
-        let sink = arg(cx, a, 0);
-        cx.fork(sink);
-        yes(true)
-    }),
-    function!(Effect, "yield", [one, set, set], |cx, a| {
-        let from = arg(cx, a, 2);
-        cx.yields(&a[1], from);
-        yes(true)
-    }),
-    function!(Effect, "join", [], |cx, _| {
-        cx.join();
-        yes(true)
-    }),
-    function!(Effect, "loop_header", [one], |cx, a| {
-        cx.loop_header(node(cx, a, 0));
-        yes(true)
-    }),
-    function!(Effect, "leave", [], |cx, _| {
-        cx.leave();
-        yes(true)
-    }),
-    function!(Effect, "defer", [one], |cx, a| {
-        cx.defer(node(cx, a, 0));
-        yes(true)
-    }),
-    function!(Flow, "read", [one], |cx, a| cx.read(node(cx, a, 0))),
-    function!(Flow, "slot", [one], |cx, a| {
+    function!(required Flow, "value_of", [one]),
+    function!(required Flow, "valued", [one]),
+    function!(required Flow, "source", [one]),
+    function!(Flow, "flow", [one], |cx, a| {
         let c = node(cx, a, 0);
-        let slot = match c.is(C::Binding) {
-            true => cx.target(c),
-            false => cx.field_slot(c),
-        };
-        slot.map_or_else(Vals::new, |slot| one(Val::Sym(slot)))
+        match cx.state().walking {
+            true => cx.read(c),
+            false => {
+                cx.walked();
+                cx.state().seen.get(&c.index()).cloned().unwrap_or_default()
+            }
+        }
     }),
     function!(Flow, "pending", [one], |cx, a| {
-        let pending = cx.pending(node(cx, a, 0)).is_some();
-        yes(pending)
+        cx.walked();
+        let call = node(cx, a, 0).index();
+        yes(cx.state().pending.contains_key(&call))
     }),
-    function!(Flow, "deferred", [one], |cx, a| cx.deferred(node(cx, a, 0))),
-    function!(Flow, "wildcards", [], |cx, _| {
-        let wildcards = Rc::clone(&cx.state().wildcards);
-        of(wildcards.iter().map(|&node| cx.loc(node)))
+    function!(Flow, "deferred", [one], |cx, a| {
+        cx.walked();
+        let call = node(cx, a, 0).index();
+        cx.state().late.get(&call).cloned().unwrap_or_default()
     }),
-    function!(Flow, "in_loop", [], |cx, _| {
-        let looping = !cx.state().loops.is_empty();
-        yes(looping)
+    function!(Flow, "wildcards", [one], |cx, a| {
+        cx.walked();
+        let call = node(cx, a, 0).index();
+        let found = cx.state().wild_at.get(&call).cloned().unwrap_or_default();
+        of(found.iter().map(|&node| cx.loc(node)))
     }),
 ];
 

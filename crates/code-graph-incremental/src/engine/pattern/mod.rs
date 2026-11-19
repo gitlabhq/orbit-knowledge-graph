@@ -15,6 +15,7 @@ pub use template::build;
 
 pub type Cap<I> = SmallVec<[I; 1]>;
 
+#[derive(Clone)]
 pub struct Slots {
     names: Vec<Box<str>>,
     filters: Vec<KindFilter>,
@@ -32,6 +33,19 @@ impl Slots {
             names: vec!["ROOT".into()],
             filters: vec![KindFilter::any()],
         }
+    }
+
+    /// Slots whose first names a definition's parameters: the first is the
+    /// matched node, the rest follow it.
+    pub fn params(params: &[String]) -> Self {
+        let mut slots = Self::new();
+        if let Some((first, rest)) = params.split_first() {
+            slots.names[0] = first.as_str().into();
+            rest.iter().for_each(|p| {
+                slots.slot(p);
+            });
+        }
+        slots
     }
 
     pub fn slot(&mut self, name: &str) -> u16 {

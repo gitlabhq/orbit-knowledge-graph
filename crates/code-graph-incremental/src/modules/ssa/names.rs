@@ -161,17 +161,11 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
         }
     }
 
-    pub(super) fn bind_import(
-        &mut self,
-        import: Cursor<'t, S>,
-        shadows: bool,
-        inline: bool,
-        type_only: u32,
-    ) {
+    pub(super) fn bind_import(&mut self, import: Cursor<'t, S>, shadows: bool, type_only: u32) {
         if !self.write().bound.insert(import.index()) {
             return;
         }
-        let module = inline.then(|| self.inline_module(import)).flatten();
+        let module = self.inline_module(import);
         for name in import.names() {
             let local = name
                 .child_sym(C::Alias)

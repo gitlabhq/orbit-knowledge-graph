@@ -15,7 +15,7 @@ use crate::env::Env;
 use crate::modules;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Compact, Edge, EdgeKind, Mutable, Node, Storage};
-pub use program::{Def, Part, Phase, Pipeline, RowShape, Span, Walk, resolution};
+pub use program::{Def, Part, Phase, Pipeline, RowShape, Walk, resolution};
 
 pub type Tree<S = Compact> = crate::tree::Tree<S>;
 pub type Cursor<'a, S = Compact> = crate::tree::Cursor<'a, S>;
@@ -175,26 +175,37 @@ pub struct IndexDecl {
     pub build: BuildIndex,
 }
 
-/// What a family run needs to build index pieces on demand.
-pub struct Indexed<'t> {
+/// The anchor under which a piece files every match of a tree.
+pub const WHOLE: u32 = u32::MAX;
+
+/// What a run needs to build index pieces on demand, and the run's
+/// family-wide directory of each index, merged from the files' pieces.
+pub struct Indexed<'t, S: Store> {
     phase: &'t Phase,
-    trees: &'t [Tree<Compact>],
+    trees: &'t [Tree<S>],
+    files: usize,
     env: &'t Env,
     budget: &'t Sentinel,
+    family: Box<[std::sync::OnceLock<FxHashMap<u32, Vec<Loc>>>]>,
 }
 
-impl<'t> Indexed<'t> {
+impl<'t, S: Store> Indexed<'t, S> {
     fn new(
         phase: &'t Phase,
-        trees: &'t [Tree<Compact>],
+        trees: &'t [Tree<S>],
+        files: usize,
         env: &'t Env,
         budget: &'t Sentinel,
     ) -> Self {
         Self {
             phase,
             trees,
+            files,
             env,
             budget,
+            family: (0..phase.index_count)
+                .map(|_| std::sync::OnceLock::new())
+                .collect(),
         }
     }
 
@@ -206,6 +217,22 @@ impl<'t> Indexed<'t> {
                 let mut run = Run::new(trees, fi, env, phase, budget, budget);
                 phase.piece(&mut run, Cursor::new(trees, fi, 0), id)
             })
+    }
+
+    fn family(&self, id: u32) -> &FxHashMap<u32, Vec<Loc>> {
+        self.family[id as usize].get_or_init(|| {
+            let mut map: FxHashMap<u32, Vec<Loc>> = FxHashMap::default();
+            for fi in 0..self.files as u32 {
+                for (&(anchor, key), nodes) in self.piece(fi, id) {
+                    if anchor == WHOLE {
+                        map.entry(key)
+                            .or_default()
+                            .extend(nodes.iter().map(|&node| Loc { fi, node }));
+                    }
+                }
+            }
+            map
+        })
     }
 }
 
@@ -352,13 +379,19 @@ pub struct FnId(u16);
 /// What a phase resolves once at load: the function each call runs, with
 /// abstract functions replaced by their providers, and the states each
 /// function can read through its calls. Any state read makes it Flow.
+/// How a phase wires required functions: to another module's function, or
+/// to a YAML definition.
 pub struct Links {
     to: Vec<FnId>,
+    defs: Vec<Option<u16>>,
     deps: Vec<u8>,
 }
 
 impl Links {
-    pub fn load(binds: &[(FnId, FnId)]) -> Result<Self, crate::error::LoadError> {
+    pub fn load(
+        binds: &[(FnId, FnId)],
+        defs: &[(FnId, u16)],
+    ) -> Result<Self, crate::error::LoadError> {
         let ids = || (0..TABLE.len() as u16).map(FnId);
         let to: Vec<FnId> = ids()
             .map(|id| {
@@ -391,7 +424,15 @@ impl Links {
             f if f.kind == Kind::Flow && !f.required => (1 << f.slot) | (1 << WALK),
             _ => 0,
         };
-        let mut deps: Vec<u8> = ids().map(own).collect();
+        let mut deps: Vec<u8> = ids()
+            .map(|id| match defs.iter().any(|&(of, _)| of == id) {
+                true => u8::MAX,
+                false => own(id),
+            })
+            .collect();
+        let defs = ids()
+            .map(|id| defs.iter().find_map(|&(of, d)| (of == id).then_some(d)))
+            .collect();
         loop {
             let mut changed = false;
             for id in ids() {
@@ -408,7 +449,7 @@ impl Links {
                 }
             }
             if !changed {
-                return Ok(Self { to, deps });
+                return Ok(Self { to, defs, deps });
             }
         }
     }
@@ -498,8 +539,10 @@ pub struct Run<'t, S: Store = Compact> {
     files: u32,
     project: Option<u32>,
     indexes: Option<&'t Indexes>,
-    indexed: Option<&'t Indexed<'t>>,
+    indexed: Option<&'t Indexed<'t, S>>,
     fns: &'t [program::Def],
+    overrides: Option<&'t std::collections::HashMap<u16, u16>>,
+    enclosing_kinds: &'t [u16],
     graph_fi: u32,
     lang: usize,
     data: &'t [Vals],
@@ -528,6 +571,8 @@ impl<'t, S: Store> Run<'t, S> {
         run.lang = rules;
         run.data = phase.data.get(rules).map_or(&[], Vec::as_slice);
         run.fns = &phase.defs;
+        run.overrides = phase.overrides.get(rules);
+        run.enclosing_kinds = &phase.enclosing;
         run
     }
 
@@ -556,6 +601,8 @@ impl<'t, S: Store> Run<'t, S> {
             indexes: None,
             indexed: None,
             fns: &[],
+            overrides: None,
+            enclosing_kinds: &[],
             graph_fi: 0,
             lang: 0,
             data: &[],
@@ -605,6 +652,123 @@ impl<'t, S: Store> Run<'t, S> {
             self.killed = Some(killed);
         }
         self.killed.is_none()
+    }
+
+    /// The innermost enclosing scope of the walk, or the file root.
+    pub(crate) fn enclosing_loc(&self) -> Loc {
+        Loc {
+            fi: self.fi,
+            node: self.defs.last().copied().unwrap_or(0),
+        }
+    }
+
+    /// Runs one of the engine's operations on evaluated arguments.
+    pub(crate) fn operate(&mut self, op: expr::Op, args: &[Vals]) -> Vals {
+        use expr::Op;
+        let nodes = |vals: &Vals| {
+            vals.iter()
+                .filter_map(|v| v.loc())
+                .collect::<SmallVec<[Loc; 2]>>()
+        };
+        let keys = |run: &Self, vals: &Vals| {
+            vals.iter()
+                .filter_map(|&v| run.text_of(v))
+                .collect::<SmallVec<[u32; 2]>>()
+        };
+        let mut out = Vals::new();
+        let push = |out: &mut Vals, v: Val| {
+            if !out.contains(&v) {
+                out.push(v);
+            }
+        };
+        match op {
+            Op::Select(id) | Op::SelectAll(id) => {
+                let Some(indexed) = self.indexed else {
+                    return out;
+                };
+                for at in nodes(&args[0]) {
+                    let anchor = match op {
+                        Op::Select(_) => at.node,
+                        _ => WHOLE,
+                    };
+                    for key in keys(self, &args[1]) {
+                        for &node in indexed
+                            .piece(at.fi, id)
+                            .get(&(anchor, key))
+                            .into_iter()
+                            .flatten()
+                        {
+                            let found = Loc { fi: at.fi, node };
+                            let inside = anchor != WHOLE
+                                || at.node == 0
+                                || Cursor::new(self.trees, found.fi, found.node)
+                                    .ancestors()
+                                    .any(|a| a.index() == at.node);
+                            if inside {
+                                push(&mut out, Val::Node(found));
+                            }
+                        }
+                    }
+                }
+            }
+            Op::SelectProject(id) => {
+                let Some(indexed) = self.indexed else {
+                    return out;
+                };
+                for key in keys(self, &args[0]) {
+                    for &found in indexed.family(id).get(&key).into_iter().flatten() {
+                        push(&mut out, Val::Node(found));
+                    }
+                }
+            }
+            Op::Enclose => {
+                let kinds = self.enclosing_kinds;
+                for at in nodes(&args[0]) {
+                    let c = Cursor::new(self.trees, at.fi, at.node);
+                    for a in c.ancestors() {
+                        if kinds.contains(&a.kind()) || a.parent().is_none() {
+                            push(&mut out, Val::Node(a.into()));
+                        }
+                    }
+                }
+            }
+            Op::Follow(kind) => {
+                let Some(graph) = self.graph else {
+                    return out;
+                };
+                for at in nodes(&args[0]) {
+                    for &to in graph
+                        .outgoing
+                        .get(&(kind, at.fi, at.node))
+                        .into_iter()
+                        .flatten()
+                    {
+                        push(&mut out, Val::Node(to));
+                    }
+                }
+            }
+            Op::Site(kind) => {
+                let Some(graph) = self.graph else {
+                    return out;
+                };
+                for at in nodes(&args[0]) {
+                    for &(_, to) in graph
+                        .sites
+                        .get(&(kind, at.fi, at.node))
+                        .into_iter()
+                        .flatten()
+                    {
+                        push(&mut out, Val::Node(to));
+                    }
+                }
+            }
+            Op::File => {
+                for at in nodes(&args[0]) {
+                    push(&mut out, Val::Node(Loc { fi: at.fi, node: 0 }));
+                }
+            }
+        }
+        out
     }
 
     fn enter_def(&mut self, node: u32) {
@@ -665,6 +829,9 @@ impl<'t, S: Store> Run<'t, S> {
     /// function can read is written.
     fn call(&mut self, id: FnId, args: &[Vals]) -> Vals {
         let links = self.links;
+        if let Some(def) = links.defs[usize::from(id.0)] {
+            return self.call_def(def, args);
+        }
         let (id, deps) = (links.to[usize::from(id.0)], links.deps[usize::from(id.0)]);
         let f = function(id);
         let invoke = S::hooks(&modules::ALL[usize::from(f.slot)]).invoke;
@@ -683,6 +850,10 @@ impl<'t, S: Store> Run<'t, S> {
 
     /// A YAML function's result, cached like a module function's.
     pub(crate) fn call_def(&mut self, def: u16, args: &[Vals]) -> Vals {
+        let def = self
+            .overrides
+            .and_then(|o| o.get(&def).copied())
+            .unwrap_or(def);
         let defs = self.fns;
         let deps = defs[usize::from(def)].deps;
         let key = defs[usize::from(def)].key(self, args);
@@ -796,19 +967,21 @@ pub fn run_tree<S: Store>(
     budget: &Sentinel,
 ) -> Result<Vec<Edge>, Killed> {
     let file = &tree_budget(phase, env, &tree.label);
-    let mut run = Run::new(std::slice::from_ref(tree), 0, env, phase, budget, file);
+    let trees = std::slice::from_ref(tree);
+    let indexed = Indexed::new(phase, trees, 1, env, budget);
+    let mut run = Run::new(trees, 0, env, phase, budget, file);
+    run.indexed = Some(&indexed);
     let root = tree.root();
     for &slot in &phase.modules {
         (S::hooks(&modules::ALL[usize::from(slot)]).start)(&mut run, slot, root.index());
     }
-    let late = phase.flow(&mut run, root);
+    phase.flow(&mut run, root, false);
     for &slot in phase.modules.iter().rev() {
         if let Some(killed) = run.killed.take() {
             return Err(killed);
         }
         (S::hooks(&modules::ALL[usize::from(slot)]).finish)(&mut run, slot);
     }
-    phase.revisit(&mut run, root, late);
     match run.killed.take() {
         Some(killed) => Err(killed),
         None => Ok(run.finish()),
@@ -853,7 +1026,7 @@ pub fn run_family(
     let scope = scope_budget(phase, env, budget);
     let indexes = Indexes::new(&env.lang, trees, edges, &phase.modules);
     let files = project.unwrap_or(trees.len() as u32) as usize;
-    let indexed = Indexed::new(phase, trees, env, &scope);
+    let indexed = Indexed::new(phase, trees, files, env, &scope);
     let edges: Vec<Result<Vec<Edge>, Killed>> = (0..files)
         .into_par_iter()
         .map(|fi| {
@@ -869,11 +1042,10 @@ pub fn run_family(
             for &slot in &phase.modules {
                 (Compact::hooks(&modules::ALL[usize::from(slot)]).start)(&mut run, slot, 0);
             }
-            let late = phase.flow(&mut run, root);
+            phase.flow(&mut run, root, false);
             for &slot in phase.modules.iter().rev() {
                 (Compact::hooks(&modules::ALL[usize::from(slot)]).finish)(&mut run, slot);
             }
-            phase.revisit(&mut run, root, late);
             match run.killed.take() {
                 Some(killed) => Err(killed),
                 None => Ok(run.finish()),
@@ -909,6 +1081,7 @@ pub fn run_graph(
     let scope = scope_budget(phase, env, budget);
     let graph = EdgeIndex::new(edges);
     let indexes = Indexes::new(&env.lang, trees, edges, &phase.modules);
+    let indexed = Indexed::new(phase, trees, project as usize, env, &scope);
     let rows: Vec<Result<Vec<Row>, Killed>> = (0..trees.len())
         .into_par_iter()
         .map(|fi| {
@@ -917,10 +1090,11 @@ pub fn run_graph(
             run.graph = Some(&graph);
             run.graph_fi = fi as u32;
             run.indexes = Some(&indexes);
+            run.indexed = Some(&indexed);
             run.files = project;
             run.project = Some(project);
             let root = Cursor::new(trees, fi as u32, 0);
-            phase.flow_all(&mut run, root);
+            phase.flow(&mut run, root, true);
             match run.killed.take() {
                 Some(killed) => Err(killed),
                 None => Ok(run.rows),
@@ -1059,33 +1233,6 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
     /// One of this module's declared indexes, in a family run.
     pub fn index<T: 'static>(&self, name: &str) -> Option<&'t T> {
         self.run.indexes?.get(self.slot, name)?.downcast_ref()
-    }
-
-    /// The nodes matching `pattern` whose index key has the text `key`: the
-    /// direct members of the scope `at`, or with `deep` every match under
-    /// `at`. A declared index answers it; a query no index covers fails.
-    pub fn query(&self, pattern: &str, at: Loc, key: u32, deep: bool) -> Vec<Loc> {
-        let indexed = self.run.indexed.expect("queries run in family phases");
-        let span = if deep { Span::Tree } else { Span::Scope };
-        let Some(&(_, _, id)) = indexed
-            .phase
-            .indexes
-            .iter()
-            .find(|(p, s, _)| p == pattern && *s == span)
-        else {
-            panic!("no index covers {pattern} ({span:?}); declare it in pipeline.yaml");
-        };
-        let anchor = if deep { 0 } else { at.node };
-        let Some(nodes) = indexed.piece(at.fi, id).get(&(anchor, key)) else {
-            return Vec::new();
-        };
-        let found = nodes.iter().map(|&node| Loc { fi: at.fi, node });
-        match deep && at.node != 0 {
-            true => found
-                .filter(|&l| self.jump(l).ancestors().any(|a| a.index() == at.node))
-                .collect(),
-            false => found.collect(),
-        }
     }
 
     /// A value's text: a symbol as is, or a node's own text.

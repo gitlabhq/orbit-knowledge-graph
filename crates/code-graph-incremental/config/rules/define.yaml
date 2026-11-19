@@ -1,0 +1,60 @@
+define:
+  type(ROOT):
+    '(_ (__call (__property) $K:__callee)) when $K | type | is_class': '$K | walk'
+    '(_ $C:__call)': '$C'
+    '_': '$ROOT | walk'
+  walk(ROOT):
+    '(_ (__object))': '$ROOT | on_object($ROOT)'
+    '(_ $M:__member)': '$M | on_object($ROOT)'
+    '_': '$ROOT | named'
+  on_object(ROOT, SITE):
+    '(_ (__object !(__call) !(__object) !(__qualifier) !(__member) !(__ivar)))': 'on_named($ROOT, $SITE)'
+    '(_ $O:__object)': 'lookup($ROOT, $SITE, %callable_kinds, %value_kinds, %type_kinds, $O | type, $O | type | type_node | type)'
+  on_named(ROOT, SITE):
+    '(_ $O:__object)': 'lookup($ROOT, $SITE, %callable_kinds, %value_kinds, %type_kinds, $O | type, $O | type | type_node | type)'
+  named(ROOT):
+    '(_ (__qualifier))': '$ROOT | name'
+    '(_ $I:__ivar)': '$I | ivar | meaning($ROOT, %callable_kinds, %value_kinds, %type_kinds)'
+    '_ when $ROOT | read': '$ROOT | name | meaning($ROOT, %callable_kinds, %value_kinds, %type_kinds)'
+    '_': '$ROOT | ivar | meaning($ROOT, %callable_kinds, %value_kinds, %type_kinds)'
+  member(ROOT, M):
+    '(__def)': 'lookup($M, $M, %callable_kinds, %value_kinds, %type_kinds, $ROOT)'
+    '(__name)': 'none'
+    '_': '$ROOT | type_node | type | member($M)'
+  reference(ROOT):
+    '$P:(_ $ROOT)': '$ROOT | type | sole($P)'
+    '_': '$ROOT | type | sole($ROOT)'
+  source(ROOT):
+    '_': '$ROOT | tail | record'
+  record(ROOT):
+    '(__obj)': '$ROOT'
+    '(_ $R:__obj)': '$R'
+    '(_ $K:__callee $A:__args) when $K | type | is_class': '$A'
+    '_': '$ROOT'
+  chain_head(ROOT):
+    '(_ (__member $O:__object))': '$O | chain_root'
+  chain_root(ROOT):
+    '(_ (__member $O:__object))': '$O | chain_root'
+    '_': '$ROOT'
+  binding_site(ROOT):
+    '$P:(_ $ROOT)': '$P | site'
+  site(ROOT):
+    '(__def)': 'none'
+    '(__binding (__rhs !(__ssa_branch) (__member)))': '$ROOT'
+    '$P:(_ $ROOT)': '$P | site'
+  returns(ROOT):
+    '(__def $K:__class|__struct|__impl|__interface|__trait|__enum)': '$ROOT'
+    '(__def $T:__ssa_return_type)': '$T | type'
+    '(__def **!__def|__lambda/(__ssa_return $B:__ssa_branch))': '$B | branch_type'
+    '_': '$ROOT | inferred_return'
+  branch_type(ROOT):
+    '(_ $$$A:__ssa_arm)': 'lub($A | tail | arm_type)'
+  arm_type(ROOT):
+    '(__ssa_return)': 'none'
+    '(__ssa_branch $$$A:__ssa_arm) when $A': 'known($ROOT | branch_type)'
+    '(__ssa_branch)': 'none'
+    '(_ $K:__callee)': 'known($K | type)'
+    '_': 'opaque'
+
+  visible(name, at): "first(enclose(at), s => select(s, '(__def $N:__defname)', name)) or select_all(file(at), '(__import $N:__name)', name) | follow(imports)"
+  resolved(ROOT): 'visible(@ROOT, ROOT)'

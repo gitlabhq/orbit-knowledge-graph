@@ -56,10 +56,19 @@ static FUNCTIONS: &[Function<Text>] = &[
     on_text!("stem", [one], stem),
     on_text!("collapse_index", [one, set], collapse_index),
     on_text!("map", [one, set], map),
-    function!(Pure, "match", [one, one, set], |cx, a| query(cx, a, false)),
-    function!(Pure, "match_all", [one, one, set], |cx, a| query(
-        cx, a, true
-    )),
+    function!(Flow, "foreign", [set], |cx, a| {
+        let here = cx.fi();
+        a[0].iter()
+            .copied()
+            .filter(|v| v.loc().is_some_and(|l| l.fi != here))
+            .collect()
+    }),
+    function!(Pure, "is_file", [set], |_, a| {
+        a[0].iter()
+            .copied()
+            .filter(|v| matches!(v, Val::Node(l) if l.node == 0))
+            .collect()
+    }),
     function!(Pure, "default", [set, set], |cx, a| {
         let present = |at: usize| -> Vals {
             a[at]
@@ -499,21 +508,6 @@ fn text_val(o: &Opts, s: &str) -> Option<Val> {
 
 fn constant<S: Storage<Node = Node>>(_: Cursor<'_, S>, o: &Opts) -> Option<Val> {
     Some(Val::Sym(o.lang.syms.intern(o.lit(1))))
-}
-
-/// `receiver | match(pattern, keys)`: the nodes matching `pattern` under
-/// the receiver whose index key is one of `keys`.
-fn query<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals], deep: bool) -> Vals {
-    let (Some(at), Some(pattern)) = (
-        a[0].first().and_then(|v| v.loc()),
-        a[1].first().and_then(|&v| text(cx, v)).map(str::to_owned),
-    ) else {
-        return Vals::new();
-    };
-    a[2].iter()
-        .filter_map(|&k| cx.text(k))
-        .flat_map(|k| cx.query(&pattern, at, k, deep).into_iter().map(Val::Node))
-        .collect()
 }
 
 #[cfg(test)]

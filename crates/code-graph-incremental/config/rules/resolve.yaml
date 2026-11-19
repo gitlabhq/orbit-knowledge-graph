@@ -1,22 +1,44 @@
+data:
+  import_kinds: [__import, __import_type]
+
+define:
+  files(path): "select_all(project, '(__source_file)' by $ROOT | stem, path) or select_all(project, '(__source_file)' by $ROOT | collapse_index(%index_files), path)"
+  modules(ROOT): 'files($ROOT | tag("resolved_source"))'
+  submodule(ROOT, N): 'files($ROOT | tag("resolved_source") | concat("/", @$N))'
+  offered(module, name): "select(module, '(__def $N:__defname)', name) or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, name) | reexported(name) or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, \"*\") | reexported(name) or module"
+  reexported(ROOT, N):
+    '$I:(%import_kinds $ROOT:(__name "*"))': '$I | modules | offered($N)'
+    '$I:(%import_kinds $ROOT:__name)': '$I | modules | offered($ROOT)'
+  producing(ROOT):
+    '(__call)': '$ROOT | sited(calls) | returned'
+    '_': '$ROOT | type'
+  returned(ROOT):
+    '_ when $ROOT | returns | is_class': '$ROOT | returns'
+    '_': 'visible($ROOT | returns, $ROOT)'
+
 resolve:
-  - group: call
-    match: '(__call (__callee $M:(__member $O:__object)))'
-    when: '$O | read | module'
-    emit: { calls: { from: enclosing, to: '$O | read | module | export($M) | callable(%callable_kinds, %value_kinds, %type_kinds) | foreign', site: $ROOT } }
-  - group: call
-    match: '(__call (__callee $M:(__member $O:__object)))'
-    emit: { calls: { from: enclosing, to: '$O | type | member($M) | foreign', site: $ROOT } }
-  - group: call
-    match: '(__call (__callee $I:__ivar))'
-    emit: { calls: { from: enclosing, to: 'lookup(@$I, $ROOT, %callable_kinds, %value_kinds, %type_kinds, enclosing | class) | foreign', site: $ROOT } }
-  - group: call
-    match: '(__call (__callee "/./"))'
-    emit: { calls: { from: enclosing, to: 'targets($ROOT, false, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds) | foreign', site: $ROOT } }
+  import:
+    - '$I:(%import_kinds $ROOT:__name) when $I | modules':
+        imports: { from: $ROOT, to: '$I | modules | offered($ROOT) | foreign' }
+    - '$I:(%import_kinds $ROOT:__name)':
+        imports: { from: $ROOT, to: '$I | submodule($ROOT) | offered($ROOT) | foreign' }
 
-  - group: decorator
-    match: '$D:(__def $ROOT:__decorator)'
-    emit: { calls: { from: $D, to: '$ROOT | type | callable(%callable_kinds, %value_kinds, %type_kinds) | foreign' } }
+  call:
+    - '(__call (__callee $M:(__member $O:__object))) when $O | read | is_file':
+        calls: { to: '$O | read | is_file | offered($M) | callable(%callable_kinds, %value_kinds, %type_kinds) | foreign', site: $ROOT }
+    - '(__call (__callee $M:(__member $O:__object)))':
+        calls:
+          - { to: '$O | type | member($M) | foreign', site: $ROOT }
+          - { to: '$ROOT | sited(type_flow) | producing | member($M)', site: $ROOT }
+    - '(__call (__callee $I:__ivar))':
+        calls: { to: 'lookup(@$I, $ROOT, %callable_kinds, %value_kinds, %type_kinds, enclosing | class) | foreign', site: $ROOT }
+    - '(__call (__callee "/./"))':
+        calls: { to: 'targets($ROOT, false, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds) | foreign', site: $ROOT }
 
-  - group: supertype
-    match: '$D:(__def $ROOT:__supertype)'
-    emit: { extends: { from: $D, to: '$ROOT | type | is_def | foreign' } }
+  decorator:
+    - '$D:(__def $ROOT:__decorator)':
+        calls: { from: $D, to: '$ROOT | type | callable(%callable_kinds, %value_kinds, %type_kinds) | foreign' }
+
+  supertype:
+    - '$D:(__def $ROOT:__supertype)':
+        extends: { from: $D, to: '$ROOT | type | is_def | foreign' }

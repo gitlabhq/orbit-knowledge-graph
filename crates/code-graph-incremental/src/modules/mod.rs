@@ -1,5 +1,4 @@
 pub mod core;
-pub mod scope;
 pub mod ssa;
 pub mod text;
 
@@ -7,7 +6,6 @@ use crate::engine::{Cursor, Cx, Module, Registration, Store, Vals, register};
 
 pub static ALL: &[Registration] = &[
     register::<core::Core>(),
-    register::<scope::Scope>(),
     register::<ssa::Ssa>(),
     register::<text::Text>(),
 ];

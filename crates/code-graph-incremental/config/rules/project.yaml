@@ -1,14 +1,12 @@
 data:
-  index_files: [__init__.py, __init__.pyi, index.ts, index.tsx, index.js, index.jsx, index.mjs, mod.rs, lib.rs, main.rs]
+  index_files: [__init__.py, __init__.pyi, index.ts, index.tsx, index.js, index.jsx, index.mjs, mod.rs,
+    lib.rs, main.rs]
 
 project:
-  - name: lookup
-    rules:
-      - match: '(__file $M:(__source_root "/./" $S?:__scope))'
-        append: ['(__alias "*" (__str @$ROOT | tree_path("/") | regex_replace("[^/]*$", "") | concat("", @$M) | regex_replace("(^|/)\./", "$1") | regex_replace("/?$", "/*") | regex_replace("^/", "")) $S)']
-      - match: '(__root $ROOT:(__dir !(__package) !(__source_root)))'
-        append: ['(__source_root)']
-  - name: entrypoints
-    rules:
-      - match: '(_ !(__source_path) $F:(__file %index_files))'
-        append: ['(__source_path @$F | tree_path("/"))']
+  - stage: lookup
+    rewrite:
+      - '(__file $M:(__source_root "/./" $S?:__scope))': '+ (__alias "*" (__str @$ROOT | tree_path("/") | regex_replace("[^/]*$", "") | concat("", @$M) | regex_replace("(^|/)\./", "$1") | regex_replace("/?$", "/*") | regex_replace("^/", "")) $S)'
+      - '(__root $ROOT:(__dir !(__package) !(__source_root)))': '+ (__source_root)'
+  - stage: entrypoints
+    rewrite:
+      - '(_ !(__source_path) $F:(__file %index_files))': '+ (__source_path @$F | tree_path("/"))'
