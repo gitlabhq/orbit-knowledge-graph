@@ -31,7 +31,6 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
     }
 }
 
-/// Explicit `session_settings` win over the defaults derived here.
 fn build_session_settings(config: &ClickHouseConfiguration) -> HashMap<String, String> {
     let mut settings = HashMap::from([("compatibility".to_string(), config.compatibility.clone())]);
     if config.replicated {
