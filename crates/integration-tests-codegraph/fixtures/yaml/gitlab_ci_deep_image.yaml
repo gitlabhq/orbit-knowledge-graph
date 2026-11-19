@@ -7,7 +7,7 @@ fixtures:
       - { repeat: 20000, text: "[" }
       - "deep:1"
       - { repeat: 20000, text: "]" }
-      - "\n"
+      - "\nsibling:\n  image: alpine:3\n"
 
 tests:
   - name: "indexing finishes"
@@ -15,4 +15,5 @@ tests:
       MATCH (i:ImportedSymbol)
       RETURN i.import_path AS image
     assert:
-      - { row_count: 0 }
+      - { row_count: 1 }
+      - { row: { image: alpine } }
