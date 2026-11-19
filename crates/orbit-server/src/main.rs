@@ -98,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
                     include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
                 )?;
 
+                clickhouse_client::require_minimum_server_version(&config.graph).await?;
                 let graph = config.graph.build_client("graph");
                 info!("initializing schema version table");
                 schema::version::init(&graph).await?;
@@ -175,6 +176,7 @@ async fn run_webserver(
             .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
     );
 
+    clickhouse_client::require_minimum_server_version(&config.graph).await?;
     let graph = config.graph.build_client("graph");
     let cluster_health = ClusterHealthChecker::new(
         config.health_check_url.clone(),

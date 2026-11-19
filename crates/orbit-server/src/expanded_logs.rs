@@ -51,6 +51,9 @@ pub fn anyhow_error_type(error: &anyhow::Error) -> &'static str {
     if let Some(error) = error.downcast_ref::<orbit_migrations::catalog::CatalogError>() {
         return error.into();
     }
+    if let Some(error) = error.downcast_ref::<clickhouse_client::ServerVersionError>() {
+        return error.into();
+    }
     "fatal"
 }
 
@@ -139,6 +142,11 @@ mod tests {
             .context("inner")
             .context("outer");
         assert_eq!(anyhow_error_type(&nested), "missing");
+        let below_minimum = clickhouse_client::check_server_version("26.2.1.788").unwrap_err();
+        assert_eq!(
+            anyhow_error_type(&below_minimum.into()),
+            "clickhouse_version_below_minimum"
+        );
         assert_eq!(
             anyhow_error_type(&anyhow::anyhow!("customer text")),
             "fatal"

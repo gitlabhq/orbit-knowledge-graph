@@ -11,6 +11,7 @@ mod canary {
 mod server {
     pub mod analytics;
     pub mod clickhouse_setup;
+    pub mod clickhouse_version;
     pub mod cluster_health;
     pub mod corpus_smoke;
     pub mod data_correctness;

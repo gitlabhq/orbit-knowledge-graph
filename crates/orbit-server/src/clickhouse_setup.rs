@@ -2,7 +2,9 @@
 //! ClickHouse as an administrator.
 
 use anyhow::{Context, anyhow};
-use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
+use clickhouse_client::{
+    ArrowClickHouseClient, ClickHouseConfigurationExt, require_minimum_server_version,
+};
 use orbit_log_fields::info;
 use orbit_server_config::{AppConfig, ClickHouseConfiguration};
 use orbit_utils::clickhouse::quote_sql_literal;
@@ -17,13 +19,14 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<()> {
     let siphon_reader_password = required(&setup.siphon_reader_password, "siphon_reader_password")?;
 
     // The graph database does not exist until the contract creates it.
-    let admin = ClickHouseConfiguration {
+    let admin_config = ClickHouseConfiguration {
         database: "default".to_string(),
         username: setup.admin_username.clone(),
         password: Some(admin_password.to_string()),
         ..config.graph.clone()
-    }
-    .build_client("graph");
+    };
+    require_minimum_server_version(&admin_config).await?;
+    let admin = admin_config.build_client("graph");
 
     if config.graph.replicated {
         check_replicated_prerequisites(&admin, &config.graph.database).await?;
