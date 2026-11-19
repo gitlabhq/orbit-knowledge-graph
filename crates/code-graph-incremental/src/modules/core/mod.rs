@@ -176,11 +176,13 @@ impl Module for Core {
     }
 
     fn start<'t, S: Store>(cx: &mut Cx<'_, 't, Self, S>, root: Cursor<'t, S>) {
-        for def in root
-            .children()
-            .filter(|d| d.is(C::Def) && !d.has(C::Declaration))
-        {
-            cx.define(def);
+        for scope in crate::modules::top_level(root) {
+            for def in scope
+                .children()
+                .filter(|d| d.is(C::Def) && !d.has(C::Declaration))
+            {
+                cx.define(def);
+            }
         }
     }
 }

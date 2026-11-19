@@ -25,6 +25,13 @@ fn arg<'t, M: Module, S: Store>(
         .map(|loc| cx.jump(loc))
 }
 
+fn top_level<S: Store>(root: Cursor<'_, S>) -> impl Iterator<Item = Cursor<'_, S>> {
+    std::iter::once(root).chain(
+        root.children()
+            .filter(|c| c.is(crate::canonical::Canonical::SourceFile)),
+    )
+}
+
 macro_rules! function {
     (required $kind:ident, $name:literal, [$($arg:ident),*]) => {
         $crate::engine::Function {

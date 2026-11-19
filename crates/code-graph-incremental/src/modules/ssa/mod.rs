@@ -78,7 +78,9 @@ impl Module for Ssa {
         s.graph.seal_block(s.cur);
         s.wildcard = wildcard;
         s.scopes = vec![(label, Vec::new())];
-        cx.predeclare(root);
+        for scope in crate::modules::top_level(root) {
+            cx.predeclare(scope);
+        }
     }
 
     fn finish<S: Store>(cx: &mut Cx<'_, '_, Self, S>) {
