@@ -14,6 +14,8 @@ use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 
 pub(super) const MAX_KEY_DEPTH: usize = 64;
+// `extract_images` reads at most two ancestor keys, so a third already proves it is too deep.
+const MAX_ENCLOSING_KEYS: usize = 3;
 
 fn node_range(node: &N<'_>) -> Range {
     crate::v2::dsl::utils::canonical_range(&crate::utils::node_to_range(node))
@@ -426,7 +428,9 @@ fn is_unquoted_non_string(node: &N<'_>) -> bool {
 fn enclosing_keys(node: &N<'_>) -> Vec<String> {
     let mut keys = Vec::new();
     let mut current = enclosing_pair(node);
-    while let Some(pair) = current {
+    while let Some(pair) = current
+        && keys.len() < MAX_ENCLOSING_KEYS
+    {
         keys.extend(pair_key(&pair));
         current = enclosing_pair(&pair);
     }
@@ -501,4 +505,28 @@ pub(super) fn extract_imports(
                 doc_type.matcher.matches(node, file_path) && extract_with_rule(rule, node, imports)
             })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::v2::config::Language;
+
+    #[test]
+    fn enclosing_keys_stop_at_the_cap_in_deeply_nested_documents() {
+        let depth = 200;
+        let source: String = (0..depth)
+            .map(|level| format!("{}k{level}:\n", " ".repeat(level)))
+            .collect::<String>()
+            + &format!("{}image: x\n", " ".repeat(depth));
+        let ast = Language::Yaml.parse_ast(&source, None).unwrap();
+        let innermost = ast
+            .root()
+            .dfs()
+            .filter(is_pair)
+            .last()
+            .expect("document has pairs");
+        assert_eq!(pair_key(&innermost).as_deref(), Some("image"));
+        assert_eq!(enclosing_keys(&innermost).len(), MAX_ENCLOSING_KEYS);
+    }
 }
