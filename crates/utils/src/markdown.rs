@@ -95,7 +95,7 @@ pub fn parse(source: &str) -> Document {
     let lines = LineIndex::new(source);
 
     let mut front_matter = None;
-    let (top_level_anchors, links) = anchors_and_links(root);
+    let (top_level_anchors, links) = anchors_and_links(root, &lines);
     let mut top_level_anchors = top_level_anchors.into_iter();
     let mut sections: Vec<Section> = Vec::new();
     let mut open: Vec<(u8, usize)> = Vec::new();
@@ -139,6 +139,13 @@ pub fn parse(source: &str) -> Document {
     }
     let reserved = front_matter.as_ref().map(|_| FRONT_MATTER_NAME);
     assign_unique_segments(&mut sections, reserved);
+    let links = links
+        .into_iter()
+        .map(|(start, link)| Link {
+            section: innermost_section(&sections, start),
+            ..link
+        })
+        .collect();
     Document {
         front_matter,
         sections,
@@ -296,12 +303,26 @@ fn is_null(text: &str, style: ScalarStyle) -> bool {
     style == ScalarStyle::Plain && matches!(text, "" | "~" | "null" | "Null" | "NULL")
 }
 
-fn anchors_and_links<'a>(root: &'a AstNode<'a>) -> (Vec<String>, Vec<Link>) {
+fn innermost_section(sections: &[Section], offset: usize) -> Option<usize> {
+    let mut index = sections
+        .partition_point(|section| section.start <= offset)
+        .checked_sub(1)?;
+    while sections[index].end <= offset {
+        index = sections[index].parent?;
+    }
+    Some(index)
+}
+
+fn anchors_and_links<'a>(
+    root: &'a AstNode<'a>,
+    lines: &LineIndex,
+) -> (Vec<String>, Vec<(usize, Link)>) {
     let mut anchorizer = UniqueAnchors::default();
     let mut top_level_anchors = Vec::new();
     let mut links = Vec::new();
     for node in root.descendants() {
-        let link = match &node.data.borrow().value {
+        let data = node.data.borrow();
+        let link = match &data.value {
             NodeValue::Heading(_) => {
                 let anchor = anchorizer.anchorize(&collect_text(node));
                 if node
@@ -315,15 +336,17 @@ fn anchors_and_links<'a>(root: &'a AstNode<'a>) -> (Vec<String>, Vec<Link>) {
             NodeValue::Link(link) => Link {
                 url: link.url.clone(),
                 image: false,
+                section: None,
             },
             NodeValue::Image(link) => Link {
                 url: link.url.clone(),
                 image: true,
+                section: None,
             },
             _ => continue,
         };
         if links.len() < MAX_LINKS_PER_FILE {
-            links.push(link);
+            links.push((lines.byte(data.sourcepos.start), link));
         }
     }
     (top_level_anchors, links)
@@ -360,6 +383,9 @@ impl UniqueAnchors {
 pub struct Link {
     pub url: String,
     pub image: bool,
+    /// Index of the innermost section containing the link; `None` before the
+    /// first heading.
+    pub section: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -725,6 +751,7 @@ mod tests {
         let link = Link {
             url: url.to_string(),
             image: false,
+            section: None,
         };
         link.target("doc/user/guide.md")
             .map(|target| (target.path, target.anchor))
@@ -776,6 +803,7 @@ mod tests {
         let image = Link {
             url: "img/shot.png#frag".to_string(),
             image: true,
+            section: None,
         };
         assert_eq!(
             image.target("doc/guide.md"),
@@ -803,6 +831,55 @@ mod tests {
                 ("three.png".to_string(), true),
                 ("four four.md".to_string(), false),
             ]
+        );
+    }
+
+    fn link_sections(source: &str) -> Vec<(String, Option<String>)> {
+        let document = parse(source);
+        document
+            .links
+            .into_iter()
+            .map(|link| {
+                let section = link.section.map(|i| document.sections[i].name.clone());
+                (link.url, section)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn links_belong_to_the_innermost_section_containing_them() {
+        let source = "Intro [a](a.md)\n\n# One [b](b.md)\n\n## Two\n\n> [c](c.md)\n\n\
+            - item\n  ![d](d.png)\n\n# Three\n\nSetext\n---\n\n[e][ref]\n\n[ref]: e.md\n";
+        let named =
+            |url: &str, section: Option<&str>| (url.to_string(), section.map(str::to_string));
+        assert_eq!(
+            link_sections(source),
+            vec![
+                named("a.md", None),
+                named("b.md", Some("One b")),
+                named("c.md", Some("Two")),
+                named("d.png", Some("Two")),
+                named("e.md", Some("Setext")),
+            ]
+        );
+    }
+
+    #[test]
+    fn links_under_headings_without_a_section_belong_to_the_enclosing_one() {
+        let source = "---\ntitle: x\n---\n[a](a.md)\n\n# One\n\n## Two\n\n#\n\n[b](b.md)\n";
+        assert_eq!(
+            link_sections(source),
+            vec![
+                ("a.md".to_string(), None),
+                ("b.md".to_string(), Some("Two".to_string()))
+            ]
+        );
+        let mut capped = "# Root\n".to_string();
+        capped.extend((1..MAX_SECTIONS_PER_FILE).map(|i| format!("## h{i}\n")));
+        capped.push_str("## Uncounted\n\n[c](c.md)\n");
+        assert_eq!(
+            link_sections(&capped),
+            vec![("c.md".to_string(), Some("Root".to_string()))]
         );
     }
 
