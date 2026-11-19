@@ -249,14 +249,7 @@ impl CoreGitaliskRepository {
     pub fn changes_since(&self, base: &str) -> Result<Vec<FileStatusInfo>, std::io::Error> {
         reject_option_like_revision(base)?;
         let output = Command::new("git")
-            .args([
-                "diff",
-                "--name-status",
-                "-z",
-                "--end-of-options",
-                base,
-                "HEAD",
-            ])
+            .args(["diff", "--name-status", "-z", base, "HEAD"])
             .current_dir(&self.path)
             .output()?;
         if !output.status.success() {
