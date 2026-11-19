@@ -4,8 +4,12 @@ use super::Scope;
 use super::paths::join;
 use crate::canonical::Canonical as C;
 use crate::constants::WILDCARD;
-use crate::engine::{Cursor, Cx, Loc, Store, Val, Vals, of};
+use crate::engine::{Cursor, Cx, Loc, Span, Store, Val, Vals, of};
 use crate::tree::EdgeKind;
+
+const DEF_NAMES: &str = "(__def $N:__defname)";
+const DEFAULT_EXPORTS: &str = "(__def $N:__default_export)";
+const EXPORTS: &str = "(__def #exports)";
 
 struct Bound {
     local: u32,
@@ -73,10 +77,11 @@ impl<'t, S: Store> Cx<'_, 't, Scope, S> {
     pub(super) fn lookup(&mut self, scope: Cursor<'t, S>, name: u32) -> Vals {
         let root = scope.parent().is_none();
         let types_only = !root && scope.is_class();
-        let defs: Vals = of(scope
-            .descendants_pruned(|n| n.is(C::Def))
-            .filter(|d| d.is(C::Def) && !d.has(C::ImplBlock))
-            .filter(|d| d.child_sym(C::DefName) == Some(name))
+        let defs: Vals = of(self
+            .find(Span::Scope, DEF_NAMES, name, Loc::from(scope))
+            .iter()
+            .map(|&l| self.jump(l))
+            .filter(|d| !d.has(C::ImplBlock))
             .filter(|d| !types_only || d.is_class()));
         if !defs.is_empty() {
             return defs;
@@ -122,18 +127,28 @@ impl<'t, S: Store> Cx<'_, 't, Scope, S> {
     }
 
     pub(super) fn exported(&mut self, file: Cursor<'t, S>, name: u32) -> Vals {
-        let fi = file.fi();
-        let in_file = |locs: &'t [Loc]| locs.iter().copied().filter(move |l| l.fi == fi);
+        let at = Loc::from(file);
         let nested = |d: Cursor<'t, S>| {
             d.is_class()
                 && d.ancestors()
                     .find(|a| a.is(C::Def))
                     .is_some_and(|a| a.is_class())
         };
-        let mut defs: SmallVec<[Cursor<'t, S>; 2]> = in_file(self.indexed("def_names", name))
-            .map(|l| self.jump(l))
+        let mut defs: SmallVec<[Cursor<'t, S>; 2]> = self
+            .find(Span::Tree, DEF_NAMES, name, at)
+            .iter()
+            .map(|&l| self.jump(l))
             .filter(|d| !nested(*d))
-            .chain(in_file(self.indexed("offered", name)).map(|l| self.jump(l)))
+            .chain(
+                self.find(Span::Tree, DEFAULT_EXPORTS, name, at)
+                    .iter()
+                    .map(|&l| self.jump(l)),
+            )
+            .chain(
+                self.find(Span::Tree, EXPORTS, name, at)
+                    .iter()
+                    .map(|&l| self.jump(l)),
+            )
             .filter(|d| !d.has(C::ImplBlock))
             .filter(|d| file.parent().is_none() || d.ancestors().any(|a| a.index() == file.index()))
             .collect();

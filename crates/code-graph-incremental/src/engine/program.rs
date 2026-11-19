@@ -33,8 +33,6 @@ struct PhaseSpec {
     resolve: BTreeMap<String, String>,
     #[serde(default)]
     budget: BudgetSpec,
-    #[serde(default)]
-    indexes: Vec<String>,
 }
 
 /// The budgets of a phase, by `Limits` field name: one per tree, and one for
@@ -49,7 +47,47 @@ pub struct BudgetSpec {
 
 #[derive(serde::Deserialize)]
 struct PipelineSpec {
+    #[serde(default)]
+    indexes: Vec<IndexSpec>,
     phases: Vec<PhaseSpec>,
+}
+
+/// A declared index: every node matching `pattern`, under the text of `key`.
+/// Family phases build it the first time they look it up.
+#[derive(serde::Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+struct IndexSpec {
+    #[serde(rename = "match")]
+    pattern: String,
+    key: String,
+    #[serde(default)]
+    span: Span,
+    #[serde(default)]
+    phases: Vec<String>,
+}
+
+/// What an index's keys are relative to: the whole family, one file, or
+/// one scope (the nearest enclosing def, or the file root).
+#[derive(serde::Deserialize, Clone, Copy, PartialEq, Eq, Default, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Span {
+    #[default]
+    Family,
+    Tree,
+    Scope,
+}
+
+impl Span {
+    /// The node a match at `c` is filed under in its tree's piece.
+    fn anchor<S: Store>(self, c: Cursor<'_, S>) -> u32 {
+        match self {
+            Span::Family | Span::Tree => 0,
+            Span::Scope => c
+                .ancestors()
+                .find(|a| a.is(C::Def) || a.parent().is_none())
+                .map_or(c.index(), |a| a.index()),
+        }
+    }
 }
 
 const EMIT_KINDS: [(&str, EdgeKind); 5] = [
@@ -168,11 +206,12 @@ struct Stage {
     repeat: bool,
 }
 
-/// A rule with an `index:` hook. Indexers run in a pass before the walk,
-/// every matching one firing, and take no part in rule groups.
+/// A declared index compiled for one language, or for all.
 struct Indexer {
     at: Match,
-    entries: Box<[(u32, Expr, Expr)]>,
+    id: u32,
+    span: Span,
+    key: Expr,
 }
 
 enum Body {
@@ -278,7 +317,8 @@ pub struct Phase {
     pub(super) links: super::Links,
     pub(super) data: Vec<Vec<Vals>>,
     pub(super) defs: Vec<Def>,
-    pub(super) indexes: Vec<u32>,
+    pub(super) indexes: Vec<(String, Span, u32)>,
+    pub(super) index_count: usize,
     pub rows: Vec<RowShape>,
     body: Body,
     slots: usize,
@@ -307,7 +347,7 @@ impl Pipeline {
             .phases
             .iter()
             .map(|p| {
-                let mut phase = Phase::load(p, &files, &names, lang)?;
+                let mut phase = Phase::load(p, &spec.indexes, &files, &names, lang)?;
                 phase.data = values.clone();
                 Ok(phase)
             })
@@ -404,6 +444,7 @@ fn walk_of(name: &str) -> Result<Walk, LoadError> {
 
 struct Loader<'a> {
     spec: &'a PhaseSpec,
+    indexes: Vec<(usize, IndexSpec)>,
     walk: Walk,
     links: &'a super::Links,
     defaults: Vec<(EdgeKind, FnId)>,
@@ -418,6 +459,7 @@ struct Loader<'a> {
 impl Phase {
     fn load(
         spec: &PhaseSpec,
+        indexes: &[IndexSpec],
         files: &RuleFiles,
         names: &HashMap<String, u16>,
         lang: &Lang,
@@ -450,6 +492,7 @@ impl Phase {
             .collect();
         let loader = Loader {
             spec,
+            indexes: phase_indexes(spec, indexes),
             walk,
             links: &links,
             defaults,
@@ -520,11 +563,11 @@ impl Phase {
             name: spec.name.clone(),
             label: Box::leak(label.into_boxed_str()),
             defs,
-            indexes: spec
-                .indexes
-                .iter()
-                .map(|n| loader.lang.syms.intern(n))
+            indexes: phase_indexes(spec, indexes)
+                .into_iter()
+                .map(|(id, i)| (i.pattern, i.span, id as u32))
                 .collect(),
+            index_count: indexes.len(),
             rows: loader.rows.take(),
             budget: spec.budget.clone(),
             scope: spec.scope.clone(),
@@ -537,6 +580,19 @@ impl Phase {
             links,
         })
     }
+}
+
+/// The declared indexes a family phase builds: those naming it, or naming no phase.
+fn phase_indexes(spec: &PhaseSpec, indexes: &[IndexSpec]) -> Vec<(usize, IndexSpec)> {
+    if spec.scope != "family" {
+        return Vec::new();
+    }
+    indexes
+        .iter()
+        .enumerate()
+        .filter(|(_, i)| i.phases.is_empty() || i.phases.contains(&spec.name))
+        .map(|(id, i)| (id, i.clone()))
+        .collect()
 }
 
 fn rules_of(rules: Option<&PhaseRules>) -> Result<&[RuleSpec], LoadError> {
@@ -786,10 +842,6 @@ impl Loader<'_> {
         for (owner, spec) in ordered {
             let at = self.at(spec);
             self.check_hooks(spec).map_err(&at)?;
-            if let Some(index) = &spec.index {
-                indexers.push(self.indexer(spec, index, owner).map_err(&at)?);
-                continue;
-            }
             let name = spec.group.clone().unwrap_or_else(|| "default".into());
             let group = match groups.iter().position(|g| *g == name) {
                 Some(found) => found,
@@ -825,6 +877,18 @@ impl Loader<'_> {
             rules.push(rule);
         }
         let slots = rules.iter().map(|r| r.at.slots.len()).max().unwrap_or(1);
+        for (id, index) in &self.indexes {
+            let owners: Vec<Option<u8>> = match index.pattern.contains('%') {
+                true => (0..langs.len()).map(|at| Some(at as u8)).collect(),
+                false => vec![None],
+            };
+            for owner in owners {
+                let indexer = self
+                    .indexer(index, *id as u32, owner)
+                    .map_err(|e| LoadError(format!("index {}: {}", index.pattern, e.0)))?;
+                indexers.push(indexer);
+            }
+        }
         let slots = indexers
             .iter()
             .map(|i| i.at.slots.len())
@@ -839,43 +903,19 @@ impl Loader<'_> {
         ))
     }
 
-    fn indexer(
-        &self,
-        spec: &RuleSpec,
-        index: &BTreeMap<String, crate::engine::lang::IndexSpec>,
-        lang: Option<u8>,
-    ) -> Result<Indexer, LoadError> {
-        let hooks = [
-            spec.enter.is_some(),
-            spec.children.is_some(),
-            spec.between.is_some(),
-            spec.exit.is_some(),
-            spec.late.is_some(),
-            spec.emit.is_some(),
-            spec.row.is_some(),
-        ];
-        if hooks.into_iter().any(|h| h) {
-            return Err(LoadError("an index rule has no other hooks".into()));
-        }
-        if let Some(name) = index.keys().find(|n| !self.spec.indexes.contains(n)) {
-            return Err(LoadError(format!(
-                "index {name} is not declared by {}",
-                self.spec.name
-            )));
-        }
-        let at = self.matcher(spec, lang)?;
-        let scope = self.scope(&at.slots, false);
-        let entries = index
-            .iter()
-            .map(|(name, entry)| {
-                Ok((
-                    self.lang.syms.intern(name),
-                    Expr::parse(&entry.key, &scope)?,
-                    Expr::parse(&entry.value, &scope)?,
-                ))
-            })
-            .collect::<Result<_, LoadError>>()?;
-        Ok(Indexer { at, entries })
+    fn indexer(&self, index: &IndexSpec, id: u32, lang: Option<u8>) -> Result<Indexer, LoadError> {
+        let spec = RuleSpec {
+            pattern: index.pattern.clone(),
+            ..RuleSpec::default()
+        };
+        let at = self.matcher(&spec, lang)?;
+        let key = Expr::parse(&index.key, &self.scope(&at.slots, false))?;
+        Ok(Indexer {
+            at,
+            id,
+            span: index.span,
+            key,
+        })
     }
 
     fn actions(
@@ -1413,33 +1453,32 @@ impl Phase {
         late
     }
 
-    pub fn has_indexers(&self) -> bool {
-        matches!(&self.body, Body::Flow { indexers, .. } if !indexers.is_empty())
-    }
-
-    /// Every entry the phase's index rules add for one tree: the index
-    /// name, the key, and the value.
-    pub fn index_entries<S: Store>(
+    /// One tree's piece of the declared index `id`.
+    pub fn piece<S: Store>(
         &self,
         run: &mut Run<S>,
         root: Cursor<'_, S>,
-    ) -> Vec<(u32, u32, Loc)> {
+        id: u32,
+    ) -> crate::tree::Piece {
+        let mut out = crate::tree::Piece::default();
         let Body::Flow { indexers, .. } = &self.body else {
-            return Vec::new();
+            return out;
         };
         let mut w = Scratch::<S>::new(self.slots);
-        let mut out = Vec::new();
+        let mine: Vec<&Indexer> = indexers.iter().filter(|i| i.id == id).collect();
         for c in std::iter::once(root).chain(root.descendants()) {
-            for indexer in indexers.iter().filter(|i| i.at.kinds.contains(&c.kind())) {
+            for indexer in mine.iter().filter(|i| i.at.kinds.contains(&c.kind())) {
                 if !w.matches(run, &indexer.at, c) || !w.holds(run, &indexer.at) {
                     continue;
                 }
-                for (name, key, value) in &indexer.entries {
-                    let keys = key.eval(run, &w.vals);
-                    let values = value.eval(run, &w.vals);
-                    for k in keys.iter().filter_map(|&k| run.text_of(k)) {
-                        out.extend(values.iter().filter_map(|v| v.loc()).map(|v| (*name, k, v)));
-                    }
+                let anchor = indexer.span.anchor(c);
+                for key in indexer
+                    .key
+                    .eval(run, &w.vals)
+                    .iter()
+                    .filter_map(|&k| run.text_of(k))
+                {
+                    out.entry((anchor, key)).or_default().push(c.index());
                 }
             }
         }

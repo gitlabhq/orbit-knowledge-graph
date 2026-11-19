@@ -11,7 +11,6 @@ const LIBS: &[(&str, &str)] = &[
     ("canonical", include_str!("../../config/lib/canonical.yaml")),
     ("display", include_str!("../../config/lib/display.yaml")),
     ("roots", include_str!("../../config/lib/roots.yaml")),
-    ("scope", include_str!("../../config/lib/scope.yaml")),
     ("shapes", include_str!("../../config/lib/shapes.yaml")),
     (
         "statements",
@@ -84,15 +83,6 @@ pub struct RuleSpec {
     pub tag_on: Option<String>,
     pub unique: Option<String>,
     pub row: Option<Rows>,
-    pub index: Option<BTreeMap<String, IndexSpec>>,
-}
-
-/// One entry an `index:` hook adds per match: values under a key.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct IndexSpec {
-    pub key: String,
-    pub value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

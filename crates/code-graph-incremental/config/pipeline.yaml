@@ -1,3 +1,9 @@
+indexes:
+  - { match: '(__def $N:__defname)', key: $N, span: tree }
+  - { match: '(__def $N:__defname)', key: $N, span: scope }
+  - { match: '(__def $N:__default_export)', key: $N, span: tree }
+  - { match: '(__def #exports)', key: '$ROOT | tag("exports")', span: tree }
+
 phases:
   - name: canonicalize
     scope: tree
@@ -32,14 +38,12 @@ phases:
     after: [project]
     walk: each
     outputs: [emit]
-    indexes: [def_names, offered]
     modules: [scope, text]
   - name: resolve
     scope: family
     after: [imports]
     walk: each
     outputs: [emit]
-    indexes: [def_names, offered]
     modules: [core, scope, text]
     bind: { core.read: scope.read }
   - name: dispatch
@@ -47,7 +51,6 @@ phases:
     after: [resolve]
     walk: fixpoint
     outputs: [emit]
-    indexes: [def_names, offered]
     modules: [core, scope, text]
     bind: { core.read: scope.read }
   - name: display

@@ -121,6 +121,7 @@ impl<N: Clone + Default> From<Tree<Mutable<N>>> for Tree<Compact<N>> {
             label: tree.label,
             tags: tree.tags,
             source: tree.source,
+            indexes: Default::default(),
         }
     }
 }
@@ -151,6 +152,7 @@ impl<N: Clone> From<Tree<Compact<N>>> for Tree<Mutable<N>> {
             label: tree.label,
             tags: tree.tags,
             source: tree.source,
+            indexes: Default::default(),
         }
     }
 }
@@ -186,6 +188,7 @@ impl<N: Clone + Default> Tree<Mutable<N>> {
             label: self.label,
             tags,
             source: self.source,
+            indexes: Default::default(),
         }
     }
 }

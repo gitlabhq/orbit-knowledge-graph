@@ -1,5 +1,3 @@
-import: [scope]
-
 functions:
   producing:
     cases:
@@ -8,7 +6,6 @@ functions:
       - value: '$ROOT | type'
 
 dispatch:
-  - use: scope_indexes
   - group: use
     match: '(__call (__callee $M:__member))'
     emit: { calls: { from: enclosing, to: '$ROOT | producers | producing | member($M) | foreign', site: $ROOT } }

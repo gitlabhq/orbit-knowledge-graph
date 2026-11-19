@@ -29,6 +29,29 @@ pub struct Tree<S: Storage = Mutable> {
     pub label: String,
     pub tags: FxHashMap<u32, SmallVec<[Tag; 2]>>,
     pub source: std::sync::Arc<str>,
+    pub(crate) indexes: IndexCache,
+}
+
+/// One declared index's entries in one tree: the matching nodes by
+/// (anchor node, key text). The anchor is the scope node for a scope index
+/// and 0 otherwise.
+pub type Piece = FxHashMap<(u32, u32), Vec<u32>>;
+
+/// This tree's piece of each declared index, built the first time a lookup
+/// needs it and dropped when the tree changes.
+#[derive(Clone, Default)]
+pub struct IndexCache(std::sync::OnceLock<Box<[std::sync::OnceLock<Piece>]>>);
+
+impl IndexCache {
+    pub fn piece(&self, count: usize, id: usize, build: impl FnOnce() -> Piece) -> &Piece {
+        self.0
+            .get_or_init(|| (0..count).map(|_| std::sync::OnceLock::new()).collect())[id]
+            .get_or_init(build)
+    }
+
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
 }
 
 impl<N> Tree<Mutable<N>> {
@@ -41,6 +64,7 @@ impl<N> Tree<Mutable<N>> {
             label: String::new(),
             tags: FxHashMap::default(),
             source: std::sync::Arc::from(""),
+            indexes: Default::default(),
         }
     }
 
@@ -51,6 +75,7 @@ impl<N> Tree<Mutable<N>> {
 
 impl<S: Storage> Tree<S> {
     pub fn set_tag(&mut self, node: u32, key: u32, val: u32) {
+        self.indexes.clear();
         let tags = self.tags.entry(node).or_default();
         if let Some(tag) = tags.iter_mut().find(|tag| tag.key == key) {
             tag.val = val;
@@ -60,6 +85,7 @@ impl<S: Storage> Tree<S> {
     }
 
     pub fn clear_tags(&mut self, node: u32, keys: &[u32]) {
+        self.indexes.clear();
         if let Some(tags) = self.tags.get_mut(&node) {
             tags.retain(|tag| !keys.contains(&tag.key));
         }

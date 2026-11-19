@@ -1,5 +1,3 @@
-import: [scope]
-
 data:
   import_kinds: [__import, __import_type]
 
@@ -23,7 +21,6 @@ functions:
       - value: $ROOT
 
 imports:
-  - use: scope_indexes
   - group: name
     match: '$I:(%import_kinds $ROOT:__name)'
     when: '$I | modules'

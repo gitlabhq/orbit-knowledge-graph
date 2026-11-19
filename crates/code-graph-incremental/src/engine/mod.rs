@@ -15,7 +15,7 @@ use crate::env::Env;
 use crate::modules;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Compact, Edge, EdgeKind, Mutable, Node, Storage};
-pub use program::{Def, Part, Phase, Pipeline, RowShape, Walk, resolution};
+pub use program::{Def, Part, Phase, Pipeline, RowShape, Span, Walk, resolution};
 
 pub type Tree<S = Compact> = crate::tree::Tree<S>;
 pub type Cursor<'a, S = Compact> = crate::tree::Cursor<'a, S>;
@@ -172,43 +172,70 @@ pub struct IndexDecl {
     pub build: fn(&crate::intern::Lang, &[Tree<Compact>], &[Edge]) -> Box<dyn Any + Send + Sync>,
 }
 
-/// The entries a family phase's `index:` rules add, by index name and key.
-#[derive(Default)]
-pub struct Indexed(FxHashMap<(u32, u32), Vec<Loc>>);
+/// What a family run needs to build index pieces on demand, and the run's
+/// family-wide directory of each index, merged from the pieces.
+pub struct Indexed<'t> {
+    phase: &'t Phase,
+    trees: &'t [Tree<Compact>],
+    files: usize,
+    env: &'t Env,
+    budget: &'t Sentinel,
+    family: Box<[std::sync::OnceLock<FxHashMap<u32, Vec<Loc>>>]>,
+}
 
-impl Indexed {
-    fn build(
-        phase: &Phase,
-        trees: &[Tree<Compact>],
+impl<'t> Indexed<'t> {
+    fn new(
+        phase: &'t Phase,
+        trees: &'t [Tree<Compact>],
         files: usize,
-        env: &Env,
-        budget: &Sentinel,
+        env: &'t Env,
+        budget: &'t Sentinel,
     ) -> Self {
-        use rayon::prelude::*;
-        if !phase.has_indexers() {
-            return Self::default();
+        Self {
+            phase,
+            trees,
+            files,
+            env,
+            budget,
+            family: (0..phase.index_count)
+                .map(|_| std::sync::OnceLock::new())
+                .collect(),
         }
-        let entries: Vec<Vec<(u32, u32, Loc)>> = (0..files)
-            .into_par_iter()
-            .map(|fi| {
-                let mut run = Run::new(trees, fi as u32, env, phase, budget, budget);
-                phase.index_entries(&mut run, Cursor::new(trees, fi as u32, 0))
+    }
+
+    fn piece(&self, fi: u32, id: u32) -> &'t crate::tree::Piece {
+        let (trees, env, phase, budget) = (self.trees, self.env, self.phase, self.budget);
+        trees[fi as usize]
+            .indexes
+            .piece(phase.index_count, id as usize, || {
+                let mut run = Run::new(trees, fi, env, phase, budget, budget);
+                phase.piece(&mut run, Cursor::new(trees, fi, 0), id)
             })
-            .collect();
-        let mut map: FxHashMap<(u32, u32), Vec<Loc>> = FxHashMap::default();
-        for (name, key, at) in entries.into_iter().flatten() {
-            map.entry((name, key)).or_default().push(at);
-        }
-        Self(map)
+    }
+
+    fn family(&self, id: u32) -> &FxHashMap<u32, Vec<Loc>> {
+        use rayon::prelude::*;
+        self.family[id as usize].get_or_init(|| {
+            let pieces: Vec<(u32, &crate::tree::Piece)> = (0..self.files as u32)
+                .into_par_iter()
+                .map(|fi| (fi, self.piece(fi, id)))
+                .collect();
+            let mut map: FxHashMap<u32, Vec<Loc>> = FxHashMap::default();
+            for (fi, piece) in pieces {
+                for (&(_, key), nodes) in piece {
+                    map.entry(key)
+                        .or_default()
+                        .extend(nodes.iter().map(|&node| Loc { fi, node }));
+                }
+            }
+            map
+        })
     }
 }
 
-/// The declared indexes of one family run, each built at most once.
-pub struct Indexes<'t> {
-    lang: &'t crate::intern::Lang,
-    trees: &'t [Tree<Compact>],
-    edges: &'t [Edge],
-    built: Box<[std::sync::OnceLock<Box<dyn Any + Send + Sync>>]>,
+/// The module-declared indexes of one family run, built before the walk.
+pub struct Indexes {
+    built: Vec<(u8, &'static str, Box<dyn Any + Send + Sync>)>,
 }
 
 static INDEXES: LazyLock<Vec<(u8, &'static IndexDecl)>> = LazyLock::new(|| {
@@ -219,29 +246,27 @@ static INDEXES: LazyLock<Vec<(u8, &'static IndexDecl)>> = LazyLock::new(|| {
         .collect()
 });
 
-impl<'t> Indexes<'t> {
+impl Indexes {
     pub fn new(
-        lang: &'t crate::intern::Lang,
-        trees: &'t [Tree<Compact>],
-        edges: &'t [Edge],
+        lang: &crate::intern::Lang,
+        trees: &[Tree<Compact>],
+        edges: &[Edge],
+        modules: &[u8],
     ) -> Self {
-        Self {
-            lang,
-            trees,
-            edges,
-            built: (0..INDEXES.len())
-                .map(|_| std::sync::OnceLock::new())
-                .collect(),
-        }
+        use rayon::prelude::*;
+        let built = INDEXES
+            .par_iter()
+            .filter(|(slot, _)| modules.contains(slot))
+            .map(|&(slot, decl)| (slot, decl.name, (decl.build)(lang, trees, edges)))
+            .collect();
+        Self { built }
     }
 
     fn get(&self, slot: u8, name: &str) -> Option<&(dyn Any + Send + Sync)> {
-        let at = INDEXES
+        self.built
             .iter()
-            .position(|(s, d)| *s == slot && d.name == name)?;
-        let built =
-            self.built[at].get_or_init(|| (INDEXES[at].1.build)(self.lang, self.trees, self.edges));
-        Some(built.as_ref())
+            .find(|(s, n, _)| *s == slot && *n == name)
+            .map(|(_, _, b)| b.as_ref())
     }
 }
 
@@ -492,9 +517,8 @@ pub struct Run<'t, S: Store = Compact> {
     graph: Option<&'t EdgeIndex>,
     files: u32,
     project: Option<u32>,
-    indexes: Option<&'t Indexes<'t>>,
-    indexed: Option<&'t Indexed>,
-    declared: &'t [u32],
+    indexes: Option<&'t Indexes>,
+    indexed: Option<&'t Indexed<'t>>,
     fns: &'t [program::Def],
     graph_fi: u32,
     lang: usize,
@@ -523,7 +547,6 @@ impl<'t, S: Store> Run<'t, S> {
         run.max_edges = env.limits.max_file_edges;
         run.lang = rules;
         run.data = phase.data.get(rules).map_or(&[], Vec::as_slice);
-        run.declared = &phase.indexes;
         run.fns = &phase.defs;
         run
     }
@@ -552,7 +575,6 @@ impl<'t, S: Store> Run<'t, S> {
             project: None,
             indexes: None,
             indexed: None,
-            declared: &[],
             fns: &[],
             graph_fi: 0,
             lang: 0,
@@ -825,9 +847,9 @@ pub fn run_family(
 ) -> Result<Vec<Edge>, Killed> {
     use rayon::prelude::*;
     let scope = scope_budget(phase, env, budget);
-    let indexes = Indexes::new(&env.lang, trees, edges);
+    let indexes = Indexes::new(&env.lang, trees, edges, &phase.modules);
     let files = project.unwrap_or(trees.len() as u32) as usize;
-    let indexed = Indexed::build(phase, trees, files, env, &scope);
+    let indexed = Indexed::new(phase, trees, files, env, &scope);
     let edges: Vec<Result<Vec<Edge>, Killed>> = (0..files)
         .into_par_iter()
         .map(|fi| {
@@ -882,7 +904,7 @@ pub fn run_graph(
     use rayon::prelude::*;
     let scope = scope_budget(phase, env, budget);
     let graph = EdgeIndex::new(edges);
-    let indexes = Indexes::new(&env.lang, trees, edges);
+    let indexes = Indexes::new(&env.lang, trees, edges, &phase.modules);
     let rows: Vec<Result<Vec<Row>, Killed>> = (0..trees.len())
         .into_par_iter()
         .map(|fi| {
@@ -1035,18 +1057,32 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
         self.run.indexes?.get(self.slot, name)?.downcast_ref()
     }
 
-    /// What a YAML `index:` rule filed under `key` in the index `name`.
-    pub fn indexed(&self, name: &str, key: u32) -> &'t [Loc] {
-        let Some(indexed) = self.run.indexed else {
-            return &[];
+    /// The nodes matching the declared index (`pattern`, `span`) whose key
+    /// has the text `key`, relative to `at`: its file for a tree index, the
+    /// scope node itself for a scope index.
+    pub fn find(&self, span: Span, pattern: &str, key: u32, at: Loc) -> Vec<Loc> {
+        let indexed = self.run.indexed.expect("find runs in family phases");
+        let Some(&(_, _, id)) = indexed
+            .phase
+            .indexes
+            .iter()
+            .find(|(p, s, _)| p == pattern && *s == span)
+        else {
+            panic!("index {pattern} ({span:?}) is not declared for this phase in pipeline.yaml");
         };
-        let name = self.run.lang_ref.syms.intern(name);
-        assert!(
-            self.run.declared.contains(&name),
-            "index {} is not declared by this phase",
-            self.run.lang_ref.syms.resolve(name)
-        );
-        indexed.0.get(&(name, key)).map_or(&[], Vec::as_slice)
+        let local = |anchor: u32| {
+            indexed
+                .piece(at.fi, id)
+                .get(&(anchor, key))
+                .map_or_else(Vec::new, |nodes| {
+                    nodes.iter().map(|&node| Loc { fi: at.fi, node }).collect()
+                })
+        };
+        match span {
+            Span::Family => indexed.family(id).get(&key).cloned().unwrap_or_default(),
+            Span::Tree => local(0),
+            Span::Scope => local(at.node),
+        }
     }
 
     /// A value's text: a symbol as is, or a node's own text.

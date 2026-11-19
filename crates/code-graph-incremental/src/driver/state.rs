@@ -295,6 +295,7 @@ impl From<TreeSnapshot> for Tree<Compact> {
                 .map(|(node, tags)| (node, SmallVec::from_vec(tags)))
                 .collect(),
             source: std::sync::Arc::from(""),
+            indexes: Default::default(),
         }
     }
 }
