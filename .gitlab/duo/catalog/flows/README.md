@@ -168,6 +168,21 @@ Leave **Instructions** empty. GraphQL: `aiFlowTriggerCreate` with
 `eventTypes: [0]` (mention) and `aiCatalogItemConsumerId` set to the
 project's item configuration.
 
+A second trigger keeps docs current. Add **Pipeline** events (`eventTypes: [3]`)
+with this filter:
+
+```json
+{"pipeline_hooks": {"rules": [
+  {"field": "object_attributes.status", "operator": "in", "value": ["success"]},
+  {"field": "object_attributes.source", "operator": "in", "value": ["merge_request_event", "push"]}
+]}}
+```
+
+The source rule matters: flow sessions run as pipelines too, and without it
+each session would start another. Pipeline runs post no progress note on
+the MR. A run on a pipeline that no docs-write MR covers ends in `setup`,
+with no model call. See [Drift and merge order](#drift-and-merge-order).
+
 To run on every new or ready MR later, add **Merge request** events
 (`eventTypes` 6 and 4) in a reviewed MR here first. Filter **Created** with
 `{"merge_request": {"rules": [{"field": "action", "operator": "in", "value": ["created"]}]}}`.
@@ -179,6 +194,23 @@ too, so the docs MR the flow opens starts the flow again. The gate ends that run
 fork MRs, MRs on a `docs-write/` branch or with the docs-write marker, and
 MRs with `~documentation` or `~"docs-factory::skip"`. Each run still spends about
 100 seconds of runner time on setup.
+
+## Drift and merge order
+
+- **A push to the feature MR:** when its pipeline succeeds, the flow checks
+  whether a docs-write MR covers the MR and whether the feature MR head moved
+  since the last docs update. On drift, the writer updates the docs against the
+  new diff, a fresh reviewer reviews them, and fixers fix the review items. The
+  docs MR stays ready for review and gets new commits, not a rewrite of the
+  history. It posts one drift note per new head.
+- **The feature MR merges:** the default-branch pipeline runs the same check.
+  With no drift, the flow posts one note that the docs match the merged head,
+  and starts a new docs MR pipeline.
+- **Merge order:** `docs-write-merge-order-check` runs on every docs MR
+  pipeline (`docs-write/mr-*` branches). It fails while any feature MR in the
+  docs MR marker is not merged. This project requires a green pipeline to
+  merge, so docs never merge before the code. The new pipeline that the flow
+  starts at merge, or a retry of the job, turns it green.
 
 ## Shadow mode
 

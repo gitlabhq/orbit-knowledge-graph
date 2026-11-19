@@ -249,6 +249,17 @@ docs-in-code-mr-check:
         exit 1
       fi
 
+docs-write-merge-order-check:
+  stage: lint
+  image: python:3.12-alpine
+  tags:
+    - saas-linux-small-amd64
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^docs-write\/mr-/
+  needs: []
+  script:
+    - python3 scripts/checks/docs-write-merge-order.py
+
 mr-title-check:
   stage: lint
   image: oven/bun:1.4.4-alpine
