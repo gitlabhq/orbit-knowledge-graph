@@ -6,14 +6,13 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
+use super::types::R;
 use super::{Ctx, Tree, VisibleMap, partial_key};
 use crate::canonical::Canonical as C;
 use crate::constants::{PATH_SEP, WILDCARD};
-use crate::engine::Cx;
-use crate::engine::Loc;
 use crate::file_tree::LookupConfig;
 use crate::intern::Lang;
-use crate::rules::ResolveConfig;
+use crate::rules::{Loc, ResolveConfig};
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{CallResolution, Compact, Edge, EdgeKind};
@@ -594,12 +593,12 @@ pub(super) fn resolve_one_import(ctx: &Ctx, req: &ImportReq) -> Vec<Edge> {
 }
 
 pub(super) fn wildcard_uses<'a>(
-    r: &mut Cx<'a>,
+    r: &mut R<'_, 'a>,
     req: &ImportReq,
     name: Cursor<'a>,
     referrers: &FxHashSet<u32>,
 ) -> Vec<Edge> {
-    let ctx = r.family.expect("a family phase");
+    let ctx = r.ctx;
     if namespace_alias(ctx.wildcard_sym, name).is_some() {
         return Vec::new();
     }
@@ -612,7 +611,7 @@ pub(super) fn wildcard_uses<'a>(
             .filter(|loc| loc.fi as usize != fi)
             .map(|loc| ctx.corpus.jump(loc.fi, loc.node))
     };
-    let root = |r: &mut Cx<'a>, c: Cursor<'a>| r.qualified(c.sym(), &|_, sym| provided(sym));
+    let root = |r: &mut R<'_, 'a>, c: Cursor<'a>| r.qualified(c.sym(), &|_, sym| provided(sym));
     let mut imported: FxHashSet<Loc> = FxHashSet::default();
     let mut edges = Vec::new();
     let mut import = |target: Cursor, edges: &mut Vec<Edge>| {

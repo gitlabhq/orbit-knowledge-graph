@@ -11,9 +11,6 @@ type Values = SmallVec<[Value; 2]>;
 
 impl<'t> Types<'t> for Cx<'t> {
     fn parts(&mut self, owner: Cursor<'t>) -> Parts<'t> {
-        if self.family.is_some() {
-            return self.family_parts(owner);
-        }
         let dn = owner.index();
         let same_name = owner
             .child_sym(C::DefName)
@@ -28,9 +25,6 @@ impl<'t> Types<'t> for Cx<'t> {
     }
 
     fn supers(&mut self, part: Cursor<'t>) -> Parts<'t> {
-        if self.family.is_some() {
-            return self.family_supers(part);
-        }
         self.supers_of(part.index())
             .into_iter()
             .map(|d| self.at(d))

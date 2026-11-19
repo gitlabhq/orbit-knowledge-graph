@@ -120,35 +120,3 @@ link:
     children: [$ROOT | mod.ssa.loop_head, $ROOT | mod.ssa.loop_body]
     between: [mod.ssa.loop_header($ROOT)]
     exit: [mod.ssa.leave()]
-
-resolve:
-  - match: '(__decorator)'
-    when: [$ROOT | owner, $ROOT | named, $ROOT | type]
-    emit: { calls: { from: $ROOT | owner, to: $ROOT | type | cross($ROOT) } }
-  - match: '(__decorator)'
-    when: [$ROOT | owner, $ROOT | named]
-    emit: { imports: { from: $ROOT | owner, to: 'unbound($ROOT | owner, @$ROOT)' } }
-
-  - match: '(__supertype)'
-    when: [$ROOT | owner, $ROOT | named, $ROOT | type | cross($ROOT)]
-    enter: ['inherit($ROOT | owner, $ROOT | type | cross($ROOT))']
-    emit: { extends: { from: $ROOT | owner, to: $ROOT | type | cross($ROOT) } }
-
-  - match: '(__destructure)'
-    enter: ['destructure($ROOT, enclosing_def)']
-
-  - match: '(__call (__callee $M:(__member $O:__object)))'
-    when:
-      - $M | named
-      - $O | root_name
-      - $M | child("__dispatch") | lacks("__object")
-      - $O | type
-    emit: { calls: { from: enclosing_def, to: $O | type | contract_member($M), site: $ROOT } }
-  - match: '(__call (__callee $M:(__member $O:__object)))'
-    when: [$M | named, $O | root_name, $M | child("__dispatch"), $O | type | is_contract]
-  - match: '(__call (__callee $M:(__member $O:__object)))'
-    when: [$M | named, $O | root_name, $O | type]
-    emit: { calls: { from: enclosing_def, to: '$O | type | cross($ROOT) | is_class | member($M)', site: $ROOT } }
-  - match: '(__call (__callee $M:(__member $O:__object)))'
-    when: [$M | named, $O | root_name]
-    emit: { imports: { from: enclosing_def, to: 'unbound_object(enclosing_def, $O | root_name)' } }

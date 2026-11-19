@@ -9,11 +9,11 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
-use crate::engine::Loc;
 use crate::env::Env;
 use crate::file_tree::{ProjectTree, WalkResult};
 use crate::intern::{Interner, Lang};
 use crate::resolve::{ImportReq, Resolver};
+use crate::rules::Loc;
 use crate::sentinel::Limits;
 use crate::tree::{Compact, CompactNode, Edge, Node, Tag, Tree};
 use crate::treesitter::SupportLang;

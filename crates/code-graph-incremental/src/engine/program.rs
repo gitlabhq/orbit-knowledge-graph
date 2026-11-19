@@ -165,7 +165,7 @@ impl Phase {
             ];
             let allowed: &[&str] = match spec.walk.as_str() {
                 "flow" => &["enter", "children", "between", "exit", "emit"],
-                "each" => &["enter", "emit"],
+                "each" => &["emit"],
                 _ => &[],
             };
             for (hook, used) in hooks {

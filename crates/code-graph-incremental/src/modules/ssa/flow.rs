@@ -556,7 +556,7 @@ impl<'t> Cx<'t> {
         let mut reset = FxHashSet::default();
         let mut aliases = SmallVec::<[_; 4]>::new();
         while let Some((target, sources)) = copies.pop() {
-            if let Err(killed) = self.budget() {
+            if let Err(killed) = self.run.check().and_then(|()| self.file.check()) {
                 self.killed = Some(killed);
                 return;
             }

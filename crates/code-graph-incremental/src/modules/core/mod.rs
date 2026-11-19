@@ -75,9 +75,10 @@ pub static MODULE: Module = Module {
             call: |_, a| yes(!truthy(&a[0])),
         },
         function!(Pure, "is_class", [one], |cx, a| keep(one(cx, a, 0), |c| c
-            .is_class())),
+            .is(C::Def)
+            && c.is_class())),
         function!(Pure, "is_contract", [one], |cx, a| {
-            keep(one(cx, a, 0), |c| c.is_dispatch_contract())
+            keep(one(cx, a, 0), |c| c.is(C::Def) && c.is_dispatch_contract())
         }),
         function!(Pure, "impl_name", [one], |cx, a| {
             keep(one(cx, a, 0), |c| {
@@ -121,7 +122,6 @@ pub static MODULE: Module = Module {
             None => Vals::new(),
         }),
         function!(Flow, "type", [one], |cx, a| match one(cx, a, 0) {
-            Some(c) if cx.family.is_some() => of(cx.names(c)),
             Some(c) => crate::modules::ssa::to_vals(&ops::chain(cx, c)),
             None => Vals::new(),
         }),
@@ -129,83 +129,8 @@ pub static MODULE: Module = Module {
             let Some(m) = one(cx, a, 1) else {
                 return Vals::new();
             };
-            match (cx.family.is_some(), cursor(cx, a[0][0])) {
-                (true, Some(receiver)) => {
-                    of(cx.method_up(receiver, m.sym(), m.fi() as usize, role(m)))
-                }
-                (true, None) => Vals::new(),
-                (false, _) => cx.member(a[0][0], m),
-            }
+            cx.member(a[0][0], m)
         }),
-        function!(
-            Flow,
-            "contract_member",
-            [one, one],
-            |cx, a| match (one(cx, a, 0), one(cx, a, 1)) {
-                (Some(receiver), Some(m)) => of(cx.member_targets(m, receiver, role(m))),
-                _ => Vals::new(),
-            }
-        ),
-        Function {
-            name: "site_class",
-            sig: &[Arg::One, Arg::Set, Arg::Set],
-            kind: Kind::Pure,
-            call: |cx, a| {
-                let loc = |at: usize| a[at].first().and_then(|v| v.loc());
-                let Some(site) = loc(0) else {
-                    return Vals::new();
-                };
-                of(cx.site_class(site, loc(1), loc(2)))
-            },
-        },
-        function!(Pure, "cross", [one, one], |cx, a| {
-            let site = one(cx, a, 1).map(|s| s.fi());
-            keep(one(cx, a, 0), |c| Some(c.fi()) != site)
-        }),
-        function!(Pure, "owner", [one], |cx, a| of(one(cx, a, 0)
-            .and_then(|c| c.parent())
-            .filter(|p| p.is(C::Def)))),
-        function!(Pure, "root_name", [one], |cx, a| {
-            of(one(cx, a, 0)
-                .map(|c| c.reference().chain_root())
-                .filter(|r| r.sym_opt().is_some()))
-        }),
-        function!(
-            Flow,
-            "unbound",
-            [one, one],
-            |cx, a| match (one(cx, a, 0), a[1].first()) {
-                (Some(_), Some(&Val::Sym(sym))) => cx.unbound(sym),
-                _ => Vals::new(),
-            }
-        ),
-        function!(
-            Flow,
-            "unbound_object",
-            [one, one],
-            |cx, a| match (one(cx, a, 0), one(cx, a, 1)) {
-                (Some(from), Some(object)) => cx.unbound_object(from, object),
-                _ => Vals::new(),
-            }
-        ),
-        function!(
-            Effect,
-            "inherit",
-            [one, one],
-            |cx, a| match (one(cx, a, 0), one(cx, a, 1)) {
-                (Some(class), Some(parent)) => yes(cx.inherited(class, parent)),
-                _ => Vals::new(),
-            }
-        ),
-        function!(
-            Effect,
-            "destructure",
-            [one, one],
-            |cx, a| match (one(cx, a, 0), one(cx, a, 1)) {
-                (Some(d), Some(from)) => yes(cx.destructure_calls(d, from)),
-                _ => Vals::new(),
-            }
-        ),
         function!(Flow, "unmatched", [one, one], |cx, a| {
             let Some(m) = one(cx, a, 1) else {
                 return Vals::new();
