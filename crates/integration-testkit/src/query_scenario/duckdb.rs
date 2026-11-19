@@ -18,7 +18,8 @@ use super::{
 use crate::scenario::seed::{group_by_columns, values_insert};
 use crate::scenario::{Seed, discover};
 
-pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
+/// Returns the constructs the DuckDB code generator renders that no scenario reached.
+pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) -> Vec<String> {
     let root = Path::new(root);
     let ontology = Arc::new(crate::load_unprefixed_ontology());
     let base = seed_preset(Path::new(presets), seed);
@@ -64,11 +65,7 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
         ran += 1;
     }
     assert!(ran > 0, "no duckdb scenarios under {}", root.display());
-    let unreached = coverage.unreached();
-    assert!(
-        unreached.is_empty(),
-        "no DuckDB scenario renders these compiler constructs: {unreached:?}"
-    );
+    coverage.unreached()
 }
 
 fn run_step(
