@@ -1,4 +1,3 @@
-pub mod core;
 pub mod ssa;
 pub mod text;
 

@@ -1,5 +1,4 @@
 pub mod constants;
-pub mod dsl;
 pub mod edge;
 pub mod engine;
 pub mod env;
@@ -17,11 +16,6 @@ pub mod treesitter;
 pub use shared::error::{Error, LoadError};
 pub use shared::sentinel::{Killed, Limits, Sentinel};
 pub use shared::{canonical, error, sentinel, tags};
-
-pub mod pattern {
-    pub use crate::dsl::rewrite::*;
-    pub use crate::dsl::types::*;
-}
 
 pub use env::Env;
 pub use export::{Envelope, Scalar, export};
