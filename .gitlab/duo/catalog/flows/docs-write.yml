@@ -13,7 +13,7 @@ components:
       - from: >-
           SKILLS_REPO=gitlab-org/orbit/team/skills;
           SKILLS_REF=7ff82867e8bb0b036dd0292af3db469141fa411b;
-          MODE=shadow;
+          MODE=full;
           DOCS_REVIEWERS=fneill,z_painter;
           D=.docs-write; rm -rf $D; mkdir -p $D/route; U="${GITLAB_BASE_URL:-https://gitlab.com}";
           X=$(git rev-parse --git-path info/exclude); mkdir -p "${X%/*}";
