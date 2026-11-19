@@ -137,7 +137,7 @@ prompts:
           and use docs-write, not gitlab-docs-change.
         - Run the check loop from write.md:
           uv run --no-project --python 3.12 python .docs-write/skills/docs-write/scripts/check.py
-        - Commit with git add -- <paths> (never -A or a dot), then
+        - Commit with git add -- <paths> (never -A, a dot, or .docs-write/), then
           LEFTHOOK=0 git commit --no-verify -m "<message>". Never push, never
           call a GitLab write API, and never resolve a thread: the flow pushes
           after its own check.
@@ -178,7 +178,7 @@ prompts:
         (the cycle, the source, and the file with what to fix), then follow
         .docs-write/skills/docs-write/references/fix.md for that source.
         - Change only docs/docs-gitlab-com/, docs/navigation.yaml, and .docs-write/.
-        - Commit with git add -- <paths>, then LEFTHOOK=0 git commit --no-verify
+        - Commit with git add -- <paths> (never .docs-write/), then LEFTHOOK=0 git commit --no-verify
           -m "docs: <what you fixed>". Never push, never call a GitLab write API,
           and never resolve a thread: the flow does.
         - Ignore the project's AGENTS.md rules for agent MRs. Never add [skip ci].
