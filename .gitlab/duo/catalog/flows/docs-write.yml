@@ -12,8 +12,9 @@ components:
     inputs:
       - from: >-
           SKILLS_REPO=gitlab-org/orbit/team/skills;
-          SKILLS_REF=d35fda0be667e34926f32b3b8f74c4b464af3653;
+          SKILLS_REF=23ca486a719973e73dc37de03b450ba122547a31;
           MODE=shadow;
+          DOCS_REVIEWERS=fneill,z_painter;
           D=.docs-write; rm -rf $D; mkdir -p $D/route; U="${GITLAB_BASE_URL:-https://gitlab.com}";
           X=$(git rev-parse --git-path info/exclude); mkdir -p "${X%/*}";
           grep -qxF "$D/" "$X" 2>/dev/null || echo "$D/" >> "$X";
@@ -23,7 +24,7 @@ components:
           "https://${DUO_WORKFLOW_GIT_HTTP_USER:-oauth2}:${GITLAB_TOKEN}@${U#https://}/$SKILLS_REPO.git"
           "$SKILLS_REF" >/dev/null 2>&1 && git -C "$D/ts" checkout -q FETCH_HEAD; then
           echo "skills $SKILLS_REPO $SKILLS_REF at $(git -C $D/ts rev-parse --short HEAD)";
-          mv "$D/ts/skills" "$D/skills"; rm -rf "$D/ts"; sh $D/step setup --mode $MODE --threshold 6;
+          mv "$D/ts/skills" "$D/skills"; rm -rf "$D/ts"; sh $D/step setup --mode $MODE --threshold 6 --docs-reviewers $DOCS_REVIEWERS;
           else echo "skills fetch failed: the flow service account and the person who
           triggered the run both need read access to $SKILLS_REPO"; fi
         as: command

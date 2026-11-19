@@ -15,8 +15,9 @@ this table.
 
 | Setting | Value |
 |---|---|
-| `SKILLS_REF` in `docs-write.yml` | `d35fda0be667e34926f32b3b8f74c4b464af3653`, the head of `team/skills` MR 30, unmerged. Re-pin to the squash commit once it merges. |
+| `SKILLS_REF` in `docs-write.yml` | `23ca486a719973e73dc37de03b450ba122547a31`, the head of `team/skills` MR 30, unmerged. Re-pin to the squash commit once it merges. |
 | `MODE` in `docs-write.yml` | `shadow` |
+| `DOCS_REVIEWERS` in `docs-write.yml` | `fneill,z_painter`: technical writers who approve and merge the docs MRs |
 | AI Catalog item in this project | Not registered yet |
 
 ## How the flow runs
@@ -53,11 +54,12 @@ this table.
    once `check.py` is clean. A thread it cannot fix gets a reply and stays
    open as a reviewer decision.
 1. When CI is green and only decision threads and threads from other people
-   are open, the flow removes `Draft:`, adds the feature MR author as
-   reviewer, and posts one note. The note lists the decision threads and
+   are open, the flow removes `Draft:`, adds the feature MR author and the
+   `DOCS_REVIEWERS` as reviewers, and posts one note. The note lists the decision threads and
    links the other threads without their text. The flow assigns nobody.
    Otherwise the MR stays in draft, with the reason in its description. A
-   person always merges the docs MR.
+   person always merges the docs MR: one of the `DOCS_REVIEWERS` approves and
+   merges it.
 
 ```mermaid
 flowchart TD
