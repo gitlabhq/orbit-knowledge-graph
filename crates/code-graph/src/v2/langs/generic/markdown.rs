@@ -60,6 +60,7 @@ fn parse_markdown(source: &str, file_path: &str) -> CustomParse {
             })),
         });
     }
+    let first_section = definitions.len();
     let mut anchors = Vec::with_capacity(sections.len());
     for (index, section) in sections.iter().enumerate() {
         let parts: Vec<&str> = std::iter::once(stem.as_str())
@@ -80,7 +81,10 @@ fn parse_markdown(source: &str, file_path: &str) -> CustomParse {
         targets: document
             .links
             .iter()
-            .filter_map(|link| link.target(file_path))
+            .filter_map(|link| {
+                let section = link.section.map(|index| first_section + index);
+                link.target(file_path).map(|target| (section, target))
+            })
             .collect(),
         anchors,
     };
@@ -267,6 +271,24 @@ mod tests {
                 ("Install", "install-2")
             ]
         );
+    }
+
+    #[test]
+    fn link_targets_carry_the_definition_of_their_innermost_section() {
+        let parsed = super::parse_markdown(
+            "---\ntitle: x\n---\n[a](a.md)\n\n# One\n\n## Two\n\n[b](b.md)\n",
+            "g.md",
+        );
+        let sourced: Vec<(Option<&str>, &str)> = parsed
+            .links
+            .targets
+            .iter()
+            .map(|(section, target)| {
+                let name = section.map(|index| parsed.definitions[index].name.as_str());
+                (name, target.path.as_str())
+            })
+            .collect();
+        assert_eq!(sourced, [(None, "a.md"), (Some("Two"), "b.md")]);
     }
 
     #[test]
