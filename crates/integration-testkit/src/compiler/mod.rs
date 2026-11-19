@@ -1543,6 +1543,7 @@ fn check_fixtures(directory: &Path, ontology: Arc<ontology::Ontology>) -> (Vec<S
     (failures, reads_other_cte)
 }
 
+#[cfg(test)]
 fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), Vec<String>> {
     let (failures, _) = check_fixtures(directory, ontology);
     if failures.is_empty() {
@@ -1946,6 +1947,7 @@ fn output_hydration_and_result_context_assertions_check_their_fields() {
     }
 }
 
+#[cfg(test)]
 fn run_one(fixture: &str, ontology: ontology::Ontology) -> String {
     let directory = tempfile::tempdir().unwrap();
     std::fs::write(directory.path().join("case.yaml"), fixture).unwrap();
