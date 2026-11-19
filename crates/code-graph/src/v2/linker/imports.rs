@@ -47,6 +47,7 @@ pub(crate) struct ImportResolver<'a> {
     pub include_index: Option<&'a super::graph::IncludeIndex>,
     pub include_reachable: &'a mut Option<rustc_hash::FxHashSet<String>>,
     pub reexport_index: Option<&'a super::graph::ReexportIndex>,
+    pub import_directories: Option<&'a super::graph::ImportDirectoryIndex>,
 }
 
 impl<'a> ImportResolver<'a> {
@@ -227,6 +228,13 @@ impl<'a> ImportResolver<'a> {
                 && imp.wildcard
             {
                 let path = self.graph.str(imp.path);
+                if let Some(directory) = self.import_directories.and_then(|d| d.directory(path)) {
+                    let matches = self.graph.lookup_top_level_in_directory(directory, name);
+                    if !matches.is_empty() {
+                        return matches;
+                    }
+                    continue;
+                }
                 let key = self.scratch.set_fmt(format_args!("{path}{sep}{name}"));
                 let matches = self.graph.lookup_fqn(key);
                 if !matches.is_empty() {

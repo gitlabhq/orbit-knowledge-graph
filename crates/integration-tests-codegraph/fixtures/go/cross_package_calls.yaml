@@ -1,0 +1,233 @@
+name: "Go: calls link into other packages through go.mod module paths"
+
+fixtures:
+  - path: go.mod
+    content: |
+      module example.com/m // root module
+
+      go 1.22
+
+  - path: internal/cmdutils/cmdutils.go
+    content: |
+      package cmdutils
+
+      type UserAssignments struct{}
+
+      func (ua *UserAssignments) UsersFromReplaces() {}
+
+      func (ua *UserAssignments) Verify() {}
+
+      func ParseAssignees() *UserAssignments { return &UserAssignments{} }
+
+      type Checker interface {
+      	Verify()
+      }
+
+  - path: internal/a/list/list.go
+    content: |
+      package list
+
+      func Run() {}
+
+  - path: internal/a/list/helpers.go
+    content: |
+      package list
+
+      func Limit() {}
+
+  - path: internal/b/list/list.go
+    content: |
+      package list
+
+      func Run() {}
+
+      func Limit() {}
+
+  - path: internal/dotpkg/dotpkg.go
+    content: |
+      package dotpkg
+
+      func DotFunc() {}
+
+  - path: errors/errors.go
+    content: |
+      package errors
+
+      func New() {}
+
+  - path: staging/api/go.mod
+    content: |
+      module k8s.io/api
+
+      go 1.22
+
+  - path: staging/api/v1/types.go
+    content: |
+      package v1
+
+      func NewPod() {}
+
+  - path: internal/update/update.go
+    content: |
+      package update
+
+      import (
+      	"errors"
+
+      	"example.com/m/internal/cmdutils"
+      	lst "example.com/m/internal/a/list"
+      	. "example.com/m/internal/dotpkg"
+      	"github.com/acme/logger"
+      	"k8s.io/api/v1"
+      )
+
+      func helper() {}
+
+      func Qualified() {
+      	cmdutils.ParseAssignees()
+      }
+
+      func Aliased() {
+      	lst.Run()
+      	lst.Limit()
+      }
+
+      func Dotted() {
+      	DotFunc()
+      }
+
+      func NestedModule() {
+      	v1.NewPod()
+      }
+
+      func ChainedMethod() {
+      	cmdutils.ParseAssignees().UsersFromReplaces()
+      }
+
+      func MethodNameAsPackageMember() {
+      	cmdutils.Verify()
+      }
+
+      func TypedVarMethod() {
+      	var ua *cmdutils.UserAssignments
+      	ua.UsersFromReplaces()
+      }
+
+      func External() {
+      	logger.Info()
+      	errors.New()
+      }
+
+      func SamePackage() {
+      	helper()
+      }
+
+  - path: internal/update/other.go
+    content: |
+      package update
+
+      func CrossFile() {
+      	helper()
+      }
+
+tests:
+  - name: "a qualified call links to the definition in the imported package directory"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'Qualified'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: ParseAssignees, file: internal/cmdutils/cmdutils.go } }
+
+  - name: "resolved package calls emit no imported-symbol fallback"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name IN ['Qualified', 'Aliased', 'Dotted', 'NestedModule', 'ChainedMethod']
+      RETURN caller.name AS caller, sym.import_path AS path
+    assert:
+      - { empty: true }
+
+  - name: "an aliased import picks its package directory, not a same-named package"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'Aliased'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: Run, file: internal/a/list/list.go } }
+      - { row: { callee: Limit, file: internal/a/list/helpers.go } }
+
+  - name: "a dot import call links to the definition in the imported package directory"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'Dotted'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: DotFunc, file: internal/dotpkg/dotpkg.go } }
+
+  - name: "an import resolves through a nested go.mod module path"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'NestedModule'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: NewPod, file: staging/api/v1/types.go } }
+
+  - name: "a method on a cross-package call result links through the return type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'ChainedMethod'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: ParseAssignees, file: internal/cmdutils/cmdutils.go } }
+      - { row: { callee: UsersFromReplaces, file: internal/cmdutils/cmdutils.go } }
+
+  - name: "a package member call does not link to a method or an interface method"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'MethodNameAsPackageMember'
+      RETURN callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: "a method on a value declared with a cross-package type links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'TypedVarMethod' AND callee.name = 'UsersFromReplaces'
+      RETURN callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: internal/cmdutils/cmdutils.go } }
+
+  - name: "external and standard library imports keep the imported-symbol fallback"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name = 'External'
+      RETURN sym.import_path AS path
+      ORDER BY path
+    assert:
+      - { row_count: 2 }
+      - { row: { path: errors } }
+      - { row: { path: github.com/acme/logger } }
+
+  - name: "a standard library import does not link to a same-named repository package"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'External'
+      RETURN callee.file_path AS file
+    assert:
+      - { empty: true }
+
+  - name: "files in one package call each other"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['SamePackage', 'CrossFile']
+      RETURN caller.name AS caller, callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: SamePackage, callee: helper, file: internal/update/update.go } }
+      - { row: { caller: CrossFile, callee: helper, file: internal/update/update.go } }

@@ -87,6 +87,8 @@ impl<'a> FileResolver<'a> {
             include_index: None,
             include_reachable: None,
             reexport_index: None,
+            import_directories: None,
+            directory_member_cache: FxHashMap::default(),
         };
         Self {
             ctx,
@@ -106,6 +108,13 @@ impl<'a> FileResolver<'a> {
 
     pub fn set_reexport_index(&mut self, idx: std::sync::Arc<super::graph::ReexportIndex>) {
         self.ctx.reexport_index = Some(idx);
+    }
+
+    pub fn set_import_directory_index(
+        &mut self,
+        idx: std::sync::Arc<super::graph::ImportDirectoryIndex>,
+    ) {
+        self.ctx.import_directories = Some(idx);
     }
 
     pub fn drain_import_edges(&mut self) -> Vec<(NodeIndex, NodeIndex, GraphEdge)> {
@@ -268,7 +277,10 @@ impl<'a> FileResolver<'a> {
                     .import_nodes
                     .iter()
                     .copied()
-                    .filter(|&import_node| self.ctx.graph.import(import_node).wildcard)
+                    .filter(|&import_node| {
+                        self.ctx.graph.import(import_node).wildcard
+                            && self.ctx.import_directory(import_node).is_none()
+                    })
                     .collect();
                 if candidates.is_empty()
                     || candidates.len() > policy.max_ambient_candidates
@@ -316,6 +328,8 @@ struct ResolveCtx<'a> {
     include_index: Option<std::sync::Arc<super::graph::IncludeIndex>>,
     include_reachable: Option<rustc_hash::FxHashSet<String>>,
     reexport_index: Option<std::sync::Arc<super::graph::ReexportIndex>>,
+    import_directories: Option<std::sync::Arc<super::graph::ImportDirectoryIndex>>,
+    directory_member_cache: FxHashMap<(NodeIndex, String), Vec<NodeIndex>>,
 }
 
 impl<'a> ResolveCtx<'a> {
@@ -348,6 +362,8 @@ impl<'a> ResolveCtx<'a> {
             include_index: None,
             include_reachable: None,
             reexport_index: None,
+            import_directories: None,
+            directory_member_cache: FxHashMap::default(),
         }
     }
 
@@ -379,6 +395,7 @@ impl<'a> ResolveCtx<'a> {
             include_index: self.include_index.as_deref(),
             include_reachable: &mut self.include_reachable,
             reexport_index: self.reexport_index.as_deref(),
+            import_directories: self.import_directories.as_deref(),
         }
     }
 
@@ -420,7 +437,60 @@ impl<'a> ResolveCtx<'a> {
     }
 
     fn import_resolves_locally(&mut self, import_node: NodeIndex) -> bool {
-        !self.resolve_import_cached(import_node).is_empty()
+        self.import_directory(import_node).is_some()
+            || !self.resolve_import_cached(import_node).is_empty()
+    }
+
+    fn import_directory(&self, import_node: NodeIndex) -> Option<&str> {
+        let import = self.graph.try_import(import_node)?;
+        self.import_directories
+            .as_deref()?
+            .directory(self.graph.str(import.path))
+    }
+
+    /// For a chain base bound to imports of repository packages, the
+    /// definitions that the next step names in those package directories.
+    /// `None` when no reaching import maps to a directory.
+    fn resolve_directory_import_member(
+        &mut self,
+        chain: &[ExpressionStep],
+        reaching: &[ParseValue],
+    ) -> Option<Vec<NodeIndex>> {
+        let index = Arc::clone(self.import_directories.as_ref()?);
+        let (
+            ExpressionStep::Ident(_),
+            Some(ExpressionStep::Call(member) | ExpressionStep::Field(member)),
+        ) = (chain.first()?, chain.get(1))
+        else {
+            return None;
+        };
+        let mut found: Option<Vec<NodeIndex>> = None;
+        for value in reaching {
+            let ParseValue::ImportRef(i) = value else {
+                continue;
+            };
+            let Some(&import_node) = self.import_nodes.get(*i as usize) else {
+                continue;
+            };
+            let import = self.graph.import(import_node);
+            if import.wildcard || matches!(import.binding_kind, ImportBindingKind::SideEffect) {
+                continue;
+            }
+            let Some(directory) = index.directory(self.graph.str(import.path)) else {
+                continue;
+            };
+            let key = (import_node, member.to_string());
+            let members = match self.directory_member_cache.get(&key) {
+                Some(cached) => cached.clone(),
+                None => {
+                    let members = self.graph.lookup_top_level_in_directory(directory, member);
+                    self.directory_member_cache.insert(key, members.clone());
+                    members
+                }
+            };
+            found.get_or_insert_default().extend(members);
+        }
+        found
     }
 
     fn has_imported_symbol_candidates(&self, r: &RefData<'_>) -> bool {
@@ -841,7 +911,22 @@ impl<'a> ResolveCtx<'a> {
             return Ok(vec![]);
         }
 
-        let mut current_types: Vec<String> = self.resolve_base_type_fqns(&chain[0], r.reaching)?;
+        let mut start = 1;
+        let mut current_types: Vec<String> =
+            match self.resolve_directory_import_member(chain, r.reaching) {
+                Some(mut members) => {
+                    if chain.len() == 2 {
+                        let mut seen = FxHashSet::default();
+                        members.retain(|n| seen.insert(*n));
+                        return Ok(members);
+                    }
+                    start = 2;
+                    let mut types = Vec::new();
+                    self.push_member_types(&chain[1], &members, &mut types);
+                    types
+                }
+                None => self.resolve_base_type_fqns(&chain[0], r.reaching)?,
+            };
         let base_has_unresolved_import_ref = self.has_unresolved_import_ref(r.reaching);
 
         trace_event!(
@@ -860,8 +945,8 @@ impl<'a> ResolveCtx<'a> {
         }
 
         let mut base_class_nodes: Vec<NodeIndex> = Vec::new();
-        if chain.len() > 1 {
-            let next_is_constructor = match &chain[1] {
+        if chain.len() > start {
+            let next_is_constructor = match &chain[start] {
                 ExpressionStep::Call(n) | ExpressionStep::Field(n) => {
                     self.rules.hooks.constructor_methods.contains(&n.as_str())
                 }
@@ -881,7 +966,8 @@ impl<'a> ResolveCtx<'a> {
             }
         }
 
-        for (depth, step) in chain[1..].iter().enumerate() {
+        for (offset, step) in chain[start..].iter().enumerate() {
+            let depth = start - 1 + offset;
             if depth >= self.settings.max_chain_depth || current_types.is_empty() {
                 break;
             }
@@ -898,49 +984,7 @@ impl<'a> ResolveCtx<'a> {
             for type_fqn in &current_types {
                 let before = found_nodes.len();
                 self.lookup_nested_cached(type_fqn, member_name, &mut found_nodes);
-
-                for &def_idx in &found_nodes[before..] {
-                    if let Some(did) = self.graph.graph[def_idx].def_id() {
-                        let gdef = &self.graph.defs[did.0 as usize];
-                        if matches!(step, ExpressionStep::Call(_)) {
-                            let mut has_return_type = false;
-                            if let Some(meta) = &gdef.metadata
-                                && let Some(rt) = meta.return_type
-                            {
-                                next_types.push(self.graph.str(rt).to_string());
-                                has_return_type = true;
-                            }
-                            if !has_return_type
-                                && let Some(rt) = self.inferred_returns.get(&def_idx)
-                            {
-                                next_types.push(rt.clone());
-                                has_return_type = true;
-                            }
-                            if !has_return_type && gdef.kind.is_type_container() {
-                                next_types.push(self.graph.str(gdef.fqn).to_string());
-                            }
-                        }
-                        if matches!(step, ExpressionStep::Field(_)) {
-                            if let Some(meta) = &gdef.metadata
-                                && let Some(ta) = meta.type_annotation
-                            {
-                                next_types.push(self.graph.str(ta).to_string());
-                            } else if let Some(meta) = &gdef.metadata
-                                && let Some(rt) = meta.return_type
-                            {
-                                next_types.push(self.graph.str(rt).to_string());
-                            } else if gdef.kind == DefKind::EnumEntry {
-                                let fqn = self.graph.str(gdef.fqn);
-                                if let Some((parent, _)) = fqn.rsplit_once(self.rules.fqn_separator)
-                                {
-                                    next_types.push(parent.to_string());
-                                }
-                            } else if gdef.kind.is_type_container() {
-                                next_types.push(self.graph.str(gdef.fqn).to_string());
-                            }
-                        }
-                    }
-                }
+                self.push_member_types(step, &found_nodes[before..], &mut next_types);
             }
 
             if found_nodes.is_empty()
@@ -992,6 +1036,54 @@ impl<'a> ResolveCtx<'a> {
         }
 
         self.chain_fallback(r, chain)
+    }
+
+    /// Types that a chain step produces from each definition it matched.
+    fn push_member_types(
+        &self,
+        step: &ExpressionStep,
+        nodes: &[NodeIndex],
+        next_types: &mut Vec<String>,
+    ) {
+        for &def_idx in nodes {
+            if let Some(did) = self.graph.graph[def_idx].def_id() {
+                let gdef = &self.graph.defs[did.0 as usize];
+                if matches!(step, ExpressionStep::Call(_)) {
+                    let mut has_return_type = false;
+                    if let Some(meta) = &gdef.metadata
+                        && let Some(rt) = meta.return_type
+                    {
+                        next_types.push(self.graph.str(rt).to_string());
+                        has_return_type = true;
+                    }
+                    if !has_return_type && let Some(rt) = self.inferred_returns.get(&def_idx) {
+                        next_types.push(rt.clone());
+                        has_return_type = true;
+                    }
+                    if !has_return_type && gdef.kind.is_type_container() {
+                        next_types.push(self.graph.str(gdef.fqn).to_string());
+                    }
+                }
+                if matches!(step, ExpressionStep::Field(_)) {
+                    if let Some(meta) = &gdef.metadata
+                        && let Some(ta) = meta.type_annotation
+                    {
+                        next_types.push(self.graph.str(ta).to_string());
+                    } else if let Some(meta) = &gdef.metadata
+                        && let Some(rt) = meta.return_type
+                    {
+                        next_types.push(self.graph.str(rt).to_string());
+                    } else if gdef.kind == DefKind::EnumEntry {
+                        let fqn = self.graph.str(gdef.fqn);
+                        if let Some((parent, _)) = fqn.rsplit_once(self.rules.fqn_separator) {
+                            next_types.push(parent.to_string());
+                        }
+                    } else if gdef.kind.is_type_container() {
+                        next_types.push(self.graph.str(gdef.fqn).to_string());
+                    }
+                }
+            }
+        }
     }
 
     fn chain_fallback(
