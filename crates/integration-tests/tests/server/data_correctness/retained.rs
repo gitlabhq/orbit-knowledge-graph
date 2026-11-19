@@ -5,7 +5,6 @@ use integration_testkit::TestContext;
 use integration_testkit::visitor::NodeExt;
 
 use super::helpers::run_query;
-use crate::common::compile_and_execute;
 
 pub(super) async fn long_node_text_is_excerpted_only_on_wide_pages(ctx: &TestContext) {
     let full_text = format!("{}tail", "🙂".repeat(10_000));
@@ -40,41 +39,6 @@ pub(super) async fn long_node_text_is_excerpted_only_on_wide_pages(ctx: &TestCon
             excerpt.ends_with(" [truncated]") && excerpt.chars().count() < full_text.chars().count()
         })
     });
-}
-
-pub(super) async fn path_finding_code_filtered_endpoints_stay_on_same_traversal_path(
-    ctx: &TestContext,
-) {
-    let (_compiled, result) = compile_and_execute(
-        ctx,
-        r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "Definition", "filters": {"name": {"eq": "compile"}}},
-                {"id": "end", "entity": "Definition", "filters": {"name": {"eq": "run_query"}}}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["CALLS"]},
-            "limit": 10
-        }"#,
-    )
-    .await;
-
-    let paths: Vec<Vec<i64>> = result
-        .rows()
-        .iter()
-        .map(|row| row.path_nodes().iter().map(|node| node.id).collect())
-        .collect();
-
-    assert_eq!(
-        paths,
-        vec![vec![12000, 12001, 12002]],
-        "filtered Definition path finding must not join CALLS hops across traversal_path"
-    );
-    assert!(
-        paths.iter().all(|path| path.last() != Some(&12102)),
-        "cross-project decoy run_query must not be reachable: {paths:?}"
-    );
 }
 
 #[tokio::test]

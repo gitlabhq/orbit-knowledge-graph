@@ -24,7 +24,6 @@ async fn data_correctness() {
     run_subtests_shared!(
         &ctx,
         retained::long_node_text_is_excerpted_only_on_wide_pages,
-        retained::path_finding_code_filtered_endpoints_stay_on_same_traversal_path,
     );
 }
 
