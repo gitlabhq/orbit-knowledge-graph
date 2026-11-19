@@ -606,7 +606,12 @@ impl LanguageSpec {
 
         if let crate::v2::dsl::types::LanguageParser::Custom(custom) = self.parser {
             let parse_start = cpu_time::ThreadTime::now();
-            let parsed = custom(source_str, file_path);
+            let parsed = custom(source_str, file_path, timeouts.parse).map_err(|detail| {
+                ParseFullError::Aborted {
+                    phase: crate::v2::error::AbortPhase::Parse,
+                    detail,
+                }
+            })?;
             return Ok(ParseFullResult {
                 definitions: parsed.definitions,
                 imports: parsed.imports,

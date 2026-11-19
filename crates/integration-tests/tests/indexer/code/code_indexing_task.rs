@@ -405,6 +405,7 @@ async fn indexes_file_nodes_for_all_archive_files() {
     )
     .await;
     assert_active_definitions(&clickhouse, project_id, "src/main.py", &["hello"]).await;
+    assert_active_definitions(&clickhouse, project_id, "Dockerfile", &["stage:scratch#0"]).await;
 }
 
 #[tokio::test]
@@ -3014,7 +3015,49 @@ async fn cancelled_lease_wait_is_backpressure(incremental: bool) {
     );
 }
 
+async fn dockerfile_stages_and_variables_are_definitions(incremental: bool) {
+    let project_id: i64 = 2811;
+    let traversal_path = "1/2811/";
+    if incremental {
+        enable_incremental(traversal_path);
+    }
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "Dockerfile",
+            "ARG GO=1.22\nFROM golang:${GO} AS builder\nENV CGO=0\nFROM alpine\n",
+        )],
+    );
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "dockerfile",
+        1,
+        traversal_path,
+    )
+    .await;
+
+    assert_active_definitions(
+        &clickhouse,
+        project_id,
+        "Dockerfile",
+        &["GO", "builder", "CGO", "stage:alpine#3"],
+    )
+    .await;
+}
+
 both_engines! {
+    dockerfile_stages_and_variables_are_definitions,
     timed_out_job_writes_no_data,
     heartbeat_keeps_a_slow_job_alive_and_indexes_it,
     disk_is_clean_after_a_timed_out_job,

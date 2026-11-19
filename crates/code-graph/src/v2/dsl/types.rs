@@ -759,7 +759,7 @@ pub type PathScopeHookFn = fn(
     &'static str,
 ) -> bool;
 pub type ImportScopeNameHook = fn(&crate::v2::types::CanonicalImport, &str) -> Option<String>;
-pub type CustomParseFn = fn(&str, &str) -> CustomParse;
+pub type CustomParseFn = fn(&str, &str, Option<std::time::Duration>) -> Result<CustomParse, String>;
 
 #[derive(Default)]
 pub struct CustomParse {
@@ -768,8 +768,9 @@ pub struct CustomParse {
     pub links: crate::v2::types::FileLinks,
 }
 
-/// `Custom` replaces tree-sitter parsing wholesale. Per-phase CPU budgets cannot
-/// interrupt it, so it must be robust to pathological input on its own.
+/// `Custom` replaces tree-sitter parsing wholesale. It receives the parse CPU budget
+/// and must honor it if it parses with tree-sitter; the walk phases have no budget,
+/// so it must be robust to pathological input on its own.
 #[derive(Clone, Copy, Default)]
 pub enum LanguageParser {
     #[default]
