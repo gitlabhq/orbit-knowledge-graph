@@ -451,6 +451,7 @@ fn push_use_clause(clause: &N<'_>, group_prefix: Option<&str>, imports: &mut Vec
         range: crate::v2::types::Range::empty(),
         is_type_only: false,
         wildcard: false,
+        ..Default::default()
     });
 }
 

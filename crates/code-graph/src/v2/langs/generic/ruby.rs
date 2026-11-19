@@ -595,6 +595,7 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
                     range: crate::v2::types::Range::empty(),
                     is_type_only: false,
                     wildcard: false,
+                    ..Default::default()
                 });
             }
             true
@@ -639,6 +640,7 @@ fn push_named_import(imports: &mut Vec<CanonicalImport>, import_type: &'static s
         range: crate::v2::types::Range::empty(),
         is_type_only: false,
         wildcard: false,
+        ..Default::default()
     });
 }
 

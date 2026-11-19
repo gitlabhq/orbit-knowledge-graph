@@ -288,6 +288,7 @@ fn csharp_extract_alias_using(node: &N<'_>, imports: &mut Vec<CanonicalImport>) 
         range: crate::v2::types::Range::empty(),
         is_type_only: false,
         wildcard: false,
+        ..Default::default()
     });
 
     true

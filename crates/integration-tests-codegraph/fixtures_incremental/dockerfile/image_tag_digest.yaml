@@ -1,0 +1,37 @@
+name: "Dockerfile: image tag and digest are queryable"
+
+fixtures:
+  - path: Dockerfile
+    content: |
+      ARG V=3
+      FROM nginx:1.25.3 AS web
+      FROM a@sha256:abc123 AS pinned
+      FROM a:1@sha256:abc123 AS both
+      FROM host:5000/a:1 AS registry
+      FROM base:${V} AS templated
+      FROM web AS child
+      FROM scratch
+
+tests:
+  - name: "tag and digest sit next to the bare image name"
+    query: |
+      MATCH (i:ImportedSymbol)
+      RETURN i.import_path AS image, i.import_tag AS tag, i.import_digest AS digest
+      ORDER BY image, tag, digest
+    assert:
+      - { row_count: 7 }
+      - { row: { image: "nginx", tag: "1.25.3", digest: "" } }
+      - { row: { image: "a", tag: "", digest: "sha256:abc123" } }
+      - { row: { image: "a", tag: "1", digest: "sha256:abc123" } }
+      - { row: { image: "host:5000/a", tag: "1", digest: "" } }
+      - { row: { image: "base", tag: "${V}", digest: "" } }
+      - { row: { image: "scratch", tag: "", digest: "" } }
+
+  - name: "a stage that builds on another stage has no tag or digest"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.import_path = "web"
+      RETURN i.import_tag AS tag, i.import_digest AS digest
+    assert:
+      - { row_count: 1 }
+      - { row: { tag: "", digest: "" } }

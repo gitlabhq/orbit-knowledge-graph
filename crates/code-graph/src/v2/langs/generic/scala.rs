@@ -123,6 +123,7 @@ fn scala_extract_imports(
             range: crate::v2::types::Range::empty(),
             is_type_only: false,
             wildcard: true,
+            ..Default::default()
         });
     }
 
@@ -143,6 +144,7 @@ fn scala_extract_imports(
                 range: crate::v2::types::Range::empty(),
                 is_type_only: false,
                 wildcard: false,
+                ..Default::default()
             });
         }
     } else if !has_wildcard {
@@ -162,6 +164,7 @@ fn scala_extract_imports(
             range: crate::v2::types::Range::empty(),
             is_type_only: false,
             wildcard: false,
+            ..Default::default()
         });
     }
 

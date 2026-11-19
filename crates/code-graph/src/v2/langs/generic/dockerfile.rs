@@ -158,6 +158,12 @@ impl<'a> DockerfileParser<'a> {
             .field("name")
             .map(|n| truncate_name(&n.text()))
             .unwrap_or_default();
+        let tag = spec
+            .field("tag")
+            .map(|n| truncate_name(strip_one(&n.text(), ':')));
+        let digest = spec
+            .field("digest")
+            .map(|n| truncate_name(strip_one(&n.text(), '@')));
         let name = match instruction.field("as") {
             Some(alias) => truncate_name(&alias.text()),
             // The index counts comments and parser directives, as in the incremental engine.
@@ -172,6 +178,8 @@ impl<'a> DockerfileParser<'a> {
             path: image.clone(),
             name: Some(image.clone()),
             alias: Some(format!("image:{image}")),
+            tag,
+            digest,
             scope_fqn: Some(fqn.clone()),
             range: canonical_range(&node_to_range(&spec)),
             is_type_only: false,
@@ -342,6 +350,10 @@ impl<'a> DockerfileParser<'a> {
             ..Default::default()
         }
     }
+}
+
+fn strip_one(text: &str, prefix: char) -> &str {
+    text.strip_prefix(prefix).unwrap_or(text)
 }
 
 fn truncate_name(name: &str) -> String {

@@ -88,7 +88,7 @@ pub enum ImportMode {
     Runtime,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CanonicalImport {
     pub import_type: &'static str,
     pub binding_kind: ImportBindingKind,
@@ -96,6 +96,8 @@ pub struct CanonicalImport {
     pub path: String,
     pub name: Option<String>,
     pub alias: Option<String>,
+    pub tag: Option<String>,
+    pub digest: Option<String>,
     pub scope_fqn: Option<Fqn>,
     pub range: Range,
     pub is_type_only: bool,

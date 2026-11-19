@@ -179,6 +179,7 @@ fn lua_extract_require(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool
         range: crate::v2::types::Range::empty(),
         is_type_only: false,
         wildcard: false,
+        ..Default::default()
     });
     true
 }

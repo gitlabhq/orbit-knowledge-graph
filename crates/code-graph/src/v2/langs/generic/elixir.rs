@@ -331,6 +331,7 @@ fn push_import(
         range: crate::v2::types::Range::empty(),
         is_type_only: false,
         wildcard,
+        ..Default::default()
     });
 }
 
