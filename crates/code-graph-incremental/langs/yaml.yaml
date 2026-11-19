@@ -4,7 +4,8 @@
 # named after the bare image with its tag and digest split out. Only the
 # positions GitLab CI defines count: the root, `default:` and a job for `image:`
 # and `services:`, and the root and a job `variables:`. Nothing else in the
-# file is indexed, and an image reference is kept as written, `$VAR` included.
+# file is indexed, an image reference is kept as written, `$VAR` included, and
+# a value with a YAML tag such as `!reference` is not an image.
 
 config:
   stdlib: []
@@ -14,6 +15,13 @@ stages:
     rules:
       - match: '(stream $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
+
+  - name: tagged
+    rules:
+      - match: '(flow_node (tag) $$$C)'
+        replace: '(flow_node (__tagged))'
+      - match: '(block_node (tag) $$$C)'
+        replace: '(block_node (__tagged))'
 
   - name: flags
     rules:
