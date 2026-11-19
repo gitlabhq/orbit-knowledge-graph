@@ -1420,6 +1420,10 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
             .push_str(self.import.name.map(|id| self.pool.get(id)).unwrap_or(""))?;
         b.col("identifier_alias")?
             .push_str(self.import.alias.map(|id| self.pool.get(id)).unwrap_or(""))?;
+        b.col("import_tag")?
+            .push_str(self.import.tag.map(|id| self.pool.get(id)).unwrap_or(""))?;
+        b.col("import_digest")?
+            .push_str(self.import.digest.map(|id| self.pool.get(id)).unwrap_or(""))?;
         write_range(b, &self.import.range)?;
         Ok(())
     }
@@ -1720,6 +1724,7 @@ mod tests {
             range: Range::new(Position::new(0, 0), Position::new(0, 20), (100, 120)),
             is_type_only: false,
             wildcard: false,
+            ..Default::default()
         };
         let import_b = CanonicalImport {
             range: Range::new(Position::new(0, 0), Position::new(0, 20), (500, 520)),
@@ -1763,6 +1768,7 @@ mod tests {
             range: Range::new(Position::new(0, 0), Position::new(0, 10), (0, 10)),
             is_type_only: false,
             wildcard: false,
+            ..Default::default()
         };
         let (_, _, import_nodes) =
             cg.add_file("/repo/x.rs", "rs", Language::Python, 1, &[], &[import]);

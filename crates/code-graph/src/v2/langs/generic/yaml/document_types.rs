@@ -45,6 +45,7 @@ fn push_import(
         range,
         is_type_only: false,
         wildcard: false,
+        ..Default::default()
     });
 }
 

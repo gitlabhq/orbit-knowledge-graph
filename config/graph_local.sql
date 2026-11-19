@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     import_path VARCHAR NOT NULL,
     identifier_name VARCHAR NOT NULL DEFAULT '',
     identifier_alias VARCHAR NOT NULL DEFAULT '',
+    import_tag VARCHAR NOT NULL DEFAULT '',
+    import_digest VARCHAR NOT NULL DEFAULT '',
     start_line BIGINT NOT NULL,
     end_line BIGINT NOT NULL,
     start_byte BIGINT NOT NULL,

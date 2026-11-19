@@ -262,6 +262,8 @@ pub struct GraphImport {
     pub path: StrId,
     pub name: Option<StrId>,
     pub alias: Option<StrId>,
+    pub tag: Option<StrId>,
+    pub digest: Option<StrId>,
     pub range: Range,
     pub is_type_only: bool,
     pub wildcard: bool,
@@ -305,6 +307,8 @@ impl GraphImport {
             path: pool.alloc(&imp.path),
             name: imp.name.as_deref().map(|s| pool.alloc(s)),
             alias: imp.alias.as_deref().map(|s| pool.alloc(s)),
+            tag: imp.tag.as_deref().map(|s| pool.alloc(s)),
+            digest: imp.digest.as_deref().map(|s| pool.alloc(s)),
             range: imp.range,
             is_type_only: imp.is_type_only,
             wildcard: imp.wildcard,
@@ -666,6 +670,7 @@ mod tests {
             range: Range::new(Position::new(1, 0), Position::new(1, 30), (0, 30)),
             is_type_only: true,
             wildcard: false,
+            ..Default::default()
         };
         let gimp = GraphImport::from_canonical(&cimp, &mut pool);
 

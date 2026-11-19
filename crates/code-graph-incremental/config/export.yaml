@@ -66,6 +66,8 @@ entities:
         on: expanded
         from: or("tag:import_type", "ancestor_tag:import_type")|default("NamedImport")
       - { name: import_path, type: Utf8, from: tag("source_path") }
+      - { name: import_tag, type: Utf8, on: expanded, from: child_sym("__import_tag")|default("") }
+      - { name: import_digest, type: Utf8, on: expanded, from: child_sym("__import_digest")|default("") }
       - { name: identifier_name, type: Utf8, on: expanded }
       - { name: identifier_alias, type: Utf8, on: expanded, from: ancestor_sym("__alias") }
       - { name: start_line, type: Int64, position: start_line }

@@ -453,6 +453,7 @@ impl LanguageSpec {
                             range,
                             is_type_only: false,
                             wildcard: false,
+                            ..Default::default()
                         });
                     }
                 } else if child_kinds.iter().any(|&k| k == ck.as_ref()) {
@@ -481,6 +482,7 @@ impl LanguageSpec {
                         range,
                         is_type_only: false,
                         wildcard: false,
+                        ..Default::default()
                     });
                 } else if rule.wildcard_child_kind.is_some_and(|wk| wk == ck.as_ref()) {
                     imports.push(CanonicalImport {
@@ -494,6 +496,7 @@ impl LanguageSpec {
                         range,
                         is_type_only: false,
                         wildcard: true,
+                        ..Default::default()
                     });
                 }
             }
@@ -518,6 +521,7 @@ impl LanguageSpec {
                     range,
                     is_type_only: false,
                     wildcard: true,
+                    ..Default::default()
                 });
             } else {
                 let (path, name) = if rule.should_split() {
@@ -539,6 +543,7 @@ impl LanguageSpec {
                     range,
                     is_type_only: false,
                     wildcard: is_wildcard,
+                    ..Default::default()
                 });
             }
         }

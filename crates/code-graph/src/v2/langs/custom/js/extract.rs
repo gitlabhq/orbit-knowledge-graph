@@ -492,6 +492,7 @@ fn canonical_import(import_entry: &JsImport) -> CanonicalImport {
         range: to_range(import_entry.range),
         is_type_only: import_entry.is_type,
         wildcard: false,
+        ..Default::default()
     }
 }
 

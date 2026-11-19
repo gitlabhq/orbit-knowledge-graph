@@ -646,6 +646,7 @@ mod tests {
             range: Range::empty(),
             is_type_only: false,
             wildcard: false,
+            ..Default::default()
         };
         let scope_name = rewriter.rewrite(&mut import, Some(module_scope), ".", "module.py");
         (import.path, scope_name)
@@ -1073,6 +1074,7 @@ mod tests {
                 range: Range::empty(),
                 is_type_only: false,
                 wildcard: false,
+                ..Default::default()
             };
             transformer.rewrite(&mut import, Some("pkg.sub"), ".", "pkg/sub/__init__.py");
             import.path

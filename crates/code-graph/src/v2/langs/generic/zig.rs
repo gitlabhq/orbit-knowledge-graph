@@ -99,6 +99,7 @@ fn zig_extract_imports(node: &N<'_>, imports: &mut Vec<crate::v2::types::Canonic
         range: crate::v2::types::Range::empty(),
         is_type_only: false,
         wildcard: false,
+        ..Default::default()
     });
     true
 }

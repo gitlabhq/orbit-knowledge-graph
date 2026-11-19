@@ -36,6 +36,10 @@ pub enum Canonical {
     Import,
     #[strum(serialize = "__import_type")]
     ImportType,
+    #[strum(serialize = "__import_tag")]
+    ImportTag,
+    #[strum(serialize = "__import_digest")]
+    ImportDigest,
     #[strum(serialize = "__source")]
     Source,
     #[strum(serialize = "__source_path")]

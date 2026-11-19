@@ -882,6 +882,7 @@ impl RustStructureExtractor {
             range: self.line_index.range(range),
             is_type_only: false,
             wildcard,
+            ..Default::default()
         });
     }
 }
