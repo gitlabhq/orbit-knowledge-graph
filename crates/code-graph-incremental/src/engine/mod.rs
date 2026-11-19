@@ -171,11 +171,12 @@ pub trait Module: Sized + 'static {
 /// file of that run shares it.
 pub struct IndexDecl {
     pub name: &'static str,
-    pub build: fn(&[Tree<Compact>], &[Edge]) -> Box<dyn Any + Send + Sync>,
+    pub build: fn(&crate::intern::Lang, &[Tree<Compact>], &[Edge]) -> Box<dyn Any + Send + Sync>,
 }
 
 /// The declared indexes of one family run, each built at most once.
 pub struct Indexes<'t> {
+    lang: &'t crate::intern::Lang,
     trees: &'t [Tree<Compact>],
     edges: &'t [Edge],
     built: Box<[std::sync::OnceLock<Box<dyn Any + Send + Sync>>]>,
@@ -190,8 +191,13 @@ static INDEXES: LazyLock<Vec<(u8, &'static IndexDecl)>> = LazyLock::new(|| {
 });
 
 impl<'t> Indexes<'t> {
-    pub fn new(trees: &'t [Tree<Compact>], edges: &'t [Edge]) -> Self {
+    pub fn new(
+        lang: &'t crate::intern::Lang,
+        trees: &'t [Tree<Compact>],
+        edges: &'t [Edge],
+    ) -> Self {
         Self {
+            lang,
             trees,
             edges,
             built: (0..INDEXES.len())
@@ -204,7 +210,8 @@ impl<'t> Indexes<'t> {
         let at = INDEXES
             .iter()
             .position(|(s, d)| *s == slot && d.name == name)?;
-        let built = self.built[at].get_or_init(|| (INDEXES[at].1.build)(self.trees, self.edges));
+        let built =
+            self.built[at].get_or_init(|| (INDEXES[at].1.build)(self.lang, self.trees, self.edges));
         Some(built.as_ref())
     }
 }
@@ -775,7 +782,7 @@ pub fn run_family(
 ) -> Result<Vec<Edge>, Killed> {
     use rayon::prelude::*;
     let scope = scope_budget(phase, env, budget);
-    let indexes = Indexes::new(trees, edges);
+    let indexes = Indexes::new(&env.lang, trees, edges);
     let files = project.unwrap_or(trees.len() as u32) as usize;
     let edges: Vec<Result<Vec<Edge>, Killed>> = (0..files)
         .into_par_iter()

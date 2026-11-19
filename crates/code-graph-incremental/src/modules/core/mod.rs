@@ -32,6 +32,7 @@ enum Ref {
 }
 
 fn defs_by_name(
+    _: &crate::intern::Lang,
     trees: &[Tree<Compact>],
     _: &[crate::tree::Edge],
 ) -> Box<dyn std::any::Any + Send + Sync> {
