@@ -5,7 +5,8 @@ define:
   files(path): "select_all(project, '(__source_file)' by $ROOT | stem, path) or select_all(project, '(__source_file)' by $ROOT | collapse_index(%index_files), path)"
   modules(ROOT): 'files($ROOT | tag("resolved_source"))'
   submodule(ROOT, N): 'files($ROOT | tag("resolved_source") | concat("/", @$N))'
-  offered(module, name): "select(module, '(__def $N:__defname)', name) or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, name) | reexported(name) or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, \"*\") | reexported(name) or module"
+  exported(module, name): "select(module, '(__def $N:__defname)', name) or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, name) | reexported(name) or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, \"*\") | reexported(name)"
+  offered(module, name): 'exported(module, name) or module'
   reexported(ROOT, N):
     '$I:(%import_kinds $ROOT:(__name "*"))': '$I | modules | offered($N)'
     '$I:(%import_kinds $ROOT:__name)': '$I | modules | offered($ROOT)'

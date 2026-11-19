@@ -93,7 +93,14 @@ struct Emit {
     from: Option<Expr>,
     to: Expr,
     site: Option<Expr>,
-    resolution: CallResolution,
+    resolution: Resolution,
+}
+
+/// An edge's call resolution: fixed, or an expression over the target, which
+/// it reads as `TARGET`.
+enum Resolution {
+    Fixed(CallResolution),
+    Of { slot: u16, expr: Expr },
 }
 
 /// The rows one pair emits: its table, its column names, and how its id is
@@ -658,6 +665,9 @@ impl Body {
                 for (m, emits) in groups.iter().flat_map(|k| &k.rules) {
                     on_match(m, f);
                     for e in emits {
+                        if let Resolution::Of { expr, .. } = &e.resolution {
+                            expr.calls(f);
+                        }
                         e.to.calls(f);
                         if let Some(from) = &e.from {
                             from.calls(f);
@@ -1150,16 +1160,26 @@ impl Loader<'_> {
                 ));
             }
         };
+        let resolution = match res {
+            None => Resolution::Fixed(CallResolution::default()),
+            Some(name) => match resolution(name) {
+                Some(fixed) => Resolution::Fixed(fixed),
+                None => {
+                    let mut with = slots.clone();
+                    let slot = with.slot("TARGET");
+                    Resolution::Of {
+                        slot,
+                        expr: self.expr(name, &with)?,
+                    }
+                }
+            },
+        };
         Ok(Emit {
             kind,
             to: self.expr(to, slots)?,
             from: from.map(|f| self.expr(f, slots)).transpose()?,
             site: site.map(|s| self.expr(s, slots)).transpose()?,
-            resolution: match res {
-                Some(name) => resolution(name)
-                    .ok_or_else(|| LoadError(format!("unknown resolution {name}")))?,
-                None => CallResolution::default(),
-            },
+            resolution,
         })
     }
 
@@ -1328,10 +1348,24 @@ impl Emit {
         }
         let to = self.to.eval(run, caps);
         for from in from.iter().filter_map(|v| v.loc()) {
-            for to in to.iter().filter_map(|v| v.loc()) {
+            for (&target, to) in to.iter().filter_map(|v| Some((v, v.loc()?))) {
+                let call_resolution = match &self.resolution {
+                    Resolution::Fixed(fixed) => *fixed,
+                    Resolution::Of { slot, expr } => {
+                        let mut with = caps.to_vec();
+                        with.resize(with.len().max(usize::from(*slot) + 1), Vals::new());
+                        with[usize::from(*slot)] = SmallVec::from_elem(target, 1);
+                        match expr.eval(run, &with).first() {
+                            Some(&Val::Sym(name)) => {
+                                resolution(run.lang_ref.syms.resolve(name)).unwrap_or_default()
+                            }
+                            _ => CallResolution::default(),
+                        }
+                    }
+                };
                 run.edges.push(Edge {
                     site,
-                    call_resolution: self.resolution,
+                    call_resolution,
                     ..Edge::new(from.fi, from.node, to.fi, to.node, self.kind)
                 });
             }

@@ -56,5 +56,5 @@ define:
     '(_ $K:__callee)': 'known($K | type)'
     '_': 'opaque'
 
-  visible(name, at): "first(enclose(at), s => select(s, '(__def $N:__defname)', name)) or select_all(file(at), '(__import $ROOT:__name)' by $ROOT, name) | follow(imports)"
+  visible(name, at): "first(enclose(at), s => select(s, '(__def $N:__defname)', name)) or select_all(file(at), '(__import $ROOT:__name)' by $ROOT, name) | follow(imports) or select_all(file(at), '(__import $ROOT:__name)' by $ROOT, \"*\") | follow(imports) | exported(name)"
   resolved(ROOT): 'visible(@ROOT, ROOT)'
