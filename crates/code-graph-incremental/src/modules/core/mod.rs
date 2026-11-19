@@ -398,8 +398,7 @@ static FUNCTIONS: &[Function<Core>] = &[
     }),
     function!(Flow, "resolution", [one, set], @uses ["core"."read"], |cx, a| {
         let target = node(cx, a, 0);
-        let site = arg(cx, a, 1).filter(|s| s.is(C::Call));
-        let shadowed = site.is_some_and(|s| cx.shadowed(s));
+        let shadowed = target.is(C::Call) && cx.shadowed(target);
         match shadowed && !target.is(C::Def) && !target.is(C::Name) {
             true => one(Val::Sym(cx.lang().syms.intern(NON_CALLABLE))),
             false => Vals::new(),

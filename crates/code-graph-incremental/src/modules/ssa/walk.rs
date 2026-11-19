@@ -128,12 +128,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     }
 
     fn record(&mut self, c: Cursor<'t, S>) {
-        let refers = c.is(C::Callee)
-            || c.is(C::Object)
-            || c.is(C::Member)
-            || c.is(C::Ivar)
-            || c.children().next().is_none();
-        if refers && c.sym_opt().is_some() && !c.is(C::DefName) {
+        if c.sym_opt().is_some() && !c.is(C::DefName) {
             let found = self.read(c);
             self.write().seen.insert(c.index(), found);
         }
@@ -248,6 +243,16 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
             exits.push(Act::Leave);
         }
 
+        if let Some(groups) = &children {
+            for skipped in c
+                .children()
+                .filter(|k| !groups.iter().flatten().any(|&n| n == k.index()))
+            {
+                for n in std::iter::once(skipped).chain(skipped.descendants()) {
+                    self.record(n);
+                }
+            }
+        }
         stack.extend(exits.into_iter().rev().map(Step::Do));
         match children {
             None => stack.extend(c.children_rev().map(|k| Step::Visit(k.index()))),
