@@ -64,13 +64,20 @@ fn apply(cx: &mut Run, id: FnId, args: &[Vals]) -> Vals {
         return cx.call(id, args);
     };
     let mut out = Vals::new();
-    let mut seen = FxHashSet::default();
+    let mut seen: Option<FxHashSet<Val>> = None;
     let mut each: SmallVec<[Vals; 3]> = SmallVec::from(args);
     for val in &args[at] {
         each[at] = SmallVec::from_elem(*val, 1);
         for found in apply(cx, id, &each) {
-            if seen.insert(found) {
+            let new = match &mut seen {
+                Some(seen) => seen.insert(found),
+                None => !out.contains(&found),
+            };
+            if new {
                 out.push(found);
+                if seen.is_none() && out.len() > 16 {
+                    seen = Some(out.iter().copied().collect());
+                }
             }
         }
     }

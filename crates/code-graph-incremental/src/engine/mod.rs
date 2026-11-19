@@ -231,11 +231,20 @@ macro_rules! fn_id {
 
 const WALK: usize = 7;
 
-type Key = (FnId, SmallVec<[Vals; 2]>);
+type Key = (FnId, SmallVec<[Val; 4]>);
 
 enum Memo {
     Busy,
     Done { vals: Vals, reads: u8, stamp: u64 },
+}
+
+/// Results by call. An entry that read state stays until a sweep finds that
+/// state written; sweeps run when the table doubles, so stale entries cost
+/// amortized constant time.
+#[derive(Default)]
+struct Table {
+    entries: FxHashMap<Key, Memo>,
+    swept: usize,
 }
 
 /// One phase run over one tree: navigation, the budget, the edges written,
@@ -254,7 +263,7 @@ pub struct Run<'t> {
     states: Box<[Box<dyn Any>]>,
     epochs: [u64; WALK + 1],
     reads: u8,
-    memo: FxHashMap<Key, Memo>,
+    memo: Table,
     cut: bool,
 }
 
@@ -274,7 +283,7 @@ impl<'t> Run<'t> {
             states: modules::ALL.iter().map(|m| (m.state)()).collect(),
             epochs: [0; WALK + 1],
             reads: 0,
-            memo: FxHashMap::default(),
+            memo: Table::default(),
             cut: false,
         }
     }
@@ -313,10 +322,37 @@ impl<'t> Run<'t> {
     }
 
     fn stamp(&self, reads: u8) -> u64 {
-        (0..=WALK)
-            .filter(|&slot| reads & (1 << slot) != 0)
-            .map(|slot| self.epochs[slot])
-            .sum()
+        stamp(&self.epochs, reads)
+    }
+
+    fn key(id: FnId, sig: &[Arg], args: &[Vals]) -> Key {
+        let mut key = SmallVec::new();
+        for (arg, vals) in sig.iter().zip(args) {
+            match arg {
+                Arg::One => key.extend_from_slice(vals),
+                Arg::Set => {
+                    key.push(Val::Sym(vals.len() as u32));
+                    key.extend_from_slice(vals);
+                }
+                Arg::Unkeyed => {}
+            }
+        }
+        (id, key)
+    }
+
+    fn sweep(&mut self) {
+        let table = &mut self.memo;
+        if table.entries.len() < 1024 || table.entries.len() < 2 * table.swept {
+            return;
+        }
+        let epochs = &self.epochs;
+        table.entries.retain(|_, memo| match memo {
+            Memo::Busy => true,
+            Memo::Done {
+                reads, stamp: at, ..
+            } => stamp(epochs, *reads) == *at,
+        });
+        table.swept = table.entries.len();
     }
 
     /// Cached calls share one cycle guard: a call already in progress yields
@@ -330,20 +366,21 @@ impl<'t> Run<'t> {
         if f.kind == Kind::Effect {
             return invoke(self, f.slot, f.index, args);
         }
-        let keyed = f.sig.iter().zip(args).filter(|(a, _)| **a != Arg::Unkeyed);
-        let key: Key = (id, keyed.map(|(_, v)| v.clone()).collect());
-        match self.memo.get(&key) {
+        let key = Self::key(id, f.sig, args);
+        match self.memo.entries.get(&key) {
             Some(Memo::Busy) => {
                 self.cut = true;
+                self.reads = u8::MAX;
                 return Vals::new();
             }
             Some(Memo::Done { vals, reads, stamp }) if self.stamp(*reads) == *stamp => {
-                self.reads |= reads;
+                self.reads |= *reads;
                 return vals.clone();
             }
             _ => {}
         }
-        self.memo.insert(key.clone(), Memo::Busy);
+        self.sweep();
+        self.memo.entries.insert(key.clone(), Memo::Busy);
         let epochs = self.epochs;
         let outer = (
             std::mem::take(&mut self.cut),
@@ -356,11 +393,13 @@ impl<'t> Run<'t> {
         self.cut |= outer.0;
         self.reads |= outer.1;
         if (cut && reads == 0) || epochs != self.epochs {
-            self.memo.remove(&key);
+            self.memo.entries.remove(&key);
         } else {
             let stamp = self.stamp(reads);
             let vals = found.clone();
-            self.memo.insert(key, Memo::Done { vals, reads, stamp });
+            self.memo
+                .entries
+                .insert(key, Memo::Done { vals, reads, stamp });
         }
         found
     }
@@ -371,6 +410,15 @@ impl<'t> Run<'t> {
             .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.call_resolution)));
         self.edges
     }
+}
+
+fn stamp(epochs: &[u64; WALK + 1], mut reads: u8) -> u64 {
+    let mut sum = 0;
+    while reads != 0 {
+        sum += epochs[reads.trailing_zeros() as usize];
+        reads &= reads - 1;
+    }
+    sum
 }
 
 /// Runs a tree phase over one file: each module of the phase starts, the walk
