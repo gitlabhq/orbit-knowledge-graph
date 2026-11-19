@@ -241,14 +241,9 @@ impl QueryParser {
 
     fn OrExpression(input: Node) -> Result<BooleanExpression<Predicate>> {
         let span = input.as_span();
-        let mut branches = Vec::new();
-        for child in input.into_children() {
-            match child.as_rule() {
-                Rule::AndExpression => branches.push(Self::AndExpression(child)?),
-                Rule::Disjunction => {}
-                _ => return Err(mismatch(&child)),
-            }
-        }
+        let mut branches: Vec<_> = match_nodes!(input.into_children();
+            [AndExpression(branches)..] => branches.collect(),
+        );
         if branches.len() == 1 {
             return Ok(branches.pop().expect("one branch"));
         }

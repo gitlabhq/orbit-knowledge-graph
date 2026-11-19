@@ -62,7 +62,7 @@ Where = { ^"WHERE" ~ SP ~ OrExpression }
 
 // OR binds looser than AND. The seventeenth branch is a sentinel for the shared 16-predicate query limit.
 OrExpression = { AndExpression ~ (SP ~ Disjunction ~ SP ~ AndExpression){0,16} }
-Disjunction = @{ ^"OR" ~ !IdentifierPart }
+Disjunction = _{ ^"OR" ~ !IdentifierPart }
 
 // The seventeenth condition is a sentinel for the shared 16-predicate query limit.
 AndExpression = { NotExpression ~ (SP ~ (^"AND" | UnsupportedBooleanOperator) ~ SP ~ NotExpression){0,16} }
