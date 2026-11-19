@@ -109,6 +109,15 @@ static FUNCTIONS: &[Function<Ssa>] = &[
             }
         }
     }),
+    function!(Flow, "slot", [one], |cx, a| {
+        cx.walked();
+        let c = node(cx, a, 0);
+        let slot = match c.is(C::Binding) {
+            true => cx.target(c),
+            false => cx.field_slot(c),
+        };
+        slot.map_or_else(Vals::new, |slot| crate::engine::one(Val::Sym(slot)))
+    }),
     function!(Flow, "pending", [one], |cx, a| {
         cx.walked();
         let call = node(cx, a, 0).index();

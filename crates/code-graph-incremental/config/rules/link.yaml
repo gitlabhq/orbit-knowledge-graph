@@ -50,6 +50,7 @@ link:
           - { to: '$O | type | member($M)', site: $ROOT }
           - { to: '$O | type | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds)', site: $ROOT }
         imports: { to: '$O | type | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
+    - '(__call (__callee (__member)))': none
     - '(__call (__callee $I:__ivar))':
         calls: { to: 'lookup(@$I, $ROOT, %callable_kinds, %value_kinds, %type_kinds, enclosing | class)', site: $ROOT }
     - '(__call (__callee "/./")) when targets($ROOT, false, %callable_kinds, %value_kinds, %type_kinds)':
@@ -66,6 +67,9 @@ link:
         imports: { to: '$ROOT | mod.ssa.wildcards', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
 
   member:
+    - '(__callee $ROOT:__member)': none
+    - '(__member (__object $ROOT:__member))': none
+    - '(__member) when $ROOT | mod.ssa.slot': none
     - '(__member $O:__object)':
         calls:
           - { to: '$O | type | member($ROOT)', resolution: reference }
