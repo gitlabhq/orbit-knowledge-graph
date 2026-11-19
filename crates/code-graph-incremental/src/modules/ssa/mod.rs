@@ -121,7 +121,10 @@ static FUNCTIONS: &[Function<Ssa>] = &[
     function!(Flow, "pending", [one], |cx, a| {
         cx.walked();
         let call = node(cx, a, 0).index();
-        yes(cx.state().pending.contains_key(&call))
+        yes(matches!(
+            cx.state().pending.get(&call),
+            Some(Pending::Callee(..))
+        ))
     }),
     function!(Flow, "deferred", [one], |cx, a| {
         cx.walked();

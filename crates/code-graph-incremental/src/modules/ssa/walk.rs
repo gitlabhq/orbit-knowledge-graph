@@ -227,9 +227,9 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
             exits.push(Act::Arm(c.index()));
         }
         if c.is(C::SsaLoop) {
-            let lifted = c
-                .children()
-                .find(|b| b.is(C::Binding) && b.has(C::Declaration) && !b.has_tag(w.lifted));
+            let lifted = c.children().find(|b| {
+                b.is(C::Binding) && b.has(C::Declaration) && !b.has(C::Rhs) && !b.has_tag(w.lifted)
+            });
             match lifted {
                 Some(b) => {
                     let head = nodes(&mut c.children().take_while(|k| k.index() != b.index()));
@@ -269,14 +269,11 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
         }
     }
 
-    /// A call whose callee may be assigned later in its scope, and is not a
-    /// dispatch through a receiver.
+    /// A call that is not a dispatch through a receiver; `defer` decides
+    /// whether its callee or its receiver waits for later assignments.
     fn deferrable(&mut self, call: Cursor<'t, S>) -> bool {
-        let Some(callee) = call.child(C::Callee) else {
-            return false;
-        };
-        let dispatch = callee.child(C::Member).is_some_and(|m| m.has(C::Dispatch));
-        !dispatch && self.pending(callee).is_some()
+        call.child(C::Callee)
+            .is_some_and(|callee| !callee.child(C::Member).is_some_and(|m| m.has(C::Dispatch)))
     }
 
     /// What a binding writes and in which order its children are visited.

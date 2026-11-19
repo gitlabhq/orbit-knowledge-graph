@@ -46,10 +46,15 @@ link:
           - { to: '$M | receiver_calls', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
           - { to: '$O | type | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | produced', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
           - { to: '$O | chain_head | type | typed_calls', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
+          - { to: '$ROOT | mod.ssa.deferred | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | produced', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
         calls:
           - { to: '$O | type | member($M)', site: $ROOT }
           - { to: '$O | type | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds)', site: $ROOT }
-        imports: { to: '$O | type | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
+          - { to: '$ROOT | mod.ssa.deferred | member($M)', site: $ROOT }
+          - { to: '$ROOT | mod.ssa.deferred | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds)', site: $ROOT }
+        imports:
+          - { to: '$O | type | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
+          - { to: '$ROOT | mod.ssa.deferred | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
     - '(__call (__callee (__member)))': none
     - '(__call (__callee $I:__ivar))':
         calls: { to: 'lookup(@$I, $ROOT, %callable_kinds, %value_kinds, %type_kinds, enclosing | class)', site: $ROOT }
