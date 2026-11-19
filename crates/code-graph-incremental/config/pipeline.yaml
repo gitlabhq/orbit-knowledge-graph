@@ -1,3 +1,5 @@
+enclosing: [__def]
+
 indexes:
   - { match: '(__def $N:__defname)', key: $N, span: tree }
   - { match: '(__def $N:__defname)', key: $N, span: scope }

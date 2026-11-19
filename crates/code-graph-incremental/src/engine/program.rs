@@ -47,6 +47,7 @@ pub struct BudgetSpec {
 
 #[derive(serde::Deserialize)]
 struct PipelineSpec {
+    enclosing: Vec<String>,
     #[serde(default)]
     indexes: Vec<IndexSpec>,
     phases: Vec<PhaseSpec>,
@@ -79,12 +80,12 @@ pub enum Span {
 
 impl Span {
     /// The node a match at `c` is filed under in its tree's piece.
-    fn anchor<S: Store>(self, c: Cursor<'_, S>) -> u32 {
+    fn anchor<S: Store>(self, c: Cursor<'_, S>, enclosing: &[u16]) -> u32 {
         match self {
             Span::Tree => 0,
             Span::Scope => c
                 .ancestors()
-                .find(|a| a.is(C::Def) || a.parent().is_none())
+                .find(|a| enclosing.contains(&a.kind()) || a.parent().is_none())
                 .map_or(c.index(), |a| a.index()),
         }
     }
@@ -319,6 +320,9 @@ pub struct Phase {
     pub(super) defs: Vec<Def>,
     pub(super) indexes: Vec<(String, Span, u32)>,
     pub(super) index_count: usize,
+    /// The kinds that open a scope: the flow walk tracks the innermost one
+    /// for `enclosing`, and scope indexes file nodes under it.
+    pub(super) enclosing: Vec<u16>,
     pub rows: Vec<RowShape>,
     body: Body,
     slots: usize,
@@ -347,7 +351,8 @@ impl Pipeline {
             .phases
             .iter()
             .map(|p| {
-                let mut phase = Phase::load(p, &spec.indexes, &files, &names, lang)?;
+                let mut phase =
+                    Phase::load(p, &spec.enclosing, &spec.indexes, &files, &names, lang)?;
                 phase.data = values.clone();
                 Ok(phase)
             })
@@ -459,6 +464,7 @@ struct Loader<'a> {
 impl Phase {
     fn load(
         spec: &PhaseSpec,
+        enclosing: &[String],
         indexes: &[IndexSpec],
         files: &RuleFiles,
         names: &HashMap<String, u16>,
@@ -568,6 +574,7 @@ impl Phase {
                 .map(|(id, i)| (i.pattern, i.span, id as u32))
                 .collect(),
             index_count: indexes.len(),
+            enclosing: enclosing.iter().map(|k| lang.intern_kind(k)).collect(),
             rows: loader.rows.take(),
             budget: spec.budget.clone(),
             scope: spec.scope.clone(),
@@ -1434,7 +1441,16 @@ impl Phase {
                         .checked_sub(CANONICAL_BASE)
                         .and_then(|i| by_kind.get(usize::from(i)))
                         .map_or(&[][..], |r| r.as_slice());
-                    visit(rules, candidates, run, &mut w, &mut stack, &mut late, c);
+                    visit(
+                        &self.enclosing,
+                        rules,
+                        candidates,
+                        run,
+                        &mut w,
+                        &mut stack,
+                        &mut late,
+                        c,
+                    );
                 }
                 Item::Leave => run.leave_def(),
                 Item::Between(rule, node) | Item::Exit(rule, node) => {
@@ -1471,7 +1487,7 @@ impl Phase {
                 if !w.matches(run, &indexer.at, c) || !w.holds(run, &indexer.at) {
                     continue;
                 }
-                let anchor = indexer.span.anchor(c);
+                let anchor = indexer.span.anchor(c, &self.enclosing);
                 for key in indexer
                     .key
                     .eval(run, &w.vals)
@@ -1508,6 +1524,7 @@ impl Phase {
 }
 
 fn visit<S: Store>(
+    enclosing: &[u16],
     rules: &[FlowRule],
     candidates: &[u16],
     run: &mut Run<S>,
@@ -1548,7 +1565,7 @@ fn visit<S: Store>(
         }
     }
     stack.extend(exits.iter().map(|&rule| Item::Exit(rule, c.index())));
-    if c.is(C::Def) {
+    if enclosing.contains(&c.kind()) {
         run.enter_def(c.index());
         stack.push(Item::Leave);
     }
