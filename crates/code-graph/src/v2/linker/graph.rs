@@ -189,8 +189,6 @@ impl ReexportIndex {
     }
 }
 
-/// Maps an import path to the repository directory that holds the imported
-/// package, for languages whose package is a directory rather than an FQN.
 #[derive(Default)]
 pub struct ImportDirectoryIndex {
     by_import_path: rustc_hash::FxHashMap<String, String>,
@@ -967,9 +965,7 @@ impl CodeGraph {
         }
     }
 
-    /// Definitions named `name` in files directly under `directory` that are
-    /// not nested in another definition of their file. Methods are excluded;
-    /// they are addressed through their receiver.
+    /// Methods are excluded; they are addressed through their receiver.
     pub fn lookup_top_level_in_directory(&self, directory: &str, name: &str) -> Vec<NodeIndex> {
         let sep = self.sep();
         self.lookup_name(name)

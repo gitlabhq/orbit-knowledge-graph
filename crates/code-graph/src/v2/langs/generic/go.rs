@@ -56,24 +56,15 @@ impl DslLanguage for GoDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        vec![
-            scope("function_declaration", "Function")
-                .def_kind(DefKind::Function)
-                .metadata(metadata().return_type(go_result_type())),
-            scope("method_declaration", "Method")
-                .def_kind(DefKind::Method)
-                .metadata(
-                    metadata().return_type(go_result_type()).receiver_type(
-                        field("receiver").then(
-                            child_of_kind("parameter_declaration")
-                                .then(field("type").inner("pointer_type", "type_identifier")),
-                        ),
-                    ),
-                ),
-            scope("method_elem", "Method")
-                .def_kind(DefKind::Method)
-                .no_scope()
-                .metadata(metadata().return_type(go_result_type())),
+        // Unconditional rules first; reverse iteration checks the pointer rules first.
+        let mut scopes: Vec<ScopeRule> = go_callable_scopes(field("result")).into();
+        scopes.extend(
+            go_callable_scopes(go_pointer_result())
+                .map(|rule| rule.when(field_kind("result", &["pointer_type"]))),
+        );
+        scopes.extend([
+            // Unconditional fallback first — reverse iteration means conditional
+            // rules (Struct, Interface) are checked before the fallback.
             scope("type_spec", "Type").def_kind(DefKind::Other),
             scope("type_spec", "Struct")
                 .def_kind(DefKind::Class)
@@ -98,7 +89,8 @@ impl DslLanguage for GoDsl {
                     "method_declaration",
                     "func_literal",
                 ])),
-        ]
+        ]);
+        scopes
     }
 
     fn refs() -> Vec<ReferenceRule> {
@@ -198,8 +190,33 @@ impl DslLanguage for GoDsl {
     }
 }
 
-fn go_result_type() -> Extract {
-    field("result").try_nav(Child, Kind("type_identifier"))
+/// A pointer result's pointee, so `*T` matches the receiver `T`.
+fn go_pointer_result() -> Extract {
+    field("result").nav(Child, AnyKind(&["type_identifier", "qualified_type"]))
+}
+
+fn go_callable_scopes(result: Extract) -> [ScopeRule; 3] {
+    [
+        scope("function_declaration", "Function")
+            .def_kind(DefKind::Function)
+            .metadata(metadata().return_type(result.clone())),
+        scope("method_declaration", "Method")
+            .def_kind(DefKind::Method)
+            .metadata(
+                metadata().return_type(result.clone()).receiver_type(
+                    field("receiver").then(
+                        child_of_kind("parameter_declaration")
+                            .then(field("type").inner("pointer_type", "type_identifier")),
+                    ),
+                ),
+            ),
+        // Interface method specs — nested inside the interface scope,
+        // so they get FQNs like Repository.Get.
+        scope("method_elem", "Method")
+            .def_kind(DefKind::Method)
+            .no_scope()
+            .metadata(metadata().return_type(result)),
+    ]
 }
 
 fn go_embedded_types(node: &N<'_>) -> Vec<String> {
@@ -321,12 +338,9 @@ impl HasRules for GoRules {
     }
 }
 
-/// Real `go.mod` files are a few KiB; anything larger is not read.
 const GO_MOD_MAX_BYTES: u64 = 1 << 20;
 
-/// Maps each import of a repository package to the package directory, through
-/// the `module` path of the `go.mod` that encloses the directory. Go package
-/// names repeat across directories, so the FQN alone cannot pick the target.
+/// Go package names repeat across directories, so the FQN alone cannot pick the target.
 fn build_go_import_directory_index(graph: &CodeGraph) -> ImportDirectoryIndex {
     let mut index = ImportDirectoryIndex::default();
     let package_dirs: FxHashSet<&str> = graph
@@ -353,15 +367,23 @@ fn build_go_import_directory_index(graph: &CodeGraph) -> ImportDirectoryIndex {
     index
 }
 
-/// `(module path, module directory)` for each `go.mod` in or above a package directory.
-fn go_modules(root: &Path, package_dirs: &FxHashSet<&str>) -> Vec<(String, String)> {
+struct GoModule {
+    path: String,
+    directory: String,
+}
+
+/// A module path declared by more than one `go.mod` is dropped: the target is ambiguous.
+fn go_modules(root: &Path, package_dirs: &FxHashSet<&str>) -> Vec<GoModule> {
     let mut checked: FxHashSet<&str> = FxHashSet::default();
-    let mut modules = Vec::new();
+    let mut modules: Vec<GoModule> = Vec::new();
     for &package_dir in package_dirs {
         let mut dir = package_dir;
         while checked.insert(dir) {
-            if let Some(module) = read_go_module(&root.join(dir).join("go.mod")) {
-                modules.push((module, dir.to_string()));
+            if let Some(path) = read_go_module(&root.join(dir).join("go.mod")) {
+                modules.push(GoModule {
+                    path,
+                    directory: dir.to_string(),
+                });
             }
             if dir.is_empty() {
                 break;
@@ -369,6 +391,11 @@ fn go_modules(root: &Path, package_dirs: &FxHashSet<&str>) -> Vec<(String, Strin
             dir = dir_of(dir);
         }
     }
+    let mut declarations: rustc_hash::FxHashMap<String, usize> = Default::default();
+    for module in &modules {
+        *declarations.entry(module.path.clone()).or_default() += 1;
+    }
+    modules.retain(|module| declarations[&module.path] == 1);
     modules
 }
 
@@ -392,17 +419,17 @@ fn parse_go_module(source: &str) -> Option<String> {
     })
 }
 
-/// The repository directory of `import_path` under the longest module path that prefixes it.
-fn go_package_directory(modules: &[(String, String)], import_path: &str) -> Option<String> {
-    let (module, module_dir) = modules
+fn go_package_directory(modules: &[GoModule], import_path: &str) -> Option<String> {
+    let module = modules
         .iter()
-        .filter(|(module, _)| {
+        .filter(|module| {
             import_path
-                .strip_prefix(module.as_str())
+                .strip_prefix(module.path.as_str())
                 .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
         })
-        .max_by_key(|(module, _)| module.len())?;
-    let rest = import_path[module.len()..].trim_start_matches('/');
+        .max_by_key(|module| module.path.len())?;
+    let rest = import_path[module.path.len()..].trim_start_matches('/');
+    let module_dir = &module.directory;
     Some(match (module_dir.is_empty(), rest.is_empty()) {
         (true, _) => rest.to_string(),
         (false, true) => module_dir.clone(),
@@ -427,10 +454,14 @@ mod tests {
 
     #[test]
     fn go_package_directory_picks_the_longest_module() {
+        let module = |path: &str, directory: &str| GoModule {
+            path: path.to_string(),
+            directory: directory.to_string(),
+        };
         let modules = vec![
-            ("example.com/m".to_string(), String::new()),
-            ("example.com/m/tools".to_string(), "tools".to_string()),
-            ("k8s.io/api".to_string(), "staging/api".to_string()),
+            module("example.com/m", ""),
+            module("example.com/m/tools", "tools"),
+            module("k8s.io/api", "staging/api"),
         ];
         let dir = |path| go_package_directory(&modules, path);
         assert_eq!(
