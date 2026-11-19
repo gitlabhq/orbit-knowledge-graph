@@ -430,7 +430,7 @@ pub fn git_index_files(repo_path: &Path) -> Result<Vec<String>> {
             Ok(path) => Some(path),
             Err(name) => {
                 orbit_log_fields::warn!(
-                    expanded(FILE_PATH) = %name.to_string_lossy(),
+                    expanded(FILE_PATH) = ?name,
                     safe(ERROR_TYPE) = "non_utf8_path",
                     "skipping a file whose name is not UTF-8"
                 );
