@@ -71,11 +71,15 @@ impl<S: Storage<Node = Node>> Matcher<'_, S> {
                 text,
                 tags,
                 flags,
+                unflags,
                 kids,
                 ..
             } => {
                 let set = [n.lifted, n.labelled, n.named, n.synth];
-                let flagged = (0..4).all(|bit| *flags & (1 << bit) == 0 || set[bit]);
+                let flagged = (0..4).all(|bit| {
+                    (*flags & (1 << bit) == 0 || set[bit])
+                        && (*unflags & (1 << bit) == 0 || !set[bit])
+                });
                 flagged
                     && kind.admits(n.kind)
                     && (*field == 0 || *field == n.field)
@@ -106,13 +110,14 @@ impl<S: Storage<Node = Node>> Matcher<'_, S> {
         }
     }
 
-    fn tagged(&self, raw: u32, tags: &[u32]) -> bool {
-        tags.is_empty()
-            || self
-                .t
-                .tags
-                .get(&raw)
-                .is_some_and(|own| tags.iter().all(|key| own.iter().any(|t| t.key == *key)))
+    fn tagged(&self, raw: u32, tags: &[(u32, bool)]) -> bool {
+        if tags.is_empty() {
+            return true;
+        }
+        let own = self.t.tags.get(&raw);
+        tags.iter().all(|&(key, present)| {
+            own.is_some_and(|own| own.iter().any(|t| t.key == key)) == present
+        })
     }
 
     fn text(&self, raw: u32, n: &Node, text: &Text) -> bool {
