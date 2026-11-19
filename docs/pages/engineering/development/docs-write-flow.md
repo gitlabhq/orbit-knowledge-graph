@@ -67,8 +67,8 @@ it reviews what a person would.
 | Handoff | When CI is green on the head and the only open threads are decisions or threads the flow does not take: removes `Draft:`, adds the feature MR author as reviewer, and posts one note. The note lists the decision threads, threads the flow did not take, and review items it did not fix. | No | End. Otherwise the MR stays in draft, with the reason in its description. |
 
 The gate ends the run with no model call on a draft feature MR or one that scores below 6.
-It also skips an MR with the `documentation` or `docs-factory::skip` label, or one that
-already changes user docs.
+It also skips a fork MR, an MR with the `documentation` or `docs-factory::skip` label, and
+an MR that already changes user docs.
 A mention on a feature MR runs the same gate.
 
 Any step that fails to write its route file ends the flow. When in doubt, the flow does
@@ -93,8 +93,8 @@ Script steps enforce these rules:
   identity, Duo Code Review, authors and reviewers of feature MRs from this project, docs MR
   reviewers, and Developer+ members. Other threads stay open for the person who merges. The
   handoff note links them without their text.
-- The related-MR check groups only MRs from this project. A fork MR that names the same issue
-  never joins the group, so its diff never reaches the writer.
+- The gate skips fork MRs, and the related-MR check groups only MRs from this project. A fork
+  MR never starts a run or joins a group, so its diff never reaches the writer.
 - The flow resolves only the threads it gave the fixer, and only after the fix is pushed and
   `check.py` is clean. It never resolves a **Needs reviewer decision** thread.
 - The threads path runs only on a docs MR with a branch in this project, not a fork. The
