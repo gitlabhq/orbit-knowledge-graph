@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use arrow::record_batch::RecordBatch;
-use code_graph_incremental::export::{self, ExportPlan};
+use code_graph_incremental::export::{self, Scope, Tables};
 use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Env, Envelope, Error, Limits, Scalar, Sentinel, driver};
 mod common;
@@ -23,16 +23,13 @@ fn export_with(
     ontology: &Ontology,
     envelope: Envelope,
 ) -> Result<Exported, Error> {
-    let (state, _) = driver::index(env, repository, &Sentinel::disabled())?;
-    let plan = ExportPlan::from_config(&env.export_config, ontology, &env.lang)?;
+    let (mut state, _) = driver::index(env, repository, &Sentinel::disabled())?;
     let tables = export::export(
-        &state.trees,
-        &state.edges,
-        &env.lang,
-        &plan,
+        env,
+        &mut state,
+        &Tables::load(env, ontology)?,
         &envelope,
-        true,
-        &|_| true,
+        &Scope::all(),
         &Sentinel::disabled(),
     )?;
     Ok(Exported { tables })
@@ -81,7 +78,7 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
     let sources = common::walk(repo.path());
     let mut env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
     let ontology = Ontology::load_embedded().unwrap();
-    let mut config = ExportConfig::embedded().clone();
+    let mut config = ExportConfig::default();
     let specs = ontology
         .local_entity_fields("File")
         .unwrap()
@@ -141,50 +138,6 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
             [traversal_path.unwrap_or("")]
         );
     }
-}
-
-#[test]
-fn each_pipeline_uses_its_own_export_config() {
-    let repo = tempfile::tempdir().unwrap();
-    write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
-    let sources = common::walk(repo.path());
-    let mut env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
-    let ontology = Ontology::load_embedded().unwrap();
-    for marker in ["first", "second", ""] {
-        let yaml = include_str!("../config/export.yaml").replace(
-            "name: traversal_path, type: Utf8, const: \"\"",
-            &format!("name: traversal_path, type: Utf8, const: \"{marker}\""),
-        );
-        env.export_config = orbit_utils::yaml::from_str(&yaml).unwrap();
-        let exported = export_with(&env, &sources, &ontology, envelope()).unwrap();
-        assert!(
-            exported
-                .tables
-                .iter()
-                .any(|(_, batch)| batch.num_rows() > 0)
-        );
-        for (_, batch) in &exported.tables {
-            assert!(
-                column(batch, "traversal_path")
-                    .iter()
-                    .all(|value| value == marker)
-            );
-        }
-    }
-}
-
-#[test]
-fn custom_export_configs_still_validate_against_the_ontology() {
-    let repo = tempfile::tempdir().unwrap();
-    write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
-    let mut env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
-    let ontology = Ontology::load_embedded().unwrap();
-    let yaml = include_str!("../config/export.yaml").replace("name: traversal_path", "name: typo");
-    env.export_config = orbit_utils::yaml::from_str(&yaml).unwrap();
-    let error = export_with(&env, &common::walk(repo.path()), &ontology, envelope())
-        .err()
-        .expect("unknown columns must fail");
-    assert!(error.to_string().contains("traversal_path"));
 }
 
 fn export_repo(root: &Path) -> Exported {
@@ -287,7 +240,7 @@ fn families_follow_the_worker_budget_and_the_family_cap() {
             },
             &envelope(),
             &ontology,
-            code_graph_incremental::export::ExportConfig::embedded(),
+            &code_graph_incremental::export::ExportConfig::default(),
             |_| -> Result<(), String> {
                 let mut guard = state.lock().unwrap();
                 let (active, _, peak, pools) = &mut *guard;
@@ -336,7 +289,7 @@ fn a_family_panic_ends_the_run_with_a_typed_error() {
         },
         &envelope(),
         &ontology,
-        code_graph_incremental::export::ExportConfig::embedded(),
+        &code_graph_incremental::export::ExportConfig::default(),
         |_| -> Result<(), String> {
             emitted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             panic!("emit failed");
@@ -367,7 +320,7 @@ fn tables_over_the_batch_byte_budget_split_into_batches() {
             },
             &envelope(),
             &ontology,
-            code_graph_incremental::export::ExportConfig::embedded(),
+            &code_graph_incremental::export::ExportConfig::default(),
             |batches| -> Result<(), String> {
                 let mut tables = tables.lock().unwrap();
                 for (name, batch) in batches {
@@ -431,7 +384,7 @@ fn cross_file_timeout_still_exports_every_family() {
         },
         &envelope(),
         &ontology,
-        code_graph_incremental::export::ExportConfig::embedded(),
+        &code_graph_incremental::export::ExportConfig::default(),
         |batches| -> Result<(), String> {
             for (name, batch) in batches {
                 if name == "gl_definition" {
@@ -669,17 +622,15 @@ fn exporting_deeply_nested_definitions_grows_linearly() {
         write_all(repo.path(), &[("deep.js", source.as_bytes())]);
         let env = Env::with_limits(SupportLang::JavaScript, Limits::UNLIMITED).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
-        let state = index(&env, repo.path());
-        let plan = ExportPlan::from_config(&env.export_config, &ontology, &env.lang).unwrap();
+        let mut state = index(&env, repo.path());
+        let tables = Tables::load(&env, &ontology).unwrap();
         let started = Instant::now();
         export::export(
-            &state.trees,
-            &state.edges,
-            &env.lang,
-            &plan,
+            &env,
+            &mut state,
+            &tables,
             &envelope(),
-            true,
-            &|_| true,
+            &Scope::all(),
             &Sentinel::disabled(),
         )
         .unwrap();
@@ -707,29 +658,25 @@ fn exporting_some_trees_matches_the_full_export_of_those_files() {
     );
     let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
     let ontology = Ontology::load_embedded().unwrap();
-    let plan = code_graph_incremental::export::ExportPlan::from_config(
-        &env.export_config,
-        &ontology,
-        &env.lang,
-    )
-    .unwrap();
-    let state = index(&env, repo.path());
+    let tables = Tables::load(&env, &ontology).unwrap();
+    let mut state = index(&env, repo.path());
     let main = state
         .trees
         .iter()
         .position(|tree| tree.label == "main.py")
         .unwrap() as u32;
-    let export = |only: Option<&rustc_hash::FxHashSet<u32>>| Exported {
-        tables: code_graph_incremental::export::export_trees(
-            &state.trees,
-            &state.edges,
-            &env.lang,
-            &plan,
+    let mut export = |only: Option<&rustc_hash::FxHashSet<u32>>| Exported {
+        tables: export::export(
+            &env,
+            &mut state,
+            &tables,
             &envelope(),
-            false,
-            &|_| true,
-            only,
-            &code_graph_incremental::Sentinel::disabled(),
+            &Scope {
+                include_directories: false,
+                owns_file: &|_| true,
+                only,
+            },
+            &Sentinel::disabled(),
         )
         .unwrap(),
     };

@@ -33,3 +33,9 @@ phases:
     walk: each
     outputs: [tag]
     modules: [text]
+  - name: export
+    scope: graph
+    after: [display]
+    walk: each
+    outputs: [row]
+    modules: [text]

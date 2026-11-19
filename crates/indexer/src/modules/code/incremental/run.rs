@@ -54,7 +54,7 @@ pub(in crate::modules::code) fn run(
     let mut output = Output::new(&envelope, &ontology);
     output.batch_bytes = options.batch_bytes;
     let cancelled = options.cancelled.clone();
-    let mut export_config = ExportConfig::embedded().clone();
+    let mut export_config = ExportConfig::default();
     for name in ontology.local_entity_names() {
         let table = ontology
             .table_name(name)

@@ -28,7 +28,7 @@ macro_rules! on_text {
 }
 
 macro_rules! on_node {
-    ($name:literal, [$($arg:ident),*], $f:ident) => {
+    ($name:literal, [$($arg:ident),*], $f:expr) => {
         function!(Pure, $name, [$($arg),*], |c, a| at(c, a, $f))
     };
 }
@@ -103,6 +103,24 @@ static FUNCTIONS: &[Function<Text>] = &[
     on_node!("tree_node_id", [one], tree_node_id),
     on_node!("kind_name", [one], kind_name),
     on_node!("const", [one, one], constant),
+    on_node!("start_line", [one], |c, o| number(o, c.start_row() + 1)),
+    on_node!("end_line", [one], |c, o| number(o, c.end_row() + 1)),
+    on_node!("start_byte", [one], |c, o| number(o, c.start())),
+    on_node!("end_byte", [one], |c, o| number(o, c.end())),
+    on_node!("start_col", [one], |c, o| number(o, c.start_col() + 1)),
+    on_node!("end_col", [one], |c, o| number(o, c.end_col() + 1)),
+    on_node!("span", [one], |c, o| text_val(
+        o,
+        &format!("{}:{}", c.start(), c.end())
+    )),
+    on_node!("tree_root", [one], |c, _| Some(Val::Node(
+        c.jump(c.fi(), 0).into()
+    ))),
+    function!(Pure, "out", [one, one], |cx, a| targets(cx, a, false)),
+    function!(Pure, "out_unresolved", [one, one], |cx, a| targets(
+        cx, a, true
+    )),
+    function!(Pure, "file_dir", [one], |cx, a| file_dir(cx, a)),
 ];
 
 const MAX_REGEX_LOOP_PASSES: usize = 64;
@@ -170,6 +188,37 @@ fn text<'t, S: Store>(cx: &Cx<'_, 't, Text, S>, v: Val) -> Option<&'t str> {
         Val::Opaque => None,
         v => Some(lit(lang, v)),
     }
+}
+
+fn targets<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals], unresolved: bool) -> Vals {
+    let (Some(loc), Ok(kind)) = (a[0][0].loc(), opts(cx, a).lit(1).parse::<EdgeKind>()) else {
+        return Vals::new();
+    };
+    let found = match unresolved {
+        true => cx.unresolved_targets(kind, loc),
+        false => cx.targets(kind, loc),
+    };
+    found.iter().map(|&l| Val::Node(l)).collect()
+}
+
+/// The project tree's directory that holds a file tree, found by its path.
+fn file_dir<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals]) -> Vals {
+    let (Some(loc), Some(mut at)) = (a[0][0].loc(), cx.project()) else {
+        return Vals::new();
+    };
+    let syms = &cx.lang().syms;
+    let label = &cx.jump(loc).tree().label;
+    let dirs = label.rsplit_once('/').map_or("", |(dirs, _)| dirs);
+    for segment in dirs.split('/').filter(|s| !s.is_empty()) {
+        let Some(dir) = at
+            .children()
+            .find(|c| c.is(crate::canonical::Canonical::Dir) && syms.resolve(c.sym()) == segment)
+        else {
+            return Vals::new();
+        };
+        at = dir;
+    }
+    one(Val::Node(at.into()))
 }
 
 fn has_edge<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals], incoming: bool) -> Vals {
@@ -434,6 +483,14 @@ fn kind_name<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val>
     Some(Val::Sym(
         o.lang.syms.intern(o.lang.kind_name(c.node().kind)),
     ))
+}
+
+fn number(o: &Opts, n: u32) -> Option<Val> {
+    text_val(o, &n.to_string())
+}
+
+fn text_val(o: &Opts, s: &str) -> Option<Val> {
+    Some(Val::Sym(o.lang.syms.intern(s)))
 }
 
 fn constant<S: Storage<Node = Node>>(_: Cursor<'_, S>, o: &Opts) -> Option<Val> {

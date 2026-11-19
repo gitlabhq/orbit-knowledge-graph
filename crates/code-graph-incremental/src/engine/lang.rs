@@ -33,6 +33,7 @@ const RULES: &[(&str, &str)] = &[
     ("imports", include_str!("../../config/rules/imports.yaml")),
     ("resolve", include_str!("../../config/rules/resolve.yaml")),
     ("dispatch", include_str!("../../config/rules/dispatch.yaml")),
+    ("export", include_str!("../../config/rules/export.yaml")),
 ];
 
 const MAX_DEPTH: usize = 32;
@@ -81,6 +82,43 @@ pub struct RuleSpec {
     pub tag: Option<BTreeMap<String, String>>,
     pub tag_on: Option<String>,
     pub unique: Option<String>,
+    pub row: Option<Rows>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum Rows {
+    One(RowSpec),
+    Many(Vec<RowSpec>),
+}
+
+impl Rows {
+    pub fn items(&self) -> &[RowSpec] {
+        match self {
+            Rows::One(one) => std::slice::from_ref(one),
+            Rows::Many(many) => many,
+        }
+    }
+}
+
+/// One row of an ontology table per match. A column whose value is a node
+/// stands for that node's row: its id in an integer column.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RowSpec {
+    pub table: String,
+    pub id: Option<IdSpec>,
+    pub columns: BTreeMap<String, String>,
+    #[serde(default)]
+    pub expect: BTreeMap<String, String>,
+    pub follows: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IdSpec {
+    pub seed: String,
+    pub parts: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

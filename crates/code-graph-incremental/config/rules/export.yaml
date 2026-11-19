@@ -1,0 +1,208 @@
+data:
+  id_prefix: [project_id, branch]
+  dirs: [__dir, __root]
+  imports: [__import, __import_type]
+
+functions:
+  measured:
+    cases:
+      - match: '(__def #definition_span)'
+        value: $ROOT
+      - match: '(__def $N:__defname)'
+        value: $N
+      - value: $ROOT
+  import_of:
+    cases:
+      - match: '$I:(%imports $ROOT:__name)'
+        value: $I
+      - value: $ROOT
+
+export:
+  - group: entity
+    match: '(%dirs)'
+    row:
+      table: gl_directory
+      id: { seed: dir, parts: [path] }
+      columns:
+        path: '$ROOT | tree_path("/") | default(".")'
+        name: '$ROOT | default(".")'
+        traversal_path: '""'
+
+  - group: entity
+    match: '(__source_file)'
+    row:
+      table: gl_file
+      id: { seed: file, parts: [path] }
+      columns:
+        path: $ROOT
+        name: '$ROOT | split_last("/")'
+        extension: '$ROOT | split_last("/") | split_last(".")'
+        language: '$ROOT | tag("language")'
+        size_bytes: '$ROOT | end_byte'
+        reason: '$ROOT | tag("reason")'
+        traversal_path: '""'
+
+  - group: entity
+    match: '(__def)'
+    row:
+      table: gl_definition
+      id: { seed: def, parts: [file_path, fqn, '$ROOT | span'] }
+      columns:
+        file_path: '$ROOT | ancestor_tag("file_path")'
+        fqn: '$ROOT | tag("fqn")'
+        name: '$ROOT | child_sym("__defname")'
+        definition_type: '$ROOT | tag("def_type")'
+        start_line: '$ROOT | measured | start_line'
+        end_line: '$ROOT | measured | end_line'
+        start_byte: '$ROOT | measured | start_byte'
+        end_byte: '$ROOT | measured | end_byte'
+        start_char: '$ROOT | measured | start_col'
+        end_char: '$ROOT | measured | end_col'
+        front_matter_name: '$ROOT | child_sym("__front_matter_name")'
+        front_matter_description: '$ROOT | child_sym("__front_matter_description")'
+        front_matter_license: '$ROOT | child_sym("__front_matter_license")'
+        front_matter_compatibility: '$ROOT | child_sym("__front_matter_compatibility")'
+        front_matter_allowed_tools: '$ROOT | child_sym("__front_matter_allowed_tools")'
+        front_matter_metadata: '$ROOT | child_sym("__front_matter_metadata")'
+        front_matter_title: '$ROOT | child_sym("__front_matter_title")'
+        front_matter_stage: '$ROOT | child_sym("__front_matter_stage")'
+        front_matter_group: '$ROOT | child_sym("__front_matter_group")'
+        front_matter_info: '$ROOT | child_sym("__front_matter_info")'
+        front_matter_version: '$ROOT | child_sym("__front_matter_version")'
+        front_matter_category: '$ROOT | child_sym("__front_matter_category")'
+        traversal_path: '""'
+
+  - group: entity
+    match: '(__module_export (%imports $ROOT:__name))'
+  - group: entity
+    match: '(__module_export $ROOT:%imports)'
+  - group: entity
+    match: '(%imports $ROOT:(__name "/./"))'
+    row: &imported_symbol
+      table: gl_imported_symbol
+      id:
+        seed: import
+        parts: [file_path, import_path, identifier_name, identifier_alias, '$ROOT | import_of | span']
+      columns:
+        file_path: '$ROOT | import_of | ancestor_tag("file_path")'
+        import_type: '$ROOT | tag("import_type") | default($ROOT | ancestor_tag("import_type")) | default("NamedImport")'
+        import_path: '$ROOT | import_of | tag("source_path")'
+        identifier_name: $ROOT
+        identifier_alias: '$ROOT | ancestor_sym("__alias")'
+        start_line: '$ROOT | import_of | start_line'
+        end_line: '$ROOT | import_of | end_line'
+        start_byte: '$ROOT | import_of | start_byte'
+        end_byte: '$ROOT | import_of | end_byte'
+        start_char: '$ROOT | import_of | start_col'
+        end_char: '$ROOT | import_of | end_col'
+        traversal_path: '""'
+  - group: entity
+    match: '(%imports !(__name "/./"))'
+    row: *imported_symbol
+
+  - group: contains
+    match: '$P:(%dirs $ROOT:__dir)'
+    row:
+      table: gl_edge
+      follows: target_id
+      columns: &directory_contains
+        source_id: $P
+        source_kind: '"Directory"'
+        relationship_kind: '"CONTAINS"'
+        target_id: $ROOT
+        target_kind: '"Directory"'
+        traversal_path: '""'
+  - group: contains
+    match: '(__source_file)'
+    row:
+      table: gl_edge
+      follows: target_id
+      columns:
+        <<: *directory_contains
+        source_id: '$ROOT | file_dir'
+        target_kind: '"File"'
+  - group: contains
+    match: '(__def)'
+    row:
+      table: gl_edge
+      follows: target_id
+      columns: &file_contains
+        source_id: '$ROOT | tree_root'
+        source_kind: '"File"'
+        relationship_kind: '"DEFINES"'
+        target_id: $ROOT
+        target_kind: '"Definition"'
+        traversal_path: '""'
+  - group: contains
+    match: '(__module_export (%imports $ROOT:__name))'
+  - group: contains
+    match: '(__module_export $ROOT:%imports)'
+  - group: contains
+    match: '(%imports $ROOT:(__name "/./"))'
+    row: &imported_in_file
+      table: gl_edge
+      follows: target_id
+      columns:
+        <<: *file_contains
+        relationship_kind: '"IMPORTS"'
+        target_kind: '"ImportedSymbol"'
+  - group: contains
+    match: '(%imports !(__name "/./"))'
+    row: *imported_in_file
+
+  - group: graph
+    match: '(__def)'
+    row:
+      - table: gl_edge
+        expect: { target_id: gl_definition }
+        columns: &def_edge
+          source_id: $ROOT
+          source_kind: '"Definition"'
+          relationship_kind: '"CALLS"'
+          target_id: '$ROOT | out("Calls")'
+          target_kind: '"Definition"'
+          traversal_path: '""'
+      - table: gl_edge
+        expect: { target_id: gl_definition }
+        columns: { <<: *def_edge, relationship_kind: '"DEFINES"', target_id: '$ROOT | out("Defines")' }
+      - table: gl_edge
+        expect: { target_id: gl_definition }
+        columns: { <<: *def_edge, relationship_kind: '"EXTENDS"', target_id: '$ROOT | out("Extends")' }
+      - table: gl_edge
+        expect: { target_id: gl_imported_symbol }
+        columns:
+          <<: *def_edge
+          target_id: '$ROOT | out_unresolved("Imports")'
+          target_kind: '"ImportedSymbol"'
+  - group: graph
+    match: '(__source_file)'
+    row:
+      - table: gl_edge
+        expect: { target_id: gl_definition }
+        columns: &file_edge { <<: *def_edge, source_kind: '"File"' }
+      - table: gl_edge
+        expect: { target_id: gl_file }
+        columns:
+          <<: *file_edge
+          relationship_kind: '"IMPORTS"'
+          target_id: '$ROOT | out("Links")'
+          target_kind: '"File"'
+      - table: gl_edge
+        expect: { target_id: gl_definition }
+        columns: { <<: *file_edge, relationship_kind: '"IMPORTS"', target_id: '$ROOT | out("Links")' }
+  - group: graph
+    match: '(__module_export (%imports $ROOT:__name))'
+  - group: graph
+    match: '(__module_export $ROOT:%imports)'
+  - group: graph
+    match: '(%imports $ROOT:(__name "/./"))'
+    row: &imported_edges
+      - table: gl_edge
+        expect: { target_id: gl_definition }
+        columns: &imported_edge { <<: *def_edge, source_kind: '"ImportedSymbol"' }
+      - table: gl_edge
+        expect: { target_id: gl_definition }
+        columns: { <<: *imported_edge, relationship_kind: '"IMPORTS"', target_id: '$ROOT | out("Imports")' }
+  - group: graph
+    match: '(%imports !(__name "/./"))'
+    row: *imported_edges

@@ -1,4 +1,3 @@
-pub mod export;
 mod expr;
 pub mod lang;
 pub mod pattern;
@@ -17,7 +16,7 @@ use crate::modules;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{Compact, Edge, EdgeKind, Mutable, Node, Storage};
-pub use program::{Def, Phase, Pipeline, Walk, resolution};
+pub use program::{Def, Part, Phase, Pipeline, RowShape, Walk, resolution};
 
 pub type Tree<S = Compact> = crate::tree::Tree<S>;
 pub type Cursor<'a, S = Compact> = crate::tree::Cursor<'a, S>;
@@ -463,6 +462,7 @@ pub struct Run<'t, S: Store = Compact> {
     lang: usize,
     data: &'t [Vals],
     edges: Vec<Edge>,
+    rows: Vec<Row>,
     defs: Vec<u32>,
     states: Box<[Box<dyn Any>]>,
     epochs: [u64; WALK + 1],
@@ -518,6 +518,7 @@ impl<'t, S: Store> Run<'t, S> {
             lang: 0,
             data: &[],
             edges: Vec::new(),
+            rows: Vec::new(),
             defs: Vec::new(),
             states: modules::ALL.iter().map(|m| (m.state)()).collect(),
             epochs: [0; WALK + 1],
@@ -809,6 +810,53 @@ pub fn run_family(
     Ok(out)
 }
 
+/// A row a `row:` hook emitted at `at`: the values of its shape's columns,
+/// then its extra id parts.
+pub struct Row {
+    pub shape: u16,
+    pub at: Loc,
+    pub values: Box<[Option<Val>]>,
+}
+
+/// Runs a graph phase: the phase's walk on every tree, the project tree
+/// included and each root visited, in parallel with the graph so far.
+pub fn run_graph(
+    phase: &Phase,
+    trees: &[Tree<Compact>],
+    project: u32,
+    edges: &[Edge],
+    env: &Env,
+    budget: &Sentinel,
+) -> Result<Vec<Row>, Killed> {
+    use rayon::prelude::*;
+    let scope = scope_budget(phase, env, budget);
+    let graph = EdgeIndex::new(edges);
+    let indexes = Indexes::new(trees, edges);
+    let rows: Vec<Result<Vec<Row>, Killed>> = (0..trees.len())
+        .into_par_iter()
+        .map(|fi| {
+            let file = tree_budget(phase, env, &trees[fi].label);
+            let mut run = Run::new(trees, fi as u32, env, phase, &scope, &file);
+            run.graph = Some(&graph);
+            run.graph_fi = fi as u32;
+            run.indexes = Some(&indexes);
+            run.files = project;
+            run.project = Some(project);
+            let root = Cursor::new(trees, fi as u32, 0);
+            phase.flow_all(&mut run, root);
+            match run.killed.take() {
+                Some(killed) => Err(killed),
+                None => Ok(run.rows),
+            }
+        })
+        .collect();
+    let mut out = Vec::new();
+    for result in rows {
+        out.extend(result?);
+    }
+    Ok(out)
+}
+
 /// Applies a rewrite phase to one tree in place.
 pub fn rewrite_tree(
     phase: &Phase,
@@ -847,21 +895,27 @@ pub fn tag_tree<S: Store>(
 
 /// Which nodes of the graph have an edge of each kind, by direction.
 pub struct EdgeIndex {
-    incoming: FxHashSet<(EdgeKind, u32, u32)>,
-    outgoing: FxHashMap<(EdgeKind, u32, u32), SmallVec<[Loc; 2]>>,
-    sites: FxHashMap<(EdgeKind, u32, u32), SmallVec<[(Loc, Loc); 1]>>,
+    incoming: FxHashSet<EdgeKey>,
+    outgoing: FxHashMap<EdgeKey, SmallVec<[Loc; 2]>>,
+    unresolved: FxHashMap<EdgeKey, SmallVec<[Loc; 2]>>,
+    sites: FxHashMap<EdgeKey, SmallVec<[(Loc, Loc); 1]>>,
 }
+
+/// An edge kind and the file and node at one end.
+type EdgeKey = (EdgeKind, u32, u32);
 
 impl EdgeIndex {
     pub fn new(edges: &[Edge]) -> Self {
         let mut outgoing: FxHashMap<_, SmallVec<[Loc; 2]>> = FxHashMap::default();
+        let mut unresolved: FxHashMap<_, SmallVec<[Loc; 2]>> = FxHashMap::default();
         let mut sites: FxHashMap<_, SmallVec<[(Loc, Loc); 1]>> = FxHashMap::default();
         for e in edges {
             let (from, to) = (e.from_loc(), e.to_loc());
-            outgoing
-                .entry((e.kind, e.from_tree, e.from_node))
-                .or_default()
-                .push(to);
+            let key = (e.kind, e.from_tree, e.from_node);
+            outgoing.entry(key).or_default().push(to);
+            if e.call_resolution == crate::tree::CallResolution::Unknown {
+                unresolved.entry(key).or_default().push(to);
+            }
             if let Some(site) = e.site {
                 sites
                     .entry((e.kind, e.from_tree, site))
@@ -875,6 +929,7 @@ impl EdgeIndex {
                 .map(|e| (e.kind, e.to_tree, e.to_node))
                 .collect(),
             outgoing,
+            unresolved,
             sites,
         }
     }
@@ -956,6 +1011,14 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
         self.run
             .graph
             .and_then(|g| g.outgoing.get(&(kind, from.fi, from.node)))
+            .map_or(&[], |t| t.as_slice())
+    }
+
+    /// The targets of the edges of `kind` from `from` whose call resolution is unknown.
+    pub fn unresolved_targets(&self, kind: EdgeKind, from: Loc) -> &'t [Loc] {
+        self.run
+            .graph
+            .and_then(|g| g.unresolved.get(&(kind, from.fi, from.node)))
             .map_or(&[], |t| t.as_slice())
     }
 

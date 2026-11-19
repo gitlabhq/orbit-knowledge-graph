@@ -5,7 +5,8 @@ use smallvec::SmallVec;
 
 use super::expr::{Expr, Scope};
 use super::lang::{
-    ActionSpec, DataSpec, EmitMap, LangFile, List, PhaseRules, RuleFiles, RuleSpec, StageSpec,
+    ActionSpec, DataSpec, EmitMap, LangFile, List, PhaseRules, RowSpec, RuleFiles, RuleSpec,
+    StageSpec,
 };
 use super::pattern::{self, Cap, Pat, Slots, Tpl};
 use super::{Cursor, FnId, Kind, Loc, Run, Store, Tree, Val, Vals};
@@ -85,7 +86,31 @@ struct Emit {
 enum Action {
     Do(Expr),
     Emit(Box<[Emit]>),
+    Row(Box<[RowRule]>),
     Revisit,
+}
+
+/// A `row:` hook: the shape it fills, and the expressions for its columns
+/// followed by the id parts that are not columns.
+struct RowRule {
+    shape: u16,
+    exprs: Box<[Expr]>,
+}
+
+/// The rows one `row:` hook emits: its table, its column names, and how its
+/// id is made. Values arrive in column order, then the extra id parts.
+pub struct RowShape {
+    pub table: String,
+    pub columns: Vec<String>,
+    pub id: Option<(String, Vec<Part>)>,
+    pub expect: Vec<(usize, String)>,
+    pub follows: Option<usize>,
+}
+
+#[derive(Clone, Copy)]
+pub enum Part {
+    Column(usize),
+    Value(usize),
 }
 
 enum Children {
@@ -240,6 +265,7 @@ pub struct Phase {
     pub(super) links: super::Links,
     pub(super) data: Vec<Vec<Vals>>,
     pub(super) defs: Vec<Def>,
+    pub rows: Vec<RowShape>,
     body: Body,
     slots: usize,
 }
@@ -372,6 +398,7 @@ struct Loader<'a> {
     data: &'a BTreeMap<String, DataSpec>,
     lang_data: Vec<BTreeMap<String, DataSpec>>,
     lang: &'a Lang,
+    rows: std::cell::RefCell<Vec<RowShape>>,
 }
 
 impl Phase {
@@ -427,12 +454,13 @@ impl Phase {
                 })
                 .collect(),
             lang,
+            rows: Default::default(),
         };
         let shared = files.shared.phases.get(&spec.name);
         fn own<'f>(file: &'f Option<LangFile>, name: &str) -> Option<&'f PhaseRules> {
             file.as_ref().and_then(|f| f.phases.get(name))
         }
-        let family = spec.scope == "family";
+        let family = matches!(spec.scope.as_str(), "family" | "graph");
         let (body, slots) = match walk {
             _ if family => loader.flow(
                 shared,
@@ -478,6 +506,7 @@ impl Phase {
             name: spec.name.clone(),
             label: Box::leak(label.into_boxed_str()),
             defs,
+            rows: loader.rows.take(),
             budget: spec.budget.clone(),
             scope: spec.scope.clone(),
             after: spec.after.clone(),
@@ -673,7 +702,8 @@ impl Loader<'_> {
             ("exit", spec.exit.is_some()),
             ("late", spec.late.is_some()),
         ];
-        let flows = self.walk == Walk::Flow || self.spec.scope == "family";
+        let flows =
+            self.walk == Walk::Flow || matches!(self.spec.scope.as_str(), "family" | "graph");
         for (hook, used) in flow {
             if used && !flows {
                 return Err(LoadError(format!("hook {hook} needs a flow walk")));
@@ -692,7 +722,11 @@ impl Loader<'_> {
                 )));
             }
         }
-        for (hook, used) in [("emit", spec.emit.is_some()), ("tag", spec.tag.is_some())] {
+        for (hook, used) in [
+            ("emit", spec.emit.is_some()),
+            ("tag", spec.tag.is_some()),
+            ("row", spec.row.is_some()),
+        ] {
             if used && !allowed(hook) {
                 return Err(LoadError(format!(
                     "{hook} is not allowed in {}",
@@ -843,6 +877,57 @@ impl Loader<'_> {
         })
     }
 
+    fn row(&self, slots: &Slots, spec: &RowSpec) -> Result<RowRule, LoadError> {
+        let scope = self.scope(slots, false);
+        let columns: Vec<String> = spec.columns.keys().cloned().collect();
+        let mut exprs = spec
+            .columns
+            .values()
+            .map(|src| Expr::parse(src, &scope))
+            .collect::<Result<Vec<_>, _>>()?;
+        let column = |name: &str| {
+            columns
+                .iter()
+                .position(|c| c == name)
+                .ok_or_else(|| LoadError(format!("row {}: no column {name}", spec.table)))
+        };
+        let id = match &spec.id {
+            None => None,
+            Some(id) => {
+                let mut parts = Vec::new();
+                for part in &id.parts {
+                    parts.push(match columns.iter().position(|c| c == part) {
+                        Some(at) => Part::Column(at),
+                        None => {
+                            exprs.push(Expr::parse(part, &scope)?);
+                            Part::Value(exprs.len() - 1)
+                        }
+                    });
+                }
+                Some((id.seed.clone(), parts))
+            }
+        };
+        let expect = spec
+            .expect
+            .iter()
+            .map(|(name, table)| Ok((column(name)?, table.clone())))
+            .collect::<Result<_, LoadError>>()?;
+        let follows = spec.follows.as_deref().map(column).transpose()?;
+        let mut rows = self.rows.borrow_mut();
+        rows.push(RowShape {
+            table: spec.table.clone(),
+            columns,
+            id,
+            expect,
+            follows,
+        });
+        Ok(RowRule {
+            shape: u16::try_from(rows.len() - 1)
+                .map_err(|_| LoadError("more than 65536 row hooks".into()))?,
+            exprs: exprs.into(),
+        })
+    }
+
     fn flow_rule(
         &self,
         spec: &RuleSpec,
@@ -854,6 +939,10 @@ impl Loader<'_> {
         let mut enter = self.actions(slots, &spec.enter)?;
         if let Some(map) = &spec.emit {
             enter.push(Action::Emit(self.emits(slots, map)?));
+        }
+        if let Some(rows) = &spec.row {
+            let rows = rows.items().iter().map(|r| self.row(slots, r));
+            enter.push(Action::Row(rows.collect::<Result<_, _>>()?));
         }
         let children = match spec.children.as_ref().map(List::items) {
             None => Children::Visit,
@@ -1073,6 +1162,33 @@ impl Emit {
     }
 }
 
+impl RowRule {
+    /// One row per combination of the values; a column with no value is empty.
+    fn run<S: Store>(&self, run: &mut Run<S>, caps: &[Vals]) {
+        let Some(at) = caps[0].first().and_then(|v| v.loc()) else {
+            return;
+        };
+        let vals: Vec<Vals> = self.exprs.iter().map(|e| e.eval(run, caps)).collect();
+        let total: usize = vals.iter().map(|v| v.len().max(1)).product();
+        for mut n in 0..total {
+            let values = vals
+                .iter()
+                .map(|v| {
+                    let len = v.len().max(1);
+                    let value = v.get(n % len).copied();
+                    n /= len;
+                    value
+                })
+                .collect();
+            run.rows.push(super::Row {
+                shape: self.shape,
+                at,
+                values,
+            });
+        }
+    }
+}
+
 enum Item {
     Visit(u32),
     Between(u16, u32),
@@ -1150,6 +1266,7 @@ impl<S: Store> Scratch<S> {
                     expr.eval(run, &self.vals);
                 }
                 Action::Emit(emits) => emits.iter().for_each(|e| e.run(run, &self.vals)),
+                Action::Row(rows) => rows.iter().for_each(|r| r.run(run, &self.vals)),
                 Action::Revisit => revisit = true,
             }
         }
@@ -1161,15 +1278,29 @@ impl Phase {
     /// Walks the tree in source order. Returns the nodes whose rules have
     /// `late` actions that no `revisit` ran yet.
     pub fn flow<S: Store>(&self, run: &mut Run<S>, root: Cursor<'_, S>) -> Vec<Late> {
+        let stack = root
+            .children_rev()
+            .map(|c| Item::Visit(c.index()))
+            .collect();
+        self.walk(run, root, stack)
+    }
+
+    /// Walks the whole tree in source order, its root first.
+    pub fn flow_all<S: Store>(&self, run: &mut Run<S>, root: Cursor<'_, S>) -> Vec<Late> {
+        self.walk(run, root, vec![Item::Visit(root.index())])
+    }
+
+    fn walk<S: Store>(
+        &self,
+        run: &mut Run<S>,
+        root: Cursor<'_, S>,
+        mut stack: Vec<Item>,
+    ) -> Vec<Late> {
         let Body::Flow { rules, by_kind } = &self.body else {
             return Vec::new();
         };
         let mut w = Scratch::<S>::new(self.slots);
         let mut late = Vec::new();
-        let mut stack: Vec<Item> = root
-            .children_rev()
-            .map(|c| Item::Visit(c.index()))
-            .collect();
         while let Some(item) = stack.pop() {
             if !run.step() {
                 return Vec::new();

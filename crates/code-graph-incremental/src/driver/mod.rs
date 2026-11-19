@@ -217,6 +217,7 @@ fn finish(env: &Env, state: &mut State, run: &Sentinel) -> Result<(), Error> {
         run.check()?;
         match phase.scope.as_str() {
             "project" => state.project(env),
+            "graph" => {}
             "family" => loop {
                 let graph = EdgeIndex::new(&state.edges);
                 let known: std::collections::HashSet<Edge> = state.edges.iter().copied().collect();
