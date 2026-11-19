@@ -1,5 +1,12 @@
 # yaml-language-server: $schema=schemas/schema-migrations.schema.json
 migrations:
+- version: 130
+  scope: code
+  note: >-
+    Markdown files named AGENTS.md, CLAUDE.md or CLAUDE.local.md get a file-level
+    Definition(AgentInstructions), and SKILL.md files get a Definition(Skill) named by
+    front matter name or its directory. Both copy the file's front_matter_* values;
+    re-index code to backfill them.
 - version: 129
   scope: none
   note: Ontology YAML comments removed; DDL and reindex output byte-identical.

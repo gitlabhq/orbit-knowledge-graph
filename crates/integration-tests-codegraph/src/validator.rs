@@ -690,8 +690,12 @@ pub fn write_fixtures(fixtures: &[FixtureFile], root: &std::path::Path) -> Vec<(
                 std::fs::create_dir_all(parent)
                     .unwrap_or_else(|e| panic!("Failed to create dir {}: {e}", parent.display()));
             }
-            std::fs::write(&path, &fixture.content)
-                .unwrap_or_else(|e| panic!("Failed to write {}: {e}", path.display()));
+            match &fixture.symlink {
+                Some(target) => std::os::unix::fs::symlink(target, &path)
+                    .unwrap_or_else(|e| panic!("Failed to link {}: {e}", path.display())),
+                None => std::fs::write(&path, &fixture.content)
+                    .unwrap_or_else(|e| panic!("Failed to write {}: {e}", path.display())),
+            }
             (fixture.path.clone(), fixture.content.len() as u64)
         })
         .collect()

@@ -1,4 +1,4 @@
-use orbit_utils::markdown::{self, FRONT_MATTER_FIELDS, FRONT_MATTER_NAME, LineIndex};
+use orbit_utils::markdown::{self, AgentFile, FRONT_MATTER_FIELDS, FRONT_MATTER_NAME, LineIndex};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical;
@@ -31,15 +31,21 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
         .iter()
         .filter_map(|link| link.target(label).map(|target| (link.section, target)))
         .collect();
-    let front_matter_nodes = document.front_matter.as_ref().map_or(0, |block| {
-        3 + block
+    let agent_file = AgentFile::classify(label);
+    let front_matter_values = document.front_matter.as_ref().map_or(0, |block| {
+        block
             .values
             .iter()
             .filter(|value| !value.is_empty())
             .count()
     });
+    let front_matter_nodes = document
+        .front_matter
+        .as_ref()
+        .map_or(0, |_| 3 + front_matter_values);
+    let agent_file_nodes = agent_file.map_or(0, |_| 2 + front_matter_values);
     let mut tree = Tree::with_capacity(
-        1 + front_matter_nodes + 4 * sections.len() + 2 * targets.len(),
+        1 + agent_file_nodes + front_matter_nodes + 4 * sections.len() + 2 * targets.len(),
         node(
             lang.intern_kind("document"),
             lang.syms.intern(label),
@@ -50,19 +56,40 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
     tree.label = label.to_string();
     tree.source = std::sync::Arc::from(source);
 
-    if let Some(block) = document.front_matter {
+    let append_front_matter_values = |tree: &mut Tree, parent, start, end| {
+        let Some(block) = &document.front_matter else {
+            return;
+        };
+        for (field, value) in FRONT_MATTER_FIELDS.iter().zip(&block.values) {
+            if !value.is_empty() {
+                let kind = lang.intern_kind(&format!("__{}", field.column));
+                tree.append(parent, node(kind, lang.syms.intern(value), start, end));
+            }
+        }
+    };
+
+    if let Some(agent_file) = agent_file {
+        let (start, end) = (0, source.len());
+        let kind = match agent_file {
+            AgentFile::Instructions => "agent_instructions",
+            AgentFile::Skill => "skill",
+        };
+        let root = tree.root;
+        let id = tree.append(root, node(lang.intern_kind(kind), 0, start, end));
+        let name = agent_file.name(label, document.front_matter.as_ref());
+        let name = lang.syms.intern(name);
+        tree.append(id, node(lang.intern_kind("name"), name, start, end));
+        append_front_matter_values(&mut tree, id, start, end);
+    }
+
+    if let Some(block) = &document.front_matter {
         let (start, end) = (block.start, block.end);
         let root = tree.root;
         let id = tree.append(root, node(lang.intern_kind("front_matter"), 0, start, end));
         let name = lang.syms.intern(FRONT_MATTER_NAME);
         tree.append(id, node(lang.intern_kind("name"), name, start, end));
         tree.append(id, node(lang.intern_kind("segment"), name, start, end));
-        for (field, value) in FRONT_MATTER_FIELDS.iter().zip(&block.values) {
-            if !value.is_empty() {
-                let kind = lang.intern_kind(&format!("__{}", field.column));
-                tree.append(id, node(kind, lang.syms.intern(value), start, end));
-            }
-        }
+        append_front_matter_values(&mut tree, id, start, end);
     }
 
     let mut ids = Vec::with_capacity(sections.len());

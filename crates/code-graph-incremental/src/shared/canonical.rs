@@ -222,6 +222,13 @@ pub enum Canonical {
     Link,
     #[strum(serialize = "__anchor")]
     Anchor,
+    #[strum(
+        serialize = "__agent_instructions",
+        props(def_type = "true", display = "AgentInstructions")
+    )]
+    AgentInstructions,
+    #[strum(serialize = "__skill", props(def_type = "true", display = "Skill"))]
+    Skill,
 }
 
 impl From<Canonical> for u16 {
