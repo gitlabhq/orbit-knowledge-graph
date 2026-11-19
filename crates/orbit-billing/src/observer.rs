@@ -42,6 +42,7 @@ struct BillingMetadata<'a> {
     source_type: &'a str,
     coding_agent: Option<&'a str>,
     is_gitlab_team_member: Option<bool>,
+    orbit_quota_exempt: Option<bool>,
     orbit_version: &'static str,
 }
 
@@ -72,6 +73,7 @@ impl BillingObserver {
             source_type: &self.inputs.source_type,
             coding_agent: self.inputs.coding_agent.as_deref(),
             is_gitlab_team_member: self.inputs.is_gitlab_team_member,
+            orbit_quota_exempt: self.inputs.orbit_quota_exempt,
             orbit_version: orbit_utils::version::get(),
         };
         serde_json::to_value(&metadata).unwrap_or_else(|e| {
@@ -304,6 +306,7 @@ mod tests {
             deployment_type: Some(".com".into()),
             realm: Some("SaaS".into()),
             is_gitlab_team_member: Some(true),
+            orbit_quota_exempt: Some(true),
             coding_agent: Some("claude-code".into()),
             has_license_checksum: false,
         }
@@ -330,6 +333,7 @@ mod tests {
         assert_eq!(metadata["source_type"], "mcp");
         assert_eq!(metadata["coding_agent"], "claude-code");
         assert_eq!(metadata["is_gitlab_team_member"], true);
+        assert_eq!(metadata["orbit_quota_exempt"], true);
         assert_eq!(metadata["orbit_version"], orbit_utils::version::get());
     }
 
@@ -338,6 +342,7 @@ mod tests {
         let inputs = BillingInputs {
             coding_agent: None,
             is_gitlab_team_member: None,
+            orbit_quota_exempt: None,
             ..test_inputs()
         };
         let obs = BillingObserver::new(None, inputs);
@@ -346,6 +351,7 @@ mod tests {
 
         assert!(metadata["coding_agent"].is_null());
         assert!(metadata["is_gitlab_team_member"].is_null());
+        assert!(metadata["orbit_quota_exempt"].is_null());
     }
 
     #[test]
@@ -356,6 +362,7 @@ mod tests {
             "source_type",
             "coding_agent",
             "is_gitlab_team_member",
+            "orbit_quota_exempt",
             "orbit_version",
         ];
         let metrics = serde_json::to_value(ExecMetrics::default()).unwrap();

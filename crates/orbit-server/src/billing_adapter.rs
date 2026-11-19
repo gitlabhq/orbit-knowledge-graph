@@ -26,6 +26,7 @@ pub fn billing_inputs(claims: &Claims, coding_agent: Option<String>) -> BillingI
         root_namespace_id: claims.root_namespace_id,
         deployment_type: claims.deployment_type.clone(),
         is_gitlab_team_member: claims.is_gitlab_team_member,
+        orbit_quota_exempt: claims.orbit_quota_exempt,
         coding_agent,
         has_license_checksum: claims.license_checksum.is_some(),
     }
@@ -44,6 +45,7 @@ impl From<&Claims> for QuotaCheckInputs {
             instance_version: c.instance_version.clone(),
             license_checksum: c.license_checksum.clone(),
             is_gitlab_team_member: c.is_gitlab_team_member.unwrap_or(false),
+            orbit_quota_exempt: c.orbit_quota_exempt.unwrap_or(false),
         }
     }
 }
