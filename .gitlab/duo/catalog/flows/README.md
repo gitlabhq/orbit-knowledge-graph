@@ -15,7 +15,7 @@ this table.
 
 | Setting | Value |
 |---|---|
-| `SKILLS_REF` in `docs-write.yml` | `e9224bc25b3e5ade7e6628f3f53ef60522739899`, the head of `team/skills` MR 30, unmerged. Re-pin to the squash commit once it merges. |
+| `SKILLS_REF` in `docs-write.yml` | `7ff82867e8bb0b036dd0292af3db469141fa411b`, the squash commit of `team/skills` MR 30 on main |
 | `MODE` in `docs-write.yml` | `shadow` |
 | `DOCS_REVIEWERS` in `docs-write.yml` | `fneill,z_painter`: technical writers who approve and merge the docs MRs |
 | AI Catalog item in this project | Not registered yet |
