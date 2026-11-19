@@ -161,6 +161,52 @@ pub trait Module: Sized + 'static {
     fn functions() -> &'static [Function<Self>];
     fn start<'t, S: Store>(_cx: &mut Cx<'_, 't, Self, S>, _root: Cursor<'t, S>) {}
     fn finish<S: Store>(_cx: &mut Cx<'_, '_, Self, S>) {}
+    fn indexes() -> &'static [IndexDecl] {
+        &[]
+    }
+}
+
+/// An index a module declares over a family's trees and edges. The engine
+/// builds it the first time a file of a family run asks for it, and every
+/// file of that run shares it.
+pub struct IndexDecl {
+    pub name: &'static str,
+    pub build: fn(&[Tree<Compact>], &[Edge]) -> Box<dyn Any + Send + Sync>,
+}
+
+/// The declared indexes of one family run, each built at most once.
+pub struct Indexes<'t> {
+    trees: &'t [Tree<Compact>],
+    edges: &'t [Edge],
+    built: Box<[std::sync::OnceLock<Box<dyn Any + Send + Sync>>]>,
+}
+
+static INDEXES: LazyLock<Vec<(u8, &'static IndexDecl)>> = LazyLock::new(|| {
+    modules::ALL
+        .iter()
+        .enumerate()
+        .flat_map(|(slot, m)| (m.indexes)().iter().map(move |d| (slot as u8, d)))
+        .collect()
+});
+
+impl<'t> Indexes<'t> {
+    pub fn new(trees: &'t [Tree<Compact>], edges: &'t [Edge]) -> Self {
+        Self {
+            trees,
+            edges,
+            built: (0..INDEXES.len())
+                .map(|_| std::sync::OnceLock::new())
+                .collect(),
+        }
+    }
+
+    fn get(&self, slot: u8, name: &str) -> Option<&(dyn Any + Send + Sync)> {
+        let at = INDEXES
+            .iter()
+            .position(|(s, d)| *s == slot && d.name == name)?;
+        let built = self.built[at].get_or_init(|| (INDEXES[at].1.build)(self.trees, self.edges));
+        Some(built.as_ref())
+    }
 }
 
 pub type Call<M, S> = for<'r, 't> fn(&mut Cx<'r, 't, M, S>, &[Vals]) -> Vals;
@@ -195,6 +241,7 @@ pub struct Registration {
     describe: fn(u8) -> Vec<Entry>,
     compact: Hooks<Compact>,
     mutable: Hooks<Mutable>,
+    indexes: fn() -> &'static [IndexDecl],
 }
 
 pub const fn register<M: Module>() -> Registration {
@@ -212,6 +259,7 @@ pub const fn register<M: Module>() -> Registration {
             start: start::<M, Mutable>,
             finish: finish::<M, Mutable>,
         },
+        indexes: M::indexes,
     }
 }
 
@@ -407,6 +455,7 @@ pub struct Run<'t, S: Store = Compact> {
     killed: Option<Killed>,
     max_edges: usize,
     graph: Option<&'t EdgeIndex>,
+    indexes: Option<&'t Indexes<'t>>,
     fns: &'t [program::Def],
     graph_fi: u32,
     lang: usize,
@@ -459,6 +508,7 @@ impl<'t, S: Store> Run<'t, S> {
             killed: None,
             max_edges: 0,
             graph: None,
+            indexes: None,
             fns: &[],
             graph_fi: 0,
             lang: 0,
@@ -717,12 +767,14 @@ pub fn scope_budget(phase: &Phase, env: &Env, run: &Sentinel) -> Sentinel {
 pub fn run_family(
     phase: &Phase,
     trees: &[Tree<Compact>],
+    edges: &[Edge],
     graph: &EdgeIndex,
     env: &Env,
     budget: &Sentinel,
 ) -> Result<Vec<Edge>, Killed> {
     use rayon::prelude::*;
     let scope = scope_budget(phase, env, budget);
+    let indexes = Indexes::new(trees, edges);
     let edges: Vec<Result<Vec<Edge>, Killed>> = (0..trees.len())
         .into_par_iter()
         .map(|fi| {
@@ -730,6 +782,7 @@ pub fn run_family(
             let mut run = Run::new(trees, fi as u32, env, phase, &scope, &file);
             run.graph = Some(graph);
             run.graph_fi = fi as u32;
+            run.indexes = Some(&indexes);
             let root = Cursor::new(trees, fi as u32, 0);
             for &slot in &phase.modules {
                 (Compact::hooks(&modules::ALL[usize::from(slot)]).start)(&mut run, slot, 0);
@@ -855,6 +908,11 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
 
     pub fn tags(&self) -> ReservedTags {
         self.run.tags
+    }
+
+    /// One of this module's declared indexes, in a family run.
+    pub fn index<T: 'static>(&self, name: &str) -> Option<&'t T> {
+        self.run.indexes?.get(self.slot, name)?.downcast_ref()
     }
 
     /// A value's text: a symbol as is, or a node's own text.
