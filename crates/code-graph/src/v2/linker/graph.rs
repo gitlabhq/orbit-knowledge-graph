@@ -195,6 +195,27 @@ impl ReexportIndex {
     }
 }
 
+/// Maps an import path to the repository directory that holds the imported
+/// package, for languages whose package is a directory rather than an FQN.
+#[derive(Default)]
+pub struct ImportDirectoryIndex {
+    by_import_path: rustc_hash::FxHashMap<String, String>,
+}
+
+impl ImportDirectoryIndex {
+    pub fn insert(&mut self, import_path: String, directory: String) {
+        self.by_import_path.insert(import_path, directory);
+    }
+
+    pub fn directory(&self, import_path: &str) -> Option<&str> {
+        self.by_import_path.get(import_path).map(String::as_str)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_import_path.is_empty()
+    }
+}
+
 pub struct CodeGraph {
     pub graph: DiGraph<GraphNode, GraphEdge>,
     pub defs: Vec<GraphDef>,
@@ -927,6 +948,36 @@ impl CodeGraph {
             Some(id) => self.indexes.by_name.lookup(id),
             None => &[],
         }
+    }
+
+    /// Definitions named `name` in files directly under `directory` that are
+    /// not nested in another definition of their file. Methods are excluded;
+    /// they are addressed through their receiver.
+    pub fn lookup_top_level_in_directory(&self, directory: &str, name: &str) -> Vec<NodeIndex> {
+        let sep = self.sep();
+        self.lookup_name(name)
+            .iter()
+            .copied()
+            .filter(|&idx| {
+                let path = self.graph[idx].path();
+                let Some(def) = self.try_def(idx) else {
+                    return false;
+                };
+                if def.kind == crate::v2::types::DefKind::Method
+                    || super::imports::dir_of(path) != directory
+                {
+                    return false;
+                }
+                let parent = self
+                    .str(def.fqn)
+                    .rsplit_once(sep)
+                    .map_or("", |(parent, _)| parent);
+                !self
+                    .lookup_fqn(parent)
+                    .iter()
+                    .any(|&p| self.graph[p].path() == path)
+            })
+            .collect()
     }
 
     pub fn name_exists(&self, key: &str) -> bool {

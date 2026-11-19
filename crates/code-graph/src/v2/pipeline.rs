@@ -1528,6 +1528,20 @@ impl FamilyPipeline {
             .first()
             .map(|build| Arc::new(build(&graph, expected_sep)));
 
+        let import_directory_builders: Vec<_> = member_ctxs
+            .values()
+            .filter_map(|lc| lc.rules.hooks.import_directory_index_builder)
+            .collect();
+        assert!(
+            import_directory_builders.len() <= 1,
+            "FamilyPipeline supports at most one import_directory_index_builder per family"
+        );
+        let shared_import_directory_index = import_directory_builders
+            .first()
+            .map(|build| build(&graph))
+            .filter(|index| !index.is_empty())
+            .map(Arc::new);
+
         let t2 = std::time::Instant::now();
         let total_edges = std::sync::atomic::AtomicUsize::new(0);
 
@@ -1570,6 +1584,9 @@ impl FamilyPipeline {
                 }
                 if let Some(idx) = &shared_reexport_index {
                     resolver.set_reexport_index(Arc::clone(idx));
+                }
+                if let Some(idx) = &shared_import_directory_index {
+                    resolver.set_import_directory_index(Arc::clone(idx));
                 }
 
                 let t_resolve = std::time::Instant::now();
@@ -1711,6 +1728,9 @@ impl FamilyPipeline {
                     }
                     if let Some(idx) = &shared_reexport_index {
                         resolver.set_reexport_index(Arc::clone(idx));
+                    }
+                    if let Some(idx) = &shared_import_directory_index {
+                        resolver.set_import_directory_index(Arc::clone(idx));
                     }
                     let mut edges = Vec::new();
                     for failed in failed_chains {

@@ -137,6 +137,9 @@ pub type ImportedSymbolFallbackCandidatesHook =
 /// Build the language's symbol re-export index from the linked graph.
 pub type ReexportIndexBuilder = fn(&CodeGraph, &str) -> super::graph::ReexportIndex;
 
+/// Build the language's import-path to package-directory index from the linked graph.
+pub type ImportDirectoryIndexBuilder = fn(&CodeGraph) -> super::graph::ImportDirectoryIndex;
+
 /// Language-specific resolver behavior. All fields default to `None`.
 #[derive(Default)]
 pub struct ResolverHooks {
@@ -167,6 +170,9 @@ pub struct ResolverHooks {
     /// Build the language's re-export index; when set, callers bind through
     /// re-exports to the concrete definition instead of an `ImportedSymbol`.
     pub reexport_index_builder: Option<ReexportIndexBuilder>,
+    /// Build the language's import directory index; when set, a member of an
+    /// imported package resolves to top-level definitions in its directory.
+    pub import_directory_index_builder: Option<ImportDirectoryIndexBuilder>,
 }
 
 pub struct ResolutionRules {

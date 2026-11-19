@@ -6,10 +6,14 @@ use treesitter_visit::extract::Extract;
 use treesitter_visit::extract::{child_of_kind, field, field_chain, text};
 use treesitter_visit::predicate::*;
 
+use crate::v2::linker::graph::ImportDirectoryIndex;
+use crate::v2::linker::imports::dir_of;
 use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolveStage, ResolverHooks,
 };
-use crate::v2::linker::{HasRules, ResolutionRules};
+use crate::v2::linker::{CodeGraph, HasRules, ResolutionRules};
+use rustc_hash::FxHashSet;
+use std::path::Path;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::tree_sitter::StrDoc;
@@ -55,11 +59,11 @@ impl DslLanguage for GoDsl {
         vec![
             scope("function_declaration", "Function")
                 .def_kind(DefKind::Function)
-                .metadata(metadata().return_type(field("result"))),
+                .metadata(metadata().return_type(go_result_type())),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
                 .metadata(
-                    metadata().return_type(field("result")).receiver_type(
+                    metadata().return_type(go_result_type()).receiver_type(
                         field("receiver").then(
                             child_of_kind("parameter_declaration")
                                 .then(field("type").inner("pointer_type", "type_identifier")),
@@ -71,7 +75,7 @@ impl DslLanguage for GoDsl {
             scope("method_elem", "Method")
                 .def_kind(DefKind::Method)
                 .no_scope()
-                .metadata(metadata().return_type(field("result"))),
+                .metadata(metadata().return_type(go_result_type())),
             // Unconditional fallback first — reverse iteration means conditional
             // rules (Struct, Interface) are checked before the fallback.
             scope("type_spec", "Type").def_kind(DefKind::Other),
@@ -199,6 +203,11 @@ impl DslLanguage for GoDsl {
     }
 }
 
+/// The result type with a pointer's `*` dropped, so `*T` matches the receiver `T`.
+fn go_result_type() -> Extract {
+    field("result").try_nav(Child, Kind("type_identifier"))
+}
+
 /// Extract embedded (promoted) types from a Go struct's field_declaration_list.
 /// Embedded fields have a `type` but no `name`, e.g. `type Foo struct { Bar }`.
 fn go_embedded_types(node: &N<'_>) -> Vec<String> {
@@ -301,6 +310,7 @@ impl HasRules for GoRules {
                 ImportStrategy::ScopeFqnWalk,
                 ImportStrategy::ExplicitImport,
                 ImportStrategy::SameFile,
+                ImportStrategy::WildcardImport,
             ],
             ReceiverMode::None,
             ".",
@@ -313,7 +323,133 @@ impl HasRules for GoRules {
                 "append", "cap", "clear", "close", "complex", "copy", "delete", "imag", "len",
                 "make", "max", "min", "new", "panic", "print", "println", "real", "recover",
             ],
+            import_directory_index_builder: Some(build_go_import_directory_index),
             ..Default::default()
         })
+    }
+}
+
+/// Real `go.mod` files are a few KiB; anything larger is not read.
+const GO_MOD_MAX_BYTES: u64 = 1 << 20;
+
+/// Maps each import of a repository package to the package directory, through
+/// the `module` path of the `go.mod` that encloses the directory. Go package
+/// names repeat across directories, so the FQN alone cannot pick the target.
+fn build_go_import_directory_index(graph: &CodeGraph) -> ImportDirectoryIndex {
+    let mut index = ImportDirectoryIndex::default();
+    let package_dirs: FxHashSet<&str> = graph
+        .files()
+        .filter(|(_, file)| file.language == Some(Language::Go))
+        .map(|(_, file)| dir_of(&file.path))
+        .collect();
+    let modules = go_modules(Path::new(&graph.root_path), &package_dirs);
+    if modules.is_empty() {
+        return index;
+    }
+    let mut seen: FxHashSet<&str> = FxHashSet::default();
+    for (_, _, import) in graph.imports_iter() {
+        let import_path = graph.str(import.path);
+        if !seen.insert(import_path) {
+            continue;
+        }
+        if let Some(directory) = go_package_directory(&modules, import_path)
+            && package_dirs.contains(directory.as_str())
+        {
+            index.insert(import_path.to_string(), directory);
+        }
+    }
+    index
+}
+
+/// `(module path, module directory)` for each `go.mod` in or above a package directory.
+fn go_modules(root: &Path, package_dirs: &FxHashSet<&str>) -> Vec<(String, String)> {
+    let mut checked: FxHashSet<&str> = FxHashSet::default();
+    let mut modules = Vec::new();
+    for &package_dir in package_dirs {
+        let mut dir = package_dir;
+        while checked.insert(dir) {
+            if let Some(module) = read_go_module(&root.join(dir).join("go.mod")) {
+                modules.push((module, dir.to_string()));
+            }
+            if dir.is_empty() {
+                break;
+            }
+            dir = dir_of(dir);
+        }
+    }
+    modules
+}
+
+fn read_go_module(path: &Path) -> Option<String> {
+    let metadata = std::fs::symlink_metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > GO_MOD_MAX_BYTES {
+        return None;
+    }
+    parse_go_module(&std::fs::read_to_string(path).ok()?)
+}
+
+fn parse_go_module(source: &str) -> Option<String> {
+    source.lines().find_map(|line| {
+        let line = line.split("//").next()?.trim();
+        let module = line.strip_prefix("module")?;
+        if !module.starts_with(char::is_whitespace) {
+            return None;
+        }
+        let module = module.trim().trim_matches(|c| c == '"' || c == '`');
+        (!module.is_empty()).then(|| module.to_string())
+    })
+}
+
+/// The repository directory of `import_path` under the longest module path that prefixes it.
+fn go_package_directory(modules: &[(String, String)], import_path: &str) -> Option<String> {
+    let (module, module_dir) = modules
+        .iter()
+        .filter(|(module, _)| {
+            import_path
+                .strip_prefix(module.as_str())
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+        })
+        .max_by_key(|(module, _)| module.len())?;
+    let rest = import_path[module.len()..].trim_start_matches('/');
+    Some(match (module_dir.is_empty(), rest.is_empty()) {
+        (true, _) => rest.to_string(),
+        (false, true) => module_dir.clone(),
+        (false, false) => format!("{module_dir}/{rest}"),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_go_module_reads_the_module_directive() {
+        let source = "// header\nmodule example.com/m // trailing\n\ngo 1.22\n";
+        assert_eq!(parse_go_module(source).as_deref(), Some("example.com/m"));
+        assert_eq!(
+            parse_go_module("module \"example.com/quoted\"\n").as_deref(),
+            Some("example.com/quoted")
+        );
+        assert_eq!(parse_go_module("modules x\ngo 1.22\n"), None);
+    }
+
+    #[test]
+    fn go_package_directory_picks_the_longest_module() {
+        let modules = vec![
+            ("example.com/m".to_string(), String::new()),
+            ("example.com/m/tools".to_string(), "tools".to_string()),
+            ("k8s.io/api".to_string(), "staging/api".to_string()),
+        ];
+        let dir = |path| go_package_directory(&modules, path);
+        assert_eq!(
+            dir("example.com/m/internal/x").as_deref(),
+            Some("internal/x")
+        );
+        assert_eq!(dir("example.com/m/tools/gen").as_deref(), Some("tools/gen"));
+        assert_eq!(dir("example.com/m/tools").as_deref(), Some("tools"));
+        assert_eq!(dir("k8s.io/api/v1").as_deref(), Some("staging/api/v1"));
+        assert_eq!(dir("example.com/m").as_deref(), Some(""));
+        assert_eq!(dir("example.com/mx/y"), None);
+        assert_eq!(dir("fmt"), None);
     }
 }
