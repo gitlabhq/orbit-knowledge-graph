@@ -459,50 +459,31 @@ impl HydrationAssertions {
         };
         for (index, expected) in self.templates.iter().enumerate() {
             let label = format!("{label}[{index}]");
-            let found = partial_matches(expected, &actual, &label)?;
-            if found.is_empty() {
+            let expected = serde_json::Value::Object(expected.clone());
+            let mismatches: Vec<_> = actual
+                .iter()
+                .map(|template| crate::scenario::subset_mismatch(&label, &expected, template))
+                .collect();
+            if !mismatches.iter().any(Option::is_none) {
                 let related: Vec<_> = actual
                     .iter()
-                    .filter(|template| {
+                    .zip(&mismatches)
+                    .filter(|(template, _)| {
                         ["node_alias", "entity_type"].iter().any(|key| {
                             expected
                                 .get(*key)
                                 .is_some_and(|value| template.get(*key) == Some(value))
                         })
                     })
+                    .map(|(_, mismatch)| mismatch.clone().unwrap())
                     .collect();
                 return Err(format!(
-                    "{label}: no template matches {}\nsame entity or alias: {}",
-                    serde_json::Value::Object(expected.clone()),
-                    serde_json::to_string(&related).unwrap()
+                    "{label}: no template matches {expected}\nsame entity or alias: {related:?}"
                 ));
             }
         }
         Ok(())
     }
-}
-
-fn partial_matches<'a>(
-    expected: &serde_json::Map<String, serde_json::Value>,
-    actual: &'a [serde_json::Value],
-    label: &str,
-) -> Result<Vec<&'a serde_json::Value>, String> {
-    if let Some(known) = actual.first().and_then(serde_json::Value::as_object)
-        && let Some(unknown) = expected.keys().find(|key| !known.contains_key(*key))
-    {
-        return Err(format!(
-            "{label}: unknown field {unknown}; fields: {:?}",
-            known.keys().collect::<Vec<_>>()
-        ));
-    }
-    Ok(actual
-        .iter()
-        .filter(|item| {
-            expected
-                .iter()
-                .all(|(key, value)| item.get(key) == Some(value))
-        })
-        .collect())
 }
 
 #[derive(Deserialize)]
@@ -573,9 +554,12 @@ impl ResultContextAssertions {
                 ));
             }
             for (alias, expected) in nodes {
-                let node = std::slice::from_ref(&actual[alias.as_str()]);
-                if partial_matches(expected, node, &format!("{label}.nodes.{alias}"))?.is_empty() {
-                    return Err(format!("{label}.nodes.{alias}: {}", node[0]));
+                if let Some(mismatch) = crate::scenario::subset_mismatch(
+                    &format!("{label}.nodes.{alias}"),
+                    &serde_json::Value::Object(expected.clone()),
+                    &actual[alias.as_str()],
+                ) {
+                    return Err(mismatch);
                 }
             }
         }
@@ -1836,11 +1820,11 @@ fn output_hydration_and_result_context_assertions_check_their_fields() {
         ),
         (
             "{result_context: {nodes: {u: {entity: User}}}}",
-            "nodes.u: unknown field entity",
+            "nodes.u.entity is missing",
         ),
         (
             "{result_context: {nodes: {u: {entity_type: Project}}}}",
-            "nodes.u: {",
+            "nodes.u.entity_type is \"User\", expected \"Project\"",
         ),
         (
             "{result_context: {neighbors_center: {entity: User, id: 1}}}",

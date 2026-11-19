@@ -69,7 +69,9 @@ the defaults.
 
 `hydration_plan` also takes a list of templates under the plan kind. Each
 listed template must match one template of the plan on every field it names.
-Field values compare exactly, and unknown fields are rejected. Static templates
+Fields match like a format `value` check: a map matches on the keys it lists,
+a list matches by length and position, and other values compare exactly. A
+field the template does not have is reported missing. Static templates
 have `entity_type`, `node_alias`, `destination_table`, `columns`,
 `virtual_columns`, `injected_columns`, `has_traversal_path`, `virtual_filters`,
 and `filter_injected_columns`. Dynamic templates have the same fields without
@@ -183,12 +185,13 @@ A case with `generate` expands before it runs. `kind: named_queries` makes one
 case per embedded named query. Each case renders the query in JSON and GQL with
 its example parameters, keeps every other key of the case, and appends the
 query name to the case name. `kind: repeat` replaces `placeholder` in every
-query string with `text` repeated `count` times, so a fixture can check a large
-input without embedding it.
+string of the case with `repeat` repeated `count` times and then `suffix`, the
+same expansion as a scenario's `{repeat, count, suffix}` value, so a fixture
+can check a large input without embedding it.
 
 ```yaml
 - name: A query past the byte limit is rejected before parsing
-  generate: {kind: repeat, placeholder: LONG_NAME, text: x, count: 40000}
+  generate: {kind: repeat, placeholder: LONG_NAME, repeat: x, count: 40000}
   query:
     gql: |
       MATCH (u:User {username: 'LONG_NAME'}) RETURN u
