@@ -303,7 +303,7 @@ static FUNCTIONS: &[Function<Core>] = &[
         cx.receiver_calls(node(cx, a, 0))
     }),
     function!(Flow, "targets", [one], @uses ["core"."read", "core"."declared"], |cx, a| {
-        cx.targets(node(cx, a, 0))
+        cx.call_targets(node(cx, a, 0))
     }),
     function!(Flow, "unresolved", [one], @uses ["core"."read", "core"."declared"], |cx, a| {
         let call = node(cx, a, 0);

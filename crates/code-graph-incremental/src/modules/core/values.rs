@@ -87,7 +87,7 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         found
     }
 
-    pub(super) fn targets(&mut self, call: Cursor<'t, S>) -> Vals {
+    pub(super) fn call_targets(&mut self, call: Cursor<'t, S>) -> Vals {
         let Some(callee) = call.child(C::Callee).filter(|c| c.sym_opt().is_some()) else {
             return Vals::new();
         };
@@ -120,6 +120,6 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
             return false;
         }
         let implicit = call.has_tag(self.tags().implicit_self);
-        self.read(callee).is_empty() && (!implicit || self.targets(call).is_empty())
+        self.read(callee).is_empty() && (!implicit || self.call_targets(call).is_empty())
     }
 }
