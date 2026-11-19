@@ -1,0 +1,110 @@
+name: "Go: cross-package call sites in closures, assignments, and helpers"
+
+fixtures:
+  - path: go.mod
+    content: |
+      module example.com/m
+
+      go 1.22
+
+  - path: internal/cobra/cobra.go
+    content: |
+      package cobra
+
+      type Command struct {
+      	RunE func() error
+      }
+
+  - path: internal/cmdutils/cmdutils.go
+    content: |
+      package cmdutils
+
+      type UserAssignments struct{}
+
+      func ParseAssignees(names []string) (*UserAssignments, error) {
+      	return &UserAssignments{}, nil
+      }
+
+  - path: internal/mrutils/mrutils.go
+    content: |
+      package mrutils
+
+      func PrintMRApprovalState() {}
+
+  - path: internal/update/update.go
+    content: |
+      package update
+
+      import (
+      	"example.com/m/internal/cmdutils"
+      	"example.com/m/internal/cobra"
+      )
+
+      func NewCmdUpdate() *cobra.Command {
+      	return &cobra.Command{
+      		RunE: func() error {
+      			cmdutils.ParseAssignees(nil)
+      			return nil
+      		},
+      	}
+      }
+
+      func AssignResult() error {
+      	ua, err := cmdutils.ParseAssignees(nil)
+      	_ = ua
+      	return err
+      }
+
+  - path: internal/view/view.go
+    content: |
+      package view
+
+      import "example.com/m/internal/mrutils"
+
+      type Viewer struct{}
+
+      func (v *Viewer) Show() {
+      	mrutils.PrintMRApprovalState()
+      }
+
+      func printTTYMRPreview() {
+      	mrutils.PrintMRApprovalState()
+      }
+
+tests:
+  - name: "a call inside a func literal assigned to a struct field links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'NewCmdUpdate' AND callee.name = 'ParseAssignees'
+      RETURN caller.name AS caller, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: NewCmdUpdate, file: internal/cmdutils/cmdutils.go } }
+
+  - name: "a call whose results are assigned links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'AssignResult' AND callee.name = 'ParseAssignees'
+      RETURN callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: internal/cmdutils/cmdutils.go } }
+
+  - name: "calls from a method and a named helper in another package link"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'PrintMRApprovalState'
+      RETURN caller.name AS caller, callee.file_path AS file
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: Show, file: internal/mrutils/mrutils.go } }
+      - { row: { caller: printTTYMRPreview, file: internal/mrutils/mrutils.go } }
+
+  - name: "the resolved calls emit no imported-symbol fallback"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE sym.import_path STARTS WITH 'example.com/m/'
+      RETURN caller.name AS caller, sym.import_path AS path
+    assert:
+      - { empty: true }
