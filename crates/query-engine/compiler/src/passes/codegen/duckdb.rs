@@ -180,7 +180,11 @@ impl Context {
 
         for union_q in &q.union_all {
             let arm = self.emit_query(union_q)?;
-            parts.push(format!("UNION ALL {arm}"));
+            parts.push(if union_q.ctes.is_empty() {
+                format!("UNION ALL {arm}")
+            } else {
+                format!("UNION ALL ({arm})")
+            });
         }
 
         // Filter out _version ORDER BY (ClickHouse dedup artifact — DuckDB
@@ -275,10 +279,7 @@ impl Context {
                     crate::input::AggFunction::Avg => "AVG",
                     crate::input::AggFunction::Min => "MIN",
                     crate::input::AggFunction::Max => "MAX",
-                    crate::input::AggFunction::Collect => {
-                        self.error = Some("collect is not supported by the DuckDB backend".into());
-                        return String::new();
-                    }
+                    crate::input::AggFunction::Collect => "array_agg",
                 };
                 let argument = argument
                     .as_ref()
@@ -289,6 +290,14 @@ impl Context {
                     if *distinct { "DISTINCT " } else { "" }
                 );
                 let condition = condition.as_ref().map(|value| self.emit_expr(value));
+                if *function == crate::input::AggFunction::Collect {
+                    let nonnull = format!("{argument} IS NOT NULL");
+                    let condition = condition.map_or_else(
+                        || nonnull.clone(),
+                        |condition| format!("({condition}) AND {nonnull}"),
+                    );
+                    return format!("coalesce({expression} FILTER (WHERE {condition}), [])");
+                }
                 if let Some(condition) = condition {
                     expression.push_str(&format!(" FILTER (WHERE {condition})"));
                 }
@@ -355,47 +364,74 @@ impl Context {
                     .join(", ")
             );
         }
-        if name == Function::ToString {
-            return format!("CAST({} AS VARCHAR)", self.emit_expr(&args[0]));
+        if name == Function::If && args.len() == 3 {
+            let cond = self.emit_expr(&args[0]);
+            let then = self.emit_expr(&args[1]);
+            let else_ = self.emit_expr(&args[2]);
+            return format!("CASE WHEN {cond} THEN {then} ELSE {else_} END");
         }
-        if name == Function::ArrayFilter {
+
+        if name == Function::ToString && args.len() == 1 {
+            let inner = self.emit_expr(&args[0]);
+            return format!("CAST({inner} AS VARCHAR)");
+        }
+
+        if name == Function::ToJson && args.len() == 1 {
+            return format!("to_json({})", self.emit_expr(&args[0]));
+        }
+
+        if matches!(
+            name,
+            Function::ArrayFilter | Function::ArrayMap | Function::ArrayExists
+        ) && args.len() == 2
+        {
             let predicate = self.emit_expr(&args[0]);
             let array = self.emit_expr(&args[1]);
-            return format!("list_filter({array}, {predicate})");
+            return match name {
+                Function::ArrayFilter => format!("list_filter({array}, {predicate})"),
+                Function::ArrayMap => format!("list_transform({array}, {predicate})"),
+                _ => format!("(len(list_filter({array}, {predicate})) > 0)"),
+            };
+        }
+        if name == Function::ByteLength && args.len() == 1 {
+            return format!("octet_length(encode({}))", self.emit_expr(&args[0]));
+        }
+        if name == Function::CountSubstrings && args.len() == 2 {
+            return format!(
+                "(len(string_split({}, {})) - 1)",
+                self.emit_expr(&args[0]),
+                self.emit_expr(&args[1])
+            );
         }
 
         let duckdb_name = match name {
             Function::StartsWith => "starts_with",
             Function::EndsWith => "ends_with",
             Function::Lower => "lower",
+            Function::Substring => "substring",
+            Function::ArrayContains => "list_contains",
+            Function::ArrayContainsAny => "list_has_any",
+            Function::ArrayContainsAll => "list_has_all",
             Function::Array => "list_value",
             Function::ArrayConcat => "list_concat",
             Function::ArrayReverse => "list_reverse",
+            Function::ArrayResize => "list_resize",
+            Function::Object => "json_object",
+            Function::Tuple => unreachable!("tuple rendered above"),
             Function::Unnest => "unnest",
             Function::TupleElement => "struct_extract_at",
-            Function::Tuple | Function::ToString | Function::ArrayFilter => {
-                unreachable!("{name} rendered above")
-            }
+            Function::Coalesce => "coalesce",
+            Function::NullIf => "nullif",
+            Function::Concat => "concat",
+            Function::ArgMax | Function::ArgMaxOrNull => "arg_max",
             Function::If
+            | Function::ToString
             | Function::ToJson
-            | Function::Object
-            | Function::Coalesce
-            | Function::NullIf
-            | Function::ByteLength
-            | Function::Substring
-            | Function::Concat
-            | Function::CountSubstrings
-            | Function::ArrayResize
-            | Function::ArrayContains
-            | Function::ArrayContainsAny
-            | Function::ArrayContainsAll
+            | Function::ArrayFilter
             | Function::ArrayMap
             | Function::ArrayExists
-            | Function::ArgMax
-            | Function::ArgMaxOrNull => {
-                self.error = Some(format!("{name} is not supported by the DuckDB backend"));
-                return String::new();
-            }
+            | Function::ByteLength
+            | Function::CountSubstrings => unreachable!("function arity checked before rendering"),
         };
 
         let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
@@ -623,6 +659,40 @@ mod tests {
         assert!(
             !result.sql.contains("Array("),
             "should not contain Array() type: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn if_to_case_when() {
+        let q = Query {
+            select: vec![SelectExpr::new(
+                Expr::func(
+                    Function::If,
+                    vec![
+                        Expr::binary(Op::Gt, Expr::col("n", "age"), Expr::lit(18)),
+                        Expr::lit("adult"),
+                        Expr::lit("minor"),
+                    ],
+                ),
+                "category",
+            )],
+            from: TableRef::scan("nodes", "n"),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            result.sql.contains("CASE WHEN"),
+            "expected CASE WHEN: {}",
+            result.sql
+        );
+        assert!(result.sql.contains("THEN"), "expected THEN: {}", result.sql);
+        assert!(result.sql.contains("ELSE"), "expected ELSE: {}", result.sql);
+        assert!(result.sql.contains("END"), "expected END: {}", result.sql);
+        assert!(
+            !result.sql.contains("if("),
+            "should not contain if(): {}",
             result.sql
         );
     }

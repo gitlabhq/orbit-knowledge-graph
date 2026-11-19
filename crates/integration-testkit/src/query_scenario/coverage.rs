@@ -15,11 +15,25 @@ impl Coverage {
         }
     }
 
-    pub(super) fn unreached(&self) -> Vec<String> {
-        required()
-            .into_iter()
-            .filter(|construct| !self.0.contains(construct))
-            .collect()
+    pub(super) fn problems(&self) -> Vec<String> {
+        let renderable = renderable();
+        let excluded = |construct: &str| EXCLUDED.iter().any(|(name, _)| *name == construct);
+        let unreached = renderable
+            .iter()
+            .filter(|construct| !excluded(construct) && !self.0.contains(*construct))
+            .map(|construct| format!("no scenario reaches {construct}"));
+        let stale = EXCLUDED.iter().filter_map(|(construct, _)| {
+            if !renderable.iter().any(|name| name == construct) {
+                Some(format!(
+                    "{construct} is excluded but DuckDB does not render it"
+                ))
+            } else if self.0.contains(*construct) {
+                Some(format!("{construct} is excluded but a scenario reaches it"))
+            } else {
+                None
+            }
+        });
+        unreached.chain(stale).collect()
     }
 
     fn insert(&mut self, construct: String) {
@@ -137,7 +151,32 @@ impl Coverage {
     }
 }
 
-fn required() -> Vec<String> {
+/// Constructs the DuckDB code generator renders that no DuckDB pipeline emits today.
+const EXCLUDED: &[(&str, &str)] = &[
+    ("function ToJson", "hydration-only"),
+    ("function Object", "hydration-only"),
+    ("function ArrayExists", "hydration-only"),
+    ("function ByteLength", "response-policy-only"),
+    ("function Substring", "response-policy-only"),
+    ("function Concat", "response-policy-only"),
+    ("function Coalesce", "tp_bounds-only"),
+    ("function ArgMaxOrNull", "tp_bounds-only"),
+    (
+        "function If",
+        "tp_bounds and response policy; neighbor paths need a variant scope, which DuckDB has none of",
+    ),
+    ("function ArrayMap", "security-check-only"),
+    ("function ArrayContains", "empty denormalized catalog"),
+    ("function ArrayContainsAny", "empty denormalized catalog"),
+    ("function NullIf", "epoch-null off"),
+    ("aggregate collect", "validator-rejected"),
+    ("function CountSubstrings", "no lowering emits"),
+    ("function ArrayResize", "no lowering emits"),
+    ("function ArrayContainsAll", "no lowering emits"),
+    ("function ArgMax", "no lowering emits"),
+];
+
+fn renderable() -> Vec<String> {
     let renders = |expr: Expr| {
         let ast = Node::Query(Box::new(Query {
             select: vec![SelectExpr::new(expr, "value")],
