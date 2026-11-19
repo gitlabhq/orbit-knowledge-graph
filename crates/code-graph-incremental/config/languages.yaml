@@ -154,7 +154,10 @@ languages:
     file_names:
       exact: [.gitlab-ci.yml, .gitlab-ci.yaml]
       prefixes: [".gitlab-ci-", ".gitlab-ci."]
-      ignored_extensions: [bak, orig, md, txt, json, toml, lock, diff, patch, j2, erb, tpl, tmpl]
+      suffixes: [".gitlab-ci.yml", ".gitlab-ci.yaml"]
+      ignored_extensions: [
+        bak, orig, md, txt, json, toml, lock, diff, patch, in, j2, jinja, jinja2, erb, tpl, tmpl, template, example, sample, dist,
+      ]
     grammar: tree-sitter-yaml
 
   zig:
