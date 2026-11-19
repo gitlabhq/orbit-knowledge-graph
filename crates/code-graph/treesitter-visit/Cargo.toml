@@ -35,6 +35,7 @@ tree-sitter-swift = { workspace = true, optional = true }
 tree-sitter-yaml = { workspace = true, optional = true }
 tree-sitter-lua = { workspace = true, optional = true }
 tree-sitter-zig = { workspace = true, optional = true }
+tree-sitter-containerfile = { workspace = true, optional = true }
 
 [[bin]]
 name = "ast"
@@ -63,12 +64,14 @@ builtin-parser = [
   "tree-sitter-lua",
   "tree-sitter-yaml",
   "tree-sitter-zig",
+  "tree-sitter-containerfile",
 ]
 tree-sitter-hcl = ["dep:tree-sitter-hcl"]
 tree-sitter-lua = ["dep:tree-sitter-lua"]
 tree-sitter-scala = ["dep:tree-sitter-scala"]
 tree-sitter-yaml = ["dep:tree-sitter-yaml"]
 tree-sitter-zig = ["dep:tree-sitter-zig"]
+tree-sitter-containerfile = ["dep:tree-sitter-containerfile"]
 
 [dev-dependencies]
 

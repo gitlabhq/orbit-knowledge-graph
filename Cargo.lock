@@ -2775,12 +2775,10 @@ dependencies = [
 [[package]]
 name = "gitalisk-core"
 version = "0.9.0"
-source = "git+https://gitlab.com/gitlab-org/rust/gitalisk.git?tag=v0.9.0#7ee31252b5419d4be97fafcfb87b317d8b86c2d7"
 dependencies = [
  "dunce",
  "ignore",
- "serde",
- "serde_json",
+ "orbit-log-fields",
  "tempfile",
  "tracing",
  "tracing-subscriber",
@@ -3430,6 +3428,20 @@ dependencies = [
  "indexer",
  "orbit-arrow",
  "tokio",
+]
+
+[[package]]
+name = "indexing-engine-next"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -9755,6 +9767,7 @@ dependencies = [
  "tree-sitter-bash",
  "tree-sitter-c",
  "tree-sitter-c-sharp",
+ "tree-sitter-containerfile",
  "tree-sitter-cpp",
  "tree-sitter-elixir",
  "tree-sitter-go",

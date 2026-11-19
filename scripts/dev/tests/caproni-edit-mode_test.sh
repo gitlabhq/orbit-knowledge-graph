@@ -152,7 +152,7 @@ check "launcher runs without fips artifacts" "args=$FAKE_BINARY --mode=webserver
 PROJECT="$HERE/../../../caproni-project.yaml"
 matches_pattern() { # path -> yes if any read_only pattern of the first reloader matches
   local path="$1" pat
-  while IFS= read -r pat; do [[ "$path" =~ $pat ]] && { echo yes; return; }; done < <(yq -r '.reloaders.gkg-webserver.mirror.filesystem.read_only[]' "$PROJECT")
+  while IFS= read -r pat; do [[ "$path" =~ $pat ]] && { echo yes; return; }; done < <(yq -r '.reloaders.orbit-webserver.mirror.filesystem.read_only[]' "$PROJECT")
   echo no
 }
 # The server checks that /etc/secrets itself exists before walking it, so the mirrord

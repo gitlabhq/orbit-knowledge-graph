@@ -22,6 +22,7 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `orbit-log-fields` | Names of every log and span field, split into `safe` (always written; the server's expanded logs allowlist) and `expanded` (written only on expanded log lines), and the log macros that name fields with `safe(NAME)` and `expanded(NAME)` |
 | `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/`, schema version tracking (`schema/version.rs`), migration orchestrator (`schema/migration.rs`), migration completion detection and dead-version GC (`orchestrator/scheduled/migration_completion.rs`). **See `crates/indexer/AGENTS.md` (reuse-infra checklist) before adding a handler.** |
 | `indexer/duckdb` | DuckDB SQL projection for `data_fusion` SDLC plans, injected into `indexer::run` |
+| `indexing-engine-next` | ADR 023 engine library: planner, worker and reconciler traits, `EngineBuilder` checks, and the in-memory `testkit`. No domain terms (ast-grep rule `indexing-engine-next-no-domain-terms`) |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
 | `query-data-model` | Derives shared graph and access-path contracts, backend catalogs, and authorization catalogs; the ClickHouse implementation owns storage definitions used by its DDL and migration consumers |
 | `code-graph` | Code parsing and linking pipeline under `src/v2/` (`pipeline`, `registry`, `config`, `types`, `linker`, `dsl`, `langs/{generic,custom}`); the old `src/legacy/` parser and linker have been removed. Shared `Range`/`Position`/`IntervalTree` live at `src/utils.rs`. |
@@ -37,6 +38,7 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `circuit-breaker` | Generic circuit breaker (`CircuitBreaker`, `CircuitBreakableError`) with observer hooks and per-circuit config |
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
 | `gitaly-protos` | Gitaly protobuf types for gRPC repository operations |
+| `gitalisk-core` | Git repository access (status, branch, commit, worktree, workspace discovery), vendored from `gitlab-org/rust/gitalisk` v0.9.0 |
 | `health-check` | Networked aggregate health for configured Kubernetes workloads and ClickHouse, plus NATS code work queue depth for autoscaling code indexer pods |
 | `orbit-cli` | Local `orbit workspace index`, `orbit workspace sql`, and `orbit workspace schema` commands; writes the property graph to DuckDB and exposes it as raw SQL (no DSL); workspace management (`Workspace`, `GitInfo`, manifest in DuckDB). Release artifacts include glibc 2.28 Linux builds plus fully static musl Linux builds for Alpine, scratch, and distroless environments. |
 | `orbit-search` | Store-agnostic grep helpers: OR-alternative parsing and the kind filter (`grep`), and the shared corpus policy (source extensions, test/vendor exclusions) in `corpus` |

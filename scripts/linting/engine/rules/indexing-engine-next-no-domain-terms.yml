@@ -1,0 +1,17 @@
+id: indexing-engine-next-no-domain-terms
+language: rust
+severity: error
+message: The indexing engine knows no domain terms. Put this name in the planner or worker that needs it.
+note: ADR 023, decision 1.
+files:
+  - crates/indexing-engine-next/**
+rule:
+  any:
+    - kind: identifier
+      regex: '(?i)(project|namespace|gitaly|ontology)'
+    - kind: type_identifier
+      regex: '(?i)(project|namespace|gitaly|ontology)'
+    - kind: field_identifier
+      regex: '(?i)(project|namespace|gitaly|ontology)'
+    - kind: string_content
+      regex: '(?i)(project|namespace|gitaly|ontology)'
