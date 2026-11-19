@@ -539,8 +539,13 @@ async fn archive_indexes_multiple_families_into_server_batches() {
 #[tokio::test]
 async fn edges_to_a_file_of_another_family_carry_its_tags() {
     let files: &[(&str, &[u8])] = &[
-        ("root/docs/index.md", b"See [main](../src/main.py).\n"),
+        (
+            "root/docs/index.md",
+            b"See [main](../src/main.py) and [config](../config.toml).\n",
+        ),
         ("root/src/main.py", b"def main():\n    pass\n"),
+        ("root/cmd/app.go", b"package main\n"),
+        ("root/config.toml", b"a = 1\n"),
     ];
     let fixture = IndexFixture::new();
     let batches = Arc::new(Mutex::new(Vec::new()));
@@ -553,14 +558,16 @@ async fn edges_to_a_file_of_another_family_carry_its_tags() {
     options.batch_bytes = 1;
     fixture.run(files, options, sink).await.unwrap();
     let batches = batches.lock().unwrap();
-    let file_id = |path: &str| {
-        collected_rows(&batches, &fixture.tables.file)
-            .into_iter()
-            .find(|row| row["path"].coerce::<String>().as_deref() == Some(path))
-            .map(|row| row["id"].coerce::<i64>().unwrap())
-            .unwrap()
-    };
-    let (source, target) = (file_id("docs/index.md"), file_id("src/main.py"));
+    let paths: std::collections::HashMap<_, _> = collected_rows(&batches, &fixture.tables.file)
+        .into_iter()
+        .map(|row| {
+            (
+                row["id"].coerce::<i64>().unwrap(),
+                row["path"].coerce::<String>().unwrap(),
+            )
+        })
+        .collect();
+    let path = |id: i64| paths.get(&id).map(String::as_str);
     let tags = |batch: &RecordBatch, column: &str, row: usize| {
         let list = batch
             .column_by_name(column)
@@ -575,7 +582,7 @@ async fn edges_to_a_file_of_another_family_carry_its_tags() {
         tags.sort();
         tags
     };
-    let imports: Vec<_> = batches
+    let mut imports: Vec<_> = batches
         .iter()
         .filter(|(table, _)| fixture.tables.edge_table_names().contains(&table.as_str()))
         .flat_map(|(_, batch)| {
@@ -590,22 +597,33 @@ async fn edges_to_a_file_of_another_family_carry_its_tags() {
             };
             let (sources, targets) = (ids("source_id"), ids("target_id"));
             (0..batch.num_rows())
-                .filter(move |&row| sources.value(row) == source && targets.value(row) == target)
-                .map(|row| {
-                    (
+                .filter(|&row| path(sources.value(row)) == Some("docs/index.md"))
+                .filter_map(|row| {
+                    Some((
+                        path(targets.value(row))?.to_owned(),
                         tags(batch, "source_tags", row),
                         tags(batch, "target_tags", row),
-                    )
+                    ))
                 })
                 .collect::<Vec<_>>()
         })
         .collect();
+    imports.sort();
+    let markdown = vec!["extension:md".to_owned(), "language:markdown".to_owned()];
     assert_eq!(
         imports,
-        [(
-            vec!["extension:md".to_owned(), "language:markdown".to_owned()],
-            vec!["extension:py".to_owned(), "language:python".to_owned()],
-        )]
+        [
+            (
+                "config.toml".to_owned(),
+                markdown.clone(),
+                vec!["extension:toml".to_owned(), "language:toml".to_owned()],
+            ),
+            (
+                "src/main.py".to_owned(),
+                markdown,
+                vec!["extension:py".to_owned(), "language:python".to_owned()],
+            ),
+        ]
     );
 }
 
