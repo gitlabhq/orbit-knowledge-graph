@@ -68,6 +68,27 @@ impl<'a> ProjectTree<'a> {
         pt.tree
     }
 
+    /// The directory tree with its manifests, after the project phase.
+    pub fn tree(env: &'a Env, paths: &'a [&'a str], files: Option<&'a [SourceFile]>) -> Tree {
+        let mut pt = Self {
+            lang: &env.lang,
+            env: Some(env),
+            project: &env.project,
+            paths,
+            files,
+            tree: Tree::new(Node {
+                kind: C::Root.into(),
+                named: true,
+                ..Default::default()
+            }),
+            prefixes: vec![],
+            aliases: vec![],
+        };
+        pt.build_dir_tree();
+        pt.run_stages();
+        pt.tree
+    }
+
     pub fn build(
         env: &'a Env,
         paths: &'a [&'a str],

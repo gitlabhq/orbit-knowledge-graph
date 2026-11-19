@@ -218,8 +218,19 @@ fn finish(env: &Env, state: &mut State, run: &Sentinel) -> Result<(), Error> {
             "family" => loop {
                 let graph = EdgeIndex::new(&state.edges);
                 let known: std::collections::HashSet<Edge> = state.edges.iter().copied().collect();
-                let found =
-                    engine::run_family(phase, &state.trees, &state.edges, &graph, env, run)?;
+                let project = state.trees.len() as u32;
+                state.trees.push(state.project_compact(env));
+                let found = engine::run_family(
+                    phase,
+                    &state.trees,
+                    Some(project),
+                    &state.edges,
+                    &graph,
+                    env,
+                    run,
+                );
+                state.trees.pop();
+                let found = found?;
                 let before = state.edges.len();
                 state
                     .edges

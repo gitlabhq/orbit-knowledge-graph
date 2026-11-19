@@ -84,6 +84,18 @@ impl State {
         self.configs.retain(|c| keep(&c.path));
     }
 
+    /// The project tree after the project phase, Compact, for family phases.
+    pub(crate) fn project_compact(&self, env: &Env) -> Tree<Compact> {
+        let paths: Vec<_> = self
+            .trees
+            .iter()
+            .map(|tree| tree.label.as_str())
+            .chain(self.configs.iter().map(|file| file.path.as_str()))
+            .collect();
+        let tree = crate::file_tree::ProjectTree::tree(env, &paths, Some(&self.configs));
+        tree.compact_and_remap()
+    }
+
     /// Sets on each tree the tags the project phase put on its file and the
     /// directories above it.
     pub(crate) fn project(&mut self, env: &Env) {

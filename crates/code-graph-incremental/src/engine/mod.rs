@@ -455,6 +455,8 @@ pub struct Run<'t, S: Store = Compact> {
     killed: Option<Killed>,
     max_edges: usize,
     graph: Option<&'t EdgeIndex>,
+    files: u32,
+    project: Option<u32>,
     indexes: Option<&'t Indexes<'t>>,
     fns: &'t [program::Def],
     graph_fi: u32,
@@ -508,6 +510,8 @@ impl<'t, S: Store> Run<'t, S> {
             killed: None,
             max_edges: 0,
             graph: None,
+            files: trees.len() as u32,
+            project: None,
             indexes: None,
             fns: &[],
             graph_fi: 0,
@@ -767,6 +771,7 @@ pub fn scope_budget(phase: &Phase, env: &Env, run: &Sentinel) -> Sentinel {
 pub fn run_family(
     phase: &Phase,
     trees: &[Tree<Compact>],
+    project: Option<u32>,
     edges: &[Edge],
     graph: &EdgeIndex,
     env: &Env,
@@ -775,7 +780,8 @@ pub fn run_family(
     use rayon::prelude::*;
     let scope = scope_budget(phase, env, budget);
     let indexes = Indexes::new(trees, edges);
-    let edges: Vec<Result<Vec<Edge>, Killed>> = (0..trees.len())
+    let files = project.unwrap_or(trees.len() as u32) as usize;
+    let edges: Vec<Result<Vec<Edge>, Killed>> = (0..files)
         .into_par_iter()
         .map(|fi| {
             let file = tree_budget(phase, env, &trees[fi].label);
@@ -783,6 +789,8 @@ pub fn run_family(
             run.graph = Some(graph);
             run.graph_fi = fi as u32;
             run.indexes = Some(&indexes);
+            run.files = files as u32;
+            run.project = project;
             let root = Cursor::new(trees, fi as u32, 0);
             for &slot in &phase.modules {
                 (Compact::hooks(&modules::ALL[usize::from(slot)]).start)(&mut run, slot, 0);
@@ -844,20 +852,34 @@ pub fn tag_tree<S: Store>(
 /// Which nodes of the graph have an edge of each kind, by direction.
 pub struct EdgeIndex {
     incoming: FxHashSet<(EdgeKind, u32, u32)>,
-    outgoing: FxHashSet<(EdgeKind, u32, u32)>,
+    outgoing: FxHashMap<(EdgeKind, u32, u32), SmallVec<[Loc; 2]>>,
+    sites: FxHashMap<(EdgeKind, u32, u32), SmallVec<[(Loc, Loc); 1]>>,
 }
 
 impl EdgeIndex {
     pub fn new(edges: &[Edge]) -> Self {
+        let mut outgoing: FxHashMap<_, SmallVec<[Loc; 2]>> = FxHashMap::default();
+        let mut sites: FxHashMap<_, SmallVec<[(Loc, Loc); 1]>> = FxHashMap::default();
+        for e in edges {
+            let (from, to) = (e.from_loc(), e.to_loc());
+            outgoing
+                .entry((e.kind, e.from_tree, e.from_node))
+                .or_default()
+                .push(to);
+            if let Some(site) = e.site {
+                sites
+                    .entry((e.kind, e.from_tree, site))
+                    .or_default()
+                    .push((from, to));
+            }
+        }
         Self {
             incoming: edges
                 .iter()
                 .map(|e| (e.kind, e.to_tree, e.to_node))
                 .collect(),
-            outgoing: edges
-                .iter()
-                .map(|e| (e.kind, e.from_tree, e.from_node))
-                .collect(),
+            outgoing,
+            sites,
         }
     }
 }
@@ -929,8 +951,36 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
         let key = (kind, self.run.graph_fi, node);
         self.run.graph.is_some_and(|g| match incoming {
             true => g.incoming.contains(&key),
-            false => g.outgoing.contains(&key),
+            false => g.outgoing.contains_key(&key),
         })
+    }
+
+    /// The targets of `from`'s edges of `kind` in the graph so far.
+    pub fn targets(&self, kind: EdgeKind, from: Loc) -> &'t [Loc] {
+        self.run
+            .graph
+            .and_then(|g| g.outgoing.get(&(kind, from.fi, from.node)))
+            .map_or(&[], |t| t.as_slice())
+    }
+
+    /// The edges of `kind` whose site is `site` in file `fi`, as (from, to).
+    pub fn at_site(&self, kind: EdgeKind, fi: u32, site: u32) -> &'t [(Loc, Loc)] {
+        self.run
+            .graph
+            .and_then(|g| g.sites.get(&(kind, fi, site)))
+            .map_or(&[], |t| t.as_slice())
+    }
+
+    /// How many files the run covers; file indexes are `0..files()`.
+    pub fn files(&self) -> u32 {
+        self.run.files
+    }
+
+    /// The project tree's root, in a family run.
+    pub fn project(&self) -> Option<Cursor<'t, S>> {
+        self.run
+            .project
+            .map(|fi| Cursor::new(self.run.trees, fi, 0))
     }
 
     pub fn state(&mut self) -> &mut M::State {
