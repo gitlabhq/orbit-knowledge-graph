@@ -388,6 +388,9 @@ static FUNCTIONS: &[Function<Core>] = &[
             })
         }
     )),
+    function!(Pure, "outermost", [one], |cx, a| keep(arg(cx, a, 0), |c| {
+        !c.ancestors().any(|up| up.is(C::SsaLoop))
+    })),
     function!(Pure, "unlifted", [one], |cx, a| keep(arg(cx, a, 0), |c| !c
         .lifted())),
     function!(Pure, "is_class", [one], |cx, a| keep(arg(cx, a, 0), |c| c

@@ -69,6 +69,7 @@ struct RuleSpec {
     children: Option<List>,
     between: Option<Vec<ActionSpec>>,
     exit: Option<Vec<ActionSpec>>,
+    late: Option<Vec<ActionSpec>>,
     emit: Option<EmitMap>,
 }
 
@@ -101,6 +102,7 @@ pub fn resolution(name: &str) -> Option<CallResolution> {
 enum Action {
     Do(Expr),
     Emit(Box<[Emit]>),
+    Revisit,
 }
 
 enum Children {
@@ -120,6 +122,7 @@ struct Rule {
     children: Children,
     between: Box<[Action]>,
     exit: Box<[Action]>,
+    late: Box<[Action]>,
 }
 
 pub struct Phase {
@@ -167,7 +170,7 @@ impl Pipeline {
 
 fn hooks_allowed(walk: &str) -> &'static [&'static str] {
     match walk {
-        "flow" => &["enter", "children", "between", "exit", "emit"],
+        "flow" => &["enter", "children", "between", "exit", "late", "emit"],
         "each" => &["emit"],
         _ => &[],
     }
@@ -315,6 +318,7 @@ impl RuleSpec {
             ("children", self.children.is_some()),
             ("between", self.between.is_some()),
             ("exit", self.exit.is_some()),
+            ("late", self.late.is_some()),
             ("emit", self.emit.is_some()),
         ];
         let allowed = hooks_allowed(&phase.walk);
@@ -385,6 +389,7 @@ impl Rule {
                 .iter()
                 .map(|item| match item {
                     ActionSpec::Emit { emit: map } => Ok(Action::Emit(emit(map)?)),
+                    ActionSpec::Expr(src) if src == "revisit" => Ok(Action::Revisit),
                     ActionSpec::Expr(src) => {
                         let parsed = Expr::parse(src, &scope(true))?;
                         match parsed.ends_in_effect() {
@@ -417,6 +422,7 @@ impl Rule {
             children,
             between: actions(&spec.between)?.into(),
             exit: actions(&spec.exit)?.into(),
+            late: actions(&spec.late)?.into(),
             depth,
             pat,
         })
@@ -523,18 +529,17 @@ impl Phase {
             .map_or(&[], |rules| rules.as_slice())
     }
 
-    pub fn flow(&self, cx: &mut Run, root: Cursor<'_>) {
-        let mut w = Walk {
-            caps: vec![SmallVec::new(); self.slots],
-            vals: vec![Vals::new(); self.slots],
-            stack: root
-                .children_rev()
-                .map(|c| Item::Visit(c.index()))
-                .collect(),
-        };
+    /// Walks the tree in source order. Returns the nodes whose rules have
+    /// `late` actions that no `revisit` ran yet.
+    pub fn flow(&self, cx: &mut Run, root: Cursor<'_>) -> Vec<Late> {
+        let mut w = Walk::new(self.slots);
+        w.stack = root
+            .children_rev()
+            .map(|c| Item::Visit(c.index()))
+            .collect();
         while let Some(item) = w.stack.pop() {
             if !cx.step() {
-                return;
+                return Vec::new();
             }
             match item {
                 Item::Visit(node) => self.visit(cx, &mut w, root.jump(root.fi(), node)),
@@ -546,8 +551,29 @@ impl Phase {
                         Item::Between(..) => &rule.between,
                         _ => &rule.exit,
                     };
-                    w.run(cx, actions);
+                    if w.run(cx, actions) {
+                        self.revisit(cx, root, std::mem::take(&mut w.late));
+                    }
                 }
+            }
+        }
+        w.late
+    }
+
+    /// Runs the `late` actions of each deferred node, with the def that
+    /// enclosed it when it was visited.
+    pub fn revisit(&self, cx: &mut Run, root: Cursor<'_>, late: Vec<Late>) {
+        let mut w = Walk::new(self.slots);
+        for Late { rule, node, def } in late {
+            let rule = &self.rules[rule as usize];
+            if let Some(def) = def {
+                cx.enter_def(def);
+            }
+            if w.matches(cx, rule, root.jump(root.fi(), node)) {
+                w.run(cx, &rule.late);
+            }
+            if def.is_some() {
+                cx.leave_def();
             }
         }
     }
@@ -569,6 +595,14 @@ impl Phase {
             }
             fired |= bit;
             w.run(cx, &rule.enter);
+            if !rule.late.is_empty() {
+                let def = cx.defs.last().copied();
+                w.late.push(Late {
+                    rule: index,
+                    node: c.index(),
+                    def,
+                });
+            }
             if !rule.exit.is_empty() {
                 exits.push(index);
             }
@@ -601,13 +635,29 @@ impl Phase {
     }
 }
 
+pub struct Late {
+    rule: u16,
+    node: u32,
+    def: Option<u32>,
+}
+
 struct Walk {
     caps: Vec<Cap<u32>>,
     vals: Vec<Vals>,
     stack: Vec<Item>,
+    late: Vec<Late>,
 }
 
 impl Walk {
+    fn new(slots: usize) -> Self {
+        Self {
+            caps: vec![SmallVec::new(); slots],
+            vals: vec![Vals::new(); slots],
+            stack: Vec::new(),
+            late: Vec::new(),
+        }
+    }
+
     fn matches(&mut self, cx: &Run, rule: &Rule, c: Cursor<'_>) -> bool {
         for cap in &mut self.caps[..rule.slots] {
             cap.clear();
@@ -650,15 +700,19 @@ impl Walk {
         true
     }
 
-    fn run(&self, cx: &mut Run, actions: &[Action]) {
+    /// Runs `actions` and reports whether one of them asked for a revisit.
+    fn run(&self, cx: &mut Run, actions: &[Action]) -> bool {
+        let mut revisit = false;
         for action in actions {
             match action {
                 Action::Do(expr) => {
                     expr.eval(cx, &self.vals);
                 }
                 Action::Emit(emits) => emits.iter().for_each(|e| e.run(cx, &self.vals)),
+                Action::Revisit => revisit = true,
             }
         }
+        revisit
     }
 
     fn enter(&mut self, cx: &mut Run, c: Cursor<'_>) {

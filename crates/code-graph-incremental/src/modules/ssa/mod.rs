@@ -22,9 +22,10 @@ enum Key {
     Field(u32, u32),
 }
 
+#[derive(Clone)]
 enum Deferred {
     Callee(Option<Rc<Vec<u32>>>),
-    Receiver(u32, Vec<Value>),
+    Receiver(Vec<Value>),
 }
 
 enum Frame {
@@ -61,7 +62,7 @@ pub struct State {
     assigned: FxHashMap<u32, Vec<u32>>,
     wildcard: u32,
     wildcards: Rc<Vec<u32>>,
-    pending: Vec<(Value, u32, u32, Deferred)>,
+    pending: FxHashMap<u32, (Value, Deferred)>,
     bound: FxHashSet<u32>,
 }
 
@@ -175,9 +176,6 @@ impl<'t> Cx<'_, 't, Ssa> {
                 let s = self.write();
                 s.loops.pop();
                 s.cur = s.graph.finish_loop(header, s.cur);
-                if s.loops.is_empty() {
-                    self.resolve_pending();
-                }
             }
             None => {}
         }
@@ -208,7 +206,6 @@ impl Module for Ssa {
         let s = cx.write();
         s.graph.seal_remaining();
         s.graph.remove_redundant_phi_sccs();
-        cx.resolve_pending();
     }
 }
 
@@ -270,6 +267,10 @@ static FUNCTIONS: &[Function<Ssa>] = &[
         cx.defer(node(cx, a, 0));
         yes(true)
     }),
+    function!(Flow, "deferred_callee", [one], |cx, a| cx
+        .deferred_callee(node(cx, a, 0))),
+    function!(Flow, "deferred_receiver", [one], |cx, a| cx
+        .deferred_receiver(node(cx, a, 0))),
     function!(Flow, "read", [one], |cx, a| cx.read(node(cx, a, 0))),
     function!(Flow, "slot", [one], |cx, a| {
         let c = node(cx, a, 0);

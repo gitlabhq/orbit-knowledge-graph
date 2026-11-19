@@ -78,6 +78,11 @@ link:
     enter:
       - emit: { type_flow: { from: enclosing, to: $M | receiver_calls, site: $ROOT } }
       - mod.ssa.defer($ROOT)
+    late:
+      - emit:
+          calls: { from: enclosing, to: $ROOT | mod.ssa.deferred_callee | callable, site: $ROOT }
+          imports: { from: enclosing, to: $ROOT | mod.ssa.deferred_callee | imported, site: $ROOT }
+          type_flow: { from: enclosing, to: $ROOT | mod.ssa.deferred_callee | produced, site: $ROOT }
   - group: call
     match: '(__call (__callee $M:(__member $O:(__object $VC?:__call))))'
     enter:
@@ -90,6 +95,12 @@ link:
           type_flow: { from: enclosing, to: $O | type | unmatched($M) | produced, site: $ROOT }
       - emit: { type_flow: { from: enclosing, to: $O | chain_head | type | typed_calls, site: $ROOT } }
       - mod.ssa.defer($ROOT)
+    late:
+      - emit: { calls: { from: enclosing, to: $ROOT | mod.ssa.deferred_receiver | member($M), site: $ROOT } }
+      - emit:
+          calls: { from: enclosing, to: $ROOT | mod.ssa.deferred_receiver | unmatched($M) | callable, site: $ROOT }
+          imports: { from: enclosing, to: $ROOT | mod.ssa.deferred_receiver | unmatched($M) | imported, site: $ROOT }
+          type_flow: { from: enclosing, to: $ROOT | mod.ssa.deferred_receiver | unmatched($M) | produced, site: $ROOT }
   - group: call
     match: '(__call (__callee (__member)))'
   - group: call
@@ -185,6 +196,11 @@ link:
     match: '(__scope $$$D:__def)'
     when: $ROOT | tagged("hoisted")
     enter: [define($D)]
+
+  - group: revisit
+    match: '(__ssa_loop)'
+    when: $ROOT | outermost
+    exit: [revisit]
 
   - group: flow
     match: '(__scope)'

@@ -6,8 +6,9 @@ use smallvec::{SmallVec, smallvec};
 
 use super::{Deferred, Key, Ssa, Value, to_vals};
 use crate::canonical::Canonical as C;
-use crate::engine::{Cursor, Cx, Loc, Val, one, resolution};
-use crate::tree::{Edge, EdgeKind, is_name_text};
+use crate::engine::Vals;
+use crate::engine::{Cursor, Cx, Val};
+use crate::tree::is_name_text;
 
 fn member_of(node: Cursor<'_>) -> Option<Cursor<'_>> {
     node.is(C::Member)
@@ -271,7 +272,6 @@ impl<'t> Cx<'_, 't, Ssa> {
     /// Defers a call whose callee, or whose receiver inside a loop, holds a
     /// phi that only the end of the loop completes.
     pub(super) fn defer(&mut self, c: Cursor<'t>) {
-        let from = self.enclosing();
         if let Some(callee) = c.child(C::Callee)
             && let Some(value) = self.pending_value(callee)
         {
@@ -280,10 +280,9 @@ impl<'t> Cx<'_, 't, Ssa> {
                 && !callee.has(C::Ivar)
                 && is_name_text(self.env().lang.syms.resolve(callee.sym())))
             .then(|| Rc::clone(&self.state().wildcards));
-            let deferred = Deferred::Callee(fallback);
             self.write()
                 .pending
-                .push((value, from, c.index(), deferred));
+                .insert(c.index(), (value, Deferred::Callee(fallback)));
             return;
         }
         let Some(obj) = c.member().and_then(|m| m.child(C::Object)) else {
@@ -292,72 +291,37 @@ impl<'t> Cx<'_, 't, Ssa> {
         let leaf = !self.state().loops.is_empty() && obj.children().next().is_none();
         if let Some(phi) = leaf.then(|| self.read_phi(obj.sym())).flatten() {
             let seen = self.lookup(obj.sym());
-            let deferred = Deferred::Receiver(obj.index(), seen);
-            self.write().pending.push((phi, from, c.index(), deferred));
+            self.write()
+                .pending
+                .insert(c.index(), (phi, Deferred::Receiver(seen)));
         }
     }
 
-    fn refs(&mut self, target: Val, edges: &mut Vec<(EdgeKind, Loc)>) {
-        for (kind, f) in [
-            (EdgeKind::Calls, crate::fn_id!("core", "callable")),
-            (EdgeKind::Imports, crate::fn_id!("core", "imported")),
-            (EdgeKind::TypeFlow, crate::fn_id!("core", "produced")),
-        ] {
-            let found = self.call(f, &[one(target)]);
-            edges.extend(found.iter().filter_map(|v| v.loc()).map(|loc| (kind, loc)));
+    /// What a deferred callee holds once its loop closed, or the wildcard
+    /// imports in scope when it holds nothing.
+    pub(super) fn deferred_callee(&mut self, c: Cursor<'t>) -> Vals {
+        let Some((value, Deferred::Callee(fallback))) =
+            self.state().pending.get(&c.index()).cloned()
+        else {
+            return Vals::new();
+        };
+        let mut targets = self.state().graph.resolve_value(&value);
+        if targets.is_empty() {
+            let wildcards = fallback.iter().flat_map(|w| w.iter());
+            targets.extend(wildcards.map(|&w| Value::ImportRef(w)));
         }
+        to_vals(&targets)
     }
 
-    pub(super) fn resolve_pending(&mut self) {
-        let pending = std::mem::take(&mut self.write().pending);
-        for (value, from, site, deferred) in pending {
-            if let Err(killed) = self.check() {
-                self.kill(killed);
-                return;
-            }
-            let mut targets = self.write().graph.resolve_value(&value);
-            let mut edges = Vec::new();
-            match deferred {
-                Deferred::Callee(fallback) => {
-                    if targets.is_empty() {
-                        let wildcards = fallback.iter().flat_map(|w| w.iter());
-                        targets.extend(wildcards.map(|&w| Value::ImportRef(w)));
-                    }
-                    for target in to_vals(&targets) {
-                        self.refs(target, &mut edges);
-                    }
-                }
-                Deferred::Receiver(object, seen) => {
-                    targets.retain(|value| !seen.contains(value));
-                    let Some(member) = self.at(object).parent() else {
-                        continue;
-                    };
-                    let member = one(Val::Node(member.into()));
-                    for target in to_vals(&targets) {
-                        let args = [one(target), member.clone()];
-                        let calls = self.call(crate::fn_id!("core", "member"), &args);
-                        let calls = calls.iter().filter_map(|v| v.loc());
-                        edges.extend(calls.map(|l| (EdgeKind::Calls, l)));
-                        for unmatched in self.call(crate::fn_id!("core", "unmatched"), &args) {
-                            self.refs(unmatched, &mut edges);
-                        }
-                    }
-                }
-            }
-            let sites = one(Val::Node(Loc { fi: 0, node: site }));
-            for (kind, to) in edges {
-                let args = [one(Val::Node(to)), sites.clone()];
-                let found = self.call(crate::fn_id!("core", "resolution"), &args);
-                let resolved = match found.first() {
-                    Some(&Val::Sym(name)) => resolution(self.env().lang.syms.resolve(name)),
-                    _ => None,
-                };
-                self.emit(Edge {
-                    site: Some(site),
-                    call_resolution: resolved.unwrap_or_default(),
-                    ..Edge::local(from, to.node, kind)
-                });
-            }
-        }
+    /// What a deferred receiver holds once its loop closed, beyond what it
+    /// held when the call was visited.
+    pub(super) fn deferred_receiver(&mut self, c: Cursor<'t>) -> Vals {
+        let Some((value, Deferred::Receiver(seen))) = self.state().pending.get(&c.index()).cloned()
+        else {
+            return Vals::new();
+        };
+        let mut targets = self.state().graph.resolve_value(&value);
+        targets.retain(|value| !seen.contains(value));
+        to_vals(&targets)
     }
 }

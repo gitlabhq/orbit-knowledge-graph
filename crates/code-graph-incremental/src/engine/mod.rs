@@ -231,6 +231,13 @@ impl Links {
             let f = function(id);
             let mut called = Vec::new();
             for &(module, name) in f.uses {
+                if module != modules::ALL[usize::from(f.slot)].name {
+                    return Err(crate::error::LoadError(format!(
+                        "{}.{} uses {module}.{name}: a module calls only its own functions",
+                        modules::ALL[usize::from(f.slot)].name,
+                        f.name
+                    )));
+                }
                 let used = lookup(module, name).ok_or_else(|| {
                     crate::error::LoadError(format!("{} uses unknown {module}.{name}", f.name))
                 })?;
@@ -558,13 +565,14 @@ pub fn run_tree(
     for &slot in &phase.modules {
         (modules::ALL[usize::from(slot)].start)(&mut run, slot, root.index());
     }
-    phase.flow(&mut run, root);
+    let late = phase.flow(&mut run, root);
     for &slot in phase.modules.iter().rev() {
         if let Some(killed) = run.killed.take() {
             return Err(killed);
         }
         (modules::ALL[usize::from(slot)].finish)(&mut run, slot);
     }
+    phase.revisit(&mut run, root, late);
     match run.killed.take() {
         Some(killed) => Err(killed),
         None => Ok(run.finish()),
@@ -640,11 +648,19 @@ impl<'r, 't, M: Module> Cx<'r, 't, M> {
     }
 
     pub fn call(&mut self, id: FnId, args: &[Vals]) -> Vals {
+        assert_eq!(
+            function(id).slot,
+            self.slot,
+            "{} called {}.{}: a module calls only its own functions",
+            M::NAME,
+            module_of(id),
+            function(id).name
+        );
         self.run.call(id, args)
     }
 
     pub fn call1(&mut self, id: FnId, arg: Val) -> Vals {
-        self.run.call(id, &[one(arg)])
+        self.call(id, &[one(arg)])
     }
 
     pub fn enclosing(&mut self) -> u32 {
