@@ -4,11 +4,13 @@ use std::sync::Arc;
 
 use crate::trace_event;
 use crate::v2::config::Language;
+use crate::v2::error::FileReason;
 use crate::v2::types::{
     CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, EdgeKind, LinkTarget,
     NodeKind, Range, Relationship, containment_relationship,
 };
 use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
+use orbit_utils::fs_walk::FileInventory;
 use orbit_utils::markdown::FRONT_MATTER_FIELDS;
 
 fn common_prefix_len(a: &str, b: &str) -> usize {
@@ -471,40 +473,89 @@ impl CodeGraph {
 
     pub fn link_anchors(
         &mut self,
-        sources: Vec<(NodeIndex, Vec<LinkTarget>)>,
+        sources: Vec<(NodeIndex, Vec<SectionLinkTarget>)>,
         anchors: &FxHashMap<String, FxHashMap<String, NodeIndex>>,
+        inventory: Option<&InventoryFiles>,
     ) -> Vec<PendingFileLink> {
         let mut seen = FxHashSet::default();
         let mut file_links = Vec::new();
+        let mut section_file_links = Vec::new();
         for (file_node, targets) in sources {
-            for target in targets {
+            for (section, target) in targets {
                 let definition = target.anchor.as_ref().and_then(|anchor| {
                     anchors
                         .get(&target.path)
                         .and_then(|by_anchor| by_anchor.get(anchor))
                 });
-                match definition {
-                    Some(&definition) => {
-                        if seen.insert((file_node, definition)) {
-                            self.graph.add_edge(
-                                file_node,
-                                definition,
-                                GraphEdge::structural(
-                                    EdgeKind::Imports,
-                                    NodeKind::File,
-                                    NodeKind::Definition,
-                                ),
-                            );
-                        }
+                let Some(&definition) = definition else {
+                    if let Some(section) = section
+                        && inventory.is_some_and(|files| files.entries.contains(&target.path))
+                    {
+                        section_file_links.push((section, target.path.clone()));
                     }
-                    None => file_links.push(PendingFileLink {
+                    file_links.push(PendingFileLink {
                         source: self.graph[file_node].path().to_string(),
                         target: target.path,
-                    }),
+                    });
+                    continue;
+                };
+                let link_sources = std::iter::once((file_node, NodeKind::File))
+                    .chain(section.map(|section| (section, NodeKind::Definition)));
+                for (source, source_kind) in link_sources {
+                    if seen.insert((source, definition)) {
+                        self.graph.add_edge(
+                            source,
+                            definition,
+                            GraphEdge::structural(
+                                EdgeKind::Imports,
+                                source_kind,
+                                NodeKind::Definition,
+                            ),
+                        );
+                    }
                 }
             }
         }
+        if let Some(inventory) = inventory {
+            self.link_sections_to_files(section_file_links, inventory);
+        }
         file_links
+    }
+
+    fn link_sections_to_files(
+        &mut self,
+        mut links: Vec<(NodeIndex, String)>,
+        inventory: &InventoryFiles,
+    ) {
+        if links.is_empty() {
+            return;
+        }
+        debug_assert!(
+            !self.output.writes_repository_structure(),
+            "endpoint File nodes would duplicate the inventory graph's File rows"
+        );
+        links.sort_unstable();
+        links.dedup();
+        let mut file_nodes: FxHashMap<String, NodeIndex> = self
+            .files()
+            .map(|(index, file)| (file.path.clone(), index))
+            .collect();
+        for (section, path) in links {
+            let file = match file_nodes.get(&path) {
+                Some(&file) => file,
+                None => {
+                    let language = inventory.languages.get(&path).copied();
+                    let file = self.add_unparsed_file(&path, language, 0, FileReason::None);
+                    file_nodes.insert(path, file);
+                    file
+                }
+            };
+            self.graph.add_edge(
+                section,
+                file,
+                GraphEdge::structural(EdgeKind::Imports, NodeKind::Definition, NodeKind::File),
+            );
+        }
     }
 
     pub fn link_files(&mut self, mut links: Vec<PendingFileLink>) {
@@ -1421,6 +1472,13 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
         write_range(b, &self.import.range)?;
         Ok(())
     }
+}
+
+pub type SectionLinkTarget = (Option<NodeIndex>, LinkTarget);
+
+pub struct InventoryFiles {
+    pub entries: Arc<FileInventory>,
+    pub languages: FxHashMap<String, Language>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

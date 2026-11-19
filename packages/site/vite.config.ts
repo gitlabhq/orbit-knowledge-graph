@@ -1,7 +1,7 @@
 import { orbitSite } from "@gitlab-org/orbit-site/vite";
 import { defineConfig, mergeConfig, type Plugin } from "vite";
 import { siteMeta, siteRoot, sourcePaths, syncContent } from "./build/content";
-import { HOME, NEXT_PAGE } from "./src/sections";
+import { HOME, LLMS_NOTES, NEXT_PAGE } from "./src/sections";
 
 function syncSources(): Plugin {
   return {
@@ -28,6 +28,8 @@ export default defineConfig(() => {
       markdown: { project: "gitlab-org/orbit/knowledge-graph", tokenEnv: "ORBIT_MARKDOWN_TOKEN" },
       meta: siteMeta,
       avatars: (route) => !route.startsWith("content/blog/"),
+      image: { url: "https://gitlaborbit.dev/og.png", width: 1200, height: 630, alt: "GitLab Orbit: The context layer for all your agents." },
+      llms: LLMS_NOTES,
     }),
     { plugins: [syncSources()] },
   );

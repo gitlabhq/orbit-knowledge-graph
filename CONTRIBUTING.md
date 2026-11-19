@@ -37,6 +37,19 @@ For test layers and CI jobs, see [Testing](docs/pages/engineering/testing/README
   or cut it to one sentence on that requirement.
 - Rust doc examples compile in `mise test:fast`, and `ignore` blocks fail it. Use a plain or `no_run` block with hidden setup lines starting with `#`, or `text` for pseudo-code.
 - Reuse infrastructure before you add new infrastructure.
+- Declare each crates.io or Git dependency once, in `[workspace.dependencies]` in
+  the root `Cargo.toml`. In the crate, inherit it with `name = { workspace = true }`,
+  and add `optional = true` or `features` there when the crate needs them.
+  `mise lint:deps`, CI, and a pre-commit hook run
+  `scripts/checks/check_workspace_deps.py` to find crate-local declarations.
+  If a crate must pin its own version, add the dependency with a reason to the
+  crate's `Cargo.toml`:
+
+  ```toml
+  [package.metadata.workspace-deps.allow]
+  some-crate = "why this crate pins its own version"
+  ```
+
 - Before you change an area, read its design document and the crate `AGENTS.md`, if present.
 - The ontology is the single source of truth for graph-shape facts.
 - Read the [SOX billing boundary](docs/pages/engineering/development/sox-billing-boundary.md) page before you change billing.
