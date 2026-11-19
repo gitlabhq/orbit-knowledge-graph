@@ -4,11 +4,10 @@ pub mod ops;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical as C;
-use crate::engine::{Cursor, Cx, Function, Module, Val, Vals, of, one, truthy, yes};
+use crate::engine::{Cursor, Cx, Function, KeyPart, Module, Val, Vals, of, one, truthy, yes};
 use crate::modules::{arg, function, node};
 use crate::resolve::CLASS_LIKE;
 use crate::tree::{CallResolution, EdgeKind, Role};
-use ops::Members;
 
 pub struct Core;
 
@@ -18,7 +17,6 @@ pub struct State {
     defs: FxHashMap<u32, Vec<u32>>,
     supers: FxHashMap<u32, Vec<u32>>,
     shadowed: FxHashSet<u32>,
-    members: Members,
 }
 
 impl Default for State {
@@ -27,7 +25,6 @@ impl Default for State {
             defs: FxHashMap::default(),
             supers: FxHashMap::default(),
             shadowed: FxHashSet::default(),
-            members: Members::new(1),
         }
     }
 }
@@ -48,6 +45,36 @@ fn kind(args: &[Vals], at: usize) -> u16 {
 
 fn keep<'t>(c: Option<Cursor<'t>>, pred: impl FnOnce(Cursor<'t>) -> bool) -> Vals {
     of(c.filter(|&c| pred(c)))
+}
+
+pub(crate) fn role_code(role: Role) -> u32 {
+    match role {
+        Role::Value => 0,
+        Role::Callable => 1,
+        Role::Type => 2,
+    }
+}
+
+fn role_of(code: u32) -> Role {
+    match code {
+        1 => Role::Callable,
+        2 => Role::Type,
+        _ => Role::Value,
+    }
+}
+
+fn member_role(member: Cursor) -> u32 {
+    role_code(role(member))
+}
+
+fn sym(c: Cursor) -> u32 {
+    c.sym()
+}
+
+fn object_name(member: Cursor) -> u32 {
+    member
+        .child(C::Object)
+        .map_or(0, |object| object.reference().sym())
 }
 
 pub(crate) fn role(member: Cursor<'_>) -> Role {
@@ -177,10 +204,6 @@ impl<'t> Cx<'_, 't, Core> {
             _ => Vals::new(),
         }
     }
-}
-
-fn unbound(_: &mut Cx<'_, '_, Core>, _: &[Vals]) -> Vals {
-    unreachable!("the engine calls the function a phase binds instead")
 }
 
 fn loop_head(c: Cursor<'_>) -> usize {
@@ -370,7 +393,7 @@ static FUNCTIONS: &[Function<Core>] = &[
     function!(
         Pure,
         "sink",
-        [one],
+        [one], @uses ["core"."sink"],
         |cx, a| match sink_step(node(cx, a, 0)) {
             Ok(next) => cx.call1(crate::fn_id!("core", "sink"), Val::Node(next.into())),
             Err(binding) => of(binding),
@@ -462,7 +485,7 @@ static FUNCTIONS: &[Function<Core>] = &[
         }
         _ => Vals::new(),
     }),
-    function!(Flow, "callable", [one], |cx, a| cx.callable(a[0][0])),
+    function!(Flow, "callable", [one], @uses ["core"."declared"], |cx, a| cx.callable(a[0][0])),
     function!(Flow, "enclosing", [], |cx, _| {
         let node = cx.enclosing();
         of([cx.at(node)])
@@ -483,7 +506,7 @@ static FUNCTIONS: &[Function<Core>] = &[
         });
         of(binding.map(|b| cx.at(producer_of(b))))
     }),
-    function!(Flow, "value_of", [one], |cx, a| {
+    function!(Flow, "value_of", [one], @uses ["core"."ivar_binding"], |cx, a| {
         let t = node(cx, a, 0);
         match t {
             t if C::try_from_u16(t.kind()).is_some_and(C::is_opaque_value) => one(Val::Opaque),
@@ -499,7 +522,7 @@ static FUNCTIONS: &[Function<Core>] = &[
             _ => Vals::new(),
         }
     }),
-    function!(Flow, "record", [one], |cx, a| {
+    function!(Flow, "record", [one], @uses ["core"."type"], |cx, a| {
         let t = node(cx, a, 0);
         if let Some(record) = t.is(C::Obj).then_some(t).or_else(|| t.child(C::Obj)) {
             return of([record]);
@@ -509,32 +532,45 @@ static FUNCTIONS: &[Function<Core>] = &[
             .is_some_and(|callee| cx.is_class_ref(callee));
         of(t.child(C::Args).filter(|_| class))
     }),
-    function!(Abstract, "read", [one], unbound),
-    function!(Abstract, "slot", [one], unbound),
-    function!(Abstract, "wildcards", [], unbound),
-    function!(Flow, "name", [one], |cx, a| {
+    function!(required Flow, "read", [one]),
+    function!(required Flow, "slot", [one]),
+    function!(required Flow, "wildcards", []),
+    function!(Pure, "declared", [one, one, one], |cx, a| {
+        let (owner, Some(&Val::Sym(name)), Some(&Val::Sym(role))) =
+            (node(cx, a, 0), a[1].first(), a[2].first())
+        else {
+            return Vals::new();
+        };
+        let defs = crate::tree::members_named(owner)
+            .filter(|&(n, _)| n == name)
+            .map(|(_, def)| owner.jump(owner.fi(), def));
+        let tags = cx.tags();
+        let found = crate::tree::find_member_in(owner, defs, role_of(role), &tags);
+        of(found.map(|node| owner.jump(owner.fi(), node)))
+    }),
+    function!(Flow, "name", [one], @uses ["core"."read"], |cx, a| {
         let mut found = cx.read(node(cx, a, 0));
         found.retain(|v| *v != Val::Opaque);
         found
     }),
-    function!(Flow, "type", [one], |cx, a| {
+    function!(Flow, "type", [one], @uses ["core"."read", "core"."type", "core"."named_member", "core"."ivar_binding", "core"."declared"], |cx, a| {
         let mut found = ops::chain(cx, node(cx, a, 0));
         found.retain(|v| *v != Val::Opaque);
         found
     }),
-    function!(Flow, "member", [one, one], |cx, a| {
+    function!(Flow, "member", [one, one], @key [KeyPart::Arg(0), KeyPart::Of(1, sym), KeyPart::Of(1, member_role)], @uses ["core"."type", "core"."member", "core"."declared"], |cx, a| {
         let Some(m) = arg(cx, a, 1) else {
             return Vals::new();
         };
         cx.member(a[0][0], m)
     }),
-    function!(Flow, "unmatched", [one, one], |cx, a| {
+    function!(Flow, "unmatched", [one, one], @key [KeyPart::Arg(0), KeyPart::Of(1, sym), KeyPart::Of(1, member_role)], @uses ["core"."declared"], |cx, a| {
         let Some(m) = arg(cx, a, 1) else {
             return Vals::new();
         };
         cx.unmatched(a[0][0], m)
     }),
-    function!(Flow, "members", [one, one, one], |cx, a| {
+    function!(Flow, "members", [one, one, one], @uses ["core"."declared"], |cx, a| {
         let (Some(owner), Some(&Val::Sym(name)), Some(site)) =
             (arg(cx, a, 0), a[1].first(), arg(cx, a, 2))
         else {
@@ -547,9 +583,9 @@ static FUNCTIONS: &[Function<Core>] = &[
         let supers = cx.state().supers.get(&def).cloned().unwrap_or_default();
         of(supers.into_iter().map(|node| cx.at(node)))
     }),
-    function!(Flow, "reference", [one], |cx, a| cx
+    function!(Flow, "reference", [one], @uses ["core"."type"], |cx, a| cx
         .reference(node(cx, a, 0))),
-    function!(Flow, "receiver_calls", [one], |cx, a| {
+    function!(Flow, "receiver_calls", [one], @uses ["core"."read"], |cx, a| {
         let receiver = arg(cx, a, 0)
             .and_then(|m| m.child(C::Dispatch))
             .and_then(|d| d.child(C::Object));
@@ -567,13 +603,16 @@ static FUNCTIONS: &[Function<Core>] = &[
     function!(
         Flow,
         "named_member",
-        [one, one, unkeyed, unkeyed, unkeyed],
+        [one, one],
+        @key [KeyPart::Of(0, object_name), KeyPart::Of(0, sym)],
+        @uses ["core"."type", "core"."declared"],
         |cx, a| {
-            let c = node(cx, a, 2);
-            cx.member_of_object(c, node(cx, a, 3), node(cx, a, 4))
+            let member = node(cx, a, 0);
+            let object = member.child(C::Object).expect("a chain member has an object");
+            cx.member_of_object(node(cx, a, 1), member, object)
         }
     ),
-    function!(Flow, "standalone", [one], |cx, a| {
+    function!(Flow, "standalone", [one], @uses ["core"."slot"], |cx, a| {
         let member = node(cx, a, 0);
         let in_chain = member.parent().is_some_and(|parent| {
             parent.is(C::Callee)
@@ -585,7 +624,7 @@ static FUNCTIONS: &[Function<Core>] = &[
             false => of([member]),
         }
     }),
-    function!(Flow, "callee_targets", [one], |cx, a| {
+    function!(Flow, "callee_targets", [one], @uses ["core"."read", "core"."wildcards", "core"."declared"], |cx, a| {
         let mut found = cx.callee_targets(node(cx, a, 0));
         found.retain(|v| *v != Val::Opaque);
         found
@@ -606,7 +645,7 @@ static FUNCTIONS: &[Function<Core>] = &[
         cx.write().supers.insert(def, supers);
         yes(true)
     }),
-    function!(Effect, "shadow", [one], |cx, a| {
+    function!(Effect, "shadow", [one], @uses ["core"."read"], |cx, a| {
         cx.shadow(node(cx, a, 0));
         yes(true)
     }),

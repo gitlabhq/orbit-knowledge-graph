@@ -480,7 +480,7 @@ impl<'c, 'a> R<'c, 'a> {
         if implementations.next().is_some() {
             return Vec::new();
         }
-        let (index, tags) = self.members_index();
+        let (index, tags) = (&self.ctx.members, self.ctx.tags);
         index
             .declared(implementation, member.sym(), role, &tags)
             .or_else(|| {
@@ -694,8 +694,8 @@ impl<'a> Types<'a> for R<'_, 'a> {
         supers
     }
 
-    fn members_index(&mut self) -> (&rules::Members, crate::tags::ReservedTags) {
-        (&self.ctx.members, self.ctx.tags)
+    fn declared(&mut self, owner: Cursor<'a>, name: u32, role: Role) -> Option<Cursor<'a>> {
+        self.ctx.members.declared(owner, name, role, &self.ctx.tags)
     }
 }
 

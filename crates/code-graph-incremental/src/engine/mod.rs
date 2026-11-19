@@ -99,18 +99,20 @@ pub enum Kind {
     Pure,
     Flow,
     Effect,
-    /// Declared here, provided per phase by the function `pipeline.yaml` binds
-    /// to it.
-    Abstract,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Arg {
     One,
     Set,
-    /// Passed but left out of the memo key: every value with the same keyed
-    /// arguments must give the same result.
-    Unkeyed,
+}
+
+/// One part of a cache key: an argument, or a value derived from a node
+/// argument. Calls with equal keys must have equal results.
+#[derive(Clone, Copy)]
+pub enum KeyPart {
+    Arg(u8),
+    Of(u8, fn(Cursor) -> u32),
 }
 
 pub trait Module: Sized + 'static {
@@ -127,6 +129,12 @@ pub struct Function<M: Module> {
     pub name: &'static str,
     pub sig: &'static [Arg],
     pub kind: Kind,
+    /// The cache key; every argument when empty.
+    pub key: &'static [KeyPart],
+    /// The functions this one calls, as `(module, function)`.
+    pub uses: &'static [(&'static str, &'static str)],
+    /// Required, not implemented: each phase binds a provider to it.
+    pub required: bool,
     pub call: Call<M>,
 }
 
@@ -164,6 +172,9 @@ fn describe<M: Module>(slot: u8) -> Vec<Entry> {
             name: f.name,
             sig: f.sig,
             kind: f.kind,
+            key: f.key,
+            uses: f.uses,
+            required: f.required,
         })
         .collect()
 }
@@ -188,10 +199,79 @@ pub struct Entry {
     pub name: &'static str,
     pub sig: &'static [Arg],
     pub kind: Kind,
+    key: &'static [KeyPart],
+    uses: &'static [(&'static str, &'static str)],
+    pub required: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct FnId(u16);
+
+/// What a phase resolves once at load: the function each call runs, with
+/// abstract functions replaced by their providers, and the states each
+/// function can read through its calls. Any state read makes it Flow.
+pub struct Links {
+    to: Vec<FnId>,
+    deps: Vec<u8>,
+}
+
+impl Links {
+    pub fn load(binds: &[(FnId, FnId)]) -> Result<Self, crate::error::LoadError> {
+        let ids = || (0..TABLE.len() as u16).map(FnId);
+        let to: Vec<FnId> = ids()
+            .map(|id| {
+                binds
+                    .iter()
+                    .find_map(|&(of, to)| (of == id).then_some(to))
+                    .unwrap_or(id)
+            })
+            .collect();
+        let mut uses = Vec::with_capacity(TABLE.len());
+        for id in ids() {
+            let f = function(id);
+            let mut called = Vec::new();
+            for &(module, name) in f.uses {
+                let used = lookup(module, name).ok_or_else(|| {
+                    crate::error::LoadError(format!("{} uses unknown {module}.{name}", f.name))
+                })?;
+                called.push(to[usize::from(used.0)]);
+            }
+            uses.push(called);
+        }
+        let own = |id: FnId| match function(id) {
+            f if f.kind == Kind::Flow && !f.required => (1 << f.slot) | (1 << WALK),
+            _ => 0,
+        };
+        let mut deps: Vec<u8> = ids().map(own).collect();
+        loop {
+            let mut changed = false;
+            for id in ids() {
+                let i = usize::from(id.0);
+                let through = to[i];
+                let reached = uses[usize::from(through.0)]
+                    .iter()
+                    .fold(deps[usize::from(through.0)], |acc, u| {
+                        acc | deps[usize::from(u.0)]
+                    });
+                if reached != deps[i] {
+                    deps[i] = reached;
+                    changed = true;
+                }
+            }
+            if !changed {
+                return Ok(Self { to, deps });
+            }
+        }
+    }
+
+    pub fn kind(&self, id: FnId) -> Kind {
+        let f = function(self.to[usize::from(id.0)]);
+        match (f.kind, self.deps[usize::from(id.0)]) {
+            (Kind::Pure, deps) if deps != 0 => Kind::Flow,
+            (kind, _) => kind,
+        }
+    }
+}
 
 static TABLE: LazyLock<Vec<Entry>> = LazyLock::new(|| {
     assert!(modules::ALL.len() < WALK);
@@ -238,7 +318,7 @@ type Key = (FnId, SmallVec<[Val; 4]>);
 
 enum Memo {
     Busy,
-    Done { vals: Vals, reads: u8, stamp: u64 },
+    Done { vals: Vals, deps: u8, stamp: u64 },
 }
 
 /// Results by call. An entry that read state stays until a sweep finds that
@@ -257,7 +337,7 @@ pub struct Run<'t> {
     fi: u32,
     env: &'t Env,
     tags: ReservedTags,
-    binds: &'t [(FnId, FnId)],
+    links: &'t Links,
     budget: &'t Sentinel,
     file: Sentinel,
     killed: Option<Killed>,
@@ -266,7 +346,7 @@ pub struct Run<'t> {
     defs: Vec<u32>,
     states: Box<[Box<dyn Any>]>,
     epochs: [u64; WALK + 1],
-    reads: u8,
+    reading: u8,
     memo: Table,
     cut: bool,
 }
@@ -276,7 +356,7 @@ impl<'t> Run<'t> {
         trees: &'t [Tree],
         fi: u32,
         env: &'t Env,
-        binds: &'t [(FnId, FnId)],
+        links: &'t Links,
         budget: &'t Sentinel,
         file: Sentinel,
     ) -> Self {
@@ -284,7 +364,7 @@ impl<'t> Run<'t> {
             trees,
             fi,
             env,
-            binds,
+            links,
             tags: ReservedTags::new(&env.lang),
             budget,
             file,
@@ -294,7 +374,7 @@ impl<'t> Run<'t> {
             defs: Vec::new(),
             states: modules::ALL.iter().map(|m| (m.state)()).collect(),
             epochs: [0; WALK + 1],
-            reads: 0,
+            reading: u8::MAX,
             memo: Table::default(),
             cut: false,
         }
@@ -333,20 +413,29 @@ impl<'t> Run<'t> {
         self.epochs[WALK] += 1;
     }
 
-    fn stamp(&self, reads: u8) -> u64 {
-        stamp(&self.epochs, reads)
+    fn stamp(&self, deps: u8) -> u64 {
+        stamp(&self.epochs, deps)
     }
 
-    fn key(id: FnId, sig: &[Arg], args: &[Vals]) -> Key {
+    fn key(&self, id: FnId, f: &Entry, args: &[Vals]) -> Key {
         let mut key = SmallVec::new();
-        for (arg, vals) in sig.iter().zip(args) {
-            match arg {
-                Arg::One => key.extend_from_slice(vals),
-                Arg::Set => {
-                    key.push(Val::Sym(vals.len() as u32));
-                    key.extend_from_slice(vals);
+        let arg = |key: &mut SmallVec<[Val; 4]>, at: usize| {
+            if f.sig[at] == Arg::Set {
+                key.push(Val::Sym(args[at].len() as u32));
+            }
+            key.extend_from_slice(&args[at]);
+        };
+        if f.key.is_empty() {
+            (0..args.len()).for_each(|at| arg(&mut key, at));
+        }
+        for part in f.key {
+            match *part {
+                KeyPart::Arg(at) => arg(&mut key, usize::from(at)),
+                KeyPart::Of(at, derive) => {
+                    let loc = args[usize::from(at)].first().and_then(|v| v.loc());
+                    let derived = loc.map(|l| derive(Cursor::new(self.trees, l.fi, l.node)));
+                    key.push(Val::Sym(derived.unwrap_or(u32::MAX)));
                 }
-                Arg::Unkeyed => {}
             }
         }
         (id, key)
@@ -361,33 +450,38 @@ impl<'t> Run<'t> {
         table.entries.retain(|_, memo| match memo {
             Memo::Busy => true,
             Memo::Done {
-                reads, stamp: at, ..
-            } => stamp(epochs, *reads) == *at,
+                deps, stamp: at, ..
+            } => stamp(epochs, *deps) == *at,
         });
         table.swept = table.entries.len();
     }
 
     /// Cached calls share one cycle guard: a call already in progress yields
     /// nothing and marks the result in progress as cut. A result stays valid
-    /// until a state it read is written. A cut result that read no state is
-    /// never stored; one that read state lives until that state changes, which
+    /// until a state its function can read is written. A cut Pure result is
+    /// never stored; a cut Flow result lives until its states change, which
     /// keeps self-referential chains (`n = n.next()`) linear.
     fn call(&mut self, id: FnId, args: &[Vals]) -> Vals {
-        let id = provider(self.binds, id);
+        let links = self.links;
+        let (id, deps) = (links.to[usize::from(id.0)], links.deps[usize::from(id.0)]);
         let f = function(id);
         let invoke = modules::ALL[usize::from(f.slot)].invoke;
+        let reading = std::mem::replace(&mut self.reading, deps);
         if f.kind == Kind::Effect {
-            return invoke(self, f.slot, f.index, args);
+            self.reading = u8::MAX;
+            let found = invoke(self, f.slot, f.index, args);
+            self.reading = reading;
+            return found;
         }
-        let key = Self::key(id, f.sig, args);
+        let key = self.key(id, f, args);
         match self.memo.entries.get(&key) {
             Some(Memo::Busy) => {
                 self.cut = true;
-                self.reads = u8::MAX;
+                self.reading = reading;
                 return Vals::new();
             }
-            Some(Memo::Done { vals, reads, stamp }) if self.stamp(*reads) == *stamp => {
-                self.reads |= *reads;
+            Some(Memo::Done { vals, deps, stamp }) if self.stamp(*deps) == *stamp => {
+                self.reading = reading;
                 return vals.clone();
             }
             _ => {}
@@ -395,24 +489,21 @@ impl<'t> Run<'t> {
         self.sweep();
         self.memo.entries.insert(key.clone(), Memo::Busy);
         let epochs = self.epochs;
-        let outer = (
-            std::mem::take(&mut self.cut),
-            std::mem::take(&mut self.reads),
-        );
+        let outer = std::mem::take(&mut self.cut);
         let found = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
             invoke(self, f.slot, f.index, args)
         });
-        let (cut, reads) = (self.cut, self.reads);
-        self.cut |= outer.0;
-        self.reads |= outer.1;
-        if (cut && reads == 0) || epochs != self.epochs {
+        let cut = self.cut;
+        self.cut |= outer;
+        self.reading = reading;
+        if (cut && deps == 0) || epochs != self.epochs {
             self.memo.entries.remove(&key);
         } else {
-            let stamp = self.stamp(reads);
+            let stamp = self.stamp(deps);
             let vals = found.clone();
             self.memo
                 .entries
-                .insert(key, Memo::Done { vals, reads, stamp });
+                .insert(key, Memo::Done { vals, deps, stamp });
         }
         found
     }
@@ -425,24 +516,23 @@ impl<'t> Run<'t> {
     }
 }
 
-fn provider(binds: &[(FnId, FnId)], id: FnId) -> FnId {
-    binds
-        .iter()
-        .find_map(|&(of, to)| (of == id).then_some(to))
-        .unwrap_or(id)
-}
-
-pub fn abstracts(module: &str) -> impl Iterator<Item = FnId> + '_ {
+pub fn required(module: &str) -> impl Iterator<Item = FnId> + '_ {
     (0..TABLE.len() as u16)
         .map(FnId)
-        .filter(move |&id| function(id).kind == Kind::Abstract && module_of(id) == module)
+        .filter(move |&id| function(id).required && module_of(id) == module)
 }
 
-fn stamp(epochs: &[u64; WALK + 1], mut reads: u8) -> u64 {
+impl Links {
+    pub(crate) fn to(&self, id: FnId) -> FnId {
+        self.to[usize::from(id.0)]
+    }
+}
+
+fn stamp(epochs: &[u64; WALK + 1], mut deps: u8) -> u64 {
     let mut sum = 0;
-    while reads != 0 {
-        sum += epochs[reads.trailing_zeros() as usize];
-        reads &= reads - 1;
+    while deps != 0 {
+        sum += epochs[deps.trailing_zeros() as usize];
+        deps &= deps - 1;
     }
     sum
 }
@@ -460,7 +550,7 @@ pub fn run_tree(
         std::slice::from_ref(tree),
         0,
         env,
-        &phase.binds,
+        &phase.links,
         budget,
         file,
     );
@@ -530,12 +620,15 @@ impl<'r, 't, M: Module> Cx<'r, 't, M> {
     }
 
     pub fn state(&mut self) -> &mut M::State {
-        self.run.reads |= 1 << self.slot;
+        debug_assert!(
+            self.run.reading & (1 << self.slot) != 0,
+            "{} state read by a function whose uses do not reach it",
+            M::NAME
+        );
         self.slot_state()
     }
 
     pub fn write(&mut self) -> &mut M::State {
-        self.run.reads |= 1 << self.slot;
         self.run.epochs[usize::from(self.slot)] += 1;
         self.slot_state()
     }
@@ -559,7 +652,10 @@ impl<'r, 't, M: Module> Cx<'r, 't, M> {
     }
 
     pub fn enclosing_def(&mut self) -> Option<u32> {
-        self.run.reads |= 1 << WALK;
+        debug_assert!(
+            self.run.reading & (1 << WALK) != 0,
+            "walk read outside Flow"
+        );
         self.run.defs.last().copied()
     }
 

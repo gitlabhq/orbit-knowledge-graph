@@ -1,8 +1,7 @@
-use super::ops::{self, Chain, Members, Parts, Types};
-use super::{Core, Ref, binding_type, field_value, role};
+use super::ops::{self, Chain, Parts, Types};
+use super::{Core, Ref, binding_type, field_value, role, role_code};
 use crate::canonical::Canonical as C;
 use crate::engine::{Cursor, Cx, Val, Vals, of, one};
-use crate::tags::ReservedTags;
 use crate::tree::{Role, is_name_text};
 
 impl<'t> Types<'t> for Cx<'_, 't, Core> {
@@ -25,9 +24,17 @@ impl<'t> Types<'t> for Cx<'_, 't, Core> {
         supers.into_iter().flatten().map(|d| self.at(d)).collect()
     }
 
-    fn members_index(&mut self) -> (&Members, ReservedTags) {
-        let tags = self.tags();
-        (&self.state().members, tags)
+    fn declared(&mut self, owner: Cursor<'t>, name: u32, role: Role) -> Option<Cursor<'t>> {
+        let args = [
+            one(Val::Node(owner.into())),
+            one(Val::Sym(name)),
+            one(Val::Sym(role_code(role))),
+        ];
+        let found = self.call(crate::fn_id!("core", "declared"), &args);
+        found
+            .first()
+            .and_then(|v| v.loc())
+            .map(|loc| self.jump(loc))
     }
 }
 
@@ -76,13 +83,7 @@ impl<'t> Chain<'t> for Cx<'_, 't, Core> {
         if !bare {
             return self.member_of_object(c, member, object);
         }
-        let key = [
-            one(Val::Sym(name.sym())),
-            one(Val::Sym(member.sym())),
-            one(Val::Node(c.into())),
-            one(Val::Node(member.into())),
-            one(Val::Node(object.into())),
-        ];
+        let key = [one(Val::Node(member.into())), one(Val::Node(c.into()))];
         self.call(crate::fn_id!("core", "named_member"), &key)
     }
 }

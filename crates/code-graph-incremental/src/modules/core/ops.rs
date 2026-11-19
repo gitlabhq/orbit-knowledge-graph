@@ -53,7 +53,7 @@ impl Members {
 pub trait Types<'t> {
     fn parts(&mut self, owner: Cursor<'t>) -> Parts<'t>;
     fn supers(&mut self, part: Cursor<'t>) -> Parts<'t>;
-    fn members_index(&mut self) -> (&Members, ReservedTags);
+    fn declared(&mut self, owner: Cursor<'t>, name: u32, role: Role) -> Option<Cursor<'t>>;
 }
 
 /// The members named `name` at the nearest inheritance level that has any; a
@@ -71,11 +71,12 @@ pub fn members<'t>(
         let mut parts: Parts<'t> = SmallVec::new();
         for &owner in &level {
             let own = t.parts(owner);
-            let (index, tags) = t.members_index();
-            let declared = |p: &Cursor<'t>| index.declared(*p, name, role, &tags);
-            let members: Parts<'t> = match declared(&own[0]) {
+            let members: Parts<'t> = match t.declared(own[0], name, role) {
                 Some(member) => SmallVec::from_elem(member, 1),
-                None => own[1..].iter().filter_map(declared).collect(),
+                None => own[1..]
+                    .iter()
+                    .filter_map(|&p| t.declared(p, name, role))
+                    .collect(),
             };
             for member in members {
                 if !found.iter().any(|f| Loc::from(*f) == Loc::from(member)) {

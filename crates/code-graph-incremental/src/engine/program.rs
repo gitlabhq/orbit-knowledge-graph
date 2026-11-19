@@ -103,7 +103,7 @@ pub struct Phase {
     pub scope: String,
     pub after: Vec<String>,
     pub(super) modules: Vec<u8>,
-    pub(super) binds: Vec<(FnId, FnId)>,
+    pub(super) links: super::Links,
     rules: Vec<Rule>,
     by_kind: Vec<SmallVec<[u16; 4]>>,
     slots: usize,
@@ -143,7 +143,7 @@ impl Pipeline {
 
 impl Phase {
     fn load(spec: PhaseSpec, rules: &[RuleSpec], lang: &Lang) -> Result<Self, LoadError> {
-        let binds = binds(&spec)?;
+        let links = super::Links::load(&binds(&spec)?)?;
         let mut phase = Phase {
             name: spec.name,
             scope: spec.scope,
@@ -153,7 +153,7 @@ impl Phase {
                 .iter()
                 .map(|m| super::slot_of(m).ok_or_else(|| LoadError(format!("no module named {m}"))))
                 .collect::<Result<_, _>>()?,
-            binds,
+            links,
             rules: Vec::new(),
             by_kind: Vec::new(),
             slots: 1,
@@ -183,7 +183,7 @@ impl Phase {
                     ))));
                 }
             }
-            let rule = Rule::load(rule, &spec.modules, &phase.binds, lang).map_err(at)?;
+            let rule = Rule::load(rule, &spec.modules, &phase.links, lang).map_err(at)?;
             let Pat::Node { kind, .. } = rule.pat else {
                 return Err(at(LoadError("must match a node kind".into())));
             };
@@ -220,13 +220,17 @@ fn binds(spec: &PhaseSpec) -> Result<Vec<(FnId, FnId)>, LoadError> {
     for (of, to) in &spec.bind {
         let (of, to) = (id(of)?, id(to)?);
         let (declared, provider) = (super::function(of), super::function(to));
-        if declared.kind != Kind::Abstract || provider.kind == Kind::Abstract {
+        if !declared.required || provider.required {
             return Err(LoadError(format!(
-                "bind {}: must bind an abstract function to a provider",
+                "bind {}: binds a required function to a provider",
                 declared.name
             )));
         }
-        if declared.sig != provider.sig {
+        let kinds = matches!(
+            (declared.kind, provider.kind),
+            (Kind::Flow, Kind::Flow | Kind::Pure) | (Kind::Pure, Kind::Pure)
+        );
+        if declared.sig != provider.sig || !kinds {
             return Err(LoadError(format!(
                 "bind {}: signatures differ",
                 declared.name
@@ -235,7 +239,7 @@ fn binds(spec: &PhaseSpec) -> Result<Vec<(FnId, FnId)>, LoadError> {
         binds.push((of, to));
     }
     for module in &spec.modules {
-        if let Some(id) = super::abstracts(module).find(|id| binds.iter().all(|(of, _)| of != id)) {
+        if let Some(id) = super::required(module).find(|id| binds.iter().all(|(of, _)| of != id)) {
             return Err(LoadError(format!(
                 "phase {}: {module}.{} needs a bind",
                 spec.name,
@@ -250,7 +254,7 @@ impl Rule {
     fn load(
         spec: &RuleSpec,
         modules: &[String],
-        binds: &[(FnId, FnId)],
+        links: &super::Links,
         lang: &Lang,
     ) -> Result<Self, LoadError> {
         let mut ctx = Ctx::new(lang);
@@ -260,7 +264,7 @@ impl Rule {
         let scope = |effects| Scope {
             slots,
             modules,
-            binds,
+            links,
             lang,
             effects,
         };
