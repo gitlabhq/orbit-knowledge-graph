@@ -537,6 +537,79 @@ async fn archive_indexes_multiple_families_into_server_batches() {
 }
 
 #[tokio::test]
+async fn edges_to_a_file_of_another_family_carry_its_tags() {
+    let files: &[(&str, &[u8])] = &[
+        ("root/docs/index.md", b"See [main](../src/main.py).\n"),
+        ("root/src/main.py", b"def main():\n    pass\n"),
+    ];
+    let fixture = IndexFixture::new();
+    let batches = Arc::new(Mutex::new(Vec::new()));
+    let capture = batches.clone();
+    let sink = Arc::new(move |table: &str, batch: RecordBatch| {
+        capture.lock().unwrap().push((table.to_owned(), batch));
+        Ok(())
+    });
+    let mut options = options();
+    options.batch_bytes = 1;
+    fixture.run(files, options, sink).await.unwrap();
+    let batches = batches.lock().unwrap();
+    let file_id = |path: &str| {
+        collected_rows(&batches, &fixture.tables.file)
+            .into_iter()
+            .find(|row| row["path"].coerce::<String>().as_deref() == Some(path))
+            .map(|row| row["id"].coerce::<i64>().unwrap())
+            .unwrap()
+    };
+    let (source, target) = (file_id("docs/index.md"), file_id("src/main.py"));
+    let tags = |batch: &RecordBatch, column: &str, row: usize| {
+        let list = batch
+            .column_by_name(column)
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::ListArray>()
+            .unwrap()
+            .value(row);
+        let mut tags: Vec<_> = (0..list.len())
+            .map(|index| arrow::util::display::array_value_to_string(&list, index).unwrap())
+            .collect();
+        tags.sort();
+        tags
+    };
+    let imports: Vec<_> = batches
+        .iter()
+        .filter(|(table, _)| fixture.tables.edge_table_names().contains(&table.as_str()))
+        .flat_map(|(_, batch)| {
+            let ids = |column| {
+                batch
+                    .column_by_name(column)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<arrow::array::Int64Array>()
+                    .unwrap()
+                    .clone()
+            };
+            let (sources, targets) = (ids("source_id"), ids("target_id"));
+            (0..batch.num_rows())
+                .filter(move |&row| sources.value(row) == source && targets.value(row) == target)
+                .map(|row| {
+                    (
+                        tags(batch, "source_tags", row),
+                        tags(batch, "target_tags", row),
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert_eq!(
+        imports,
+        [(
+            vec!["extension:md".to_owned(), "language:markdown".to_owned()],
+            vec!["extension:py".to_owned(), "language:python".to_owned()],
+        )]
+    );
+}
+
+#[tokio::test]
 async fn tables_over_the_batch_byte_budget_index_the_same_rows() {
     let files: &[(&str, &[u8])] = &[
         ("root/src/main.py", b"from helper import greet\ngreet()\n"),
