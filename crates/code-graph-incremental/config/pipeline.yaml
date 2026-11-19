@@ -14,5 +14,5 @@ phases:
     does: edges
     until: stable
     bind: { core.read: resolved }
-  - { name: display, over: graph, does: tags }
+  - { name: display, over: tree, does: tags }
   - { name: export, over: graph, does: rows }
