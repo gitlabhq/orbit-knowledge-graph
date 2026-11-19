@@ -88,14 +88,14 @@ impl Edge {
     pub fn to(&self) -> (u32, u32) {
         (self.to_tree, self.to_node)
     }
-    pub fn from_loc(&self) -> crate::rules::Loc {
-        crate::rules::Loc {
+    pub fn from_loc(&self) -> crate::engine::Loc {
+        crate::engine::Loc {
             fi: self.from_tree,
             node: self.from_node,
         }
     }
-    pub fn to_loc(&self) -> crate::rules::Loc {
-        crate::rules::Loc {
+    pub fn to_loc(&self) -> crate::engine::Loc {
+        crate::engine::Loc {
             fi: self.to_tree,
             node: self.to_node,
         }

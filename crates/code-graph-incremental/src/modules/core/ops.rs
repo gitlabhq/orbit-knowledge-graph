@@ -1,52 +1,12 @@
-use std::sync::{Arc, Mutex};
-
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
 use crate::canonical::Canonical as C;
 use crate::engine::Loc;
-use crate::tags::ReservedTags;
-use crate::tree::{Compact, Role, find_member_in, members_named, reachable};
+use crate::tree::{Compact, Role, reachable};
 
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 pub type Parts<'t> = SmallVec<[Cursor<'t>; 4]>;
-type Index = Arc<FxHashMap<u32, SmallVec<[u32; 1]>>>;
-
-/// Per file, each owner's members by name, built the first time it is asked.
-pub struct Members(Vec<Mutex<FxHashMap<u32, Index>>>);
-
-impl Members {
-    pub fn new(files: usize) -> Self {
-        Self((0..files).map(|_| Mutex::default()).collect())
-    }
-
-    fn of(&self, owner: Cursor<'_>) -> Index {
-        let mut cache = self.0[owner.fi() as usize]
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let index = cache.entry(owner.index()).or_insert_with(|| {
-            let mut index: FxHashMap<u32, SmallVec<[u32; 1]>> = FxHashMap::default();
-            for (name, def) in members_named(owner) {
-                index.entry(name).or_default().push(def);
-            }
-            Arc::new(index)
-        });
-        Arc::clone(index)
-    }
-
-    pub fn declared<'t>(
-        &self,
-        owner: Cursor<'t>,
-        name: u32,
-        role: Role,
-        tags: &ReservedTags,
-    ) -> Option<Cursor<'t>> {
-        let index = self.of(owner);
-        let defs = index.get(&name).into_iter().flatten();
-        let defs = defs.map(|&def| owner.jump(owner.fi(), def));
-        find_member_in(owner, defs, role, tags).map(|node| owner.jump(owner.fi(), node))
-    }
-}
 
 /// What a pass knows about types: the defs that make up one type (impl
 /// blocks, partial classes) and the types a part names as its supertypes.

@@ -12,8 +12,6 @@ use smallvec::SmallVec;
 use crate::env::Env;
 use crate::file_tree::{ProjectTree, WalkResult};
 use crate::intern::{Interner, Lang};
-use crate::resolve::{ImportReq, Resolver};
-use crate::rules::Loc;
 use crate::sentinel::Limits;
 use crate::tree::{Compact, CompactNode, Edge, Node, Tag, Tree};
 use crate::treesitter::SupportLang;
@@ -32,7 +30,6 @@ impl From<(String, String)> for SourceFile {
 pub struct State {
     pub trees: Vec<Tree<Compact>>,
     pub edges: Vec<Edge>,
-    pub resolver: Resolver,
     /// Manifest files (`parse_files`) the resolver reads for module roots.
     pub configs: Vec<SourceFile>,
 }
@@ -54,11 +51,10 @@ impl State {
         )
     }
 
-    pub fn new(env: &Env) -> Self {
+    pub fn new(_: &Env) -> Self {
         Self {
             trees: Vec::new(),
             edges: Vec::new(),
-            resolver: Resolver::new(&env.lang),
             configs: Vec::new(),
         }
     }
@@ -248,8 +244,6 @@ impl From<TreeSnapshot> for Tree<Compact> {
 struct StoredFile {
     tree: TreeSnapshot,
     edges: Vec<Edge>,
-    visible: Vec<(u32, Loc)>,
-    reqs: Vec<ImportReq>,
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -265,7 +259,6 @@ struct Index {
     labels: Vec<String>,
     buckets: u32,
     blocks: Vec<(u32, String)>,
-    resolved: bool,
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -397,9 +390,8 @@ impl State {
             .div_ceil(FILES_PER_BLOCK)
             .max(1)
             .next_power_of_two() as u32;
-        let resolved = !self.resolver.visible().is_empty();
         let kept = match touched {
-            Some(touched) => self.unchanged_blocks(path, buckets, resolved, touched),
+            Some(touched) => self.unchanged_blocks(path, buckets, touched),
             None => FxHashMap::default(),
         };
         let blocks: Vec<(u32, String)> = self
@@ -414,7 +406,6 @@ impl State {
             labels: self.trees.iter().map(|tree| tree.label.clone()).collect(),
             buckets,
             blocks,
-            resolved,
         };
         let shared = Shared {
             lang: LangSnapshot::from(&env.lang),
@@ -439,13 +430,12 @@ impl State {
         &self,
         path: &Path,
         buckets: u32,
-        resolved: bool,
         touched: &FxHashSet<u32>,
     ) -> FxHashMap<u32, String> {
         let Ok((_, previous)) = open_index(path) else {
             return FxHashMap::default();
         };
-        if previous.buckets != buckets || previous.resolved != resolved {
+        if previous.buckets != buckets {
             return FxHashMap::default();
         }
         let before: FxHashSet<&str> = previous.labels.iter().map(String::as_str).collect();
@@ -500,22 +490,11 @@ impl State {
         for edge in self.edges.iter().filter(|e| members.contains(&e.from_tree)) {
             edges.entry(edge.from_tree).or_default().push(*edge);
         }
-        let mut reqs: FxHashMap<u32, Vec<ImportReq>> = FxHashMap::default();
-        for req in self
-            .resolver
-            .reqs()
-            .iter()
-            .filter(|r| members.contains(&r.fi))
-        {
-            reqs.entry(req.fi).or_default().push(req.clone());
-        }
         let mut stored: Vec<StoredFile> = files
             .iter()
             .map(|&fi| StoredFile {
                 tree: TreeSnapshot::from(&self.trees[fi as usize]),
                 edges: edges.remove(&fi).unwrap_or_default(),
-                visible: self.visible_names(fi),
-                reqs: reqs.remove(&fi).unwrap_or_default(),
             })
             .collect();
         let mut paths: Vec<u32> = files
@@ -538,19 +517,6 @@ impl State {
             paths: paths.iter().map(|fi| label(fi).to_string()).collect(),
             files: stored,
         }
-    }
-
-    fn visible_names(&self, fi: u32) -> Vec<(u32, Loc)> {
-        let mut names: Vec<(u32, Loc)> = self
-            .resolver
-            .visible()
-            .get(fi as usize)
-            .into_iter()
-            .flatten()
-            .map(|(&sym, &loc)| (sym, loc))
-            .collect();
-        names.sort_unstable_by_key(|(sym, _)| *sym);
-        names
     }
 
     /// The labels of the snapshot at `path`, in tree order, without reading
@@ -621,28 +587,15 @@ impl State {
             .collect::<io::Result<_>>()?;
         let mut trees = Vec::with_capacity(files.len());
         let mut edges = Vec::new();
-        let mut visible = Vec::with_capacity(files.len());
-        let mut reqs = Vec::new();
         for file in files {
             trees.push(file.tree.into());
             edges.extend(file.edges);
-            visible.push(file.visible.into_iter().collect());
-            reqs.extend(file.reqs);
         }
-        if !index.resolved {
-            visible = Vec::new();
-        }
-        let mut state = State {
+        let state = State {
             trees,
             edges,
-            resolver: Resolver::from_parts(visible, reqs, &env.lang),
             configs: shared.configs.into_iter().map(Into::into).collect(),
         };
-        let walk = state.project_tree(&env);
-        state
-            .resolver
-            .rebuild_file_index(&state.trees, &env, &walk.entrypoints);
-        state.resolver.lookup = walk.lookup;
         Ok((env, state))
     }
 }
@@ -680,10 +633,7 @@ fn read_block(path: &Path) -> io::Result<Block> {
 
 /// Every file `file` refers to.
 fn references(file: &StoredFile) -> impl Iterator<Item = u32> + '_ {
-    let edges = file.edges.iter().flat_map(|e| [e.from_tree, e.to_tree]);
-    let names = file.visible.iter().map(|(_, loc)| loc.fi);
-    let reqs = file.reqs.iter().flat_map(|r| [r.fi, r.target_fi]);
-    edges.chain(names).chain(reqs)
+    file.edges.iter().flat_map(|e| [e.from_tree, e.to_tree])
 }
 
 /// Rewrites every file reference in `file` through `to`.
@@ -692,13 +642,6 @@ fn renumber(file: &mut StoredFile, to: impl Fn(u32) -> Option<u32>) -> Option<()
     for edge in &mut file.edges {
         edge.from_tree = to(edge.from_tree)?;
         edge.to_tree = to(edge.to_tree)?;
-    }
-    for (_, loc) in &mut file.visible {
-        loc.fi = to(loc.fi)?;
-    }
-    for req in &mut file.reqs {
-        req.fi = to(req.fi)?;
-        req.target_fi = to(req.target_fi)?;
     }
     Some(())
 }

@@ -3,6 +3,7 @@ mod node;
 #[cfg(feature = "pretty-print")]
 mod print;
 mod semantic;
+pub use semantic::CLASS_LIKE;
 mod storage;
 
 use indextree::Arena;

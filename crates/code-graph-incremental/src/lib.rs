@@ -9,8 +9,6 @@ pub mod intern;
 pub mod markdown;
 pub mod modules;
 pub mod pipeline;
-pub mod resolve;
-pub mod rules;
 pub mod shared;
 pub mod templates;
 pub mod tree;

@@ -63,9 +63,6 @@ mod tests {
                 "modules/core/names.rs",
                 include_str!("../modules/core/chain.rs"),
             ),
-            ("resolve/mod.rs", include_str!("../resolve/mod.rs")),
-            ("resolve/types.rs", include_str!("../resolve/types.rs")),
-            ("resolve/imports.rs", include_str!("../resolve/imports.rs")),
             ("tree/semantic.rs", include_str!("../tree/semantic.rs")),
         ] {
             for (i, line) in src.lines().enumerate() {

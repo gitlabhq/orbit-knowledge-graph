@@ -6,7 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::canonical::Canonical as C;
 use crate::engine::{Cursor, Cx, Function, KeyPart, Module, Val, Vals, of, one, yes};
 use crate::modules::{arg, function, node};
-use crate::resolve::CLASS_LIKE;
+use crate::tree::CLASS_LIKE;
 use crate::tree::Role;
 
 pub struct Core;

@@ -4,7 +4,7 @@ use std::path::Path;
 use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::SNAPSHOT_VERSION;
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, State, pattern, rules, templates};
+use code_graph_incremental::{Context, Env, State, dsl::rules, pattern, templates};
 mod common;
 
 const MAIN: &str = "from utils import helper\nhelper()\n";

@@ -3,10 +3,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical as C;
 use crate::constants::PATH_SEP;
+use crate::dsl::rules::{ParseFormat, ResolveConfig, ResolveStage};
 use crate::intern::Lang;
 use crate::pattern;
 use crate::pipeline::SourceFile;
-use crate::rules::{ParseFormat, ResolveConfig, ResolveStage};
 use crate::tree::{Cursor, Node, Step, Tag, Tree};
 
 pub struct WalkResult {

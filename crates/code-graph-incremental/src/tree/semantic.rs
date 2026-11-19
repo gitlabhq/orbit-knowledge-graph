@@ -1,8 +1,16 @@
 use std::ops::ControlFlow;
 
+pub const CLASS_LIKE: &[C] = &[
+    C::Class,
+    C::Struct,
+    C::ImplBlock,
+    C::Interface,
+    C::Trait,
+    C::Enum,
+];
+
 use super::{Cursor, Edge, EdgeKind, Node, Storage};
 use crate::canonical::Canonical as C;
-use crate::resolve::CLASS_LIKE;
 use crate::tags::ReservedTags;
 
 impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {

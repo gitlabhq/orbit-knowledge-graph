@@ -19,7 +19,7 @@ use crate::env::Env;
 use crate::export::{self, Envelope};
 use crate::pattern::{self, EdgeCtx, EdgeIndex};
 use crate::sentinel::{Killed, Sentinel};
-use crate::tree::{Edge, Storage, Tag, Tree};
+use crate::tree::{Edge, Tag, Tree};
 use crate::treesitter::{self, SupportLang};
 
 pub struct Prepare;
@@ -161,25 +161,7 @@ fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> F
         })
         .collect();
 
-    let old_dirty_fis: FxHashSet<u32> = old_labels
-        .iter()
-        .enumerate()
-        .filter(|(_, l)| dirty.contains(l.as_str()))
-        .map(|(i, _)| u32::try_from(i).expect("file index exceeds u32"))
-        .collect();
-    let reverse_dirty: FxHashSet<u32> = state
-        .resolver
-        .reqs()
-        .iter()
-        .filter(|r| old_dirty_fis.contains(&r.target_fi))
-        .filter_map(|r| label_to_fi.get(old_labels[r.fi as usize].as_str()))
-        .copied()
-        .collect();
-
-    let mut dependents = state.resolver.remap(old_labels, &label_to_fi);
-    dependents.extend(reverse_dirty);
-    dependents.extend(dropped_link_sources);
-    dependents
+    dropped_link_sources.into_iter().collect()
 }
 
 /// Runs an `ItemPhase` over every item of a workset in parallel. An item that
@@ -520,10 +502,6 @@ impl Phase<DirtyGraph> for Resolve {
             inserted,
         } = input;
         let env = context.env;
-        let resolve_budget =
-            context
-                .run
-                .child("resolve", "", context.env.limits.cross_file_resolve_ms);
         let walk = state.project_tree(env);
         let tree_by_path: FxHashMap<&str, usize> = state
             .trees
@@ -568,25 +546,6 @@ impl Phase<DirtyGraph> for Resolve {
                 .filter(|(_, (tree, before))| project_tags(tree) != **before)
                 .map(|(fi, _)| u32::try_from(fi).expect("file index exceeds u32")),
         );
-        let result = state.resolver.resolve(
-            &state.trees,
-            &mut state.edges,
-            &dirty,
-            &walk,
-            env,
-            &resolve_budget,
-        )?;
-        context.run.check()?;
-        for rsp in &result.resolved_source_paths {
-            state.trees[rsp.fi as usize].storage.node_mut(rsp.node).sym = rsp.sym;
-        }
-        let retained: FxHashSet<Edge> = state.edges.iter().copied().collect();
-        state.edges.extend(
-            result
-                .cross_edges
-                .into_iter()
-                .filter(|edge| !retained.contains(edge)),
-        );
         let mut old_links = FxHashSet::default();
         state.edges.retain(|edge| {
             let link = edge.kind == crate::edge::EdgeKind::Links;
@@ -604,21 +563,7 @@ impl Phase<DirtyGraph> for Resolve {
         debug_assert!(old_links.is_empty(), "stale Links edges: {old_links:?}");
         state.edges.extend(new_links);
         context.run.check()?;
-        // Only files parsed in this run have an entry.
-        let mut resolved = Vec::with_capacity(result.file_timings.len());
-        for (fi, elapsed) in result.file_timings {
-            resolved.push(fi);
-            if let Some(stats) = context
-                .report
-                .files
-                .get_mut(state.trees[fi as usize].label.as_str())
-            {
-                stats.resolve += elapsed;
-            }
-        }
-        for k in result.killed {
-            context.skip(k);
-        }
+        let resolved: Vec<u32> = dirty.iter().copied().collect();
         touched.extend(&resolved);
         Ok(Resolved {
             state,

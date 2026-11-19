@@ -4,12 +4,13 @@
 
 use rustc_hash::FxHashMap;
 
+use crate::dsl::rules;
+use crate::dsl::rules::{LangConfig, ResolveConfig, ResolveStage};
 use crate::error::LoadError;
 use crate::intern::Lang;
-use crate::rules::{LangConfig, Program, ResolveConfig, ResolveStage};
 use crate::sentinel::Limits;
+use crate::treesitter;
 use crate::treesitter::SupportLang;
-use crate::{rules, treesitter};
 
 pub struct Env {
     pub export_config: crate::export::ExportConfig,
@@ -19,7 +20,6 @@ pub struct Env {
     pub resolve: FamilyResolve,
     pub limits: Limits,
     pub pipeline: crate::engine::Pipeline,
-    pub resolve_rules: Program<crate::resolve::Fun>,
     rules: FxHashMap<SupportLang, usize>,
     compiled: Vec<LangConfig>,
 }
@@ -72,7 +72,6 @@ impl Env {
         }
         Ok(Self {
             pipeline: crate::engine::Pipeline::load(&lang, &sources)?,
-            resolve_rules: Program::load(include_str!("../config/resolve.yaml"), &lang)?,
             export_config: crate::export::ExportConfig::embedded().clone(),
             lang,
             lang_id,

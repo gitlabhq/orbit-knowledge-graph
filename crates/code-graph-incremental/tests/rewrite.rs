@@ -42,7 +42,7 @@ fn standard_library_configuration_rejects_invalid_entries_and_legacy_fields() {
     ] {
         let yaml = format!("config:\n  stdlib: [{entry}]\nstages: []\n");
         assert!(
-            code_graph_incremental::rules::load_lang(&yaml, &lang).is_err(),
+            code_graph_incremental::dsl::rules::load_lang(&yaml, &lang).is_err(),
             "accepted {entry}"
         );
     }
@@ -53,7 +53,7 @@ fn standard_library_configuration_rejects_invalid_entries_and_legacy_fields() {
     ] {
         let yaml = format!("config:\n  {legacy}\nstages: []\n");
         assert!(
-            code_graph_incremental::rules::load_lang(&yaml, &lang).is_err(),
+            code_graph_incremental::dsl::rules::load_lang(&yaml, &lang).is_err(),
             "accepted {legacy}"
         );
     }
@@ -198,7 +198,7 @@ fn groups_after_grouping(repeat: bool) -> usize {
     )
     .unwrap();
     let yaml = GROUP_FUNCTIONS.replace("REPEAT", &repeat.to_string());
-    let stages = code_graph_incremental::rules::load_rules(&yaml, &env.lang).unwrap();
+    let stages = code_graph_incremental::dsl::rules::load_rules(&yaml, &env.lang).unwrap();
     for stage in &stages {
         code_graph_incremental::pattern::apply_stage(&mut tree, &env.lang, stage, &[]).unwrap();
     }
