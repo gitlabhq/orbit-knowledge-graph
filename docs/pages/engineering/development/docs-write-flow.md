@@ -94,7 +94,7 @@ Script steps enforce these rules:
   reviewers, and Developer+ members. Other threads stay open for the person who merges. The
   handoff note links them without their text.
 - The gate skips fork MRs, and the related-MR check groups only MRs from this project. A fork
-  MR never starts a run or joins a group, so its diff never reaches the writer.
+  MR ends at the gate and never joins a group, so its diff never reaches the writer.
 - The flow resolves only the threads it gave the fixer, and only after the fix is pushed and
   `check.py` is clean. It never resolves a **Needs reviewer decision** thread.
 - The threads path runs only on a docs MR with a branch in this project, not a fork. The
