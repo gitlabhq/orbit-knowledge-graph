@@ -1,4 +1,4 @@
-use super::config::{DOCUMENT_TYPES, DefinitionRule, DocumentType, KeyRule, Shape};
+use super::config::{DOCUMENT_TYPES, DefinitionRule, DocumentType, ImageRule, KeyRule, Shape};
 use super::{
     N, child_mapping, child_sequence, find_pair, is_pair, item_scalar, pair_key, pairs, scalar_text,
 };
@@ -296,6 +296,156 @@ fn extract_with_rule(
     true
 }
 
+fn split_image_reference(reference: &str) -> (String, Option<String>, Option<String>) {
+    let (rest, digest) = match reference.split_once('@') {
+        Some((rest, digest)) => (rest, Some(digest.to_string())),
+        None => (reference, None),
+    };
+    let mut depth = 0usize;
+    let mut tag_start = None;
+    for (index, ch) in rest.char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            '/' if depth == 0 => tag_start = None,
+            ':' if depth == 0 => tag_start = Some(index),
+            _ => {}
+        }
+    }
+    match tag_start {
+        Some(index) => (
+            rest[..index].to_string(),
+            Some(rest[index + 1..].to_string()),
+            digest,
+        ),
+        None => (rest.to_string(), None, digest),
+    }
+}
+
+fn push_image(
+    imports: &mut Vec<CanonicalImport>,
+    rule: &'static ImageRule,
+    reference: &str,
+    range: Range,
+) {
+    let (image, tag, digest) = split_image_reference(reference);
+    if image.is_empty() {
+        return;
+    }
+    imports.push(CanonicalImport {
+        import_type: &rule.import_type,
+        binding_kind: ImportBindingKind::SideEffect,
+        mode: ImportMode::Declarative,
+        path: image.clone(),
+        name: Some(image),
+        tag,
+        digest,
+        range,
+        ..Default::default()
+    });
+}
+
+fn push_image_value(
+    imports: &mut Vec<CanonicalImport>,
+    rule: &'static ImageRule,
+    value: &N<'_>,
+    mapping_key: &str,
+    depth: usize,
+) {
+    if depth > MAX_KEY_DEPTH
+        || stacker::remaining_stack().unwrap_or(usize::MAX) < crate::utils::MINIMUM_STACK_REMAINING
+    {
+        return;
+    }
+    if let Some(reference) = item_scalar(value) {
+        if !is_unquoted_non_string(value) {
+            push_image(imports, rule, &reference, node_range(value));
+        }
+    } else if let Some(mapping) = child_mapping(value) {
+        if let Some(entry) = find_pair(&mapping, mapping_key).and_then(|pair| pair.field("value"))
+            && let Some(reference) = scalar_text(&entry)
+            && !is_unquoted_non_string(&entry)
+        {
+            push_image(imports, rule, &reference, node_range(&entry));
+        }
+    } else if let Some(sequence) = child_sequence(value) {
+        for item in sequence.children() {
+            push_image_value(imports, rule, &item, mapping_key, depth + 1);
+        }
+    }
+}
+
+fn is_unquoted_non_string(node: &N<'_>) -> bool {
+    matches!(
+        node.text().trim(),
+        "true"
+            | "false"
+            | "True"
+            | "False"
+            | "TRUE"
+            | "FALSE"
+            | "yes"
+            | "no"
+            | "on"
+            | "off"
+            | "null"
+            | "Null"
+            | "NULL"
+            | "~"
+    )
+}
+
+fn enclosing_keys(node: &N<'_>) -> Vec<String> {
+    let mut keys = Vec::new();
+    let mut current = enclosing_pair(node);
+    while let Some(pair) = current {
+        keys.extend(pair_key(&pair));
+        current = enclosing_pair(&pair);
+    }
+    keys.reverse();
+    keys
+}
+
+fn extract_images(
+    doc_type: &DocumentType,
+    rule: &'static ImageRule,
+    node: &N<'_>,
+    key: &str,
+    imports: &mut Vec<CanonicalImport>,
+) -> bool {
+    if !rule.keys.iter().any(|k| k == key) && !rule.is_image_variable(key) {
+        return false;
+    }
+    let is_job = |name: &String| !doc_type.keywords.contains(name);
+    let parents = enclosing_keys(node);
+    let Some(value) = node.field("value") else {
+        return false;
+    };
+    let in_variables = match parents.as_slice() {
+        [variables] | [_, variables] if variables == "variables" => {
+            parents.len() == 1 || is_job(&parents[0])
+        }
+        _ => false,
+    };
+    if in_variables {
+        if !rule.is_image_variable(key) {
+            return false;
+        }
+        push_image_value(imports, rule, &value, "value", 0);
+        return true;
+    }
+    let at_image_level = match parents.as_slice() {
+        [] => true,
+        [parent] => rule.also_under.contains(parent) || is_job(parent),
+        _ => false,
+    };
+    if !at_image_level || !rule.keys.iter().any(|k| k == key) {
+        return false;
+    }
+    push_image_value(imports, rule, &value, "name", 0);
+    true
+}
+
 pub(super) fn extract_imports(
     node: &N<'_>,
     file_path: &str,
@@ -309,6 +459,12 @@ pub(super) fn extract_imports(
     };
     let document_types: &'static [DocumentType] = &DOCUMENT_TYPES;
     document_types.iter().any(|doc_type| {
+        if let Some(rule) = &doc_type.images
+            && doc_type.matcher.matches(node, file_path)
+            && extract_images(doc_type, rule, node, &key, imports)
+        {
+            return true;
+        }
         doc_type
             .imports
             .iter()

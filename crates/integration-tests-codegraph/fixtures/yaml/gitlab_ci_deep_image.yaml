@@ -1,0 +1,18 @@
+name: "GitLab CI: a deeply nested image sequence does not overflow the stack"
+
+fixtures:
+  - path: .gitlab-ci.yml
+    content:
+      - "job:\n  image: "
+      - { repeat: 20000, text: "[" }
+      - "deep:1"
+      - { repeat: 20000, text: "]" }
+      - "\n"
+
+tests:
+  - name: "indexing finishes"
+    query: |
+      MATCH (i:ImportedSymbol)
+      RETURN i.import_path AS image
+    assert:
+      - { row_count: 0 }
