@@ -33,6 +33,7 @@ pub enum SupportLang {
     Swift,
     TypeScript,
     Tsx,
+    Yaml,
     Zig,
 }
 
@@ -133,6 +134,7 @@ pub fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
         SupportLang::Lua => Some(include_str!("../langs/lua.yaml")),
         SupportLang::Swift => Some(include_str!("../langs/swift.yaml")),
         SupportLang::Zig => Some(include_str!("../langs/zig.yaml")),
+        SupportLang::Yaml => Some(include_str!("../langs/yaml.yaml")),
         SupportLang::Markdown => Some(include_str!("../langs/markdown.yaml")),
         _ => None,
     }
@@ -282,6 +284,7 @@ fn grammar_to_ts_language(grammar: &str) -> tree_sitter::Language {
         "tree-sitter-typescript-tsx" => tree_sitter_typescript::LANGUAGE_TSX.into(),
         "tree-sitter-haskell" => tree_sitter_haskell::LANGUAGE.into(),
         "tree-sitter-ocaml" => tree_sitter_ocaml::LANGUAGE_OCAML.into(),
+        "tree-sitter-yaml" => tree_sitter_yaml::LANGUAGE.into(),
         "tree-sitter-zig" => tree_sitter_zig::LANGUAGE.into(),
         _ => panic!("unknown grammar: {grammar}"),
     }

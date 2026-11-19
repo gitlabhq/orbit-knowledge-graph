@@ -213,3 +213,42 @@ fn a_repeat_stage_runs_until_no_node_is_replaced() {
     assert_eq!(groups_after_grouping(false), 1);
     assert_eq!(groups_after_grouping(true), 3);
 }
+
+fn gitlab_ci_services(count: usize, limits: Limits) -> (Vec<Canonical>, Vec<Killed>, Env) {
+    let repo = tempfile::tempdir().unwrap();
+    let mut content = String::from("job:\n  services:\n");
+    for index in 0..count {
+        content.push_str(&format!("    - svc{index}:1\n"));
+    }
+    std::fs::write(repo.path().join(".gitlab-ci.yml"), content).unwrap();
+    let env = Env::with_limits(SupportLang::Yaml, limits).unwrap();
+    let (items, skipped) = rewrite_repo(&env, repo.path());
+    (items, skipped, env)
+}
+
+#[test]
+fn a_gitlab_ci_file_keeps_only_the_first_images_up_to_the_cap() {
+    let (items, skipped, env) = gitlab_ci_services(1_100, Limits::UNLIMITED);
+
+    assert!(skipped.is_empty());
+    let Canonical(tree, _) = &items[0];
+    let mut images: Vec<_> = nodes(tree, C::Import).map(|i| name_of(&env, i)).collect();
+    assert_eq!(images.len(), 1_000);
+    images.sort();
+    assert!(images.contains(&"svc0".to_string()));
+    assert!(!images.contains(&"svc1099".to_string()));
+}
+
+#[test]
+fn a_gitlab_ci_file_over_the_rewrite_budget_is_skipped() {
+    let (items, skipped, _) = gitlab_ci_services(
+        200,
+        Limits {
+            file_rewrite_ms: 0,
+            ..Limits::UNLIMITED
+        },
+    );
+
+    assert!(items.is_empty());
+    assert_eq!(skipped.len(), 1);
+}

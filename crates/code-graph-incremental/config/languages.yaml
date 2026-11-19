@@ -149,6 +149,14 @@ languages:
     package_markers: [package.json]
     index_names: [index]
 
+  yaml:
+    extensions: []
+    file_names:
+      exact: [.gitlab-ci.yml, .gitlab-ci.yaml]
+      prefixes: [".gitlab-ci-", ".gitlab-ci."]
+      ignored_extensions: [bak, orig, md, txt, json, toml, lock, diff, patch, j2, erb, tpl, tmpl]
+    grammar: tree-sitter-yaml
+
   zig:
     extensions: [zig]
     grammar: tree-sitter-zig

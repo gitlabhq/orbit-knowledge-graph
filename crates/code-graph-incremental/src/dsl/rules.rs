@@ -50,6 +50,8 @@ pub enum ParseFormat {
 /// phase that reads them. Settings read by more than one phase go in `global`.
 #[derive(Default)]
 pub struct Config {
+    /// Most imports kept per file, the earliest in source order; 0 keeps all.
+    pub max_imports: usize,
     pub link: LinkConfig,
     pub resolve: ResolveConfig,
 }
@@ -121,6 +123,8 @@ impl ResolveConfig {
 #[derive(serde::Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct ConfigSection {
+    #[serde(default)]
+    max_imports: usize,
     #[serde(default)]
     stdlib: Vec<Library>,
     #[serde(default)]
@@ -295,7 +299,11 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
             .collect::<Result<_, _>>()?,
         merge_same_named_types: r.merge_same_named_types,
     };
-    Ok(Config { link, resolve })
+    Ok(Config {
+        max_imports: section.max_imports,
+        link,
+        resolve,
+    })
 }
 
 #[derive(serde::Deserialize)]

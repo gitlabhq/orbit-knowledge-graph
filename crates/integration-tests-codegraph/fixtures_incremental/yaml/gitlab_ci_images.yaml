@@ -1,0 +1,178 @@
+name: "GitLab CI: container images"
+
+fixtures:
+  - path: image_string/.gitlab-ci.yml
+    content: |
+      image: node:18
+      build:
+        image: 'ruby:3.2@sha256:abc123'
+        script: [make]
+
+  - path: image_name_key/.gitlab-ci.yml
+    content: |
+      test:
+        image:
+          name: "host:5000/team/app:1.2"
+          entrypoint: [""]
+        script: [make test]
+
+  - path: services/.gitlab-ci.yml
+    content: |
+      test:
+        services:
+          - postgres:15
+          - name: redis:7
+            alias: cache
+          - "mysql@sha256:def456"
+        script: [make test]
+
+  - path: cs_image_variable/.gitlab-ci.yml
+    content: |
+      container_scanning:
+        variables:
+          CS_IMAGE: "nginx:1.25.3"
+
+  - path: star_image_suffix/.gitlab-ci.yml
+    content: |
+      variables:
+        DOCKER_IMAGE: alpine:3.19
+        BUILD_IMAGE: golang:1.22
+        IMAGE_TAG: not-this-one
+
+  - path: default_image/.gitlab-ci.yml
+    content: |
+      default:
+        image: python:3.12
+        services:
+          - docker:dind
+
+  - path: not_an_image/.gitlab-ci.yml
+    content: |
+      variables:
+        NODE_VERSION: 18
+        IMAGE_PULL: "always"
+      job:
+        script:
+          - echo image
+          - docker run ubuntu:22.04
+
+  - path: variable_in_image/.gitlab-ci.yml
+    content: |
+      build:
+        image: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+      other:
+        image: "${REGISTRY}/tools:${TOOLS_VERSION}"
+
+  - path: ci/other.yml
+    content: |
+      image: not-indexed:1
+
+  - path: .gitlab-ci.yml.bak
+    content: |
+      image: backup:1
+
+  - path: config/app.yaml
+    content: |
+      image: nope:2
+
+tests:
+  - name: "image: as a string, quoted or plain"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = "image_string/.gitlab-ci.yml"
+      RETURN i.import_path AS image, i.identifier_name AS name, i.import_tag AS tag, i.import_digest AS digest, i.import_type AS type
+      ORDER BY image, tag
+    assert:
+      - { row_count: 2 }
+      - { row: { image: "node", tag: "18", digest: "" } }
+      - { row: { image: "ruby", tag: "3.2", digest: "sha256:abc123" } }
+
+  - name: "image: with a name key and a registry port"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = "image_name_key/.gitlab-ci.yml"
+      RETURN i.import_path AS image, i.identifier_name AS name, i.import_tag AS tag, i.import_digest AS digest, i.import_type AS type
+      ORDER BY image, tag
+    assert:
+      - { row_count: 1 }
+      - { row: { image: "host:5000/team/app", tag: "1.2", digest: "" } }
+
+  - name: "services: as strings and name keys"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = "services/.gitlab-ci.yml"
+      RETURN i.import_path AS image, i.identifier_name AS name, i.import_tag AS tag, i.import_digest AS digest, i.import_type AS type
+      ORDER BY image, tag
+    assert:
+      - { row_count: 3 }
+      - { row: { image: "postgres", tag: "15", digest: "" } }
+      - { row: { image: "redis", tag: "7", digest: "" } }
+      - { row: { image: "mysql", tag: "", digest: "sha256:def456" } }
+
+  - name: "CS_IMAGE names an image"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = "cs_image_variable/.gitlab-ci.yml"
+      RETURN i.import_path AS image, i.identifier_name AS name, i.import_tag AS tag, i.import_digest AS digest, i.import_type AS type
+      ORDER BY image, tag
+    assert:
+      - { row_count: 1 }
+      - { row: { image: "nginx", tag: "1.25.3", digest: "" } }
+
+  - name: "variables ending in _IMAGE name images"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = "star_image_suffix/.gitlab-ci.yml"
+      RETURN i.import_path AS image, i.identifier_name AS name, i.import_tag AS tag, i.import_digest AS digest, i.import_type AS type
+      ORDER BY image, tag
+    assert:
+      - { row_count: 2 }
+      - { row: { image: "alpine", tag: "3.19", digest: "" } }
+      - { row: { image: "golang", tag: "1.22", digest: "" } }
+
+  - name: "default: image and services"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = "default_image/.gitlab-ci.yml"
+      RETURN i.import_path AS image, i.identifier_name AS name, i.import_tag AS tag, i.import_digest AS digest, i.import_type AS type
+      ORDER BY image, tag
+    assert:
+      - { row_count: 2 }
+      - { row: { image: "python", tag: "3.12", digest: "" } }
+      - { row: { image: "docker", tag: "dind", digest: "" } }
+
+  - name: "values that only look like images are skipped"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = "not_an_image/.gitlab-ci.yml"
+      RETURN i.import_path AS image, i.identifier_name AS name, i.import_tag AS tag, i.import_digest AS digest, i.import_type AS type
+      ORDER BY image, tag
+    assert:
+      - { row_count: 0 }
+
+  - name: "a variable in the value stays as written"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = "variable_in_image/.gitlab-ci.yml"
+      RETURN i.import_path AS image, i.identifier_name AS name, i.import_tag AS tag, i.import_digest AS digest, i.import_type AS type
+      ORDER BY image, tag
+    assert:
+      - { row_count: 2 }
+      - { row: { image: "$CI_REGISTRY_IMAGE", tag: "$CI_COMMIT_SHA", digest: "" } }
+      - { row: { image: "${REGISTRY}/tools", tag: "${TOOLS_VERSION}", digest: "" } }
+
+  - name: "images carry the CI image import type"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.import_type != "CiImage"
+      RETURN i.file_path AS file
+    assert:
+      - { row_count: 0 }
+
+  - name: "only GitLab CI files are indexed"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path IN ["ci/other.yml", ".gitlab-ci.yml.bak", "config/app.yaml"]
+      RETURN i.file_path AS file
+    assert:
+      - { row_count: 0 }
