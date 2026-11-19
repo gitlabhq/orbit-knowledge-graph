@@ -48,20 +48,12 @@ mod tests {
         for (name, src) in [
             ("modules/ssa/mod.rs", include_str!("../modules/ssa/mod.rs")),
             (
-                "modules/ssa/bind.rs",
-                include_str!("../modules/ssa/bind.rs"),
+                "modules/ssa/names.rs",
+                include_str!("../modules/ssa/names.rs"),
             ),
             (
-                "modules/ssa/control.rs",
-                include_str!("../modules/ssa/control.rs"),
-            ),
-            (
-                "modules/ssa/deferred.rs",
-                include_str!("../modules/ssa/deferred.rs"),
-            ),
-            (
-                "modules/ssa/fields.rs",
-                include_str!("../modules/ssa/fields.rs"),
+                "modules/ssa/values.rs",
+                include_str!("../modules/ssa/values.rs"),
             ),
             (
                 "modules/core/mod.rs",
