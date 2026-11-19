@@ -953,6 +953,38 @@ engine-spec-check:
     - mise run spec:engine:counterexample
     - mise run spec:engine:code
 
+engine-spec-deep:
+  stage: test
+  extends:
+    - .job-template
+    - .sccache-template
+  tags:
+    - ${RUNNER_LARGE}
+  needs: []
+  timeout: 90 minutes
+  variables:
+    ENGINE_SPEC_RUNS: "20000"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "engine-spec-deep"
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - specs/indexing-engine-next/**/*
+        - crates/indexing-engine-next/src/protocol/**/*
+        - crates/indexing-engine-next/tests/protocol/**/*
+        - crates/indexing-engine-next/src/testkit/simulator/**/*
+      when: manual
+      allow_failure: true
+  script:
+    - export ENGINE_SPEC_FIRST_SEED=$(( CI_PIPELINE_ID * ENGINE_SPEC_RUNS ))
+    - echo "random runs use seeds ${ENGINE_SPEC_FIRST_SEED} to $(( ENGINE_SPEC_FIRST_SEED + ENGINE_SPEC_RUNS - 1 ))"
+    - mise run spec:engine:code
+  artifacts:
+    when: on_failure
+    access: developer
+    paths:
+      - target/tmp/indexing-engine-next-spec/
+    expire_in: 14 days
+
 # No --all-targets: some tests are unix-only.
 windows-cli-check:
   stage: test
