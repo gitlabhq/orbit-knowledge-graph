@@ -838,7 +838,7 @@ pub fn run_graph(
     use rayon::prelude::*;
     let scope = scope_budget(phase, env, budget);
     let graph = EdgeIndex::new(edges);
-    let indexes = Indexes::new(trees, edges);
+    let indexes = Indexes::new(&env.lang, trees, edges);
     let rows: Vec<Result<Vec<Row>, Killed>> = (0..trees.len())
         .into_par_iter()
         .map(|fi| {

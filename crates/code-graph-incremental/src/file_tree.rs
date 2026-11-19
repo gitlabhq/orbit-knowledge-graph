@@ -9,28 +9,11 @@ use crate::intern::Lang;
 use crate::tree::{Cursor, Node, Tag, Tree};
 
 pub struct WalkResult {
-    pub entrypoints: Vec<(String, String)>,
-    pub lookup: LookupConfig,
-    /// Per file: the tags rules put on it and on its ancestor directories,
-    /// nearest first, plus `source_root_rel`, its path below the nearest source root.
+    pub tree: Tree,
     pub file_tags: Vec<(String, Vec<Tag>)>,
     /// Every key a file tag can carry, so a reused tree can drop the ones
     /// that no longer apply before this run's are set.
     pub tag_keys: Vec<u32>,
-}
-
-#[derive(Clone, Default, PartialEq, Eq)]
-pub struct LookupConfig {
-    pub prefixes: Vec<String>,
-    pub aliases: Vec<ImportAlias>,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct ImportAlias {
-    pub pattern: String,
-    pub replacement: String,
-    pub if_exists: bool,
-    pub scope: Option<u32>,
 }
 
 pub struct ProjectTree<'a> {
@@ -40,40 +23,32 @@ pub struct ProjectTree<'a> {
     paths: &'a [&'a str],
     files: Option<&'a [SourceFile]>,
     tree: Tree,
-    prefixes: Vec<String>,
-    aliases: Vec<ImportAlias>,
 }
 
 impl<'a> ProjectTree<'a> {
-    /// Just the directory tree: `__root` over `__dir` and `__file` nodes whose
-    /// `sym` is the path segment. The resolver and the exporter both walk it.
     pub fn directory_tree(lang: &'a Lang, paths: &'a [&'a str]) -> Tree {
         static NO_PROJECT: std::sync::LazyLock<Project> =
             std::sync::LazyLock::new(Project::default);
-        let mut pt = Self {
-            lang,
-            env: None,
-            project: &NO_PROJECT,
-            paths,
-            files: None,
-            tree: Tree::new(Node {
-                kind: C::Root.into(),
-                named: true,
-                ..Default::default()
-            }),
-            prefixes: vec![],
-            aliases: vec![],
-        };
+        let mut pt = Self::new(lang, None, &NO_PROJECT, paths, None);
         pt.build_dir_tree();
         pt.tree
     }
 
-    /// The directory tree with its manifests, after the project phase.
     pub fn tree(env: &'a Env, paths: &'a [&'a str], files: Option<&'a [SourceFile]>) -> Tree {
-        let mut pt = Self {
-            lang: &env.lang,
-            env: Some(env),
-            project: &env.project,
+        Self::build(env, paths, files).tree
+    }
+
+    fn new(
+        lang: &'a Lang,
+        env: Option<&'a Env>,
+        project: &'a Project,
+        paths: &'a [&'a str],
+        files: Option<&'a [SourceFile]>,
+    ) -> Self {
+        Self {
+            lang,
+            env,
+            project,
             paths,
             files,
             tree: Tree::new(Node {
@@ -81,12 +56,7 @@ impl<'a> ProjectTree<'a> {
                 named: true,
                 ..Default::default()
             }),
-            prefixes: vec![],
-            aliases: vec![],
-        };
-        pt.build_dir_tree();
-        pt.run_stages();
-        pt.tree
+        }
     }
 
     pub fn build(
@@ -94,68 +64,22 @@ impl<'a> ProjectTree<'a> {
         paths: &'a [&'a str],
         files: Option<&'a [SourceFile]>,
     ) -> WalkResult {
-        let lang = &env.lang;
-        let mut pt = Self {
-            lang,
-            env: Some(env),
-            project: &env.project,
-            paths,
-            files,
-            tree: Tree::new(Node {
-                kind: C::Root.into(),
-                named: true,
-                ..Default::default()
-            }),
-            prefixes: vec![],
-            aliases: vec![],
-        };
-        let tag_keys = pt.tag_keys();
+        let mut pt = Self::new(&env.lang, Some(env), &env.project, paths, files);
         let phase = env.pipeline.phase("project");
-        let staged = env.project.rules.iter().any(|&r| phase.has_rules(r));
-        if !staged && env.project.lookup_from.is_empty() && env.project.parse_files.is_empty() {
-            return WalkResult {
-                entrypoints: vec![],
-                lookup: LookupConfig::default(),
-                file_tags: vec![],
-                tag_keys,
-            };
-        }
+        let tag_keys = env
+            .project
+            .rules
+            .iter()
+            .flat_map(|&r| phase.tag_keys(r))
+            .collect();
         pt.build_dir_tree();
         pt.run_stages();
-        pt.collect_aliases();
-        pt.collect_prefixes();
         let file_tags = pt.collect_file_tags();
-        let entrypoints = pt
-            .tree
-            .root()
-            .descendants()
-            .filter(|node| node.is(C::Dir))
-            .filter_map(|directory| {
-                let path = directory.child_sym(C::SourcePath)?;
-                Some((pt.node_path(directory), lang.syms.resolve(path).to_string()))
-            })
-            .collect();
         WalkResult {
-            entrypoints,
-            lookup: LookupConfig {
-                prefixes: pt.prefixes,
-                aliases: pt.aliases,
-            },
+            tree: pt.tree,
             file_tags,
             tag_keys,
         }
-    }
-
-    fn tag_keys(&self) -> Vec<u32> {
-        let keys = self.env.into_iter().flat_map(|env| {
-            let phase = env.pipeline.phase("project");
-            env.project
-                .rules
-                .iter()
-                .flat_map(move |&r| phase.tag_keys(r))
-        });
-        keys.chain(std::iter::once(self.lang.syms.intern("source_root_rel")))
-            .collect()
     }
 
     fn build_dir_tree(&mut self) {
@@ -244,56 +168,13 @@ impl<'a> ProjectTree<'a> {
             return;
         };
         let phase = env.pipeline.phase("project");
-        let run = crate::sentinel::Sentinel::new("project", "", 0);
+        let run = crate::sentinel::Sentinel::disabled();
         for &rules in &env.project.rules {
             let _ = crate::engine::rewrite_tree_with(phase, &mut self.tree, env, rules, &run);
         }
     }
 
-    /// Import-path aliases a rule file declared as `(__alias key (__str value))`
-    /// on the project tree, longest key first so `@/lib/*` wins over `@/*`.
-    fn collect_aliases(&mut self) {
-        let mut aliases = self
-            .tree
-            .root()
-            .fold_tree(Vec::new(), |aliases, cursor, _w| {
-                if cursor.is(C::Alias) && cursor.sym() != 0 {
-                    if let Some(val) = cursor.child_sym(C::Str) {
-                        aliases.push(ImportAlias {
-                            pattern: self.lang.syms.resolve(cursor.sym()).to_owned(),
-                            replacement: self.lang.syms.resolve(val).to_owned(),
-                            if_exists: false,
-                            scope: cursor.child_sym(C::Scope),
-                        });
-                    }
-                } else if self.project.lookup_from.contains(&cursor.kind())
-                    && cursor.sym_opt().is_some()
-                    && let Some(file) = cursor.parent().filter(|node| node.is(C::File))
-                    && let Some(directory) = file.parent()
-                {
-                    aliases.push(ImportAlias {
-                        pattern: "*".into(),
-                        replacement: format!(
-                            "{}/{}/*",
-                            self.node_path(directory),
-                            self.lang.syms.resolve(cursor.sym())
-                        )
-                        .trim_start_matches('/')
-                        .to_owned(),
-                        if_exists: true,
-                        scope: cursor.child_sym(C::Scope),
-                    });
-                }
-            });
-        aliases.sort_by_key(|alias| (alias.if_exists, std::cmp::Reverse(alias.pattern.len())));
-        self.aliases = aliases;
-    }
-
     fn collect_file_tags(&self) -> Vec<(String, Vec<Tag>)> {
-        let markers = &self.project.lookup_from;
-        let source_root_rel = self.lang.syms.intern("source_root_rel");
-        let is_source_root =
-            |n: Cursor| n.is(C::Root) || n.children().any(|c| markers.contains(&c.kind()));
         self.tree.root().fold_tree(Vec::new(), |out, file, _w| {
             if !file.is(C::File) {
                 return;
@@ -306,66 +187,18 @@ impl<'a> ProjectTree<'a> {
                     }
                 }
             }
-            let rel = self.path_below(file, is_source_root);
-            tags.push(Tag {
-                key: source_root_rel,
-                val: self.lang.syms.intern(&rel),
-            });
             out.push((self.node_path(file), tags));
         })
     }
 
-    fn collect_prefixes(&mut self) {
-        self.collect_marked_paths();
-        self.add_fallback_roots();
-    }
-
-    fn collect_marked_paths(&mut self) {
-        if self.project.lookup_from.is_empty() {
-            return;
-        }
-        let markers = &self.project.lookup_from;
-        self.prefixes = self.tree.root().fold_tree(Vec::new(), |paths, cursor, _w| {
-            if cursor.is(C::Root) {
-                return;
-            }
-            if cursor.children().any(|c| markers.contains(&c.kind())) {
-                let path = self.node_path(cursor);
-                if !paths.contains(&path) {
-                    paths.push(path);
-                }
-            }
-        });
-    }
-
     fn node_path(&self, cursor: Cursor) -> String {
-        self.path_below(cursor, |n| n.is(C::Root))
-    }
-
-    fn path_below(&self, cursor: Cursor, is_root: impl Fn(Cursor) -> bool) -> String {
         let mut parts: Vec<&str> = std::iter::once(cursor)
             .chain(cursor.ancestors())
-            .take_while(|n| !is_root(*n))
+            .take_while(|n| !n.is(C::Root))
             .map(|n| self.lang.syms.resolve(n.sym()))
             .collect();
         parts.reverse();
         parts.join(PATH_SEP)
-    }
-
-    fn add_fallback_roots(&mut self) {
-        let packages = self.tree.root().fold_tree(Vec::new(), |pkgs, cursor, _w| {
-            if cursor.children().any(|c| c.is(C::Package)) {
-                pkgs.push(self.node_path(cursor));
-            }
-        });
-        for &path in self.paths {
-            let Some((top, _)) = path.split_once(PATH_SEP) else {
-                continue;
-            };
-            if !self.prefixes.iter().any(|p| p == top) && !packages.iter().any(|p| p == top) {
-                self.prefixes.push(top.to_string());
-            }
-        }
     }
 }
 

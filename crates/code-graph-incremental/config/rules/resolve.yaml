@@ -1,1 +1,22 @@
-resolve: []
+resolve:
+  - group: call
+    match: '(__call (__callee $M:(__member $O:__object)))'
+    when: '$O | read | module'
+    emit: { calls: { from: enclosing, to: '$O | read | module | export($M) | callable | foreign', site: $ROOT } }
+  - group: call
+    match: '(__call (__callee $M:(__member $O:__object)))'
+    emit: { calls: { from: enclosing, to: '$O | type | member($M) | foreign', site: $ROOT } }
+  - group: call
+    match: '(__call (__callee $I:__ivar))'
+    emit: { calls: { from: enclosing, to: 'lookup(@$I, $ROOT, enclosing | class) | foreign', site: $ROOT } }
+  - group: call
+    match: '(__call (__callee "/./"))'
+    emit: { calls: { from: enclosing, to: '$ROOT | targets | callable | foreign', site: $ROOT } }
+
+  - group: decorator
+    match: '$D:(__def $ROOT:__decorator)'
+    emit: { calls: { from: $D, to: '$ROOT | type | callable | foreign' } }
+
+  - group: supertype
+    match: '$D:(__def $ROOT:__supertype)'
+    emit: { extends: { from: $D, to: '$ROOT | type | is_def | foreign' } }

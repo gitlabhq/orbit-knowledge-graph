@@ -1,1 +1,33 @@
-imports: []
+data:
+  import_kinds: [__import, __import_type]
+
+functions:
+  modules:
+    cases:
+      - when: '$ROOT | alias'
+        value: '$ROOT | alias | files | foreign'
+      - when: '$ROOT | mod.scope.source | under(%external)'
+        value: none
+      - value: '$ROOT | tag("resolved_source") | files | foreign'
+  submodule:
+    params: [$N]
+    cases:
+      - value: '$ROOT | tag("resolved_source") | concat("/", @$N) | files | foreign'
+  offered:
+    params: [$N]
+    cases:
+      - when: '$ROOT | export($N)'
+        value: '$ROOT | export($N)'
+      - value: $ROOT
+
+imports:
+  - group: name
+    match: '$I:(%import_kinds $ROOT:__name)'
+    when: '$I | modules'
+    emit: { imports: { from: $ROOT, to: '$I | modules | offered($ROOT) | foreign' } }
+  - group: name
+    match: '$I:(%import_kinds $ROOT:__name)'
+    when: '$I | mod.scope.source | under(%stdlib)'
+  - group: name
+    match: '$I:(%import_kinds $ROOT:__name)'
+    emit: { imports: { from: $ROOT, to: '$I | submodule($ROOT) | offered($ROOT) | foreign' } }
