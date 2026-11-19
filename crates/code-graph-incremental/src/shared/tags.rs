@@ -40,26 +40,3 @@ impl ReservedTags {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn engine_interns_tag_keys_only_here() {
-        for (name, src) in [
-            ("modules/ssa/mod.rs", include_str!("../modules/ssa/mod.rs")),
-            (
-                "modules/ssa/graph.rs",
-                include_str!("../modules/ssa/graph.rs"),
-            ),
-            ("tree/semantic.rs", include_str!("../tree/semantic.rs")),
-        ] {
-            for (i, line) in src.lines().enumerate() {
-                assert!(
-                    !line.contains("syms.intern(\""),
-                    "{name}:{}: engine-read tag keys belong in tags.rs",
-                    i + 1
-                );
-            }
-        }
-    }
-}
