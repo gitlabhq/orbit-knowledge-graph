@@ -6,7 +6,7 @@ description: How the docs-write flow drafts, reviews, and hands off a docs MR, w
 The docs-write flow is a GitLab Duo custom flow. When a feature MR in this project is
 created or marked ready, it decides whether users need a docs change. If they do, it writes
 the change and gets CI green. A fresh agent reviews it, and the flow fixes the review threads.
-Then it marks the docs MR ready and requests review from the feature MR author. It never merges anything.
+Then it marks the docs MR ready and requests review from the feature MR author and the docs reviewers. It never merges or approves anything.
 
 Status: design v2, built and tested in a private sandbox fork. Not enabled in this project
 yet. Plan, decisions, and every result are in
@@ -64,7 +64,7 @@ it reviews what a person would.
 | Review | One fresh agent with only the `docs-review` skill. It reads the changed pages, the docs diff, and the feature MR diff and code. It checks claims, missing steps, brevity, the word list, topic type, and links. | Yes | Threads |
 | Threads | Applies the exact fixes, then posts the review as one comment, "For agent: docs review", with every finding numbered. Each `decision` finding also gets a thread titled **Needs reviewer decision**. | No | A fixer, CI, or handoff |
 | Fix | A fresh agent per cycle, four at most. It fixes check or CI findings, or the numbered review items and the open threads it was given in one pass. | Yes | Publish, which posts one reply on the review comment and one per thread |
-| Handoff | When CI is green on the head and the only open threads are decisions or threads the flow does not take: removes `Draft:`, adds the feature MR author as reviewer, and posts one note. The note lists the decision threads, threads the flow did not take, and review items it did not fix. | No | End. Otherwise the MR stays in draft, with the reason in its description. |
+| Handoff | When CI is green on the head and the only open threads are decisions or threads the flow does not take: removes `Draft:`, adds the feature MR author and the docs reviewers as reviewers, and posts one note. The note lists the decision threads, threads the flow did not take, and review items it did not fix. | No | End. Otherwise the MR stays in draft, with the reason in its description. |
 
 The gate ends the run with no model call on a draft feature MR or one that scores below 6.
 It also skips a fork MR, an MR with the `documentation` or `docs-factory::skip` label, and
@@ -79,7 +79,7 @@ nothing. The flow file ships with `MODE=shadow`, which stops after setup and log
 | Role | What to do |
 |---|---|
 | Feature MR author | Review the docs MR when the flow requests your review. Settle the **Needs reviewer decision** threads. To skip the flow, add `docs-factory::skip`. |
-| Docs MR reviewer | Read the "For agent: docs review" comment and the flow's reply to it. Check the "What to check" lines in the description, and each claim against the feature code. Add the feature MR as a dependency, then merge after it. |
+| Docs reviewer (`DOCS_REVIEWERS` in the flow file: Fiona Neill and Zachary Painter) | Approve and merge the docs MR by hand. Read the "For agent: docs review" comment and the flow's reply to it. Check the "What to check" lines in the description, and each claim against the feature code. Add the feature MR as a dependency, then merge after it. |
 | Anyone | Mention the flow's service account on a feature MR to run the gate again. Mention it on a docs MR from the flow to fix the open threads. It fixes only threads from the people and bots listed in [Guardrails](#guardrails). |
 
 ## Guardrails
