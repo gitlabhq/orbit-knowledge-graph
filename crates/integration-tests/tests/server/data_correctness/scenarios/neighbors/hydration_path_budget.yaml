@@ -1,4 +1,4 @@
-description: Neighbors at 900 distinct project paths exceed the hydration path budget, so hydration widens the paths and still returns every neighbor with its properties
+description: Neighbors at 900 distinct project paths, more than the hydration path budget, all come back with their properties, so no node is lost when the paths widen
 
 config:
   redaction:

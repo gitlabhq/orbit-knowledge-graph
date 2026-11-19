@@ -32,6 +32,13 @@ pub async fn run_index_explains(ctx: &TestContext, directory: &Path) {
             ));
             continue;
         }
+        if let Some(prefix) = &scenario.schema_version_prefix {
+            failures.push(format!(
+                "{}: index EXPLAIN runs on the default schema, so drop schema_version_prefix {prefix} or the indexes check",
+                path.display()
+            ));
+            continue;
+        }
         for (language, raw) in &scenario.query {
             let label = format!(
                 "{}: {} [{language}/clickhouse]",
