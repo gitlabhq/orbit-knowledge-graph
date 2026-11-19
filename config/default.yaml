@@ -51,7 +51,10 @@ datalake:
   # Oldest supported ClickHouse version. Keep in step with the version requirements docs.
   compatibility: "26.6"
   replicated: false
-  session_settings: {}
+  session_settings:
+    # ClickHouse Cloud 26.6 skips the Siphon watermark index when it reads through the
+    # pg_pkey_ordered projection, and scans whole tables. Server 26.8 does not.
+    use_skip_indexes_on_data_read: "0"
   insert_settings: {}
   profiling:
     enabled: false
