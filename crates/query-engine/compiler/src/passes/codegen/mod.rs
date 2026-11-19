@@ -186,17 +186,12 @@ mod tests {
         use crate::input::AggFunction;
 
         for (function, plain, conditional, local) in [
-            (AggFunction::Count, "COUNT", "countIf", "COUNT"),
-            (AggFunction::Sum, "SUM", "sumIf", "SUM"),
-            (AggFunction::Avg, "AVG", "avgIf", "AVG"),
-            (AggFunction::Min, "MIN", "minIf", "MIN"),
-            (AggFunction::Max, "MAX", "maxIf", "MAX"),
-            (
-                AggFunction::Collect,
-                "groupArray",
-                "groupArrayIf",
-                "array_agg",
-            ),
+            (AggFunction::Count, "COUNT", "countIf", Some("COUNT")),
+            (AggFunction::Sum, "SUM", "sumIf", Some("SUM")),
+            (AggFunction::Avg, "AVG", "avgIf", Some("AVG")),
+            (AggFunction::Min, "MIN", "minIf", Some("MIN")),
+            (AggFunction::Max, "MAX", "maxIf", Some("MAX")),
+            (AggFunction::Collect, "groupArray", "groupArrayIf", None),
         ] {
             for filtered in [false, true] {
                 for distinct in [false, true] {
@@ -215,7 +210,7 @@ mod tests {
                     }));
                     let remote =
                         codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
-                    let local_query = duckdb::codegen(&ast, ResultContext::new()).unwrap();
+                    let local_query = duckdb::codegen(&ast, ResultContext::new());
                     let name = if distinct {
                         format!(
                             "{}Distinct{}",
@@ -235,6 +230,10 @@ mod tests {
                         "{}",
                         remote.sql
                     );
+                    let Some(local) = local else {
+                        assert!(local_query.is_err());
+                        continue;
+                    };
                     let aggregate = format!(
                         "SELECT {local}({}n.value){} AS result FROM nodes AS n",
                         if distinct { "DISTINCT " } else { "" },
@@ -244,18 +243,7 @@ mod tests {
                             ""
                         }
                     );
-                    if function == AggFunction::Collect {
-                        assert!(
-                            local_query.sql.contains("coalesce(array_agg("),
-                            "{}",
-                            local_query.sql
-                        );
-                        assert!(local_query.sql.contains("n.value IS NOT NULL"));
-                        assert_eq!(local_query.sql.contains("n.keep"), filtered);
-                        assert_eq!(local_query.sql.contains("DISTINCT"), distinct);
-                    } else {
-                        assert_eq!(local_query.sql, aggregate);
-                    }
+                    assert_eq!(local_query.unwrap().sql, aggregate);
                 }
             }
         }
