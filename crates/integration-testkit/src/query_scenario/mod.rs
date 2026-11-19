@@ -69,10 +69,14 @@ pub fn validate_parse(root: &str) {
 
 fn read_scenarios(root: &Path, file: &Path) -> Vec<(String, QueryScenario)> {
     let name = scenario::scenario_name(root, file);
-    scenario::read_cases(file)
+    scenario::read_cases::<serde_json::Value>(file)
         .into_iter()
         .map(|(case, scenario)| {
             let name = case.map_or_else(|| name.clone(), |case| format!("{name}/{case}"));
+            let mut generated = scenario::generate::expand(scenario, &["rows"])
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            let scenario = serde_json::from_value(generated.remove(0))
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
             (name, scenario)
         })
         .collect()
@@ -95,32 +99,6 @@ fn seed_preset(presets_dir: &Path, name: &str) -> Seed {
         .unwrap_or_else(|| panic!("unknown seed preset '{name}'"))
 }
 
-pub async fn run_query(
-    ctx: &TestContext,
-    frontend: Frontend,
-    query: &str,
-    security: &SecurityContext,
-    redaction: &MockRedactionService,
-) -> ResponseView {
-    let ontology = load_ontology();
-    let data_model = derive_clickhouse_data_model(&ontology);
-    let compiled = compile_like_server(query, frontend, (&data_model, &ontology), security)
-        .await
-        .expect("query should compile");
-    let output = execute_output(
-        ctx,
-        frontend,
-        &compiled,
-        (&data_model, &ontology),
-        security,
-        redaction,
-    )
-    .await;
-    assert_pagination(&output, "run_query");
-    let response = validate_response(&compiled.input, GraphFormatter.format(&output), "run_query");
-    ResponseView::for_query(&compiled.input, response)
-}
-
 pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let root = Path::new(root);
     let presets: Arc<Path> = Arc::from(Path::new(presets));
@@ -130,6 +108,12 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let mut scenarios: Vec<_> = files
         .iter()
         .flat_map(|file| read_scenarios(root, file))
+        .filter(|(_, scenario)| {
+            scenario
+                .config
+                .backends
+                .contains(&format::Backend::Clickhouse)
+        })
         .collect();
     assert!(
         !scenarios.is_empty(),
@@ -925,6 +909,9 @@ fn eval_filter_predicate(
             "in" => n
                 .prop(field)
                 .is_some_and(|actual| value.as_array().unwrap().contains(actual)),
+            "max_chars" => n.prop_str(field).is_some_and(|text| {
+                text.chars().count() <= value.as_u64().expect("max_chars takes a count") as usize
+            }),
             "is_null" if value == &serde_json::Value::Bool(true) => {
                 n.properties.get(field) == Some(&serde_json::Value::Null)
             }

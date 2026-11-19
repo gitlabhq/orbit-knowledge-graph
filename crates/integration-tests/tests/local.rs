@@ -1,4 +1,3 @@
-mod compiler_legacy;
 mod duckdb;
 
 #[path = "server/querying_pipeline/mod.rs"]

@@ -273,6 +273,17 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `query` | map | one of `query`/`steps` | Query strings keyed by frontend (`json`, `gql`) |
 | `expect` | `QueryExpect` | with `query` | Assertions on the result |
 | `steps` | [`QueryStep`] | one of `query`/`steps` | Ordered steps, each with an optional `seed` (rows inserted before the step runs), a `query` map, and an `expect`. Use it when a later query must observe a write made after an earlier one |
+| `generate` | generator or [generators] | no | Seed rows built before the scenario runs (below) |
+
+`generate` takes one generator or a list. `kind: rows` appends `count` rows to
+`config.extra_seed.<table>`. In each row, a string that is exactly `$i` becomes
+the integer `start + index`, and `$i` inside a longer string becomes that number
+as text. `start` defaults to 0.
+
+```yaml
+generate:
+  - {kind: rows, table: gl_project, count: 900, start: 20000, row: {id: $i, traversal_path: "1/100/$i/"}}
+```
 
 #### `config` — `ScenarioConfig`
 
@@ -283,7 +294,7 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `unmerged_seed` | bool | Default `false`. For extra seed rows, stop background merges on their tables, disable insert optimization, insert each row as its own part, and skip `OPTIMIZE`. Uses physical table names, such as `gl_project`. |
 | `security` | preset name or inline `SecurityOverride` | Authorization context |
 | `redaction` | preset name or inline `RedactionConfig` | Entity-level redaction |
-| `duckdb` | bool | Default `false`. Also run the scenario in local mode on an embedded DuckDB, through `run_duckdb_dir` in `cargo test --test local`. The runner creates the local tables from the ontology, inserts the preset and `extra_seed` rows of those tables, and applies the same `expect`. Local mode has no security or redaction, so use it only for scenarios on local entities, such as `Definition` and `File`, with CALLS rows in `gl_edge`. |
+| `backends` | [`clickhouse`, `duckdb`] | Default `[clickhouse]`. The backends that run the scenario, each once. `duckdb` runs it in local mode on an embedded DuckDB, through `run_duckdb_dir` in `cargo test --test local`. The runner creates the local tables from the ontology and `ontology_overlay`, inserts the preset and `extra_seed` rows of those tables, and applies the same `expect`. Local mode has no security or redaction, so use it only for scenarios on local entities, such as `Definition` and `File`, with code edge rows in `gl_edge`. List only `duckdb` when ClickHouse behaves differently by an open bug. |
 
 Scenarios with the same `seed`, `extra_seed`, `unmerged_seed`, and `ontology_overlay` share one database. The runner builds it for the first case and drops it after the last. A scenario whose steps add seed rows gets its own database.
 
@@ -392,7 +403,8 @@ Each format also checks its format name and version. TOON decodes to its JSON va
 | `rows` | `[{id, prop: val}]` | Per-node property assertions |
 
 Filter operators: `eq`, `in`, `starts_with`, `contains`, `ends_with`, `is_null`,
-`is_not_null`, `gte`, `lte`, `lt`.
+`is_not_null`, `gte`, `lte`, `lt`, and `max_chars`, which bounds the length of a
+text value in characters.
 
 Row values support `{repeat: str, count: N, suffix: str}` for expansion.
 

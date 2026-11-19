@@ -1,7 +1,6 @@
 mod aliases;
 mod clickhouse;
 mod explain;
-mod generate;
 mod operator;
 mod pattern;
 mod schema;
@@ -1421,7 +1420,7 @@ fn read_fixtures(directory: &Path) -> Vec<(std::path::PathBuf, Scenario)> {
             crate::scenario::read_cases::<serde_json::Value>(&path)
                 .into_iter()
                 .flat_map(|(_, case)| {
-                    generate::expand(case)
+                    crate::scenario::generate::expand(case, &["named_queries", "repeat"])
                         .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
                 })
                 .map(|case| {

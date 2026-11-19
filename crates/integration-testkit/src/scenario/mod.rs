@@ -4,6 +4,7 @@
 
 mod expect;
 mod format;
+pub(crate) mod generate;
 pub(crate) mod seed;
 
 use std::collections::HashMap;

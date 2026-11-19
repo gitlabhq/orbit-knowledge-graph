@@ -2,44 +2,6 @@ use compiler::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
 use compiler::input::AggFunction;
 use compiler::passes::codegen::codegen;
 use integration_testkit::TestContext;
-use integration_testkit::visitor::NodeExt;
-
-use super::helpers::run_query;
-
-pub(super) async fn long_node_text_is_excerpted_only_on_wide_pages(ctx: &TestContext) {
-    let full_text = format!("{}tail", "🙂".repeat(10_000));
-    let query_with_limit = |limit: u32| {
-        format!(
-            r#"{{
-            "query_type": "traversal",
-            "nodes": [{{"id": "n", "entity": "Note", "node_ids": [3002],
-                       "columns": ["note", "discussion_id"],
-                       "filters": {{"note": {{"ends_with": "tail"}}}}}}],
-            "limit": {limit}
-        }}"#
-        )
-    };
-
-    let single_row = run_query(ctx, &query_with_limit(1)).await;
-    single_row.assert_node_count(1);
-    single_row.assert_node_ids("Note", &[3002]);
-    single_row.assert_filter("Note", "note", |note| {
-        note.prop_str("note") == Some(&full_text)
-    });
-    single_row
-        .find_node("Note", 3002)
-        .unwrap()
-        .assert_prop("discussion_id", &"🙂".repeat(2048).into());
-
-    let wide_page = run_query(ctx, &query_with_limit(1000)).await;
-    wide_page.assert_node_count(1);
-    wide_page.assert_node_ids("Note", &[3002]);
-    wide_page.assert_filter("Note", "note", |note| {
-        note.prop_str("note").is_some_and(|excerpt| {
-            excerpt.ends_with(" [truncated]") && excerpt.chars().count() < full_text.chars().count()
-        })
-    });
-}
 
 #[tokio::test]
 async fn semantic_aggregate_and_nested_cte_codegen_execute() {

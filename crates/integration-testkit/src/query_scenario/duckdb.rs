@@ -9,6 +9,7 @@ use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::PipelineOutput;
 
+use super::format::Backend;
 use super::pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
 use super::{
     QueryStep, assert_compilation, assert_output, assert_pagination, assert_repeated_response,
@@ -26,9 +27,13 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
     files.sort();
     let mut ran = 0;
     for (name, scenario) in files.iter().flat_map(|file| read_scenarios(root, file)) {
-        if !scenario.config.duckdb {
+        if !scenario.config.backends.contains(&Backend::Duckdb) {
             continue;
         }
+        let ontology = scenario.config.ontology_overlay.as_deref().map_or_else(
+            || Arc::clone(&ontology),
+            |name| Arc::new(crate::load_ontology_overlay(name)),
+        );
         let directory = tempfile::tempdir().expect("temporary DuckDB directory");
         let database = DuckDbClient::open(&directory.path().join("scenario.duckdb"))
             .unwrap_or_else(|e| panic!("{name}: open DuckDB: {e}"));

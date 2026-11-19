@@ -1,7 +1,6 @@
-mod helpers;
 mod retained;
 
-use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, query_scenario, run_subtests_shared};
+use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, query_scenario};
 
 const SCENARIOS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -16,16 +15,6 @@ const PRESETS: &str = concat!(
     "/tests/server/data_correctness/presets"
 );
 const COMPILER_FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/compiler/fixtures");
-
-#[tokio::test]
-async fn data_correctness() {
-    let ctx = data_correctness_context().await;
-
-    run_subtests_shared!(
-        &ctx,
-        retained::long_node_text_is_excerpted_only_on_wide_pages,
-    );
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn data_correctness_scenarios() {
