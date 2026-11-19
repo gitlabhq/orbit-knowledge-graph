@@ -277,7 +277,7 @@ impl<'a> FileResolver<'a> {
                     if excluded_ambient_name && import.wildcard {
                         continue;
                     }
-                    if !self.ctx.import_resolves_locally(import_node) {
+                    if !self.ctx.import_resolves_for_ref(import_node, r) {
                         self.push_imported_symbol_edge(src, import_node, rel);
                     }
                 }
@@ -461,8 +461,27 @@ impl<'a> ResolveCtx<'a> {
     }
 
     fn import_resolves_locally(&mut self, import_node: NodeIndex) -> bool {
-        self.import_directory(import_node).is_some()
-            || !self.resolve_import_cached(import_node).is_empty()
+        !self.resolve_import_cached(import_node).is_empty()
+    }
+
+    /// A directory-mapped import resolves for a ref only when its package
+    /// defines the member the ref names.
+    fn import_resolves_for_ref(&mut self, import_node: NodeIndex, r: &RefData<'_>) -> bool {
+        let member = match r.chain {
+            None => r.name,
+            Some(
+                [
+                    ExpressionStep::Ident(_),
+                    ExpressionStep::Call(m) | ExpressionStep::Field(m),
+                    ..,
+                ],
+            ) => m.as_str(),
+            Some(_) => "",
+        };
+        match self.directory_members(import_node, member) {
+            Some(members) => !members.is_empty(),
+            None => self.import_resolves_locally(import_node),
+        }
     }
 
     fn import_directory(&self, import_node: NodeIndex) -> Option<&str> {
@@ -480,7 +499,7 @@ impl<'a> ResolveCtx<'a> {
         chain: &[ExpressionStep],
         reaching: &[ParseValue],
     ) -> Option<Vec<NodeIndex>> {
-        let index = Arc::clone(self.import_directories.as_ref()?);
+        self.import_directories.as_ref()?;
         let (
             ExpressionStep::Ident(_),
             Some(ExpressionStep::Call(member) | ExpressionStep::Field(member)),
@@ -500,21 +519,28 @@ impl<'a> ResolveCtx<'a> {
             if import.wildcard || matches!(import.binding_kind, ImportBindingKind::SideEffect) {
                 continue;
             }
-            let Some(directory) = index.directory(self.graph.str(import.path)) else {
-                continue;
-            };
-            let key = (import_node, member.to_string());
-            let members = match self.directory_member_cache.get(&key) {
-                Some(cached) => cached.clone(),
-                None => {
-                    let members = self.graph.lookup_top_level_in_directory(directory, member);
-                    self.directory_member_cache.insert(key, members.clone());
-                    members
-                }
-            };
-            found.get_or_insert_default().extend(members);
+            if let Some(members) = self.directory_members(import_node, member) {
+                found.get_or_insert_default().extend(members);
+            }
         }
         found
+    }
+
+    fn directory_members(
+        &mut self,
+        import_node: NodeIndex,
+        member: &str,
+    ) -> Option<Vec<NodeIndex>> {
+        let index = Arc::clone(self.import_directories.as_ref()?);
+        let import = self.graph.try_import(import_node)?;
+        let directory = index.directory(self.graph.str(import.path))?;
+        let key = (import_node, member.to_string());
+        if let Some(cached) = self.directory_member_cache.get(&key) {
+            return Some(cached.clone());
+        }
+        let members = self.graph.lookup_top_level_in_directory(directory, member);
+        self.directory_member_cache.insert(key, members.clone());
+        Some(members)
     }
 
     fn has_imported_symbol_candidates(&self, r: &RefData<'_>) -> bool {
@@ -968,9 +994,12 @@ impl<'a> ResolveCtx<'a> {
                         members.retain(|n| seen.insert(*n));
                         return Ok(members);
                     }
-                    start = 2;
                     let mut types = Vec::new();
                     self.push_member_types(&chain[1], &members, &mut types);
+                    if types.is_empty() {
+                        return Ok(vec![]);
+                    }
+                    start = 2;
                     types
                 }
                 None => self.resolve_base_type_fqns(&chain[0], r.reaching)?,
@@ -1086,14 +1115,13 @@ impl<'a> ResolveCtx<'a> {
             current_types = next_types;
         }
 
-        if base_has_unresolved_import_ref || self.has_imported_symbol_candidates(r) {
+        if start == 2 || base_has_unresolved_import_ref || self.has_imported_symbol_candidates(r) {
             return Ok(vec![]);
         }
 
         self.chain_fallback(r, chain)
     }
 
-    /// Types that a chain step produces from each definition it matched.
     fn push_member_types(
         &self,
         step: &ExpressionStep,

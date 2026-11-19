@@ -1,0 +1,54 @@
+name: "Go: a module path declared by two go.mod files is not mapped"
+
+fixtures:
+  - path: go.mod
+    content: |
+      module "example.com/m" // root
+
+      go 1.22
+
+  - path: internal/cfg/cfg.go
+    content: |
+      package cfg
+
+      func Real() {}
+
+  - path: examples/copy/go.mod
+    content: |
+      module example.com/m
+
+      go 1.22
+
+  - path: examples/copy/internal/cfg/cfg.go
+    content: |
+      package cfg
+
+      func Real() {}
+
+  - path: internal/update/update.go
+    content: |
+      package update
+
+      import "example.com/m/internal/cfg"
+
+      func Caller() {
+      	cfg.Real()
+      }
+
+tests:
+  - name: "a call through an ambiguous module path keeps the imported-symbol fallback"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name = 'Caller'
+      RETURN sym.import_path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: example.com/m/internal/cfg } }
+
+  - name: "a call through an ambiguous module path links to neither copy"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'Caller'
+      RETURN callee.file_path AS file
+    assert:
+      - { empty: true }

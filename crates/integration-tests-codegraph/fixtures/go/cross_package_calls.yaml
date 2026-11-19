@@ -43,6 +43,18 @@ fixtures:
 
       func Limit() {}
 
+  - path: internal/cfg/cfg.go
+    content: |
+      package cfg
+
+      type Thing struct{}
+
+      func (t *Thing) Reload() {}
+
+      var Default = &Thing{}
+
+      var Typed *Thing
+
   - path: internal/dotpkg/dotpkg.go
     content: |
       package dotpkg
@@ -74,6 +86,7 @@ fixtures:
       import (
       	"errors"
 
+      	"example.com/m/internal/cfg"
       	"example.com/m/internal/cmdutils"
       	lst "example.com/m/internal/a/list"
       	. "example.com/m/internal/dotpkg"
@@ -82,6 +95,10 @@ fixtures:
       )
 
       func helper() {}
+
+      func Load() {}
+
+      func Close() {}
 
       func Qualified() {
       	cmdutils.ParseAssignees()
@@ -111,6 +128,16 @@ fixtures:
       func TypedVarMethod() {
       	var ua *cmdutils.UserAssignments
       	ua.UsersFromReplaces()
+      }
+
+      func PackageVarMethod() {
+      	cfg.Default.Load()
+      	cfg.Typed.Close()
+      }
+
+      func MissingMember() {
+      	cfg.Missing()
+      	cfg.Missing().Close()
       }
 
       func External() {
@@ -202,6 +229,23 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { file: internal/cmdutils/cmdutils.go } }
+
+  - name: "an untyped member of an imported package does not fall back to a same-package name"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['PackageVarMethod', 'MissingMember']
+      RETURN caller.name AS caller, callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: "a member missing from the imported package keeps the imported-symbol fallback"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name = 'MissingMember'
+      RETURN sym.import_path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: example.com/m/internal/cfg } }
 
   - name: "external and standard library imports keep the imported-symbol fallback"
     query: |
