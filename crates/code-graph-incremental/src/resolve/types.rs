@@ -482,10 +482,10 @@ impl<'c, 'a> R<'c, 'a> {
         }
         let (index, tags) = self.members_index();
         index
-            .declared(implementation, member.sym(), role, tags)
+            .declared(implementation, member.sym(), role, &tags)
             .or_else(|| {
                 index
-                    .declared(contract, member.sym(), role, tags)
+                    .declared(contract, member.sym(), role, &tags)
                     .filter(|method| !method.has(C::Declaration))
             })
             .into_iter()
@@ -694,8 +694,8 @@ impl<'a> Types<'a> for R<'_, 'a> {
         supers
     }
 
-    fn members_index(&self) -> (&rules::Members, &crate::tags::ReservedTags) {
-        (&self.ctx.members, &self.ctx.tags)
+    fn members_index(&mut self) -> (&rules::Members, crate::tags::ReservedTags) {
+        (&self.ctx.members, self.ctx.tags)
     }
 }
 

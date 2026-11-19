@@ -4,7 +4,7 @@ use smallvec::SmallVec;
 
 use super::expr::{Expr, Scope};
 use super::matching::matches;
-use super::{Cursor, Cx, Loc, Val, Vals};
+use super::{Cursor, Loc, Run, Val, Vals};
 use crate::canonical::{CANONICAL_BASE, Canonical as C};
 use crate::dsl::parser::parse;
 use crate::dsl::types::{Cap, Ctx, Pat};
@@ -67,13 +67,8 @@ struct RuleSpec {
     emit: Option<EmitMap>,
 }
 
-enum Target {
-    Edge(EdgeKind),
-    Refs,
-}
-
 struct Emit {
-    target: Target,
+    kind: EdgeKind,
     from: Expr,
     to: Expr,
     site: Option<Expr>,
@@ -105,6 +100,7 @@ pub struct Phase {
     pub name: String,
     pub scope: String,
     pub after: Vec<String>,
+    pub(super) modules: Vec<u8>,
     rules: Vec<Rule>,
     by_kind: Vec<SmallVec<[u16; 4]>>,
     slots: usize,
@@ -148,6 +144,11 @@ impl Phase {
             name: spec.name,
             scope: spec.scope,
             after: spec.after,
+            modules: spec
+                .modules
+                .iter()
+                .map(|m| super::slot_of(m).ok_or_else(|| LoadError(format!("no module named {m}"))))
+                .collect::<Result<_, _>>()?,
             rules: Vec::new(),
             by_kind: Vec::new(),
             slots: 1,
@@ -266,13 +267,12 @@ impl Emit {
         fields: &BTreeMap<String, String>,
         scope: &Scope,
     ) -> Result<Self, LoadError> {
-        let target = match kind {
-            "calls" => Target::Edge(EdgeKind::Calls),
-            "imports" => Target::Edge(EdgeKind::Imports),
-            "extends" => Target::Edge(EdgeKind::Extends),
-            "defines" => Target::Edge(EdgeKind::Defines),
-            "type_flow" => Target::Edge(EdgeKind::TypeFlow),
-            "refs" => Target::Refs,
+        let edge = match kind {
+            "calls" => EdgeKind::Calls,
+            "imports" => EdgeKind::Imports,
+            "extends" => EdgeKind::Extends,
+            "defines" => EdgeKind::Defines,
+            "type_flow" => EdgeKind::TypeFlow,
             _ => return Err(LoadError(format!("unknown emit kind {kind}"))),
         };
         let field = |name: &str| {
@@ -294,7 +294,7 @@ impl Emit {
             Some(other) => return Err(LoadError(format!("unknown resolution {other}"))),
         };
         Ok(Emit {
-            target,
+            kind: edge,
             from: field("from")?.ok_or_else(|| LoadError(format!("emit {kind} needs from")))?,
             to: field("to")?.ok_or_else(|| LoadError(format!("emit {kind} needs to")))?,
             site: field("site")?,
@@ -302,26 +302,20 @@ impl Emit {
         })
     }
 
-    fn run(&self, cx: &mut Cx, caps: &[Vals]) {
-        let site = self.site.as_ref().map(|s| s.eval(cx, caps));
+    fn run(&self, run: &mut Run, caps: &[Vals]) {
+        let site = self.site.as_ref().map(|s| s.eval(run, caps));
         let site = site
             .and_then(|s| s.first().and_then(|v| v.loc()))
             .map(|l| l.node);
-        let from = self.from.eval(cx, caps);
-        let to = self.to.eval(cx, caps);
+        let from = self.from.eval(run, caps);
+        let to = self.to.eval(run, caps);
         for from in from.iter().filter_map(|v| v.loc()) {
-            for &target in &to {
-                let edges: SmallVec<[(EdgeKind, Loc); 2]> = match self.target {
-                    Target::Edge(kind) => target.loc().map(|loc| (kind, loc)).into_iter().collect(),
-                    Target::Refs => crate::modules::core::refs(cx, target),
-                };
-                for (kind, to) in edges {
-                    cx.edges.push(Edge {
-                        site,
-                        call_resolution: self.resolution,
-                        ..Edge::new(from.fi, from.node, to.fi, to.node, kind)
-                    });
-                }
+            for to in to.iter().filter_map(|v| v.loc()) {
+                run.edges.push(Edge {
+                    site,
+                    call_resolution: self.resolution,
+                    ..Edge::new(from.fi, from.node, to.fi, to.node, self.kind)
+                });
             }
         }
     }
@@ -341,7 +335,7 @@ impl Phase {
             .map_or(&[], |rules| rules.as_slice())
     }
 
-    pub fn flow(&self, cx: &mut Cx, root: Cursor<'_>) {
+    pub fn flow(&self, cx: &mut Run, root: Cursor<'_>) {
         let mut w = Walk {
             caps: vec![SmallVec::new(); self.slots],
             vals: vec![Vals::new(); self.slots],
@@ -356,9 +350,7 @@ impl Phase {
             }
             match item {
                 Item::Visit(node) => self.visit(cx, &mut w, root.jump(root.fi(), node)),
-                Item::Leave => {
-                    cx.defs.pop();
-                }
+                Item::Leave => cx.leave_def(),
                 Item::Between(rule, node) | Item::Exit(rule, node) => {
                     let rule = &self.rules[rule as usize];
                     w.matches(cx, rule, root.jump(root.fi(), node));
@@ -372,7 +364,7 @@ impl Phase {
         }
     }
 
-    fn visit(&self, cx: &mut Cx, w: &mut Walk, c: Cursor<'_>) {
+    fn visit(&self, cx: &mut Run, w: &mut Walk, c: Cursor<'_>) {
         for &index in self.candidates(c.kind()) {
             let rule = &self.rules[index as usize];
             if !w.matches(cx, rule, c)
@@ -416,7 +408,7 @@ struct Walk {
 }
 
 impl Walk {
-    fn matches(&mut self, cx: &Cx, rule: &Rule, c: Cursor<'_>) -> bool {
+    fn matches(&mut self, cx: &Run, rule: &Rule, c: Cursor<'_>) -> bool {
         for cap in &mut self.caps[..rule.slots] {
             cap.clear();
         }
@@ -434,7 +426,7 @@ impl Walk {
         true
     }
 
-    fn run(&self, cx: &mut Cx, actions: &[Action]) {
+    fn run(&self, cx: &mut Run, actions: &[Action]) {
         for action in actions {
             match action {
                 Action::Do(expr) => {
@@ -445,9 +437,9 @@ impl Walk {
         }
     }
 
-    fn enter(&mut self, cx: &mut Cx, c: Cursor<'_>) {
+    fn enter(&mut self, cx: &mut Run, c: Cursor<'_>) {
         if c.is(C::Def) {
-            cx.defs.push(c.index());
+            cx.enter_def(c.index());
             self.stack.push(Item::Leave);
         }
     }

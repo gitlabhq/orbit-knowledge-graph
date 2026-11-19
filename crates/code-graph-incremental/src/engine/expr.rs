@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
+use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
-use super::{Arg, Cx, FnId, Kind, Val, Vals, function, lookup, module_of};
+use super::{Arg, FnId, Kind, Run, Val, Vals, function, lookup, module_of};
 use crate::canonical::Canonical as C;
 use crate::error::LoadError;
 use crate::intern::Lang;
@@ -36,13 +37,13 @@ impl Expr {
         matches!(self, Expr::Call(id, _) if function(*id).kind == Kind::Effect)
     }
 
-    pub fn eval(&self, cx: &mut Cx, caps: &[Vals]) -> Vals {
+    pub fn eval(&self, cx: &mut Run, caps: &[Vals]) -> Vals {
         match self {
             Expr::Cap(slot) => caps[*slot as usize].clone(),
             Expr::Text(slot) => caps[*slot as usize]
                 .iter()
                 .filter_map(|v| v.loc())
-                .map(|loc| Val::Sym(cx.jump(loc).sym()))
+                .map(|loc| Val::Sym(super::Cursor::new(cx.trees, loc.fi, loc.node).sym()))
                 .collect(),
             Expr::Lit(val) => SmallVec::from_elem(*val, 1),
             Expr::Call(id, args) => {
@@ -53,21 +54,22 @@ impl Expr {
     }
 }
 
-fn apply(cx: &mut Cx, id: FnId, args: &[Vals]) -> Vals {
+fn apply(cx: &mut Run, id: FnId, args: &[Vals]) -> Vals {
     let sig = function(id).sig;
     let spread = sig
         .iter()
         .zip(args)
-        .position(|(arg, vals)| *arg == Arg::One && vals.len() != 1);
+        .position(|(arg, vals)| *arg != Arg::Set && vals.len() != 1);
     let Some(at) = spread else {
         return cx.call(id, args);
     };
     let mut out = Vals::new();
+    let mut seen = FxHashSet::default();
     let mut each: SmallVec<[Vals; 3]> = SmallVec::from(args);
     for val in &args[at] {
         each[at] = SmallVec::from_elem(*val, 1);
         for found in apply(cx, id, &each) {
-            if !out.contains(&found) {
+            if seen.insert(found) {
                 out.push(found);
             }
         }

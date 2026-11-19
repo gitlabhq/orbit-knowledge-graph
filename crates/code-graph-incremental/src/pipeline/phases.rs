@@ -14,9 +14,9 @@ use super::{
     LinkedFile, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, SourcePaths, State,
     Workset,
 };
+use crate::engine;
 use crate::env::Env;
 use crate::export::{self, Envelope};
-use crate::modules::ssa as link;
 use crate::pattern::{self, EdgeCtx, EdgeIndex};
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Edge, Storage, Tag, Tree};
@@ -406,7 +406,8 @@ impl ItemPhase<Canonical> for Link {
         run: &Sentinel,
         Canonical(tree, cut): Canonical,
     ) -> Result<LinkedFile, Killed> {
-        let edges = link::link(&tree, env, run)?;
+        let file = Sentinel::new("link", &tree.label, env.limits.file_link_ms).on_thread_cpu();
+        let edges = engine::run_tree(env.pipeline.phase("link"), &tree, env, run, file)?;
         Ok(LinkedFile {
             tree,
             edges,
