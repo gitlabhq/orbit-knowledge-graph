@@ -189,21 +189,6 @@ glab orbit status --full-path <my-group>
 
 Without `--full-path`, `--namespace-id`, or `--project-id`, `glab orbit status` shows only the health of the service, not indexing progress.
 
-### An empty result is read as no dependency
-
-Your agent answers that a project has no dependencies, no callers, or no related vulnerabilities, because its query returned no rows.
-
-This issue occurs when the agent infers that an empty result means that no relationship exists.
-A query can also return no rows when indexing of the group is not complete, when the scope filter matches nothing, or when your role removes the data from the results.
-For the roles that can query security data, see [roles](security.md#roles).
-
-To resolve this issue:
-
-1. Ask the agent to show the query that it ran, and to explain why the query returned nothing.
-1. Give the agent the full path of the project, for example `my-group/my-project`, then ask again.
-1. If the results are still empty, check the indexing progress.
-   For more information, see [Results are missing recent data](#results-are-missing-recent-data).
-
 ## Tokens and service accounts
 
 {{< details >}}
