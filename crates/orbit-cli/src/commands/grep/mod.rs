@@ -501,6 +501,7 @@ fn resolve_missing(root: &Path, scope: Vec<String>, notes: &mut Vec<String>) -> 
         .index_files()
         .unwrap_or_default()
         .into_iter()
+        .filter(|file| file.tracked)
         .map(|file| file.path.to_string_lossy().into_owned())
         .collect();
     let mut resolved = Vec::new();

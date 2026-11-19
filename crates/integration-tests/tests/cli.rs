@@ -1567,6 +1567,24 @@ fn grep_lists_matching_lines_with_their_definitions() {
 }
 
 #[test]
+fn grep_only_suggests_tracked_files_for_a_missing_path() {
+    let data = tempfile::TempDir::new().unwrap();
+    let repo_dir = tempfile::TempDir::new().unwrap();
+    let repo = repo_dir.path();
+    init_repo_at(repo, &[("src/utils.py", "def read_file():\n    pass\n")]);
+    write_file(repo, "extra/utils.py", "def read_file():\n    pass\n");
+    let repo_arg = repo.to_str().unwrap();
+    let (out, err, ok) = run_cmd(
+        &["grep", "read_file", "lib/utils.py", "--repo", repo_arg],
+        data.path(),
+    );
+    assert!(
+        ok && out.contains("» lib/utils.py not found; searched src/utils.py\n"),
+        "{err}\n{out}"
+    );
+}
+
+#[test]
 fn context_relationship_order_is_stable_across_overloads() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let workspace = tempfile::TempDir::new().unwrap();

@@ -407,26 +407,11 @@ impl CoreGitaliskRepository {
     }
 
     pub fn index_files(&self) -> Result<Vec<IndexedFile>, std::io::Error> {
-        let output = Command::new("git")
-            .arg("--literal-pathspecs")
-            .args([
-                "ls-files",
-                "-z",
-                "-t",
-                "--cached",
-                "--others",
-                "--exclude-standard",
-            ])
-            .current_dir(&self.path)
-            .output()?;
-        if !output.status.success() {
-            return Err(std::io::Error::other(format!(
-                "git ls-files failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            )));
-        }
-        let mut files: Vec<IndexedFile> = output
-            .stdout
+        let stdout = self.ls_files(
+            &["-t", "--cached", "--others", "--exclude-standard"],
+            &[] as &[&str],
+        )?;
+        let mut files: Vec<IndexedFile> = stdout
             .split(|b| *b == 0)
             .filter_map(|record| {
                 let (tag, path) = record.split_at_checked(2)?;
@@ -450,6 +435,19 @@ impl CoreGitaliskRepository {
         flags: &[&str],
         pathspecs: &[S],
     ) -> Result<Vec<PathBuf>, std::io::Error> {
+        Ok(self
+            .ls_files(flags, pathspecs)?
+            .split(|b| *b == 0)
+            .filter(|path| !path.is_empty())
+            .map(|path| self.join_repo_path(path_from_bytes(path)))
+            .collect())
+    }
+
+    fn ls_files<S: AsRef<OsStr>>(
+        &self,
+        flags: &[&str],
+        pathspecs: &[S],
+    ) -> Result<Vec<u8>, std::io::Error> {
         let output = Command::new("git")
             .arg("--literal-pathspecs")
             .args(["ls-files", "-z"])
@@ -464,12 +462,7 @@ impl CoreGitaliskRepository {
                 String::from_utf8_lossy(&output.stderr).trim()
             )));
         }
-        Ok(output
-            .stdout
-            .split(|b| *b == 0)
-            .filter(|path| !path.is_empty())
-            .map(|path| self.join_repo_path(path_from_bytes(path)))
-            .collect())
+        Ok(output.stdout)
     }
 
     pub fn iter_repo_files(&self, options: IterFileOptions) -> FileInfoIterator {

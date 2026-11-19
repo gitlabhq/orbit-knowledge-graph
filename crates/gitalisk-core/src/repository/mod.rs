@@ -639,6 +639,51 @@ mod tests {
         );
     }
 
+    #[test]
+    fn index_files_drops_untracked_nested_repositories() {
+        let mut local_repo = LocalGitRepository::new(None);
+        local_repo.fs.create_file("a.rs", Some("fn a() {}"));
+        local_repo.add_all().commit("base");
+        let nested = local_repo.path.join("inner");
+        std::fs::create_dir_all(&nested).unwrap();
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&nested)
+            .output()
+            .unwrap();
+        std::fs::write(nested.join("in.rs"), "fn i() {}").unwrap();
+
+        let listed = repo_handle(&local_repo).index_files().unwrap();
+        let paths: Vec<_> = listed.iter().map(|file| file.path.as_path()).collect();
+        assert_eq!(paths, [Path::new("a.rs")]);
+    }
+
+    #[test]
+    fn index_files_lists_an_unmerged_path_once() {
+        let mut local_repo = LocalGitRepository::new(None);
+        local_repo.fs.create_file("a.rs", Some("base\n"));
+        local_repo.add_all().commit("base");
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(&local_repo.path)
+                .output()
+                .unwrap();
+            output.status.success()
+        };
+        git(&["checkout", "-q", "-b", "other"]);
+        std::fs::write(local_repo.path.join("a.rs"), "other\n").unwrap();
+        git(&["commit", "-qam", "other"]);
+        git(&["checkout", "-q", "-"]);
+        std::fs::write(local_repo.path.join("a.rs"), "mine\n").unwrap();
+        git(&["commit", "-qam", "mine"]);
+        assert!(!git(&["merge", "other"]));
+
+        let listed = repo_handle(&local_repo).index_files().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].path, Path::new("a.rs"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn index_files_keeps_names_that_are_not_utf8() {
