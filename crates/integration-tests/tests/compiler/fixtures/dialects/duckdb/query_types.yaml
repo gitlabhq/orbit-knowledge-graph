@@ -86,7 +86,7 @@ cases:
     missing_frontends:
       json: The source test supplies only GQL.
     logical:
-      expect: ["(EdgeScan CALLS|DEFINES|EXTENDS a->b AS e0)"]
+      expect: ["(EdgeScan CALLS|DEFINES|EXTENDS|IMPORTS a->b AS e0)"]
     physical:
       duckdb: {}
 
