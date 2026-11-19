@@ -7,7 +7,7 @@ link:
     children: skip
 
   - match: '(__def $N:__defname)'
-    when: $N | named
+    when: [$N | named, $ROOT | tagged("scoped")]
     enter:
       - emit: { imports: { from: $N | impl_name, to: $N | impl_name | reference, resolution: reference } }
       - mod.ssa.enter_def($ROOT)
@@ -16,6 +16,15 @@ link:
       extends: { from: $ROOT, to: $ROOT | supers }
     children: $ROOT | body
     exit: [mod.ssa.leave()]
+  - match: '(__def $N:__defname)'
+    when: $N | named
+    enter:
+      - emit: { imports: { from: $N | impl_name, to: $N | impl_name | reference, resolution: reference } }
+      - mod.ssa.enter_def($ROOT)
+    emit:
+      defines: { from: enclosing_def, to: $ROOT }
+      extends: { from: $ROOT, to: $ROOT | supers }
+    children: skip
   - match: '(__def)'
     children: skip
 
