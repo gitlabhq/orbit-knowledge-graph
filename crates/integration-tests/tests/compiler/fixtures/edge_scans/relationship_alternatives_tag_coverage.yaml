@@ -2,9 +2,9 @@ name: Covered relationship alternatives share denormalized tag filtering
 
 query:
   json: |
-    {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","filters":{"user_type":"human"}},{"id":"mr","entity":"MergeRequest","node_ids":[99002]}],"relationships":[{"type":["REVIEWER","APPROVED"],"from":"u","to":"mr"}],"aggregations":[{"count":"u","as":"n"}]}
+    {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","filters":{"user_type":"human"}},{"id":"mr","entity":"MergeRequest","node_ids":[99002]}],"relationships":[{"type":["ASSIGNED","REOPENED"],"from":"u","to":"mr"}],"aggregations":[{"count":"u","as":"n"}]}
   gql: |
-    MATCH (u:User {user_type: 'human'})-[:REVIEWER|APPROVED]->(mr:MergeRequest {id: 99002})
+    MATCH (u:User {user_type: 'human'})-[:ASSIGNED|REOPENED]->(mr:MergeRequest {id: 99002})
     RETURN count(u) AS n
 
 logical:
