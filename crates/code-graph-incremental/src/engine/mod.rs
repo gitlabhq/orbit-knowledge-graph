@@ -971,27 +971,29 @@ fn stamp(epochs: &[u64; WALK + 1], mut deps: u8) -> u64 {
 
 /// Runs a tree phase over one file: each module of the phase starts, the walk
 /// runs, then each module finishes in reverse order.
-pub fn run_tree<S: Store>(
+pub fn run_tree(
     phase: &Phase,
-    tree: &Tree<S>,
+    tree: &Tree<Compact>,
     env: &Env,
     budget: &Sentinel,
 ) -> Result<Vec<Edge>, Killed> {
     let file = &tree_budget(phase, env, &tree.label);
     let trees = std::slice::from_ref(tree);
+    let indexes = Indexes::new(&env.lang, trees, &[], &phase.modules);
     let indexed = Indexed::new(phase, trees, 1, env, budget);
     let mut run = Run::new(trees, 0, env, phase, budget, file);
+    run.indexes = Some(&indexes);
     run.indexed = Some(&indexed);
     let root = tree.root();
     for &slot in &phase.modules {
-        (S::hooks(&modules::ALL[usize::from(slot)]).start)(&mut run, slot, root.index());
+        (Compact::hooks(&modules::ALL[usize::from(slot)]).start)(&mut run, slot, root.index());
     }
     phase.flow(&mut run, root, false);
     for &slot in phase.modules.iter().rev() {
         if let Some(killed) = run.killed.take() {
             return Err(killed);
         }
-        (S::hooks(&modules::ALL[usize::from(slot)]).finish)(&mut run, slot);
+        (Compact::hooks(&modules::ALL[usize::from(slot)]).finish)(&mut run, slot);
     }
     match run.killed.take() {
         Some(killed) => Err(killed),
