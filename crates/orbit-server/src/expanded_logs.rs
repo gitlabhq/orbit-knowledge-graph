@@ -142,7 +142,10 @@ mod tests {
             .context("inner")
             .context("outer");
         assert_eq!(anyhow_error_type(&nested), "missing");
-        let below_minimum = clickhouse_client::check_server_version("26.2.1.788").unwrap_err();
+        let below_minimum = clickhouse_client::ServerVersionError::BelowMinimum {
+            found: "26.2.1.788".to_string(),
+            required: clickhouse_client::MINIMUM_SERVER_VERSION,
+        };
         assert_eq!(
             anyhow_error_type(&below_minimum.into()),
             "clickhouse_version_below_minimum"

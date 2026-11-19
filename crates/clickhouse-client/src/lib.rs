@@ -13,7 +13,7 @@ pub use configuration::ClickHouseConfigurationExt;
 pub use error::ClickHouseError;
 pub use extract::FromArrowColumn;
 pub use server_version::{
-    MINIMUM_SERVER_VERSION, ServerVersion, ServerVersionError, check_server_version,
-    require_minimum_server_version, wait_for_minimum_server_version,
+    MINIMUM_SERVER_VERSION, ServerVersion, ServerVersionError, require_minimum_server_version,
+    wait_for_minimum_server_version,
 };
 pub use stats::{InstanceHealth, ProcessorProfile, QueryLogEntry};

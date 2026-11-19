@@ -44,7 +44,7 @@ pub enum ServerVersionError {
 }
 
 /// Parses the text of `SELECT version()` and rejects a server below [`MINIMUM_SERVER_VERSION`].
-pub fn check_server_version(reported: &str) -> Result<ServerVersion, ServerVersionError> {
+fn check_server_version(reported: &str) -> Result<ServerVersion, ServerVersionError> {
     let version = parse_server_version(reported)
         .ok_or_else(|| ServerVersionError::Unparsable(reported.to_string()))?;
 
