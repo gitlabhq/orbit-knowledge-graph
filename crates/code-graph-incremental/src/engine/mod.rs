@@ -693,6 +693,54 @@ pub fn scope_budget(phase: &Phase, env: &Env, run: &Sentinel) -> Sentinel {
     run.child(phase.label, "", ms)
 }
 
+/// Runs a family phase: the phase's walk on each file in parallel, over all
+/// the family's trees and the graph so far. Each file has its own memo.
+pub fn run_family(
+    phase: &Phase,
+    trees: &[Tree<Compact>],
+    graph: &EdgeIndex,
+    env: &Env,
+    budget: &Sentinel,
+) -> Result<Vec<Edge>, Killed> {
+    use rayon::prelude::*;
+    let scope = scope_budget(phase, env, budget);
+    let edges: Vec<Result<Vec<Edge>, Killed>> = (0..trees.len())
+        .into_par_iter()
+        .map(|fi| {
+            let file = tree_budget(phase, env, &trees[fi].label);
+            let mut run = Run::new(
+                trees,
+                fi as u32,
+                env,
+                &phase.links,
+                &phase.data,
+                &scope,
+                &file,
+            );
+            run.graph = Some(graph);
+            run.graph_fi = fi as u32;
+            let root = Cursor::new(trees, fi as u32, 0);
+            for &slot in &phase.modules {
+                (Compact::hooks(&modules::ALL[usize::from(slot)]).start)(&mut run, slot, 0);
+            }
+            let late = phase.flow(&mut run, root);
+            for &slot in phase.modules.iter().rev() {
+                (Compact::hooks(&modules::ALL[usize::from(slot)]).finish)(&mut run, slot);
+            }
+            phase.revisit(&mut run, root, late);
+            match run.killed.take() {
+                Some(killed) => Err(killed),
+                None => Ok(run.finish()),
+            }
+        })
+        .collect();
+    let mut out = Vec::new();
+    for result in edges {
+        out.extend(result?);
+    }
+    Ok(out)
+}
+
 /// Applies a rewrite phase to one tree in place.
 pub fn rewrite_tree(
     phase: &Phase,

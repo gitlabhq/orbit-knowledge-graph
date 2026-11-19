@@ -215,6 +215,18 @@ fn finish(env: &Env, state: &mut State, run: &Sentinel) -> Result<(), Error> {
         run.check()?;
         match phase.scope.as_str() {
             "project" => state.project(env),
+            "family" => loop {
+                let graph = EdgeIndex::new(&state.edges);
+                let known: std::collections::HashSet<Edge> = state.edges.iter().copied().collect();
+                let found = engine::run_family(phase, &state.trees, &graph, env, run)?;
+                let before = state.edges.len();
+                state
+                    .edges
+                    .extend(found.into_iter().filter(|e| !known.contains(e)));
+                if phase.walk != Walk::Fixpoint || state.edges.len() == before {
+                    break;
+                }
+            },
             _ => {
                 let graph = EdgeIndex::new(&state.edges);
                 for (fi, tree) in state.trees.iter_mut().enumerate() {

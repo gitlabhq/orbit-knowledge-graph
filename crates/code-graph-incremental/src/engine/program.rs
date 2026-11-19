@@ -323,7 +323,12 @@ impl Phase {
         fn own<'f>(file: &'f Option<LangFile>, name: &str) -> Option<&'f PhaseRules> {
             file.as_ref().and_then(|f| f.phases.get(name))
         }
+        let family = spec.scope == "family";
         let (body, slots) = match walk {
+            _ if family => loader.flow(
+                shared,
+                files.langs.iter().map(|f| own(f, &spec.name)).collect(),
+            )?,
             Walk::Flow => loader.flow(
                 shared,
                 files.langs.iter().map(|f| own(f, &spec.name)).collect(),
@@ -439,8 +444,9 @@ impl Loader<'_> {
             ("exit", spec.exit.is_some()),
             ("late", spec.late.is_some()),
         ];
+        let flows = self.walk == Walk::Flow || self.spec.scope == "family";
         for (hook, used) in flow {
-            if used && self.walk != Walk::Flow {
+            if used && !flows {
                 return Err(LoadError(format!("hook {hook} needs a flow walk")));
             }
         }
