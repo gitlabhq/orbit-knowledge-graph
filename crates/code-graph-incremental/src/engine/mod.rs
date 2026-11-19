@@ -636,11 +636,7 @@ impl<'t, S: Store> Run<'t, S> {
     pub(crate) fn call_def(&mut self, def: u16, args: &[Vals]) -> Vals {
         let defs = self.fns;
         let deps = defs[usize::from(def)].deps;
-        let mut key: SmallVec<[Val; 4]> = SmallVec::new();
-        for vals in args {
-            key.push(Val::Sym(vals.len() as u32));
-            key.extend_from_slice(vals);
-        }
+        let key = defs[usize::from(def)].key(self, args);
         let reading = std::mem::replace(&mut self.reading, deps);
         let found = self.memoized((FnId(u16::MAX - def), key), deps, |run| {
             defs[usize::from(def)].eval(run, args)

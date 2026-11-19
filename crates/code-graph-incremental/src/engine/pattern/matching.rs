@@ -70,10 +70,14 @@ impl<S: Storage<Node = Node>> Matcher<'_, S> {
                 field,
                 text,
                 tags,
+                flags,
                 kids,
                 ..
             } => {
-                kind.admits(n.kind)
+                let set = [n.lifted, n.labelled, n.named, n.synth];
+                let flagged = (0..4).all(|bit| *flags & (1 << bit) == 0 || set[bit]);
+                flagged
+                    && kind.admits(n.kind)
                     && (*field == 0 || *field == n.field)
                     && self.text(raw, n, text)
                     && self.tagged(raw, tags)

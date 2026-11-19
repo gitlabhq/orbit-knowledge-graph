@@ -251,14 +251,18 @@ impl PatParser<'_, '_> {
             },
         };
         let optional = self.s.eat("?");
-        let (mut text, mut kids, mut tags) = (Text::Any, Vec::new(), Vec::new());
+        let (mut text, mut kids, mut tags, mut flags) = (Text::Any, Vec::new(), Vec::new(), 0u8);
         loop {
             self.s.ws();
             match self.s.peek() {
                 None => return Err(self.s.err("unclosed node")),
                 Some(b'#') => {
                     self.s.at += 1;
-                    tags.push(self.lang.syms.intern(self.s.name()?));
+                    let name = self.s.name()?;
+                    match super::FLAGS.iter().position(|f| *f == name) {
+                        Some(bit) => flags |= 1 << bit,
+                        None => tags.push(self.lang.syms.intern(name)),
+                    }
                 }
                 Some(b')') => {
                     self.s.at += 1;
@@ -296,6 +300,7 @@ impl PatParser<'_, '_> {
             field,
             text,
             tags: tags.into(),
+            flags,
             kids: kids.into(),
             optional,
         })

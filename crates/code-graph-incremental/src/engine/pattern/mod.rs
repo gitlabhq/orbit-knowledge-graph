@@ -126,12 +126,16 @@ pub enum Text {
     Regex(regex::Regex),
 }
 
+/// Node flags a pattern can test with `#name`; any other `#name` is a tag.
+pub const FLAGS: [&str; 4] = ["lifted", "labelled", "named", "synth"];
+
 pub enum Pat {
     Node {
         kind: KindFilter,
         field: u16,
         text: Text,
         tags: Box<[u32]>,
+        flags: u8,
         kids: Box<[Pat]>,
         optional: bool,
     },

@@ -155,6 +155,7 @@ pub struct Def {
     cases: Vec<Case>,
     pub(super) deps: u8,
     slots: usize,
+    key: Vec<Expr>,
 }
 
 struct Case {
@@ -168,6 +169,8 @@ struct Case {
 struct DefSpec {
     #[serde(default)]
     params: Vec<String>,
+    #[serde(default)]
+    key: Vec<String>,
     cases: Vec<CaseSpec>,
 }
 
@@ -185,6 +188,26 @@ fn any_node() -> String {
 }
 
 impl Def {
+    /// The cache key of a call: the declared key expressions over the
+    /// arguments, or every argument.
+    pub(super) fn key<S: Store>(&self, run: &mut Run<S>, args: &[Vals]) -> SmallVec<[Val; 4]> {
+        let mut key = SmallVec::new();
+        if self.key.is_empty() {
+            for vals in args {
+                key.push(Val::Sym(vals.len() as u32));
+                key.extend_from_slice(vals);
+            }
+            return key;
+        }
+        let bound: Vec<Vals> = args.to_vec();
+        for expr in &self.key {
+            let vals = expr.eval(run, &bound);
+            key.push(Val::Sym(vals.len() as u32));
+            key.extend(vals);
+        }
+        key
+    }
+
     pub(super) fn eval<S: Store>(&self, run: &mut Run<S>, args: &[Vals]) -> Vals {
         let Some(head) = args[0].first().and_then(|v| v.loc()) else {
             return Vals::new();
@@ -436,6 +459,7 @@ impl Phase {
             .label
             .clone()
             .unwrap_or_else(|| spec.name.clone());
+        let mut loader = loader;
         let defs = loader.defs(&specs)?;
         Ok(Phase {
             name: spec.name.clone(),
@@ -467,11 +491,36 @@ fn rules_of(rules: Option<&PhaseRules>) -> Result<&[RuleSpec], LoadError> {
 impl Loader<'_> {
     /// Compiles the rule files' functions for this phase, with the states
     /// each can read through its calls.
-    fn defs(&self, specs: &[(String, DefSpec)]) -> Result<Vec<Def>, LoadError> {
+    /// Compiles the functions whose calls resolve in this phase; a function
+    /// that needs a module the phase lacks is left out of it.
+    fn defs(&mut self, specs: &[(String, DefSpec)]) -> Result<Vec<Def>, LoadError> {
+        loop {
+            match self.compile_defs(specs) {
+                Ok(defs) => return Ok(defs),
+                Err((name, e)) => {
+                    if self.defs.remove(&name).is_none() {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+    }
+
+    fn compile_defs(&self, specs: &[(String, DefSpec)]) -> Result<Vec<Def>, (String, LoadError)> {
         let mut defs = Vec::new();
         let mut calls: Vec<Vec<Result<FnId, u16>>> = Vec::new();
         for (name, spec) in specs {
-            let at = |e: LoadError| LoadError(format!("function {name}: {}", e.0));
+            if !self.defs.contains_key(name) {
+                defs.push(Def {
+                    cases: Vec::new(),
+                    deps: 0,
+                    slots: 1,
+                    key: Vec::new(),
+                });
+                calls.push(Vec::new());
+                continue;
+            }
+            let at = |e: LoadError| (name.clone(), LoadError(format!("function {name}: {}", e.0)));
             let mut cases = Vec::new();
             let mut used = Vec::new();
             for case in &spec.cases {
@@ -480,15 +529,16 @@ impl Loader<'_> {
                     when: case.when.clone(),
                     ..RuleSpec::default()
                 };
-                let mut at_ = self.matcher(&rule, None).map_err(at)?;
+                let at_ = self.matcher_with(&rule, None, &spec.params).map_err(at)?;
                 let params = spec
                     .params
                     .iter()
-                    .map(|p| at_.slots.slot(p.trim_start_matches('$')))
+                    .map(|p| {
+                        at_.slots
+                            .get(p.trim_start_matches('$'))
+                            .expect("params are slots")
+                    })
                     .collect();
-                if let Some(when) = case.when.as_deref() {
-                    at_.when = Some(Expr::parse(when, &self.scope(&at_.slots, false)).map_err(at)?);
-                }
                 let value = Expr::parse(&case.value, &self.scope(&at_.slots, false)).map_err(at)?;
                 value.calls(&mut |c| used.push(c));
                 if let Some(when) = &at_.when {
@@ -501,10 +551,22 @@ impl Loader<'_> {
                 });
             }
             let slots = cases.iter().map(|c| c.at.slots.len()).max().unwrap_or(1);
+            let mut bound = Slots::new();
+            for p in &spec.params {
+                bound.slot(p.trim_start_matches('$'));
+            }
+            let key = spec
+                .key
+                .iter()
+                .map(|k| Expr::parse(k, &self.scope(&bound, false)))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(at)?;
+            key.iter().for_each(|k| k.calls(&mut |c| used.push(c)));
             defs.push(Def {
                 cases,
                 deps: 0,
                 slots,
+                key,
             });
             calls.push(used);
         }
@@ -544,7 +606,19 @@ impl Loader<'_> {
     }
 
     fn matcher(&self, spec: &RuleSpec, lang: Option<u8>) -> Result<Match, LoadError> {
+        self.matcher_with(spec, lang, &[])
+    }
+
+    fn matcher_with(
+        &self,
+        spec: &RuleSpec,
+        lang: Option<u8>,
+        params: &[String],
+    ) -> Result<Match, LoadError> {
         let mut slots = Slots::new();
+        for p in params {
+            slots.slot(p.trim_start_matches('$'));
+        }
         let data = |name: &str| {
             let spec = self.data.get(name)?;
             let mut out = Vec::new();
