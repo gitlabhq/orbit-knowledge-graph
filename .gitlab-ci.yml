@@ -815,6 +815,9 @@ check_docs_i18n_markdown:
 pages:
   extends: .engineering-site
   resource_group: pages
+  variables:
+    # Serve from the custom domain root; site-kit derives its base path from this.
+    CI_PAGES_URL: https://gitlaborbit.dev/
   rules:
     - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
     - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
@@ -822,6 +825,9 @@ pages:
 pages:preview:
   extends: .engineering-site
   allow_failure: true
+  variables:
+    # Pages serves previews at gitlaborbit.dev/<branch>/; site-kit derives its base path from this.
+    CI_PAGES_URL: https://gitlaborbit.dev/$CI_COMMIT_REF_SLUG/
   pages:
     path_prefix: "$CI_COMMIT_REF_SLUG"
     expire_in: 1 week
