@@ -4,3 +4,9 @@ phases:
     walk: flow
     outputs: [emit]
     modules: [core, ssa, text]
+  - name: resolve
+    scope: family
+    after: [link]
+    walk: each
+    outputs: [emit]
+    modules: [core, text]

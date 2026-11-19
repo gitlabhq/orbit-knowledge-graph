@@ -14,15 +14,15 @@ use imports::{
     build_file_index, gather_imports_for, gather_visible_one, name_target, propagate_reexports,
     resolve_glob, resolve_one_import, wildcard_or_name, wildcard_uses,
 };
-pub use types::Fun;
-use types::R;
+pub(crate) use types::FileWalk;
 
 use crate::canonical::Canonical as C;
 use crate::constants::WILDCARD;
+use crate::engine::{Cx, Loc, Shards};
 use crate::env::Env;
 use crate::file_tree::{LookupConfig, WalkResult};
 use crate::intern::Lang;
-use crate::rules::{Loc, Members, MemoMap};
+use crate::modules::core::ops::Members;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{CallResolution, Compact, Edge, EdgeKind, reachable};
@@ -305,7 +305,7 @@ impl Resolver {
             .par_iter()
             .map(|&fi| {
                 let started = Instant::now();
-                (R::resolve_file(&ctx, fi as usize), (fi, started.elapsed()))
+                (Cx::resolve_file(&ctx, fi as usize), (fi, started.elapsed()))
             })
             .unzip();
         let (per_file, mut killed): (Vec<Vec<Edge>>, Vec<Killed>) =
@@ -478,7 +478,7 @@ fn expand(
         let shared: &Ctx = ctx;
         wave = wave
             .par_iter()
-            .flat_map_iter(|ce| R::new(shared).resolve_type_edges(ce))
+            .flat_map_iter(|ce| Cx::for_family(shared, 0, None).resolve_type_edges(ce))
             .collect::<Vec<_>>()
             .into_iter()
             .filter(|e| seen.insert(call_key(e)))
@@ -525,7 +525,7 @@ fn wildcard_wave<'e>(
         .collect::<Vec<_>>()
         .par_iter()
         .flat_map_iter(|imports| {
-            let mut r = R::new(ctx);
+            let mut r = Cx::for_family(ctx, 0, None);
             let mut out = Vec::new();
             for req in imports.iter().filter(|r| touches(ctx, dirty_fis, r)) {
                 let names = ctx.corpus.jump(req.fi, req.node).names();
@@ -549,7 +549,7 @@ fn producer_wave(ctx: &Ctx) -> Vec<Edge> {
         .par_iter()
         .flat_map_iter(|(&(tree, node), uses)| {
             let producer = ctx.corpus.jump(tree, node);
-            let mut r = R::new(ctx);
+            let mut r = Cx::for_family(ctx, 0, None);
             let typed = producer.is(C::Binding)
                 || (producer.is(C::Call)
                     && !uses
@@ -566,16 +566,14 @@ fn producer_wave(ctx: &Ctx) -> Vec<Edge> {
         .collect()
 }
 
-type Memo = std::sync::Mutex<MemoMap<Fun>>;
-
 pub(super) struct Ctx<'a> {
     references: FxHashMap<Loc, Loc>,
     implementations: FxHashMap<Loc, Vec<Loc>>,
     saved_imports: FxHashMap<(u32, u32), Vec<u32>>,
-    trees: &'a [Tree],
-    run: &'a Sentinel,
+    pub(crate) trees: &'a [Tree],
+    pub(crate) run: &'a Sentinel,
     file_resolve_ms: u64,
-    env: &'a Env,
+    pub(crate) env: &'a Env,
     extends_of: FxHashMap<Loc, Vec<Loc>>,
     imports_to: FxHashMap<(u32, u32), Vec<&'a Edge>>,
     call_at_site: FxHashMap<(u32, u32), &'a Edge>,
@@ -583,7 +581,7 @@ pub(super) struct Ctx<'a> {
     corpus: Cursor<'a>,
     type_uses: FxHashMap<(u32, u32), Vec<&'a Edge>>,
     producers: FxHashMap<(u32, u32), Vec<&'a Edge>>,
-    lang: &'a Lang,
+    pub(crate) lang: &'a Lang,
     visible: &'a VisibleMap,
     ambiguous: &'a FxHashSet<(u32, u32)>,
     file_index: &'a FileIndex,
@@ -594,8 +592,8 @@ pub(super) struct Ctx<'a> {
     packages: &'a [FxHashMap<u32, u32>],
     partials: FxHashMap<(u32, u32, u32), Vec<Loc>>,
     extensions: FxHashMap<u32, Vec<Loc>>,
-    members: Members,
-    memo: Vec<Memo>,
+    pub(crate) members: Members,
+    pub(crate) memo: Shards,
     exporters: Vec<FxHashSet<u32>>,
     imports: Vec<FxHashMap<u32, (u32, u32)>>,
 }

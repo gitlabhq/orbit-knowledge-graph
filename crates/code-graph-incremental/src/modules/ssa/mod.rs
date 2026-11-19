@@ -145,10 +145,14 @@ impl<'t> Cx<'t> {
     }
 
     pub(crate) fn members_index(&self) -> &Members {
-        self.ssa
-            .members
-            .as_ref()
-            .expect("the link phase builds the member index")
+        match self.family {
+            Some(ctx) => &ctx.members,
+            None => self
+                .ssa
+                .members
+                .as_ref()
+                .expect("the link phase builds the member index"),
+        }
     }
 }
 
@@ -272,7 +276,7 @@ fn loop_head(c: Cursor<'_>) -> usize {
 
 pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed> {
     let file = Sentinel::new("link", &tree.label, env.limits.file_link_ms).on_thread_cpu();
-    let mut cx = Cx::new(std::slice::from_ref(tree), 0, env, run, file);
+    let mut cx = Cx::new(std::slice::from_ref(tree), 0, env, run, Some(file));
     let root = tree.root();
     let entry = cx.ssa.graph.add_block();
     cx.ssa.graph.seal_block(entry);
@@ -296,7 +300,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
 impl Cx<'_> {
     fn decorators(&mut self) -> Result<(), Killed> {
         for dn in self.ssa.declared.clone() {
-            self.run.check().and_then(|()| self.file.check())?;
+            self.budget()?;
             for c in self.at(dn).children().filter(|c| c.is(C::Decorator)) {
                 for target in self.lookup_chain(c) {
                     match target {

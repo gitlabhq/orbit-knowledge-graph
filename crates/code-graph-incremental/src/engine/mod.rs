@@ -149,7 +149,8 @@ macro_rules! fn_id {
     }};
 }
 
-type Key = (FnId, SmallVec<[Vals; 2]>);
+pub(crate) type Key = (FnId, SmallVec<[Vals; 2]>);
+pub(crate) type Shards = Vec<std::sync::Mutex<FxHashMap<Key, Vals>>>;
 
 pub struct Cx<'t> {
     pub trees: &'t [Tree],
@@ -157,12 +158,14 @@ pub struct Cx<'t> {
     pub env: &'t Env,
     pub tags: ReservedTags,
     pub run: &'t Sentinel,
-    pub file: Sentinel,
+    pub file: Option<Sentinel>,
     pub killed: Option<Killed>,
     pub max_edges: usize,
     pub edges: Vec<Edge>,
     pub defs: Vec<u32>,
     pub ssa: modules::ssa::State,
+    pub(crate) family: Option<&'t crate::resolve::Ctx<'t>>,
+    pub(crate) walk: crate::resolve::FileWalk,
     pure: FxHashMap<Key, Vals>,
     flow: FxHashMap<Key, Vals>,
     flow_at: modules::ssa::Epoch,
@@ -176,7 +179,7 @@ impl<'t> Cx<'t> {
         fi: u32,
         env: &'t Env,
         run: &'t Sentinel,
-        file: Sentinel,
+        file: Option<Sentinel>,
     ) -> Self {
         Self {
             trees,
@@ -190,12 +193,25 @@ impl<'t> Cx<'t> {
             edges: Vec::new(),
             defs: Vec::new(),
             ssa: modules::ssa::State::default(),
+            family: None,
+            walk: Default::default(),
             pure: FxHashMap::default(),
             flow: FxHashMap::default(),
             flow_at: Default::default(),
             busy: FxHashSet::default(),
             cut: false,
         }
+    }
+
+    pub(crate) fn for_family(
+        ctx: &'t crate::resolve::Ctx<'t>,
+        fi: u32,
+        file: Option<Sentinel>,
+    ) -> Self {
+        let mut cx = Self::new(ctx.trees, fi, ctx.env, ctx.run, file);
+        cx.max_edges = 0;
+        cx.family = Some(ctx);
+        cx
     }
 
     pub fn tree(&self) -> &'t Tree {
@@ -210,8 +226,13 @@ impl<'t> Cx<'t> {
         Cursor::new(self.trees, loc.fi, loc.node)
     }
 
+    pub fn budget(&self) -> Result<(), Killed> {
+        self.run.check()?;
+        self.file.as_ref().map_or(Ok(()), Sentinel::check)
+    }
+
     pub fn check(&self) -> Result<(), Killed> {
-        self.run.check().and_then(|()| self.file.check())?;
+        self.budget()?;
         match self.max_edges {
             0 => Ok(()),
             cap if self.edges.len() <= cap => Ok(()),
@@ -233,29 +254,65 @@ impl<'t> Cx<'t> {
         self.killed.is_none()
     }
 
+    pub fn cut(&mut self) {
+        self.cut = true;
+    }
+
+    fn shard(&self, key: &Key) -> Option<&'t std::sync::Mutex<FxHashMap<Key, Vals>>> {
+        let fi = key.1.first()?.first()?.loc()?.fi;
+        Some(&self.family?.memo[fi as usize])
+    }
+
+    fn cached(&mut self, key: &Key, pure: bool) -> Option<Vals> {
+        match (pure, self.shard(key)) {
+            (true, Some(shard)) => shard
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(key)
+                .cloned(),
+            (true, None) => self.pure.get(key).cloned(),
+            (false, _) => self.flow.get(key).cloned(),
+        }
+    }
+
+    fn store(&mut self, key: Key, found: &Vals, pure: bool) {
+        match (pure, self.shard(&key)) {
+            (true, Some(shard)) => {
+                shard
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(key, found.clone());
+            }
+            (true, None) => {
+                self.pure.insert(key, found.clone());
+            }
+            (false, _) => {
+                self.flow.insert(key, found.clone());
+            }
+        }
+    }
+
     /// Cached calls share one cycle guard: a call already in progress yields
     /// nothing and marks the result in progress as cut. A pure result under a
     /// cut is never stored; a flow result lives one epoch, so it is stored to
-    /// keep self-referential chains (`n = n.next()`) linear.
+    /// keep self-referential chains (`n = n.next()`) linear. A family phase has
+    /// no flow state, so its flow functions cache like pure ones.
     pub fn call(&mut self, id: FnId, args: &[Vals]) -> Vals {
         let f = function(id);
         if f.kind == Kind::Effect {
             return (f.call)(self, args);
         }
+        let pure = f.kind == Kind::Pure || self.family.is_some();
         let key: Key = (id, SmallVec::from(args));
-        if f.kind == Kind::Flow {
+        if !pure {
             let epoch = self.ssa.epoch(self.defs.len());
             if epoch != self.flow_at {
                 self.flow.clear();
                 self.flow_at = epoch;
             }
         }
-        let memo = match f.kind {
-            Kind::Pure => &self.pure,
-            _ => &self.flow,
-        };
-        if let Some(found) = memo.get(&key) {
-            return found.clone();
+        if let Some(found) = self.cached(&key, pure) {
+            return found;
         }
         if !self.busy.insert(key.clone()) {
             self.cut = true;
@@ -266,14 +323,12 @@ impl<'t> Cx<'t> {
         self.busy.remove(&key);
         let cut = self.cut;
         self.cut |= outer;
-        match f.kind {
-            Kind::Pure if !cut => {
-                self.pure.insert(key, found.clone());
-            }
-            Kind::Flow if self.flow_at == self.ssa.epoch(self.defs.len()) => {
-                self.flow.insert(key, found.clone());
-            }
-            _ => {}
+        let keep = match pure {
+            true => !cut,
+            false => self.flow_at == self.ssa.epoch(self.defs.len()),
+        };
+        if keep {
+            self.store(key, &found, pure);
         }
         found
     }
