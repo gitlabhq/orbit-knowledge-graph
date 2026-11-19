@@ -43,6 +43,10 @@ fixtures:
         image: { name: "flowmap:2", entrypoint: [""] }
         services: [ "flowseq:1", { name: flowseqmap:2 } ]
 
+      reference_tag:
+        image: !reference [.base, image]
+        services: !reference [.x, services]
+
       bool_service:
         services:
           - false
@@ -95,7 +99,7 @@ tests:
   - name: "a version variable is not an image"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.import_path IN ["18", "registry.example.com", "ignored", "false", "tagonly", "7"]
+      WHERE i.import_path IN ["18", "registry.example.com", "ignored", "false", "tagonly", "7", ".x", ".base", "services"]
       RETURN i.import_path AS image
     assert:
       - { row_count: 0 }

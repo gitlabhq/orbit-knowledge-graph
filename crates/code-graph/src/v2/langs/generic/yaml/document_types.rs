@@ -363,6 +363,9 @@ fn push_image_value(
     {
         return;
     }
+    if is_tagged(value) {
+        return;
+    }
     if let Some(reference) = item_scalar(value) {
         if !is_unquoted_non_string(value) {
             push_image(imports, rule, &reference, node_range(value));
@@ -379,6 +382,14 @@ fn push_image_value(
             push_image_value(imports, rule, &item, mapping_key, depth + 1);
         }
     }
+}
+
+fn is_tagged(node: &N<'_>) -> bool {
+    let has_tag = |n: &N<'_>| n.find(Child, Kind("tag")).is_some();
+    has_tag(node)
+        || node
+            .find(Child, AnyKind(&["flow_node", "block_node"]))
+            .is_some_and(|inner| has_tag(&inner))
 }
 
 fn is_unquoted_non_string(node: &N<'_>) -> bool {
