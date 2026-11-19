@@ -247,15 +247,55 @@ To verify the setup:
    kubectl -n dip logs -f job/serviceping-exporter-check
    ```
 
-   In `dry-run` mode the log shows the payload for each closed weekly window, with the Service Ping settings it read from GitLab.
+   In `dry-run` mode the log shows the JSON payload for each closed weekly window, followed by `dry run complete`.
    A window closes on Monday at 00:00 UTC, so the first payload appears after the first Monday that follows your first event.
-   Until then, the log shows the settings and no payload.
+   Until then, the log shows `nothing to send`.
 
 ## Upgrade
 
 Upgrade the DIP and exporter releases with the `helm upgrade` commands above, and GitLab Orbit as in [Upgrade GitLab Orbit](orbit-setup.md#upgrade-gitlab-orbit).
 When you upgrade GitLab Orbit, set `component.version` in `exporter-values.yaml` to the new version and upgrade the exporter release.
 The DIP migrations run again on every upgrade.
+
+## Remove Service Ping for GitLab Orbit
+
+To remove Service Ping for GitLab Orbit:
+
+1. Set `analytics.local_collector.enabled` to `false` in `orbit-values.yaml` and upgrade GitLab Orbit.
+1. Uninstall the exporter and DIP:
+
+   ```shell
+   helm uninstall serviceping-exporter --namespace dip
+   helm uninstall dip --namespace dip
+   ```
+
+The `snowplow` and `serviceping` databases and the `serviceping_exporter` user stay in ClickHouse.
+If you no longer need them, drop them with your ClickHouse client.
+
+## Troubleshooting
+
+### The exporter log shows `403 Forbidden` from GitLab
+
+GitLab answers the Service Ping settings request only through Workhorse.
+Set `gitlab.url` in `exporter-values.yaml` to an address that goes through Workhorse, not to the Rails port.
+
+### The exporter request to GitLab times out
+
+If the GitLab chart's `webservice` NetworkPolicy is on, allow the exporter's namespace on port 8181.
+
+### `serviceping.events` stays empty
+
+1. Check that `analytics.local_collector.enabled` is `true` and that the URL matches the DIP Service:
+
+   ```shell
+   kubectl -n dip get service platform-single
+   ```
+
+1. Check the DIP pod log for errors:
+
+   ```shell
+   kubectl -n dip logs platform-single-0
+   ```
 
 ## Related topics
 
