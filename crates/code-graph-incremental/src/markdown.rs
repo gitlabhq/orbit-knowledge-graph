@@ -29,7 +29,7 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
     let targets: Vec<_> = document
         .links
         .iter()
-        .filter_map(|link| link.target(label))
+        .filter_map(|link| link.target(label).map(|target| (link.section, target)))
         .collect();
     let front_matter_nodes = document.front_matter.as_ref().map_or(0, |block| {
         3 + block
@@ -84,10 +84,12 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
         tree.append(id, node(Canonical::Anchor.into(), anchor, start, end));
         ids.push(id);
     }
-    let end = source.len();
-    for target in targets {
+    for (section, target) in targets {
+        let (parent, end) = section.map_or((tree.root, source.len()), |index| {
+            (ids[index], sections[index].end)
+        });
         let link = tree.append(
-            tree.root,
+            parent,
             node(
                 Canonical::Link.into(),
                 lang.syms.intern(&target.path),
@@ -116,7 +118,7 @@ pub fn link_edges(trees: &[Tree<Compact>], lang: &Lang) -> Vec<Edge> {
         .enumerate()
         .flat_map(|(from_fi, tree)| {
             tree.root()
-                .children()
+                .descendants()
                 .filter(|node| node.is(Canonical::Link))
                 .map(move |link| (from_fi, link))
         })
@@ -146,15 +148,22 @@ pub fn link_edges(trees: &[Tree<Compact>], lang: &Lang) -> Vec<Edge> {
                     .copied()
             });
         let to_node = section.unwrap_or_else(|| trees[to_fi].root().index());
-        let edge = Edge::new(
-            from_fi as u32,
-            trees[from_fi].root().index(),
-            to_fi as u32,
-            to_node,
-            EdgeKind::Links,
+        let from_nodes = std::iter::once(trees[from_fi].root().index()).chain(
+            link.parent()
+                .filter(|parent| parent.is(Canonical::Def))
+                .map(|parent| parent.index()),
         );
-        if seen.insert(edge) {
-            edges.push(edge);
+        for from_node in from_nodes {
+            let edge = Edge::new(
+                from_fi as u32,
+                from_node,
+                to_fi as u32,
+                to_node,
+                EdgeKind::Links,
+            );
+            if seen.insert(edge) {
+                edges.push(edge);
+            }
         }
     }
     edges

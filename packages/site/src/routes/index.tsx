@@ -1,10 +1,10 @@
 import { type ComponentProps, useState } from "react";
 import { AgentLogos, AgentPrompt, cn, Contrasts, CopyButton, CostCalculator, DotWave, FieldBand, Flow, GravityGlobe, Icon, OrbitHalo, OrbitHero, PageFrame, pageHead, type PromptExample, Reveal, RippleField, RippleLog, Section, segment, site, SiteLink, type Slide, Slideshow, Terminal, Testimonial, type UseCase, UseCases } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
-import { USER_DOCS } from "../sections";
+import { HOME, USER_DOCS } from "../sections";
 
 export const Route = createFileRoute("/")({
-  head: () => pageHead(site.name),
+  head: () => pageHead(site.name, HOME.description),
   component: HomePage,
 });
 

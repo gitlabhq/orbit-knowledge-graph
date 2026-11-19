@@ -7,6 +7,9 @@
     A [broken anchor](other.md#nope) still links the page.
     The [entry point](/src/main.py) and [notes](my%20notes.md).
     The [question](faq.md#question) moves in an edit.
+
+    ## Assets
+
     ![logo](../assets/logo.png "Logo")
     ![logo anchor](../assets/diagram.svg#part)
 
@@ -32,6 +35,8 @@
 
 - path: docs/other.md
   content: |
+    Before any heading, the [guide](guide.md).
+
     # Other
 
     See the [notes](my%20notes.md#nope).

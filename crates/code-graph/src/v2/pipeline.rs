@@ -271,6 +271,7 @@ pub struct PipelineContext {
     pub file_timings: std::sync::Mutex<Vec<FileTimingEntry>>,
     pub language_timings: std::sync::Mutex<Vec<LanguageTimings>>,
     pub file_links: std::sync::Mutex<Vec<crate::v2::linker::graph::PendingFileLink>>,
+    pub inventory: Option<Arc<crate::v2::linker::graph::InventoryFiles>>,
 }
 
 impl PipelineContext {
@@ -774,6 +775,10 @@ impl Pipeline {
         let t_discovery = std::time::Instant::now();
         let (files_by_family, parsed_file_languages) =
             group_parseable_inventory(&file_inventory, config.max_files);
+        let inventory = Arc::new(crate::v2::linker::graph::InventoryFiles {
+            entries: file_inventory.clone(),
+            languages: parsed_file_languages,
+        });
         let total_files = file_inventory.len();
         let total_bytes: u64 = file_inventory.total_bytes();
         let parsable_files: usize = files_by_family.values().map(|f| f.len()).sum();
@@ -797,6 +802,7 @@ impl Pipeline {
             file_timings: std::sync::Mutex::new(Vec::new()),
             language_timings: std::sync::Mutex::new(Vec::new()),
             file_links: std::sync::Mutex::new(Vec::new()),
+            inventory: Some(inventory.clone()),
         });
 
         // 2. Process languages with bounded concurrency. At most
@@ -1045,7 +1051,7 @@ impl Pipeline {
             let structural_graph = build_file_inventory_graph(
                 root,
                 &file_inventory,
-                &parsed_file_languages,
+                &inventory.languages,
                 &reasons,
                 file_links,
             );
@@ -1460,7 +1466,17 @@ impl FamilyPipeline {
                 }
             }
             if !links.targets.is_empty() {
-                link_sources.push((file_node, links.targets));
+                let targets = links
+                    .targets
+                    .into_iter()
+                    .map(|(section, target)| {
+                        (
+                            section.and_then(|index| def_nodes.get(index).copied()),
+                            target,
+                        )
+                    })
+                    .collect();
+                link_sources.push((file_node, targets));
             }
 
             files_with_refs[parsed_file.path_idx] = Some(FileWithRefs {
@@ -1760,7 +1776,7 @@ impl FamilyPipeline {
         graph.indexes.definition_ranges.clear();
         graph.indexes.definition_ranges.shrink_to_fit();
 
-        let file_links = graph.link_anchors(link_sources, &link_anchors);
+        let file_links = graph.link_anchors(link_sources, &link_anchors, ctx.inventory.as_deref());
         if !file_links.is_empty()
             && let Ok(mut pending) = ctx.file_links.lock()
         {
@@ -2095,6 +2111,70 @@ mod tests {
     }
 
     #[test]
+    fn section_link_endpoints_carry_the_inventory_file_language() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("src/main.py"), "def main(): pass\n").unwrap();
+        let readme = "# Intro\n\nSee [main](../src/main.py).\n";
+        std::fs::write(root.join("docs/index.md"), readme).unwrap();
+        let entry = |path: &str, size: usize| FileInventoryEntry {
+            path: path.into(),
+            size: size as u64,
+            decision: Decision::Parse,
+            label: Default::default(),
+        };
+        let inventory = FileInventory::new(vec![
+            entry("src/main.py", 17),
+            entry("docs/index.md", readme.len()),
+        ]);
+
+        let capture = Arc::new(TestCapture::new());
+        let result = Pipeline::run_with_tracer(
+            root,
+            Arc::new(inventory),
+            PipelineConfig::default(),
+            crate::v2::trace::Tracer::new(false),
+            capture.clone(),
+            Arc::new(|_: &str, _: RecordBatch| Ok(())),
+        );
+        assert_eq!(result.errors.len(), 0);
+
+        let target_languages = |source: NodeKind| -> Vec<(bool, &'static str)> {
+            let mut languages: Vec<_> = capture
+                .graphs
+                .lock()
+                .unwrap()
+                .iter()
+                .flat_map(|graph| {
+                    graph
+                        .edges()
+                        .filter(|(_, _, edge)| {
+                            edge.relationship.source_node == source
+                                && edge.relationship.target_node == NodeKind::File
+                                && edge.relationship.edge_kind
+                                    == crate::v2::types::EdgeKind::Imports
+                        })
+                        .filter_map(|(_, target, _)| target.as_file())
+                        .filter(|file| file.path == "src/main.py")
+                        .map(|file| {
+                            (
+                                graph.output.writes_repository_structure(),
+                                file.language_name(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            languages.sort();
+            languages
+        };
+        assert_eq!(target_languages(NodeKind::File), [(true, "python")]);
+        assert_eq!(target_languages(NodeKind::Definition), [(false, "python")]);
+    }
+
+    #[test]
     fn file_inventory_emits_unparsed_file_nodes_once() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -2366,6 +2446,7 @@ namespace MyApp {
             file_timings: std::sync::Mutex::new(Vec::new()),
             language_timings: std::sync::Mutex::new(Vec::new()),
             file_links: std::sync::Mutex::new(Vec::new()),
+            inventory: None,
         });
         ctx.record_skip(
             "src/slow.rs",

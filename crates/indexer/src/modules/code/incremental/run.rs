@@ -8,7 +8,7 @@ use code_graph_incremental::pipeline::FileStats;
 use code_graph_incremental::{Envelope, Error, Scalar, export::ExportConfig, templates};
 
 use super::super::{
-    arrow_converter::{IndexerEnvelope, route_graph},
+    arrow_converter::{ConvertedGraphData, IndexerEnvelope, route_graph},
     config::CodeTableNames,
 };
 use super::{Repository, output::Output};
@@ -70,6 +70,31 @@ pub(in crate::modules::code) fn run(
     }
     let indexed = std::sync::Mutex::new(stats);
     let sink_failed = std::sync::atomic::AtomicBool::new(false);
+    let write = |converted: Vec<ConvertedGraphData>| -> Result<(), SinkError> {
+        for batches in converted {
+            {
+                #[expect(
+                    clippy::expect_used,
+                    reason = "mutex poisoning means another thread already panicked; propagating is intended"
+                )]
+                let mut stats = indexed.lock().expect("stats lock");
+                stats.files_indexed += batches.files.num_rows();
+                stats.directories_indexed += batches.directories.num_rows();
+                stats.definitions_count += batches.definitions.num_rows();
+                stats.imports_count += batches.imported_symbols.num_rows();
+                stats.edges_count += batches.edges.num_rows();
+            }
+            for (table, batch) in route_graph(batches, &tables)? {
+                if cancelled() {
+                    return Err(SinkError("indexing cancelled".into()));
+                }
+                on_batch(&table, batch).inspect_err(|_| {
+                    sink_failed.store(true, std::sync::atomic::Ordering::Relaxed)
+                })?;
+            }
+        }
+        Ok(())
+    };
     let report = templates::repository(
         repository,
         options,
@@ -86,32 +111,16 @@ pub(in crate::modules::code) fn run(
         ]),
         &ontology,
         &export_config,
-        |batches| -> Result<(), SinkError> {
-            for batches in output.convert(batches)? {
-                {
-                    #[expect(
-                        clippy::expect_used,
-                        reason = "mutex poisoning means another thread already panicked; propagating is intended"
-                    )]
-                    let mut stats = indexed.lock().expect("stats lock");
-                    stats.files_indexed += batches.files.num_rows();
-                    stats.directories_indexed += batches.directories.num_rows();
-                    stats.definitions_count += batches.definitions.num_rows();
-                    stats.imports_count += batches.imported_symbols.num_rows();
-                    stats.edges_count += batches.edges.num_rows();
-                }
-                for (table, batch) in route_graph(batches, &tables)? {
-                    if cancelled() {
-                        return Err(SinkError("indexing cancelled".into()));
-                    }
-                    on_batch(&table, batch).inspect_err(|_| {
-                        sink_failed.store(true, std::sync::atomic::Ordering::Relaxed)
-                    })?;
-                }
-            }
-            Ok(())
-        },
-    );
+        |batches| write(output.convert(batches)?),
+    )
+    .and_then(|report| {
+        output.finish().and_then(&write).map_err(|error| {
+            Error::Export(arrow::error::ArrowError::ExternalError(
+                error.to_string().into(),
+            ))
+        })?;
+        Ok(report)
+    });
     #[expect(
         clippy::expect_used,
         reason = "mutex poisoning means another thread already panicked; propagating is intended"

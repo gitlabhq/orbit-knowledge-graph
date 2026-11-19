@@ -22,3 +22,13 @@ variants:
     to_node: { type: Definition, id: id }
     scope: same_namespace
     description: "Documentation file links to a heading anchor in another file (e.g. a Markdown link to a section)."
+
+  - from_node: { type: Definition, id: id }
+    to_node: { type: File, id: id }
+    scope: same_namespace
+    description: "Documentation section links to another repository file (e.g. a Markdown link under a heading)."
+
+  - from_node: { type: Definition, id: id }
+    to_node: { type: Definition, id: id }
+    scope: same_namespace
+    description: "Documentation section links to a heading anchor in another file (e.g. a Markdown link under a heading to a section)."

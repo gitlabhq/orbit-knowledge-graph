@@ -54,6 +54,12 @@ context block.
 If the change alters what a user sees (CLI output, skill text, MCP tool
 descriptions, rendered docs), paste the before and after output here.
 A screenshot works too.
+
+If the change alters what Orbit stores or returns, paste one short code
+block of real before and after rows from a tiny fixture. Stored data means
+indexed rows, edges, properties, and schema. Returned data means query and
+tool output. Never invent rows or paste production data. Skip the block
+when no data changes (docs, CI, pure refactors).
 -->
 
 ### Performance Analysis
