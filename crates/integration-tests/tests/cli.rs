@@ -433,6 +433,7 @@ fn indexes_and_refreshes_files_git_tracks_under_ignored_directories() {
         names(definitions),
         [
             ".claude.tool.tool",
+            "SKILL",
             "SKILL#Demo",
             "SKILL#Demo#Usage",
             "app.app"
