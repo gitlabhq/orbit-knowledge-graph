@@ -234,7 +234,20 @@ fn every_state_and_step_of_the_small_clusters_matches_the_spec() {
         std::env::var("ENGINE_SPEC_TLC_GRAPHS")
             .expect("ENGINE_SPEC_TLC_GRAPHS names the folder of the TLC graphs"),
     );
-    for (name, bounds) in SMALL_CLUSTERS {
-        compare_with_spec(name, bounds, &graphs.join(format!("{name}.dot")));
-    }
+    let only = std::env::var("ENGINE_SPEC_CLUSTER").ok();
+    let clusters: Vec<_> = SMALL_CLUSTERS
+        .into_iter()
+        .filter(|(name, _)| only.as_deref().is_none_or(|only| only == *name))
+        .collect();
+    assert!(
+        !clusters.is_empty(),
+        "ENGINE_SPEC_CLUSTER names no small cluster"
+    );
+
+    std::thread::scope(|scope| {
+        for (name, bounds) in clusters {
+            let spec_graph = graphs.join(format!("{name}.dot"));
+            scope.spawn(move || compare_with_spec(name, bounds, &spec_graph));
+        }
+    });
 }

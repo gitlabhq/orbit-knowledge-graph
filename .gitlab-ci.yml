@@ -94,6 +94,7 @@ include:
   - local: .gitlab/ci/release-deploy-mr.yml
   - local: .gitlab/ci/linting.yml
   - local: .gitlab/ci/rails-contract.yml
+  - local: .gitlab/ci/indexing-engine-spec.yml
   # Uses `secrets`, which dev.gitlab.org rejects and fork MR pipelines can't use.
   - local: .gitlab/ci/review-docs.yml
     rules:
@@ -931,27 +932,6 @@ unit-test:
   script:
     - ./scripts/dev/run-unit-tests.sh --profile ci
     - sccache --show-stats || true
-
-engine-spec-check:
-  stage: test
-  extends:
-    - .job-template
-    - .sccache-template
-  rules:
-    - !reference [.skip-on-solo-schedule, rules]
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      changes:
-        - specs/indexing-engine-next/**/*
-        - crates/indexing-engine-next/src/protocol/**/*
-        - crates/indexing-engine-next/tests/protocol/**/*
-        - crates/indexing-engine-next/src/testkit/simulator/**/*
-  tags:
-    - ${RUNNER_LARGE}
-  needs: []
-  script:
-    - mise run spec:engine
-    - mise run spec:engine:counterexample
-    - mise run spec:engine:code
 
 # No --all-targets: some tests are unix-only.
 windows-cli-check:

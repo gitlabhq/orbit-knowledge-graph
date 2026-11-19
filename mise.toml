@@ -480,7 +480,7 @@ done
 """
 
 [tasks."spec:engine:code"]
-description = "Check that the Rust protocol code has the same state graph as the spec in three small clusters"
+description = "Check that the Rust protocol code has the same state graph as the spec in small clusters (ENGINE_SPEC_CLUSTER picks one)"
 tools = { java = "temurin-21.0.13+9.0.LTS" }
 depends = ["spec:engine:tools"]
 shell = "bash -c"
@@ -490,6 +490,7 @@ graphs="$PWD/${CARGO_TARGET_DIR:-target}/tmp/indexing-engine-next-spec/graphs"
 rm -rf "$graphs" && mkdir -p "$graphs"
 for config in specs/indexing-engine-next/code-check/*.cfg; do
   name=$(basename "$config" .cfg)
+  [ -z "${ENGINE_SPEC_CLUSTER:-}" ] || [ "$ENGINE_SPEC_CLUSTER" = "$name" ] || continue
   java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir "target/tlc-graph-$name" \
     -dump dot,actionlabels "$graphs/$name" -config "$config" specs/indexing-engine-next/LeaseDedupe.tla > "$graphs/$name.log" 2>&1 \
     || { tail -40 "$graphs/$name.log"; exit 1; }
