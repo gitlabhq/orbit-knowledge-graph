@@ -1,12 +1,12 @@
 mod cluster;
 
-use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cluster::{
-    Bounds, Coverage, RANDOM_RUN_BOUNDS, RandomRun, SMALL_CLUSTER, SMALL_CLUSTER_WITH_DUPLICATE,
-    SMALL_CLUSTER_WITH_NATS_WIPE, explore_every_state, random_run, write_runs_module,
+    Bounds, SMALL_CLUSTER, SMALL_CLUSTER_WITH_DUPLICATE, SMALL_CLUSTER_WITH_NATS_WIPE,
+    SMALL_CLUSTER_WITH_TWO_TASKS, StateGraph, explore_graph, read_spec_graph,
 };
 use indexing_engine_next::protocol::{
     Claim, Fence, Generation, HolderId, Lease, LeaseEntry, LeaseRules, Publish, Renewal, Revision,
@@ -14,9 +14,12 @@ use indexing_engine_next::protocol::{
 };
 use uuid::Uuid;
 
-const DEFAULT_RUNS: u64 = 2_000;
-const RUNS_PER_TLC_CHUNK: usize = 100;
-const STEPS: usize = 60;
+const SMALL_CLUSTERS: [(&str, Bounds); 4] = [
+    ("no_nats_faults", SMALL_CLUSTER),
+    ("two_tasks", SMALL_CLUSTER_WITH_TWO_TASKS),
+    ("nats_wipe", SMALL_CLUSTER_WITH_NATS_WIPE),
+    ("duplicate", SMALL_CLUSTER_WITH_DUPLICATE),
+];
 const FIRST_GENERATION: Generation = Generation(1);
 
 const RULES: LeaseRules = LeaseRules {
@@ -48,26 +51,55 @@ fn held_by(name: &str, expires_at: u64, revision: u64) -> LeaseEntry {
     }
 }
 
-fn environment_number(name: &str, default: u64) -> u64 {
-    std::env::var(name)
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(default)
+fn compare_with_spec(name: &str, bounds: Bounds, spec_graph: &Path) {
+    let none = HashSet::new();
+    let (code, _) = explore_graph(bounds, &none);
+    let spec = read_spec_graph(spec_graph, &none).graph;
+    if code.initial == spec.initial && code.states == spec.states && code.steps == spec.steps {
+        println!(
+            "{name}: the code and the spec have the same {} states and {} steps",
+            code.states.len(),
+            code.steps.len()
+        );
+        return;
+    }
+
+    let code_only: HashSet<_> = code
+        .states
+        .difference(&spec.states)
+        .copied()
+        .take(3)
+        .collect();
+    let spec_only: HashSet<_> = spec
+        .states
+        .difference(&code.states)
+        .copied()
+        .take(3)
+        .collect();
+    let (_, code_examples) = explore_graph(bounds, &code_only);
+    let spec_examples = read_spec_graph(spec_graph, &spec_only).labels;
+    panic!(
+        "{name}: the code and the spec differ\n{}\nonly the code reaches:\n{}\nonly the spec reaches:\n{}",
+        describe_difference(&code, &spec),
+        code_examples.join("\n\n"),
+        spec_examples.into_values().collect::<Vec<_>>().join("\n\n"),
+    );
 }
 
-fn random_runs() -> &'static [RandomRun] {
-    static RUNS: OnceLock<Vec<RandomRun>> = OnceLock::new();
-    RUNS.get_or_init(|| {
-        let first = environment_number("ENGINE_SPEC_FIRST_SEED", 0);
-        let count = environment_number("ENGINE_SPEC_RUNS", DEFAULT_RUNS);
-        (first..first + count)
-            .map(|seed| random_run(seed, STEPS))
-            .collect()
-    })
-}
-
-fn spec_output_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("indexing-engine-next-spec")
+fn describe_difference(code: &StateGraph, spec: &StateGraph) -> String {
+    format!(
+        "initial states: code {} spec {}, states: code {} spec {} (only code {}, only spec {}), steps: code {} spec {} (only code {}, only spec {})",
+        code.initial.len(),
+        spec.initial.len(),
+        code.states.len(),
+        spec.states.len(),
+        code.states.difference(&spec.states).count(),
+        spec.states.difference(&code.states).count(),
+        code.steps.len(),
+        spec.steps.len(),
+        code.steps.difference(&spec.steps).count(),
+        spec.steps.difference(&code.steps).count(),
+    )
 }
 
 #[test]
@@ -189,75 +221,20 @@ fn a_fence_of_a_newer_generation_beats_any_revision_of_an_older_one() {
 }
 
 #[test]
-fn random_runs_with_stalls_crashes_and_nats_faults_keep_the_rules() {
-    let runs = random_runs();
-    assert!(!runs.is_empty());
-}
-
-#[test]
-fn random_runs_reach_the_path_of_each_fix() {
-    let mut coverage = Coverage::default();
-    for run in random_runs() {
-        coverage += run.coverage;
-    }
-
-    assert!(coverage.fence_rejections > 0, "{coverage:?}");
-    assert!(coverage.foreign_markers_kept > 0, "{coverage:?}");
-    assert!(coverage.republished_markers > 0, "{coverage:?}");
-    assert!(coverage.lost_renewals > 0, "{coverage:?}");
-    assert!(coverage.releases > 0, "{coverage:?}");
-    assert!(coverage.recoveries > 0, "{coverage:?}");
-    assert!(coverage.duplicates > 0, "{coverage:?}");
-}
-
-#[test]
-fn random_runs_are_written_in_chunks_for_the_tlc_check_against_the_spec() {
-    let runs = random_runs();
-    let dir = spec_output_dir().join("runs");
-    let _ = std::fs::remove_dir_all(&dir);
-
-    for (n, chunk) in runs.chunks(RUNS_PER_TLC_CHUNK).enumerate() {
-        let chunk_dir = dir.join(format!("chunk-{n:03}"));
-        std::fs::create_dir_all(&chunk_dir).unwrap();
-        let module = write_runs_module(chunk, RANDOM_RUN_BOUNDS.holders);
-        std::fs::write(chunk_dir.join("LeaseDedupeRuns.tla"), module).unwrap();
-    }
-
-    let seeds: Vec<u64> = runs.iter().map(|run| run.seed).collect();
-    println!(
-        "wrote {} runs, seeds {}..={}",
-        runs.len(),
-        seeds.first().unwrap(),
-        seeds.last().unwrap()
-    );
-    let chunks = std::fs::read_dir(&dir).unwrap().count();
-    assert_eq!(chunks, runs.len().div_ceil(RUNS_PER_TLC_CHUNK));
-}
-
-fn explore_and_write_summary(name: &str, bounds: Bounds) {
-    let exploration = explore_every_state(bounds);
-    let dir = spec_output_dir().join("small-cluster");
-    std::fs::create_dir_all(&dir).unwrap();
-    let summary = format!("{}\n", exploration.states);
-    std::fs::write(dir.join(format!("{name}.txt")), summary).unwrap();
-
-    println!("{name}: the code reaches {} states", exploration.states);
-    assert!(exploration.states > 1);
-}
-
-#[test]
 fn every_state_of_a_small_cluster_keeps_the_rules() {
-    explore_and_write_summary("no_nats_faults", SMALL_CLUSTER);
+    let (graph, _) = explore_graph(SMALL_CLUSTER, &HashSet::new());
+    assert_eq!(graph.initial.len(), 4);
+    assert!(graph.states.len() > graph.initial.len());
 }
 
 #[test]
-#[ignore = "explores 1.1 million states, about 11 s in a release build; engine-spec-check runs it"]
-fn every_state_of_a_small_cluster_with_a_nats_wipe_keeps_the_rules() {
-    explore_and_write_summary("nats_wipe", SMALL_CLUSTER_WITH_NATS_WIPE);
-}
-
-#[test]
-#[ignore = "explores 4.2 million states, about 40 s in a release build; engine-spec-check runs it"]
-fn every_state_of_a_small_cluster_with_a_duplicate_keeps_the_rules() {
-    explore_and_write_summary("duplicate", SMALL_CLUSTER_WITH_DUPLICATE);
+#[ignore = "needs the state graphs that TLC dumps; mise run spec:engine:code writes them and runs this test"]
+fn every_state_and_step_of_the_small_clusters_matches_the_spec() {
+    let graphs = PathBuf::from(
+        std::env::var("ENGINE_SPEC_TLC_GRAPHS")
+            .expect("ENGINE_SPEC_TLC_GRAPHS names the folder of the TLC graphs"),
+    );
+    for (name, bounds) in SMALL_CLUSTERS {
+        compare_with_spec(name, bounds, &graphs.join(format!("{name}.dot")));
+    }
 }

@@ -354,7 +354,6 @@ LoseMessage(c) ==
     /\ UNCHANGED <<now, offset, lease, started, stallsLeft, crashesLeft>>
     /\ UNCHANGED <<natsGeneration, wipesLeft, duplicatesLeft, lostInWipe, podVars, plannerVars, storeVars>>
 
-\* why: code-check/LeaseDedupeEnabled.tla lists every action of Next in SpecEnabled by hand. When you add an action here, add it to SpecEnabled and to the Rust cluster in crates/indexing-engine-next/tests/protocol/cluster.rs.
 Next ==
     \/ Tick
     \/ Submit

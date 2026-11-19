@@ -480,35 +480,24 @@ done
 """
 
 [tasks."spec:engine:code"]
-description = "Check with TLC that the Rust protocol code follows the spec: every state of three small clusters, then random runs"
+description = "Check that the Rust protocol code has the same state graph as the spec in three small clusters"
 tools = { java = "temurin-21.0.13+9.0.LTS" }
 depends = ["spec:engine:tools"]
 shell = "bash -c"
 run = """
 set -euo pipefail
-cargo test -q --release -p indexing-engine-next --test protocol -- --include-ignored --nocapture 2>&1 | grep -E "wrote|reaches|test result"
-out="${CARGO_TARGET_DIR:-target}/tmp/indexing-engine-next-spec"
-spec=specs/indexing-engine-next
-tlc() { java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup "$@"; }
-
-for config in "$spec"/code-check/small-cluster/*.cfg; do
+graphs="$PWD/${CARGO_TARGET_DIR:-target}/tmp/indexing-engine-next-spec/graphs"
+rm -rf "$graphs" && mkdir -p "$graphs"
+for config in specs/indexing-engine-next/code-check/*.cfg; do
   name=$(basename "$config" .cfg)
-  log="$out/small-cluster/$name.tlc.log"
-  tlc -metadir "target/tlc-small-$name" -config "$config" "$spec/LeaseDedupe.tla" > "$log" 2>&1 || { tail -40 "$log"; exit 1; }
-  spec_states=$(grep -oE "[0-9]+ distinct states found, 0 states left" "$log" | grep -oE "^[0-9]+")
-  code_states=$(cat "$out/small-cluster/$name.txt")
-  if [ "$spec_states" != "$code_states" ]; then
-    echo "$name: the spec reaches $spec_states states and the code reaches $code_states"
-    exit 1
-  fi
-  echo "$name: the spec and the code both reach $code_states states"
+  java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir "target/tlc-graph-$name" \
+    -dump dot,actionlabels "$graphs/$name" -config "$config" specs/indexing-engine-next/LeaseDedupe.tla > "$graphs/$name.log" 2>&1 \
+    || { tail -40 "$graphs/$name.log"; exit 1; }
+  echo "$name: $(grep -oE "[0-9]+ distinct states found, 0 states left" "$graphs/$name.log" | grep -oE "^[0-9]+") states in the spec"
 done
-
-for chunk in "$out"/runs/chunk-*; do
-  cp "$spec/LeaseDedupe.tla" "$spec"/code-check/*.tla "$spec"/code-check/*.cfg "$chunk/"
-  tlc -metadir "target/tlc-code-$(basename "$chunk")" -config "$chunk/LeaseDedupeCodeCheck.cfg" "$chunk/LeaseDedupeCodeCheck.tla" > "$chunk/tlc.log" 2>&1 || { tail -60 "$chunk/tlc.log"; echo "$chunk: a run of the code is not a run of the spec"; exit 1; }
-  echo "$(basename "$chunk"): every step is a step of the spec ($(grep -oE "[0-9]+ distinct states found" "$chunk/tlc.log"))"
-done
+ENGINE_SPEC_TLC_GRAPHS="$graphs" cargo test -q --release -p indexing-engine-next --test protocol \
+  every_state_and_step_of_the_small_clusters_matches_the_spec -- --include-ignored --nocapture
+rm -f "$graphs"/*.dot
 """
 
 [tasks."schema:bump"]

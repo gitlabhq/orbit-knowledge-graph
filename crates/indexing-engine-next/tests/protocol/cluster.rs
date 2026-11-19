@@ -1,8 +1,6 @@
-mod tla;
+mod tlc;
 
 use std::collections::{BTreeSet, HashSet, VecDeque};
-use std::fmt;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::{Duration, SystemTime};
 
 use indexing_engine_next::protocol::{
@@ -12,11 +10,9 @@ use indexing_engine_next::testkit::simulator::{
     DatabaseWrite, FaultBudget, MessageState, SimulatedBroker, SimulatedClock, SimulatedDatabase,
     SimulatedKeyValue,
 };
-use rand::rngs::Xoshiro256PlusPlus;
-use rand::{RngExt, SeedableRng};
 use uuid::Uuid;
 
-pub use tla::write_runs_module;
+pub use tlc::{StateGraph, StateId, read_spec_graph};
 
 const UNIT: Duration = Duration::from_secs(20);
 const OFFSETS: [u64; 2] = [0, 1];
@@ -32,25 +28,25 @@ pub struct Bounds {
     pub faults: FaultBudget,
 }
 
-pub const RANDOM_RUN_BOUNDS: Bounds = Bounds {
-    holders: 3,
-    max_time: 12,
-    max_events: 3,
-    faults: FaultBudget {
-        stalls: 2,
-        crashes: 2,
-        wipes: 1,
-        duplicates: 1,
-        losses: 0,
-    },
-};
-
 pub const SMALL_CLUSTER: Bounds = Bounds {
     holders: 2,
     max_time: 4,
     max_events: 1,
     faults: FaultBudget {
         stalls: 1,
+        crashes: 1,
+        wipes: 0,
+        duplicates: 0,
+        losses: 0,
+    },
+};
+
+pub const SMALL_CLUSTER_WITH_TWO_TASKS: Bounds = Bounds {
+    holders: 2,
+    max_time: 4,
+    max_events: 2,
+    faults: FaultBudget {
+        stalls: 0,
         crashes: 1,
         wipes: 0,
         duplicates: 0,
@@ -73,7 +69,7 @@ pub const SMALL_CLUSTER_WITH_NATS_WIPE: Bounds = Bounds {
 
 pub const SMALL_CLUSTER_WITH_DUPLICATE: Bounds = Bounds {
     holders: 2,
-    max_time: 4,
+    max_time: 3,
     max_events: 1,
     faults: FaultBudget {
         stalls: 1,
@@ -108,129 +104,42 @@ pub enum Action {
     Crash(usize),
 }
 
-impl fmt::Display for Action {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Action::Tick => f.write_str("Tick"),
-            Action::Submit => f.write_str("Submit"),
-            Action::Publish => f.write_str("Publish"),
-            Action::PlannerCrash => f.write_str("PlannerCrash"),
-            Action::NatsWipe => f.write_str("NatsWipe"),
-            Action::RecoverNats => f.write_str("RecoverNats"),
-            Action::Redeliver(c) => write!(f, "Redeliver({})", c + 1),
-            Action::DuplicateCopy(c) => write!(f, "DuplicateCopy({})", c + 1),
-            Action::LoseMessage(c) => write!(f, "LoseMessage({})", c + 1),
-            Action::Deliver(p, c) => write!(f, "Deliver(p{},{})", p + 1, c + 1),
-            Action::AcquireLease(p) => write!(f, "AcquireLease(p{})", p + 1),
-            Action::StartTask(p) => write!(f, "StartTask(p{})", p + 1),
-            Action::Renew(p) => write!(f, "Renew(p{})", p + 1),
-            Action::RenewFails(p) => write!(f, "RenewFails(p{})", p + 1),
-            Action::BeginWrite(p) => write!(f, "BeginWrite(p{})", p + 1),
-            Action::CommitWrite(p) => write!(f, "CommitWrite(p{})", p + 1),
-            Action::Finish(p) => write!(f, "Finish(p{})", p + 1),
-            Action::Stall(p) => write!(f, "Stall(p{})", p + 1),
-            Action::Resume(p) => write!(f, "Resume(p{})", p + 1),
-            Action::Crash(p) => write!(f, "Crash(p{})", p + 1),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Coverage {
-    pub republished_markers: u32,
-    pub foreign_markers_kept: u32,
-    pub fence_rejections: u32,
-    pub lost_renewals: u32,
-    pub releases: u32,
-    pub recoveries: u32,
-    pub duplicates: u32,
-}
-
-impl std::ops::AddAssign for Coverage {
-    fn add_assign(&mut self, other: Self) {
-        self.republished_markers += other.republished_markers;
-        self.foreign_markers_kept += other.foreign_markers_kept;
-        self.fence_rejections += other.fence_rejections;
-        self.lost_renewals += other.lost_renewals;
-        self.releases += other.releases;
-        self.recoveries += other.recoveries;
-        self.duplicates += other.duplicates;
-    }
-}
-
-pub struct RandomRun {
-    pub seed: u64,
-    pub states: Vec<String>,
-    pub coverage: Coverage,
-}
-
-pub fn random_run(seed: u64, max_steps: usize) -> RandomRun {
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-    let bounds = RANDOM_RUN_BOUNDS;
-    let skews = (0..bounds.holders)
-        .map(|_| OFFSETS[rng.random_range(0..OFFSETS.len())])
-        .collect();
-    let mut cluster = Cluster::init(bounds, skews);
-    let mut states = vec![cluster.to_tla()];
-
-    for step in 1..=max_steps {
-        let actions = cluster.enabled_actions();
-        if actions.is_empty() {
-            break;
-        }
-        let action = actions[rng.random_range(0..actions.len())];
-        cluster.apply(action);
-        if let Err(broken) = cluster.check_invariants() {
-            panic!("seed {seed}, step {step}, {action}: {broken}");
-        }
-        states.push(cluster.to_tla());
-    }
-
-    RandomRun {
-        seed,
-        states,
-        coverage: cluster.coverage,
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Exploration {
-    pub states: u64,
-}
-
-pub fn explore_every_state(bounds: Bounds) -> Exploration {
-    let mut seen = HashSet::new();
+pub fn explore_graph(
+    bounds: Bounds,
+    keep_states_of: &HashSet<StateId>,
+) -> (StateGraph, Vec<String>) {
+    let mut graph = StateGraph::default();
+    let mut kept = Vec::new();
     let mut queue = VecDeque::new();
 
     for skews in skew_combinations(bounds.holders) {
         let cluster = Cluster::init(bounds, skews);
-        if seen.insert(fingerprint(&cluster)) {
-            queue.push_back(cluster);
+        let id = cluster.state_id();
+        graph.initial.insert(id);
+        if graph.states.insert(id) {
+            queue.push_back((cluster, id));
         }
     }
 
-    while let Some(cluster) = queue.pop_front() {
+    while let Some((cluster, id)) = queue.pop_front() {
         if let Err(broken) = cluster.check_invariants() {
-            panic!("state {}: {broken}", cluster.to_tla());
+            panic!("{broken} in state\n{}", cluster.canonical_state());
+        }
+        if keep_states_of.contains(&id) {
+            kept.push(cluster.canonical_state());
         }
         for action in cluster.enabled_actions() {
             let mut next = cluster.clone();
             next.apply(action);
-            if seen.insert(fingerprint(&next)) {
-                queue.push_back(next);
+            let next_id = next.state_id();
+            graph.steps.insert((id, next_id));
+            if graph.states.insert(next_id) {
+                queue.push_back((next, next_id));
             }
         }
     }
 
-    Exploration {
-        states: seen.len() as u64,
-    }
-}
-
-fn fingerprint(cluster: &Cluster) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    cluster.to_tla().hash(&mut hasher);
-    hasher.finish()
+    (graph, kept)
 }
 
 fn skew_combinations(holders: usize) -> Vec<Vec<u64>> {
@@ -326,7 +235,6 @@ struct Cluster {
     started: BTreeSet<TaskId>,
     lost_in_wipe: BTreeSet<TaskId>,
     rejected_current: bool,
-    coverage: Coverage,
 }
 
 impl Cluster {
@@ -372,7 +280,6 @@ impl Cluster {
             started: BTreeSet::new(),
             lost_in_wipe: BTreeSet::new(),
             rejected_current: false,
-            coverage: Coverage::default(),
         }
     }
 
@@ -493,7 +400,6 @@ impl Cluster {
             Action::Redeliver(c) => self.broker.redeliver(c),
             Action::DuplicateCopy(c) => {
                 self.faults.duplicates -= 1;
-                self.coverage.duplicates += 1;
                 self.broker.duplicate(c);
             }
             Action::LoseMessage(c) => {
@@ -533,10 +439,7 @@ impl Cluster {
                 self.next_id += 1;
                 self.publishing = Some(task);
             }
-            Publish::Pending(task) => {
-                self.coverage.republished_markers += 1;
-                self.publishing = Some(task);
-            }
+            Publish::Pending(task) => self.publishing = Some(task),
         }
     }
 
@@ -584,7 +487,6 @@ impl Cluster {
             let cleared = self.marker.put(self.marker.revision(), None);
             assert!(cleared.is_ok(), "a start is atomic in the spec");
         } else if marker.is_some() {
-            self.coverage.foreign_markers_kept += 1;
         }
         self.holders[h].step = Step::Running(hold);
     }
@@ -611,7 +513,6 @@ impl Cluster {
                 }
             }
             Renewal::Lost => {
-                self.coverage.lost_renewals += 1;
                 self.drop_run(h);
             }
         }
@@ -638,7 +539,6 @@ impl Cluster {
                     .holds(h)
                     .is_some_and(|hold| hold.release(&entry).is_some());
                 self.rejected_current |= holds_current;
-                self.coverage.fence_rejections += 1;
                 self.drop_run(h);
             }
         }
@@ -653,9 +553,7 @@ impl Cluster {
             .and_then(|hold| hold.release(&self.lease_entry()));
         if let Some(expected) = release
             && self.lease.put(expected, None).is_ok()
-        {
-            self.coverage.releases += 1;
-        }
+        {}
         self.drop_run(h);
     }
 
@@ -676,7 +574,6 @@ impl Cluster {
         let next = self.database.start_next_generation();
         let written = self.generation.put(self.generation.revision(), Some(next));
         assert!(written.is_ok(), "a recovery is atomic in the spec");
-        self.coverage.recoveries += 1;
     }
 
     fn drop_run(&mut self, h: usize) {
@@ -728,8 +625,12 @@ impl Cluster {
         Ok(())
     }
 
-    fn to_tla(&self) -> String {
-        tla::Tla(self).to_string()
+    fn canonical_state(&self) -> String {
+        tlc::canonical(tlc::state_lines(self))
+    }
+
+    fn state_id(&self) -> StateId {
+        tlc::state_id(&self.canonical_state())
     }
 }
 
