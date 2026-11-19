@@ -5,7 +5,7 @@ use regex::Regex;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
-use crate::engine::{Cursor, Cx, Function, Loc, Module, Span, Store, Val, Vals, one, yes};
+use crate::engine::{Cursor, Cx, Function, Module, Store, Val, Vals, one, yes};
 use crate::intern::Lang;
 use crate::modules::function;
 use crate::tree::{EdgeKind, Node, Storage};
@@ -56,16 +56,9 @@ static FUNCTIONS: &[Function<Text>] = &[
     on_text!("stem", [one], stem),
     on_text!("collapse_index", [one, set], collapse_index),
     on_text!("map", [one, set], map),
-    function!(Pure, "find", [one, set], |cx, a| find(cx, a, Span::Family)),
-    function!(Pure, "find_tree", [one, set, one], |cx, a| find(
-        cx,
-        a,
-        Span::Tree
-    )),
-    function!(Pure, "find_scope", [one, set, one], |cx, a| find(
-        cx,
-        a,
-        Span::Scope
+    function!(Pure, "match", [one, one, set], |cx, a| query(cx, a, false)),
+    function!(Pure, "match_all", [one, one, set], |cx, a| query(
+        cx, a, true
     )),
     function!(Pure, "default", [set, set], |cx, a| {
         let present = |at: usize| -> Vals {
@@ -508,6 +501,21 @@ fn constant<S: Storage<Node = Node>>(_: Cursor<'_, S>, o: &Opts) -> Option<Val> 
     Some(Val::Sym(o.lang.syms.intern(o.lit(1))))
 }
 
+/// `receiver | match(pattern, keys)`: the nodes matching `pattern` under
+/// the receiver whose index key is one of `keys`.
+fn query<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals], deep: bool) -> Vals {
+    let (Some(at), Some(pattern)) = (
+        a[0].first().and_then(|v| v.loc()),
+        a[1].first().and_then(|&v| text(cx, v)).map(str::to_owned),
+    ) else {
+        return Vals::new();
+    };
+    a[2].iter()
+        .filter_map(|&k| cx.text(k))
+        .flat_map(|k| cx.query(&pattern, at, k, deep).into_iter().map(Val::Node))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -697,23 +705,4 @@ mod tests {
             Some(Val::Node(tree.cursor(Tree::to_raw(path)).into()))
         );
     }
-}
-
-/// The nodes a declared index holds under each key in `a[1]`, relative to
-/// the node in `a[2]` for a tree or scope index.
-fn find<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals], span: Span) -> Vals {
-    let Some(pattern) = a[0].first().and_then(|&v| text(cx, v)).map(str::to_owned) else {
-        return Vals::new();
-    };
-    let at = match span {
-        Span::Family => Loc { fi: 0, node: 0 },
-        _ => match a[2].first().and_then(|v| v.loc()) {
-            Some(at) => at,
-            None => return Vals::new(),
-        },
-    };
-    a[1].iter()
-        .filter_map(|&k| cx.text(k))
-        .flat_map(|k| cx.find(span, &pattern, k, at).into_iter().map(Val::Node))
-        .collect()
 }

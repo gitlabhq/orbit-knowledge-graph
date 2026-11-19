@@ -4,7 +4,7 @@ use super::Scope;
 use super::paths::join;
 use crate::canonical::Canonical as C;
 use crate::constants::WILDCARD;
-use crate::engine::{Cursor, Cx, Loc, Span, Store, Val, Vals, of};
+use crate::engine::{Cursor, Cx, Loc, Store, Val, Vals, of};
 use crate::tree::EdgeKind;
 
 const DEF_NAMES: &str = "(__def $N:__defname)";
@@ -78,7 +78,7 @@ impl<'t, S: Store> Cx<'_, 't, Scope, S> {
         let root = scope.parent().is_none();
         let types_only = !root && scope.is_class();
         let defs: Vals = of(self
-            .find(Span::Scope, DEF_NAMES, name, Loc::from(scope))
+            .query(DEF_NAMES, Loc::from(scope), name, false)
             .iter()
             .map(|&l| self.jump(l))
             .filter(|d| !d.has(C::ImplBlock))
@@ -135,17 +135,17 @@ impl<'t, S: Store> Cx<'_, 't, Scope, S> {
                     .is_some_and(|a| a.is_class())
         };
         let mut defs: SmallVec<[Cursor<'t, S>; 2]> = self
-            .find(Span::Tree, DEF_NAMES, name, at)
+            .query(DEF_NAMES, at, name, true)
             .iter()
             .map(|&l| self.jump(l))
             .filter(|d| !nested(*d))
             .chain(
-                self.find(Span::Tree, DEFAULT_EXPORTS, name, at)
+                self.query(DEFAULT_EXPORTS, at, name, true)
                     .iter()
                     .map(|&l| self.jump(l)),
             )
             .chain(
-                self.find(Span::Tree, EXPORTS, name, at)
+                self.query(EXPORTS, at, name, true)
                     .iter()
                     .map(|&l| self.jump(l)),
             )

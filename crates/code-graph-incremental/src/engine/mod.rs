@@ -167,39 +167,34 @@ pub trait Module: Sized + 'static {
 /// An index a module declares over a family's trees and edges. The engine
 /// builds it the first time a file of a family run asks for it, and every
 /// file of that run shares it.
+pub type BuildIndex =
+    fn(&crate::intern::Lang, &[Tree<Compact>], &[Edge]) -> Box<dyn Any + Send + Sync>;
+
 pub struct IndexDecl {
     pub name: &'static str,
-    pub build: fn(&crate::intern::Lang, &[Tree<Compact>], &[Edge]) -> Box<dyn Any + Send + Sync>,
+    pub build: BuildIndex,
 }
 
-/// What a family run needs to build index pieces on demand, and the run's
-/// family-wide directory of each index, merged from the pieces.
+/// What a family run needs to build index pieces on demand.
 pub struct Indexed<'t> {
     phase: &'t Phase,
     trees: &'t [Tree<Compact>],
-    files: usize,
     env: &'t Env,
     budget: &'t Sentinel,
-    family: Box<[std::sync::OnceLock<FxHashMap<u32, Vec<Loc>>>]>,
 }
 
 impl<'t> Indexed<'t> {
     fn new(
         phase: &'t Phase,
         trees: &'t [Tree<Compact>],
-        files: usize,
         env: &'t Env,
         budget: &'t Sentinel,
     ) -> Self {
         Self {
             phase,
             trees,
-            files,
             env,
             budget,
-            family: (0..phase.index_count)
-                .map(|_| std::sync::OnceLock::new())
-                .collect(),
         }
     }
 
@@ -211,25 +206,6 @@ impl<'t> Indexed<'t> {
                 let mut run = Run::new(trees, fi, env, phase, budget, budget);
                 phase.piece(&mut run, Cursor::new(trees, fi, 0), id)
             })
-    }
-
-    fn family(&self, id: u32) -> &FxHashMap<u32, Vec<Loc>> {
-        use rayon::prelude::*;
-        self.family[id as usize].get_or_init(|| {
-            let pieces: Vec<(u32, &crate::tree::Piece)> = (0..self.files as u32)
-                .into_par_iter()
-                .map(|fi| (fi, self.piece(fi, id)))
-                .collect();
-            let mut map: FxHashMap<u32, Vec<Loc>> = FxHashMap::default();
-            for (fi, piece) in pieces {
-                for (&(_, key), nodes) in piece {
-                    map.entry(key)
-                        .or_default()
-                        .extend(nodes.iter().map(|&node| Loc { fi, node }));
-                }
-            }
-            map
-        })
     }
 }
 
@@ -849,7 +825,7 @@ pub fn run_family(
     let scope = scope_budget(phase, env, budget);
     let indexes = Indexes::new(&env.lang, trees, edges, &phase.modules);
     let files = project.unwrap_or(trees.len() as u32) as usize;
-    let indexed = Indexed::new(phase, trees, files, env, &scope);
+    let indexed = Indexed::new(phase, trees, env, &scope);
     let edges: Vec<Result<Vec<Edge>, Killed>> = (0..files)
         .into_par_iter()
         .map(|fi| {
@@ -1057,31 +1033,30 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
         self.run.indexes?.get(self.slot, name)?.downcast_ref()
     }
 
-    /// The nodes matching the declared index (`pattern`, `span`) whose key
-    /// has the text `key`, relative to `at`: its file for a tree index, the
-    /// scope node itself for a scope index.
-    pub fn find(&self, span: Span, pattern: &str, key: u32, at: Loc) -> Vec<Loc> {
-        let indexed = self.run.indexed.expect("find runs in family phases");
+    /// The nodes matching `pattern` whose index key has the text `key`: the
+    /// direct members of the scope `at`, or with `deep` every match under
+    /// `at`. A declared index answers it; a query no index covers fails.
+    pub fn query(&self, pattern: &str, at: Loc, key: u32, deep: bool) -> Vec<Loc> {
+        let indexed = self.run.indexed.expect("queries run in family phases");
+        let span = if deep { Span::Tree } else { Span::Scope };
         let Some(&(_, _, id)) = indexed
             .phase
             .indexes
             .iter()
             .find(|(p, s, _)| p == pattern && *s == span)
         else {
-            panic!("index {pattern} ({span:?}) is not declared for this phase in pipeline.yaml");
+            panic!("no index covers {pattern} ({span:?}); declare it in pipeline.yaml");
         };
-        let local = |anchor: u32| {
-            indexed
-                .piece(at.fi, id)
-                .get(&(anchor, key))
-                .map_or_else(Vec::new, |nodes| {
-                    nodes.iter().map(|&node| Loc { fi: at.fi, node }).collect()
-                })
+        let anchor = if deep { 0 } else { at.node };
+        let Some(nodes) = indexed.piece(at.fi, id).get(&(anchor, key)) else {
+            return Vec::new();
         };
-        match span {
-            Span::Family => indexed.family(id).get(&key).cloned().unwrap_or_default(),
-            Span::Tree => local(0),
-            Span::Scope => local(at.node),
+        let found = nodes.iter().map(|&node| Loc { fi: at.fi, node });
+        match deep && at.node != 0 {
+            true => found
+                .filter(|&l| self.jump(l).ancestors().any(|a| a.index() == at.node))
+                .collect(),
+            false => found.collect(),
         }
     }
 

@@ -66,13 +66,13 @@ struct IndexSpec {
     phases: Vec<String>,
 }
 
-/// What an index's keys are relative to: the whole family, one file, or
-/// one scope (the nearest enclosing def, or the file root).
+/// What an index's keys are relative to: one file, which `match_all`
+/// reads, or one scope (the nearest enclosing def, or the file root), which
+/// `match` reads.
 #[derive(serde::Deserialize, Clone, Copy, PartialEq, Eq, Default, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Span {
     #[default]
-    Family,
     Tree,
     Scope,
 }
@@ -81,7 +81,7 @@ impl Span {
     /// The node a match at `c` is filed under in its tree's piece.
     fn anchor<S: Store>(self, c: Cursor<'_, S>) -> u32 {
         match self {
-            Span::Family | Span::Tree => 0,
+            Span::Tree => 0,
             Span::Scope => c
                 .ancestors()
                 .find(|a| a.is(C::Def) || a.parent().is_none())
