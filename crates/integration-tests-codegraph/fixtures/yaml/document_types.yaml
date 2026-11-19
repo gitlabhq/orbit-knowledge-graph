@@ -161,12 +161,13 @@ tests:
       - { row: { type: CiVariable, fqn: "variables.CARGO_HOME", file: ".gitlab-ci.yml" } }
       - { row: { type: CiVariable, fqn: "variables.RUST_BACKTRACE", file: ".gitlab-ci.yml" } }
 
-  - name: "Every import: all include flavors plus trigger.include, ArgoCD sources, Helm dependencies; include under a job and MyChart.yaml yield none"
+  - name: "Every import: both alpine images, all include flavors plus trigger.include, ArgoCD sources, Helm dependencies; include under a job and MyChart.yaml yield none"
     query: |
       MATCH (i:ImportedSymbol)
       RETURN i.import_type AS type, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias
     assert:
-      - { row_count: 10 }
+      - { row_count: 12 }
+      - { row: { type: CiImage, path: alpine, name: alpine, alias: null } }
       - { row: { type: CiLocalInclude, path: "/ci/lint.gitlab-ci.yml", name: null, alias: null } }
       - { row: { type: CiProjectInclude, path: "gitlab-org/pipeline-common", name: "/templates/build.yml", alias: main } }
       - { row: { type: CiProjectInclude, path: "gitlab-org/pipeline-common", name: "/templates/test.yml", alias: main } }

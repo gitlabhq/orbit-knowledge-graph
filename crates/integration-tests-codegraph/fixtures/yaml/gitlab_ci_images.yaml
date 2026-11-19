@@ -1,0 +1,93 @@
+name: "GitLab CI: container images from image, services and image variables"
+
+fixtures:
+  - path: .gitlab-ci.yml
+    content: |
+      image: alpine:3.19
+
+      default:
+        image:
+          name: ruby:3.2@sha256:abc123
+          entrypoint: [""]
+        services:
+          - postgres:15
+
+      variables:
+        CS_IMAGE: "nginx:1.25.3"
+        NODE_VERSION: 18
+        GO_IMAGE: golang:1.22
+        REGISTRY_URL: registry.example.com
+        IMAGE: exact:1
+        DESCRIBED_IMAGE:
+          value: described:2
+          description: an image
+        SCAN_IMAGE: false
+        PUSH_IMAGE: "true"
+        MY_IMAGE_TAG: tagonly:1
+
+      build:
+        image: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+        services:
+          - name: redis:7
+            alias: cache
+          - host:5000/mirror/mysql
+        variables:
+          CS_IMAGE: nginx:1.27.0
+
+      .template:
+        image: hidden:1
+
+      flow:
+        image: { name: "flowmap:2", entrypoint: [""] }
+        services: [ "flowseq:1", { name: flowseqmap:2 } ]
+
+      test:
+        script: [true]
+        rules:
+          - variables:
+              OTHER_IMAGE: ignored:1
+
+      workflow:
+        rules:
+          - variables:
+              WF_IMAGE: ignored:2
+
+  - path: .gitlab/ci/build.yml
+    content: |
+      fragment:
+        image: fragment:1
+
+tests:
+  - name: "every image reference becomes an import with the bare image, tag and digest"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.import_type = "CiImage"
+      RETURN i.import_path AS image, i.identifier_name AS name, i.import_tag AS tag, i.import_digest AS digest
+      ORDER BY image, tag
+    assert:
+      - { row_count: 17 }
+      - { row: { image: alpine, name: alpine, tag: "3.19", digest: "" } }
+      - { row: { image: ruby, name: ruby, tag: "3.2", digest: "sha256:abc123" } }
+      - { row: { image: postgres, name: postgres, tag: "15", digest: "" } }
+      - { row: { image: nginx, name: nginx, tag: "1.25.3", digest: "" } }
+      - { row: { image: nginx, name: nginx, tag: "1.27.0", digest: "" } }
+      - { row: { image: golang, name: golang, tag: "1.22", digest: "" } }
+      - { row: { image: "$CI_REGISTRY_IMAGE", name: "$CI_REGISTRY_IMAGE", tag: "$CI_COMMIT_SHA", digest: "" } }
+      - { row: { image: redis, name: redis, tag: "7", digest: "" } }
+      - { row: { image: exact, name: exact, tag: "1", digest: "" } }
+      - { row: { image: described, name: described, tag: "2", digest: "" } }
+      - { row: { image: "true", name: "true", tag: "", digest: "" } }
+      - { row: { image: hidden, name: hidden, tag: "1", digest: "" } }
+      - { row: { image: flowmap, name: flowmap, tag: "2", digest: "" } }
+      - { row: { image: flowseq, name: flowseq, tag: "1", digest: "" } }
+      - { row: { image: flowseqmap, name: flowseqmap, tag: "2", digest: "" } }
+      - { row: { image: fragment, name: fragment, tag: "1", digest: "" } }
+      - { row: { image: "host:5000/mirror/mysql", name: "host:5000/mirror/mysql", tag: "", digest: "" } }
+
+  - name: "a version variable is not an image"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.import_path IN ["18", "registry.example.com", "ignored", "false", "tagonly"]
+      RETURN i.import_path AS image
+    assert:
+      - { row_count: 0 }

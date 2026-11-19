@@ -18,6 +18,11 @@
 migrations:
 - version: 126
   scope: code
+  note: >-
+    ImportedSymbol gains import_tag and import_digest. Dockerfile FROM rows fill
+    them, and CI images from image:, services: and image variables in
+    .gitlab-ci.yml become ImportedSymbol rows too, so the rebuild re-indexes code
+    to populate the rows already indexed.
 - version: 125
   scope: "*"
   note: >-

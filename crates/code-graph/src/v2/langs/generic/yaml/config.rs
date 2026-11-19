@@ -26,6 +26,31 @@ pub(super) struct DocumentType {
     pub(super) definitions: Vec<DefinitionRule>,
     #[serde(default)]
     pub(super) imports: Vec<KeyRule>,
+    pub(super) images: Option<ImageRule>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ImageRule {
+    #[serde(rename = "type")]
+    pub(super) import_type: String,
+    pub(super) keys: Vec<String>,
+    #[serde(default)]
+    pub(super) also_under: Vec<String>,
+    #[serde(default)]
+    pub(super) variable_names: Vec<String>,
+    #[serde(default)]
+    pub(super) variable_suffixes: Vec<String>,
+}
+
+impl ImageRule {
+    pub(super) fn is_image_variable(&self, name: &str) -> bool {
+        self.variable_names.iter().any(|n| n == name)
+            || self
+                .variable_suffixes
+                .iter()
+                .any(|s| name.ends_with(s.as_str()))
+    }
 }
 
 #[derive(Deserialize)]

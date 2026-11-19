@@ -39,3 +39,9 @@ imports:
       - type: CiComponentInclude
         path_key: component
         version_split: "@"
+images:
+  type: CiImage
+  keys: [image, services]
+  also_under: [default]
+  variable_names: [IMAGE]
+  variable_suffixes: [_IMAGE]
