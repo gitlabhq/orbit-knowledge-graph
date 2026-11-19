@@ -91,15 +91,6 @@ To resolve this issue:
 Then run `helm upgrade` with the new values.
 For the values file, see [Install Siphon](data-replication.md#install-siphon).
 
-## PostgreSQL does not start after the restart
-
-On a Linux package instance, PostgreSQL does not start after you restart it for logical replication.
-
-This issue occurs when `/etc/gitlab/gitlab.rb` holds a partially applied combination of `wal_level`, `max_replication_slots`, and `max_wal_senders`.
-
-To resolve this issue, correct the three settings in `/etc/gitlab/gitlab.rb`, run `sudo gitlab-ctl reconfigure`, then run `sudo gitlab-ctl restart postgresql`.
-For the values and the query that confirms the settings, see [Turn on logical replication in PostgreSQL](data-replication.md#turn-on-logical-replication-in-postgresql).
-
 ## Siphon logs permission errors, and the data lake tables stay empty
 
 The Siphon consumer pod is `Running`, but its logs show permission errors from ClickHouse, and the tables in the data lake stay empty.
@@ -130,33 +121,6 @@ GitLab splits its schema across the `main`, `ci`, and `sec` databases, whether o
 To resolve this issue, restore the table definitions, and map `ci` and `sec` onto `main` in `database_mapping` in `siphon-values.yaml`.
 Then run the `helm upgrade` command from [Install Siphon](data-replication.md#install-siphon), and restart the Siphon deployments.
 For more information, see [Values file settings](data-replication.md#values-file-settings).
-
-## The NATS volume is full
-
-The persistent volume of NATS JetStream is full.
-
-This issue occurs when `nats_config.max_age_seconds` is missing from `siphon-values.yaml`, or when the JetStream volume is too small for the window that it sets.
-
-To resolve this issue, set `max_age_seconds` to the number of seconds of changed rows that the stream keeps, for example `1296000` for 15 days, and size the JetStream volume for that window.
-To apply a new `max_age_seconds`, run the `helm upgrade` command from [Install Siphon](data-replication.md#install-siphon), and restart the Siphon deployments.
-For the volume setting, see [Configure NATS](getting-started.md#configure-nats).
-For the size, see [NATS](sizing.md#nats).
-
-## Queries return no rows after you turn on indexing
-
-Right after you turn on indexing for a group, the verification query returns no rows, while the pods are `Running` and the `/-/readiness` endpoint passes.
-
-This issue occurs when the first index has not finished.
-The first index takes from several minutes to a few hours, and pod status does not confirm indexing.
-An hourly sweep picks up any data that indexing missed.
-
-To resolve this issue, check the indexing progress with the [GitLab Orbit CLI](../cli.md#install-the-cli), and send the query again when the summary ends with `Ready.`:
-
-```shell
-glab orbit status --full-path <my-group>
-```
-
-For more information, see [Check indexing progress](../cli.md#check-indexing-progress).
 
 ## Recover from data loss
 
