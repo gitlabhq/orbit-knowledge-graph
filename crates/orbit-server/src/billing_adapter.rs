@@ -49,3 +49,45 @@ impl From<&Claims> for QuotaCheckInputs {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn claims_with_quota_exempt(orbit_quota_exempt: Option<bool>) -> Claims {
+        let mut json = json!({
+            "sub": "u",
+            "iss": "gitlab",
+            "aud": "gitlab-knowledge-graph",
+            "iat": 0,
+            "exp": 0,
+            "user_id": 1,
+            "username": "u",
+            "source_type": "mcp",
+        });
+        if let Some(exempt) = orbit_quota_exempt {
+            json["orbit_quota_exempt"] = json!(exempt);
+        }
+        serde_json::from_value(json).unwrap()
+    }
+
+    #[test]
+    fn orbit_quota_exempt_claim_reaches_quota_and_billing_inputs() {
+        for (claim, quota_exempt) in [(Some(true), true), (Some(false), false), (None, false)] {
+            let claims = claims_with_quota_exempt(claim);
+
+            assert_eq!(
+                QuotaCheckInputs::from(&claims).orbit_quota_exempt,
+                quota_exempt,
+                "claim {claim:?}"
+            );
+            assert_eq!(
+                billing_inputs(&claims, None).orbit_quota_exempt,
+                claim,
+                "claim {claim:?}"
+            );
+        }
+    }
+}
