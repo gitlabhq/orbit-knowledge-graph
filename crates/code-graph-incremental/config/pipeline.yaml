@@ -7,7 +7,7 @@ phases:
   - name: link
     over: tree
     does: edges
-    bind: { core.read: ssa.flow, core.supertypes: supertypes, core.callable_kinds: callable_kinds, core.value_kinds: value_kinds, core.type_kinds: type_kinds, core.declared: declared, core.members: members, ssa.value_of: core.value_of, ssa.valued: core.valued, ssa.source: source }
+    bind: { core.read: ssa.flow, core.supertypes: supertypes, core.declared: declared, core.members: members, core.member_for: member_for, ssa.value_of: core.value_of, ssa.valued: core.valued, ssa.source: source }
     budget: { tree: file_link_ms, skip: skip_timeout_ssa }
   - { name: project, over: project, does: rewrite }
   - name: resolve
@@ -15,6 +15,6 @@ phases:
     does: edges
     until: stable
     budget: { scope: cross_file_resolve_ms }
-    bind: { core.read: resolved, core.supertypes: supertypes, core.callable_kinds: callable_kinds, core.value_kinds: value_kinds, core.type_kinds: type_kinds, core.declared: declared, core.members: members }
+    bind: { core.read: resolved, core.supertypes: supertypes, core.declared: declared, core.members: members, core.member_for: member_for }
   - { name: display, over: tree, does: tags }
   - { name: export, over: graph, does: rows }

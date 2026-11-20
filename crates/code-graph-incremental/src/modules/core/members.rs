@@ -1,7 +1,7 @@
 use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
-use super::{Core, Ref, Roles, role_code, values};
+use super::{Core, Ref, role_code, values};
 use crate::canonical::Canonical as C;
 use crate::engine::{Cursor, Cx, Loc, Store, Val, Vals, one};
 use crate::tree::Role;
@@ -29,9 +29,7 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         owner: Cursor<'t, S>,
         name: u32,
         role: Role,
-        roles: &Roles,
     ) -> Vec<Cursor<'t, S>> {
-        let _ = roles;
         let args = [
             one(Val::Node(owner.into())),
             one(Val::Sym(name)),
@@ -45,38 +43,18 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
             .collect()
     }
 
-    pub(super) fn meaning(&mut self, value: Val, site: Cursor<'t, S>, roles: &Roles) -> Vals {
-        let value = self.member_for(value, site, roles);
+    pub(super) fn meaning(&mut self, value: Val, site: Cursor<'t, S>) -> Vals {
+        let value = self.member_for(value, site);
         match self.view(value) {
             Some(Ref::Def(d)) => one(values::field_value(self.jump(d)).unwrap_or(value)),
             _ => one(value),
         }
     }
 
-    pub(super) fn member_for(&mut self, value: Val, site: Cursor<'t, S>, roles: &Roles) -> Val {
-        let Some(Ref::Def(def)) = self.view(value) else {
-            return value;
-        };
-        let target = self.jump(def);
-        let both = |d: Cursor<'t, S>| roles.both(d);
-        let role = site.role();
-        let filled = roles.has(target, role) && !(role == Role::Callable && both(target));
-        let Some(name) = target.child_sym(C::DefName).filter(|_| !filled) else {
-            return value;
-        };
-        let declaring = |up: Cursor<'t, S>| {
-            Loc::from(up) == def
-                || up.is(C::Binding) && up.has(C::Declaration) && up.sym_opt() == Some(name)
-        };
-        let class = target
-            .ancestors()
-            .filter(|n| n.is(C::Def))
-            .find(|n| n.is_class())
-            .filter(|class| target.is_member_of(*class) || site.ancestors().any(declaring));
-        let member = class
-            .and_then(|class| self.members(class, name, role, roles).first().copied())
-            .filter(|&member| !(both(target) && both(member)));
-        member.map_or(value, |m| Val::Node(m.into()))
+    pub(super) fn member_for(&mut self, value: Val, site: Cursor<'t, S>) -> Val {
+        let args = [one(value), one(Val::Node(site.into()))];
+        let found = self.call(crate::fn_id!("core", "member_for"), &args);
+        found.first().copied().unwrap_or(value)
     }
 
     fn ancestors(&mut self, class: Loc) -> FxHashSet<Loc> {

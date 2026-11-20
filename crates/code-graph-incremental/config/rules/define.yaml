@@ -1,9 +1,37 @@
 define:
   site_role(ROOT):
+    '$K:(__callee $ROOT)': 'cursor_role($K)'
+    '_': 'cursor_role($ROOT)'
+  cursor_role(ROOT):
     '$C:(__call $ROOT:__callee)': 'call_role($C)'
     '(__call)': 'call_role($ROOT)'
-    '$K:(__callee $ROOT)': 'site_role($K)'
     '_': '"value"'
+  member_for(ROOT, site):
+    '_ when instances($ROOT)': '$ROOT'
+    '(__def) when keeps($ROOT, cursor_role(site))': '$ROOT'
+    '(__def $N:__defname)': 'class_member($ROOT, $N, cursor_role(site), site) or $ROOT'
+    '_': '$ROOT'
+  keeps(ROOT, role):
+    '_ when both_callable($ROOT, role)': none
+    '_': 'fills($ROOT, role)'
+  both_callable(ROOT, role):
+    '_ when eq(role, "callable")': 'both_roles($ROOT)'
+  both_roles(ROOT): 'fills(fills($ROOT, "value"), "callable")'
+  class_member(ROOT, name, role, site): >-
+    first(ancestors($ROOT), a => is_class(a)) | belongs_or_declares($ROOT, name, site)
+    | first_member(name, role) | distinct_from($ROOT)
+  belongs_or_declares(ROOT, def, name, site):
+    '_ when belongs(def, $ROOT)': '$ROOT'
+    '_ when first(ancestors(site), up => declares(up, def, name))': '$ROOT'
+  declares(ROOT, def, name):
+    '_ when same($ROOT, def)': '$ROOT'
+    '(__binding (__declaration)) when eq($ROOT, name)': '$ROOT'
+  first_member(ROOT, name, role): 'first(members($ROOT, name, role), m => m)'
+  distinct_from(ROOT, def):
+    '_ when both_pair($ROOT, def)': none
+    '_': '$ROOT'
+  both_pair(ROOT, def):
+    '_ when both_roles(def)': 'both_roles($ROOT)'
   call_role(ROOT):
     '(__call (__type))': '"type"'
     '(__call (__property))': '"value"'
@@ -146,6 +174,3 @@ define:
     '_': 'visible(@ROOT, ROOT)'
   supertypes(ROOT):
     '(__def $$$S:__supertype)': '$S | type | is_def'
-  callable_kinds(at): '%callable_kinds'
-  value_kinds(at): '%value_kinds'
-  type_kinds(at): '%type_kinds'
