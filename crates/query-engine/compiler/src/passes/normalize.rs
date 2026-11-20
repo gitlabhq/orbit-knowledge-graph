@@ -242,145 +242,27 @@ mod tests {
     use crate::input::parse_input;
     use serde_json::json;
 
-    fn normalize_query(json: &str) -> Input {
-        let input = parse_input(json).unwrap();
+    fn model() -> std::sync::Arc<ClickHouseDataModel> {
         let ontology = Ontology::load_embedded().unwrap();
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology)).unwrap();
-        normalize(input, model.as_ref()).unwrap()
+        crate::data_model::clickhouse(std::sync::Arc::new(ontology)).unwrap()
     }
 
     #[test]
-    fn enum_coercion_all_variants() {
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": 1}}]}"#,
-        );
-        assert_eq!(
-            r.nodes[0].filters.get("state").unwrap()[0].value,
-            Some(json!("opened"))
-        );
-
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": [1, 2, 3, 4]}}}]}"#,
-        );
-        assert_eq!(
-            r.nodes[0].filters.get("state").unwrap()[0].value,
-            Some(json!(["opened", "closed", "merged", "locked"]))
-        );
-
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}]}"#,
-        );
-        assert_eq!(
-            r.nodes[0].filters.get("state").unwrap()[0].value,
-            Some(json!("opened"))
-        );
-
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"is_null": true}}}]}"#,
-        );
-        assert_eq!(r.nodes[0].filters.get("state").unwrap()[0].value, None);
-    }
-
-    #[test]
-    fn full_traversal_normalization() {
-        let result = normalize_query(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "filters": {"username": "admin", "id": 42}},
-                    {"id": "mr", "entity": "MergeRequest", "filters": {"state": 3, "draft": false, "title": {"contains": "fix"}}},
-                    {"id": "p", "entity": "Pipeline", "filters": {"source": 10, "failure_reason": 1}},
-                    {"id": "wi", "entity": "WorkItem", "filters": {"state": 2, "work_item_type": 8}},
-                    {"id": "n"}
-                ],
-                "relationships": [
-                    {"type": "AUTHORED", "from": "u", "to": "mr"},
-                    {"type": "TRIGGERED", "from": "mr", "to": "p"}
-                ]
-            }"#,
-        );
-
-        assert_eq!(
-            result.nodes[0].filters.get("username").unwrap()[0].value,
-            Some(json!("admin"))
-        );
-        assert_eq!(
-            result.nodes[0].filters.get("id").unwrap()[0].value,
-            Some(json!(42))
-        );
-
-        assert_eq!(
-            result.nodes[1].filters.get("state").unwrap()[0].value,
-            Some(json!("merged"))
-        );
-        assert_eq!(
-            result.nodes[1].filters.get("draft").unwrap()[0].value,
-            Some(json!(false))
-        );
-        assert_eq!(
-            result.nodes[1].filters.get("title").unwrap()[0].value,
-            Some(json!("fix"))
-        );
-
-        assert_eq!(
-            result.nodes[2].filters.get("source").unwrap()[0].value,
-            Some(json!("merge_request_event"))
-        );
-        assert_eq!(
-            result.nodes[2].filters.get("failure_reason").unwrap()[0].value,
-            Some(json!("config_error"))
-        );
-
-        assert_eq!(
-            result.nodes[3].filters.get("state").unwrap()[0].value,
-            Some(json!("closed"))
-        );
-        assert_eq!(
-            result.nodes[3].filters.get("work_item_type").unwrap()[0].value,
-            Some(json!("epic"))
-        );
-    }
-
-    #[test]
-    fn edge_cases() {
-        let r = normalize_query(
+    fn leaves_unknown_fields_and_rejects_unknown_entities() {
+        let input = parse_input(
             r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"nonexistent_field": 42}}]}"#,
-        );
+        )
+        .unwrap();
+        let r = normalize(input, model().as_ref()).unwrap();
         assert_eq!(
             r.nodes[0].filters.get("nonexistent_field").unwrap()[0].value,
             Some(json!(42))
         );
 
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "filters": {"id": 1}}]}"#,
-        );
-        assert_eq!(
-            r.nodes[0].filters.get("id").unwrap()[0].value,
-            Some(json!(1))
-        );
-
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"squash": true}}]}"#,
-        );
-        assert_eq!(
-            r.nodes[0].filters.get("squash").unwrap()[0].value,
-            Some(json!(true))
-        );
-
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"source_branch": {"in": ["main", "develop"]}}}]}"#,
-        );
-        assert_eq!(
-            r.nodes[0].filters.get("source_branch").unwrap()[0].value,
-            Some(json!(["main", "develop"]))
-        );
-
         let input = parse_input(
             r#"{"query_type": "traversal", "nodes": [{"id": "x", "entity": "UnknownEntity", "filters": {"foo": 123}}]}"#,
         ).unwrap();
-        let ontology = Ontology::load_embedded().unwrap();
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology)).unwrap();
-        let err = normalize(input, model.as_ref()).unwrap_err();
+        let err = normalize(input, model().as_ref()).unwrap_err();
         assert!(
             matches!(err, QueryError::AllowlistRejected(_)),
             "unknown entity should be AllowlistRejected, got: {err}"

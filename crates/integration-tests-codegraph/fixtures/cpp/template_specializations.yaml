@@ -1,0 +1,174 @@
+name: C++ explicit template specialization names (kg#1118)
+
+fixtures:
+  - path: free.cpp
+    content: |
+      template<typename T> int foo(T a) { return 0; }
+      template<> int foo<int>(int a) { return a; }
+      template<> int foo<char, 2>(char a) { return a; }
+      template<> int *ptr_spec<int>(int a) { return 0; }
+      template<> int empty_args<>(int a) { return a; }
+      int plain_proto(int a);
+      template<> int spec_proto<int>(int a);
+
+  - path: members.cpp
+    content: |
+      template<> int Foo::bar<int>(int a) { return a; }
+      template<> int A::B::deep<int>(int a) { return a; }
+      template<> int *Foo::ptr_member<int>(int a) { return 0; }
+      template<> int Foo::nested<std::vector<int>>(int a) { return a; }
+      template<> int Foo::deeper<std::map<int, std::vector<int>>>(int a) { return a; }
+      int Foo::operator<=>(const Foo& o) const { return 0; }
+      int Stack<int>::push(int a) { return a; }
+      template<> int Stack<int>::emplace<int>(int a) { return a; }
+      template<class T> T* Ptr<T>::operator->() const { return p; }
+      template<class T> bool Ord<T>::operator>(const Ord& o) const { return false; }
+      template<class T> int Ord<T>::operator>>(int n) const { return n; }
+      template<class T> T* Ptr<A<B>>::operator->() const { return p; }
+      template<> int Foo::mixed<std::vector<int>, std::string>(int a) { return a; }
+      template<> int Foo::member_type<std::vector<int>::value_type>(int a) { return a; }
+      template<> int Stack<int>::assign<std::vector<int>, std::string>(int a) { return a; }
+      template<class T> T* Nest<std::vector<int>>::operator->() const { return p; }
+      int& Foo::plain_ref() { return x; }
+      template<> int& Foo::ref_member<int>(int a) { return a; }
+      template<> int& Stack<int>::ref_assign<std::vector<int>, std::string>(int a) { return a; }
+      template<class T> T& Ref<T>::operator*() const { return *p; }
+      template<class T> T& Ref<T>::operator>(int n) const { return *p; }
+
+tests:
+  - name: "Explicit specialization of a free function template drops the template arguments"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'free::foo'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { name: "foo", fqn: "free::foo" } }
+
+  - name: "No specialization keeps a template argument list in its name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+        AND d.name IN ['foo<int>', 'foo<char, 2>', 'ptr_spec<int>', 'empty_args<>', 'Stack<int>::emplace<int>',
+                       'Foo::mixed<std::vector<int>, std::string>', 'Foo::member_type<std::vector<int>::value_type>',
+                       'Stack<int>::assign<std::vector<int>, std::string>', 'Foo::bar<int>', 'A::B::deep<int>',
+                       'Foo::ptr_member<int>', 'Foo::nested<std::vector<int>>',
+                       'Foo::deeper<std::map<int, std::vector<int>>>', 'Foo::ref_member<int>',
+                       'Stack<int>::ref_assign<std::vector<int>, std::string>']
+      RETURN d.name AS name
+    assert:
+      - { empty: true }
+
+  - name: "Pointer-returning specialization unwraps the declarator and drops the arguments"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'free::ptr_spec'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "ptr_spec", fqn: "free::ptr_spec" } }
+
+  - name: "Out-of-line member template specialization keeps the class qualifier"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+        AND d.name IN ['Foo::bar', 'A::B::deep', 'Foo::ptr_member', 'Foo::nested', 'Foo::deeper']
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+      - { row: { name: "Foo::bar", fqn: "members::Foo::bar" } }
+      - { row: { name: "A::B::deep", fqn: "members::A::B::deep" } }
+      - { row: { name: "Foo::ptr_member", fqn: "members::Foo::ptr_member" } }
+      - { row: { name: "Foo::nested", fqn: "members::Foo::nested" } }
+      - { row: { name: "Foo::deeper", fqn: "members::Foo::deeper" } }
+
+  - name: "Empty template argument list is dropped"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'free::empty_args'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "empty_args" } }
+
+  - name: "Specialization of a class template's member keeps the qualifier's arguments"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.name IN ['Stack<int>::push', 'Stack<int>::emplace']
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "Stack<int>::push", fqn: "members::Stack<int>::push" } }
+      - { row: { name: "Stack<int>::emplace", fqn: "members::Stack<int>::emplace" } }
+
+  - name: "A specialization prototype is no more a definition than a plain prototype"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['plain_proto', 'spec_proto', 'spec_proto<int>']
+      RETURN d.name AS name
+    assert:
+      - { empty: true }
+
+  - name: "Operators ending in > on a class template keep the qualifier's arguments"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.file_path = 'members.cpp' AND d.name STARTS WITH 'Ptr'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "Ptr<T>::operator->" } }
+      - { row: { name: "Ptr<A<B>>::operator->" } }
+
+  - name: "Comparison and shift operators on a class template keep the qualifier's arguments"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.name IN ['Ord<T>::operator>', 'Ord<T>::operator>>']
+      RETURN d.name AS name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "Ord<T>::operator>" } }
+      - { row: { name: "Ord<T>::operator>>" } }
+
+  - name: "Arguments that contain :: after a nested list are dropped too"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+        AND d.name IN ['Foo::mixed', 'Foo::member_type', 'Stack<int>::assign']
+      RETURN d.name AS name
+    assert:
+      - { row_count: 3 }
+      - { row: { name: "Foo::mixed" } }
+      - { row: { name: "Foo::member_type" } }
+      - { row: { name: "Stack<int>::assign" } }
+
+  - name: "Operator on a class template with nested qualifier arguments keeps them"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.file_path = 'members.cpp' AND d.name STARTS WITH 'Nest'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Nest<std::vector<int>>::operator->" } }
+
+  - name: "Qualified definitions that return a reference are indexed and named like the others"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.file_path = 'members.cpp'
+        AND d.name IN ['Foo::plain_ref', 'Foo::ref_member', 'Stack<int>::ref_assign', 'Ref<T>::operator*', 'Ref<T>::operator>']
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+      - { row: { name: "Foo::plain_ref", fqn: "members::Foo::plain_ref" } }
+      - { row: { name: "Foo::ref_member", fqn: "members::Foo::ref_member" } }
+      - { row: { name: "Stack<int>::ref_assign", fqn: "members::Stack<int>::ref_assign" } }
+      - { row: { name: "Ref<T>::operator*", fqn: "members::Ref<T>::operator*" } }
+      - { row: { name: "Ref<T>::operator>", fqn: "members::Ref<T>::operator>" } }
+
+  - name: "Three-way comparison operator keeps its name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'members::Foo::operator<=>'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Foo::operator<=>" } }

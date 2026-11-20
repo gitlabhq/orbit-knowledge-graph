@@ -78,3 +78,73 @@ cases:
             sql:
               contains: ["d.id IN (1, 2, 3)"]
               not_contains: ["Array("]
+
+  - name: DuckDB accepts an untyped relationship variable
+    query:
+      gql: |
+        MATCH (a:Definition {id: 1})-[e]->(b:Definition) RETURN b.name
+    missing_frontends:
+      json: The source test supplies only GQL.
+    logical:
+      expect: ["(EdgeScan CALLS|DEFINES|EXTENDS|IMPORTS a->b AS e0)"]
+    physical:
+      duckdb: {}
+
+  - name: DuckDB projects properties of both endpoints
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1],"columns":["name"]},{"id":"b","entity":"Definition","columns":["fqn"]}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
+      gql: |
+        MATCH (a:Definition {id: 1})-[e:CALLS]->(b:Definition) RETURN a.name, b.fqn
+    physical:
+      duckdb:
+        duckdb_codegen:
+          output:
+            sql:
+              contains: [a_name, b_fqn]
+
+  - name: DuckDB scans a node without pinned ids
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","columns":["name"]}]}
+      gql: |
+        MATCH (d:Definition) RETURN d.name
+    physical:
+      duckdb:
+        emitted:
+          expect: ["(Scan Table(gl_definition) AS d)"]
+
+  - name: DuckDB counts a node without pinned ids
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition"}],"aggregations":[{"count":"d","as":"n"}]}
+      gql: |
+        MATCH (d:Definition) RETURN count(d) AS n
+    physical:
+      duckdb:
+        emitted:
+          expect: ["(Aggregate COUNT() AS n, ... (_))"]
+
+  - name: DuckDB sorts by a property of the traversal target
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","columns":["name"]}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"order_by":"b.name"}
+      gql: |
+        MATCH (a:Definition {id: 1})-[e:CALLS]->(b:Definition) RETURN b.name ORDER BY b.name
+    physical:
+      duckdb:
+        emitted:
+          expect: ["(Sort b.name (_))"]
+
+  - name: DuckDB compares two properties of one node
+    query:
+      gql: |
+        MATCH (a:Definition {id: 1})-[e:CALLS]->(b:Definition) WHERE a.name <> a.fqn RETURN a.name
+    missing_frontends:
+      json: The JSON frontend does not expose property-to-property comparisons.
+    physical:
+      duckdb:
+        duckdb_codegen:
+          output:
+            sql:
+              contains: [a.name != a.fqn]

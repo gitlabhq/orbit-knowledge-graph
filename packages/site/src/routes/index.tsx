@@ -1,6 +1,7 @@
 import { type ComponentProps, useState } from "react";
-import { AgentLogos, AgentPrompt, cn, Contrasts, CopyButton, CostCalculator, DotWave, FieldBand, Flow, GravityGlobe, Icon, OrbitHalo, OrbitHero, PageFrame, pageHead, type PromptExample, Reveal, RippleField, RippleLog, Section, segment, site, SiteLink, type Slide, Slideshow, Terminal, Testimonial, type UseCase, UseCases } from "@gitlab-org/orbit-site";
+import { AgentLogos, AgentPrompt, cn, Contrasts, CopyButton, CostCalculator, DotWave, Feature, FeatureGrid, FieldBand, Flow, GravityGlobe, Icon, OrbitHalo, OrbitHero, PageFrame, pageHead, type PromptExample, Reveal, RippleField, RippleLog, Section, segment, site, SiteLink, type Slide, Slideshow, Terminal, Testimonial, type UseCase, UseCases } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
+import { QUESTIONS } from "../questions";
 import { HOME, USER_DOCS } from "../sections";
 
 export const Route = createFileRoute("/")({
@@ -496,6 +497,23 @@ function HomePage() {
             <Terminal title="GitLab Orbit CLI" code={SETUP} copy="glab orbit setup" />
           </Reveal>
         </div>
+      </Section>
+
+      <Section id="common-questions" eyebrow="Questions" title={<>Common <span className="orbit-fade">questions</span></>}>
+        <FeatureGrid columns={3}>
+          {QUESTIONS.map(({ question, answer, link }) => (
+            <Feature key={question} title={question}>
+              <p>{answer.split(/(glab orbit setup)/).map((part) => (part === "glab orbit setup" ? <code key={part}>{part}</code> : part))}</p>
+              {link && (
+                <p>
+                  <SiteLink href={link.href} className="gl-link">
+                    {link.label}
+                  </SiteLink>
+                </p>
+              )}
+            </Feature>
+          ))}
+        </FeatureGrid>
       </Section>
 
       <Section id="start" dark className="page-dark-bottom page-end" title={<>Your agent already has the code. <span className="orbit-fade">Give it the rest.</span></>} lede="Answers from your real GitLab data, not guesses or digging by hand.">

@@ -8,6 +8,7 @@ mod ledger;
 mod payload;
 mod planner;
 pub mod prelude;
+pub mod protocol;
 mod reconciler;
 pub mod testkit;
 mod trigger;

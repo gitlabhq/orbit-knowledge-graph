@@ -28,109 +28,64 @@ pub struct SchemaConfig {
     pub indexer_schema_wait_timeout_secs: u64,
 }
 
-impl SchemaConfig {
-    /// Validates the schema config.
-    pub fn validate(&self) -> Result<(), SchemaConfigError> {
-        if self.max_retained_versions < 2 {
-            return Err(SchemaConfigError::MaxRetainedVersionsTooLow(
-                self.max_retained_versions,
-            ));
-        }
-        if self.version_poll_interval_secs < 1 {
-            return Err(SchemaConfigError::VersionPollIntervalTooLow);
-        }
-        if self.indexer_schema_wait_timeout_secs < 1 {
-            return Err(SchemaConfigError::IndexerSchemaWaitTimeoutTooLow);
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum SchemaConfigError {
-    #[error(
-        "schema.max_retained_versions must be at least 2 (got {0}); \
-         at least one active and one rollback version must be kept"
-    )]
-    MaxRetainedVersionsTooLow(u32),
-
-    #[error("schema.version_poll_interval_secs must be at least 1")]
-    VersionPollIntervalTooLow,
-
-    #[error("schema.indexer_schema_wait_timeout_secs must be at least 1")]
-    IndexerSchemaWaitTimeoutTooLow,
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::AppConfig;
 
-    fn defaults() -> SchemaConfig {
-        AppConfig::embedded_defaults().schema
+    fn rejection(key: &str, value: u64) -> String {
+        AppConfig::with_overlay(&format!("schema:\n  {key}: {value}\n"))
+            .unwrap_err()
+            .to_string()
     }
 
     #[test]
-    fn default_passes_validation() {
-        assert!(defaults().validate().is_ok());
+    fn max_retained_versions_below_two_is_rejected() {
+        for value in [0, 1] {
+            let error = rejection("max_retained_versions", value);
+            assert!(
+                error.contains("- schema.max_retained_versions: "),
+                "{error}"
+            );
+        }
     }
 
     #[test]
-    fn max_retained_versions_one_fails() {
-        let cfg = SchemaConfig {
-            max_retained_versions: 1,
-            ..defaults()
-        };
-        assert!(cfg.validate().is_err());
+    fn version_poll_interval_zero_is_rejected() {
+        let error = rejection("version_poll_interval_secs", 0);
+        assert!(
+            error.contains("- schema.version_poll_interval_secs: "),
+            "{error}"
+        );
     }
 
     #[test]
-    fn max_retained_versions_zero_fails() {
-        let cfg = SchemaConfig {
-            max_retained_versions: 0,
-            ..defaults()
-        };
-        assert!(cfg.validate().is_err());
+    fn indexer_schema_wait_timeout_zero_is_rejected() {
+        let error = rejection("indexer_schema_wait_timeout_secs", 0);
+        assert!(
+            error.contains("- schema.indexer_schema_wait_timeout_secs: "),
+            "{error}"
+        );
     }
 
     #[test]
-    fn max_retained_versions_two_passes() {
-        let cfg = SchemaConfig {
-            max_retained_versions: 2,
-            ..defaults()
-        };
-        assert!(cfg.validate().is_ok());
-    }
-
-    #[test]
-    fn version_poll_interval_zero_fails() {
-        let cfg = SchemaConfig {
-            version_poll_interval_secs: 0,
-            ..defaults()
-        };
-        assert!(cfg.validate().is_err());
-    }
-
-    #[test]
-    fn version_poll_interval_one_passes() {
-        let cfg = SchemaConfig {
-            version_poll_interval_secs: 1,
-            ..defaults()
-        };
-        assert!(cfg.validate().is_ok());
-    }
-
-    #[test]
-    fn indexer_schema_wait_timeout_zero_fails() {
-        let cfg = SchemaConfig {
-            indexer_schema_wait_timeout_secs: 0,
-            ..defaults()
-        };
-        assert!(cfg.validate().is_err());
+    fn the_lowest_allowed_values_load() {
+        let schema = AppConfig::with_overlay(
+            "schema:\n  max_retained_versions: 2\n  version_poll_interval_secs: 1\n  indexer_schema_wait_timeout_secs: 1\n",
+        )
+        .unwrap()
+        .schema;
+        assert_eq!(schema.max_retained_versions, 2);
+        assert_eq!(schema.version_poll_interval_secs, 1);
+        assert_eq!(schema.indexer_schema_wait_timeout_secs, 1);
     }
 
     #[test]
     fn indexer_schema_wait_timeout_defaults_to_five_minutes() {
-        assert_eq!(defaults().indexer_schema_wait_timeout_secs, 300);
+        assert_eq!(
+            AppConfig::embedded_defaults()
+                .schema
+                .indexer_schema_wait_timeout_secs,
+            300
+        );
     }
 }
