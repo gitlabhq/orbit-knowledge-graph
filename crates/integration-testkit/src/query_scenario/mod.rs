@@ -5,6 +5,7 @@
 pub mod coverage;
 mod datasets;
 mod duckdb;
+mod engine;
 mod format;
 mod output_format;
 mod pagination;
@@ -18,12 +19,10 @@ use std::sync::Arc;
 
 use datasets::{Database, Datasets};
 use futures::FutureExt;
-use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
 use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ResultContext,
     SecurityContext,
 };
-use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineStage, QueryPipelineContext, TypeMap,
 };
@@ -103,19 +102,7 @@ fn seed_preset(presets_dir: &Path, name: &str) -> Seed {
 pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let root = Path::new(root);
     let presets: Arc<Path> = Arc::from(Path::new(presets));
-    let mut files = Vec::new();
-    scenario::discover(root, &mut files);
-    files.sort();
-    let mut scenarios: Vec<_> = files
-        .iter()
-        .flat_map(|file| read_scenarios(root, file))
-        .filter(|(_, scenario)| {
-            scenario
-                .config
-                .backends
-                .contains(&format::Backend::Clickhouse)
-        })
-        .collect();
+    let mut scenarios = engine::scenarios_for(root, format::Backend::Clickhouse);
     assert!(
         !scenarios.is_empty(),
         "no query scenario files found under {}",
@@ -237,31 +224,65 @@ async fn run_case(
                 crate::load_ontology_overlay(name).with_schema_version_prefix(&crate::TABLE_PREFIX),
             )
         });
-    let data_model = derive_clickhouse_data_model(&ontology);
+    let engine = ClickhouseEngine {
+        ctx,
+        data_model: derive_clickhouse_data_model(&ontology),
+        ontology,
+        security,
+        redaction,
+    };
+    engine::run_steps(&engine, steps, name).await;
+}
 
-    for (index, step) in steps.iter().enumerate() {
-        if !step.seed.is_empty() {
-            let columns = crate::scenario::seed::fetch_table_columns(ctx).await;
-            crate::scenario::seed::apply_seed(ctx, &step.seed, &Default::default(), &columns, name)
-                .await;
-            ctx.optimize_if_needed().await;
-        }
-        let name = &step_label(name, index, steps.len());
-        for (frontend_key, query_str) in &step.query {
-            let frontend = frontend_key
-                .parse::<Frontend>()
-                .unwrap_or_else(|_| panic!("{name}: unknown query language '{frontend_key}'"));
-            run_frontend(
-                (ctx, &data_model, &ontology),
-                (frontend, frontend_key),
-                query_str,
-                &security,
-                &redaction,
-                &step.expect,
-                name,
-            )
+struct ClickhouseEngine<'a> {
+    ctx: &'a TestContext,
+    data_model: Arc<query_data_model::ClickHouseDataModel>,
+    ontology: Arc<ontology::Ontology>,
+    security: SecurityContext,
+    redaction: MockRedactionService,
+}
+
+impl engine::Engine for ClickhouseEngine<'_> {
+    fn backend(&self) -> format::Backend {
+        format::Backend::Clickhouse
+    }
+
+    async fn seed(&self, seed: &Seed, name: &str) {
+        let columns = crate::scenario::seed::fetch_table_columns(self.ctx).await;
+        crate::scenario::seed::apply_seed(self.ctx, seed, &Default::default(), &columns, name)
             .await;
-        }
+        self.ctx.optimize_if_needed().await;
+    }
+
+    async fn compile(
+        &self,
+        query: &str,
+        frontend: Frontend,
+    ) -> Result<Arc<CompiledQueryContext>, PipelineError> {
+        compile_like_server(
+            query,
+            frontend,
+            (&self.data_model, &self.ontology),
+            &self.security,
+        )
+        .await
+    }
+
+    async fn execute(
+        &self,
+        compiled: &Arc<CompiledQueryContext>,
+        frontend: Frontend,
+        _label: &str,
+    ) -> PipelineOutput {
+        execute_output(
+            self.ctx,
+            frontend,
+            compiled,
+            (&self.data_model, &self.ontology),
+            &self.security,
+            &self.redaction,
+        )
+        .await
     }
 }
 
@@ -270,135 +291,6 @@ pub(super) fn step_label(name: &str, index: usize, steps: usize) -> String {
         format!("{name} step {}", index + 1)
     } else {
         name.to_string()
-    }
-}
-
-async fn run_frontend(
-    (ctx, data_model, ontology): (
-        &TestContext,
-        &Arc<query_data_model::ClickHouseDataModel>,
-        &Arc<ontology::Ontology>,
-    ),
-    (frontend, frontend_key): (Frontend, &str),
-    query: &str,
-    security: &SecurityContext,
-    redaction: &MockRedactionService,
-    expect: &QueryExpect,
-    name: &str,
-) {
-    let label = &format!("{name} [{frontend_key}]");
-    expect.validate_pages_exclusive(label);
-
-    let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
-    let Some(compiled) = assert_compilation(compiled, expect, ("clickhouse", frontend_key), label)
-    else {
-        return;
-    };
-
-    if !expect.pages.is_empty() {
-        run_pages(
-            ctx,
-            frontend,
-            query,
-            (data_model, ontology),
-            security,
-            redaction,
-            expect,
-            label,
-        )
-        .await;
-        return;
-    }
-
-    let output = execute_output(
-        ctx,
-        frontend,
-        &compiled,
-        (data_model, ontology),
-        security,
-        redaction,
-    )
-    .await;
-    let baseline = assert_output(&output, expect, label);
-    let count = repeat_count(expect, label);
-    for run in 2..=count {
-        let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
-        let compiled = assert_compilation(compiled, expect, ("clickhouse", frontend_key), label)
-            .expect("repeated query should compile");
-        let output = execute_output(
-            ctx,
-            frontend,
-            &compiled,
-            (data_model, ontology),
-            security,
-            redaction,
-        )
-        .await;
-        let rerun = assert_output(&output, expect, label);
-        assert_repeated_response(&baseline, &rerun, run, label);
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn run_pages(
-    ctx: &TestContext,
-    frontend: Frontend,
-    base_query: &str,
-    (data_model, ontology): (
-        &Arc<query_data_model::ClickHouseDataModel>,
-        &Arc<ontology::Ontology>,
-    ),
-    security: &SecurityContext,
-    redaction: &MockRedactionService,
-    expect: &QueryExpect,
-    label: &str,
-) {
-    let mut collected = PageCollection::default();
-
-    for (i, page_expect) in expect.pages.iter().enumerate() {
-        let page_label = format!("{label} page {}", i + 1);
-        let query_str = page_query(frontend, base_query, i);
-
-        let compiled = compile_like_server(&query_str, frontend, (data_model, ontology), security)
-            .await
-            .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}"));
-
-        let output = execute_output(
-            ctx,
-            frontend,
-            &compiled,
-            (data_model, ontology),
-            security,
-            redaction,
-        )
-        .await;
-        let response = assert_output(&output, page_expect, &page_label);
-        let response = serde_json::from_value(response).expect("response should deserialize");
-        collected.push(&response);
-        assert_page_bounds(&response, i, expect.pages.len(), &page_label);
-    }
-
-    if let Some(all_pages) = &expect.all_pages {
-        collected.assert_expect(all_pages, label);
-        if all_pages.matches_unpaginated {
-            let query = unpaginated(frontend, base_query);
-            let compiled = compile_like_server(&query, frontend, (data_model, ontology), security)
-                .await
-                .unwrap_or_else(|error| panic!("{label}: unpaginated compile failed: {error}"));
-            let output = execute_output(
-                ctx,
-                frontend,
-                &compiled,
-                (data_model, ontology),
-                security,
-                redaction,
-            )
-            .await;
-            assert_pagination(&output, label);
-            let response =
-                validate_response(&compiled.input, GraphFormatter.format(&output), label);
-            collected.assert_matches(&response, label);
-        }
     }
 }
 

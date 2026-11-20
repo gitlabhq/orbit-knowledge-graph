@@ -537,7 +537,7 @@ fn pagination_coverage_compares_typed_node_identities_without_excerpt_values() {
     full["pagination"] = json!({"has_more": false, "truncated": false});
     let mut page = full.clone();
     page["nodes"][0]["username"] = json!("page-specific excerpt");
-    let mut collected = super::PageCollection::default();
+    let mut collected = super::pagination::PageCollection::default();
     collected.push(&super::validate_response(&input, page, "page"));
     collected.assert_matches(
         &super::validate_response(&input, full.clone(), "full"),

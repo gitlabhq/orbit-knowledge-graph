@@ -80,6 +80,15 @@ pub enum Backend {
     Duckdb,
 }
 
+impl Backend {
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Self::Clickhouse => "clickhouse",
+            Self::Duckdb => "duckdb",
+        }
+    }
+}
+
 impl Default for ScenarioConfig {
     fn default() -> Self {
         Self {
