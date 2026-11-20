@@ -510,6 +510,11 @@ impl<'s> Parser<'s, '_> {
             }
             false => None,
         };
+        let keyless = self.eat(")");
+        let key = match keyless {
+            true => Some("\"\"".to_owned()),
+            false => key,
+        };
         let spec = IndexSpec { pattern, key };
         let id = {
             let mut indexes = self.scope.indexes.borrow_mut();
@@ -521,12 +526,17 @@ impl<'s> Parser<'s, '_> {
                 }
             }
         } as u32;
-        if !self.eat(",") {
-            return Err(self.error("expected , before the key"));
-        }
-        args.push(self.expr()?);
-        if !self.eat(")") {
-            return Err(self.error("expected )"));
+        match keyless {
+            true => args.push(Expr::Lit(Val::Sym(self.scope.lang.syms.intern("")))),
+            false => {
+                if !self.eat(",") {
+                    return Err(self.error("expected , before the key"));
+                }
+                args.push(self.expr()?);
+                if !self.eat(")") {
+                    return Err(self.error("expected )"));
+                }
+            }
         }
         let op = match (word, project) {
             ("select", false) => Op::Select(id),

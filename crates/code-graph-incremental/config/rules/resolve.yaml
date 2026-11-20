@@ -3,10 +3,16 @@ data:
 
 define:
   file_at(path):
-    '_ when path | regex_match("(^|/)[*]$")': "select_all(project, '(__source_file)' by $ROOT | regex_replace(\"/?[^/]*$\", \"\"), path | regex_replace(\"/?[*]$\", \"\")) or select_all(project, '(__source_file $P:__package)' by package_path($P), path | regex_replace(\"/?[*]$\", \"\"))"
-    '_': "select_all(project, '(__source_file)' by $ROOT | stem, path) or select_all(project, '(__source_file)' by $ROOT | collapse_index(%index_files), path) or file(select_all(project, '(__source_file $P:__package (__def $ROOT:__defname))' by package_path($P) | concat(\"/\", $ROOT), path))"
+    '_ when path | regex_match("(^|/)[*]$")': >-
+      select_all(project, '(__source_file)' by $ROOT | regex_replace("/?[^/]*$", ""), path | regex_replace("/?[*]$", ""))
+      or select_all(project, '(__source_file $P:__package)' by package_path($P), path | regex_replace("/?[*]$", ""))
+    '_': >-
+      select_all(project, '(__source_file)' by $ROOT | stem, path)
+      or select_all(project, '(__source_file)' by $ROOT | collapse_index(%index_files), path)
+      or file(select_all(project, '(__source_file $P:__package (__def $ROOT:__defname))' by package_path($P) | concat("/", $ROOT), path))
   package_path(ROOT): '$ROOT | regex_replace("[.]|::|[\\\\]", "/")'
-  roots(at): "select_all(project(), '(__dir $D:__source_root)' by \"root\", \"root\") | tree_path(\"/\")"
+  roots(at): >-
+    select_all(project(), '(__dir $D:__source_root)') | tree_path("/")
   files(path): 'first(%search, place => locate(place, path))'
   locate(place, path):
     '_ when in(place, "external")': 'outside(path, %external)'
@@ -15,12 +21,18 @@ define:
   outside(path, names):
     '_ when in(path | split_first("/"), names)': 'opaque'
   modules(ROOT): 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
-  aliased(ROOT): "first(select_all(project(), '(__alias)' by \"alias\", \"alias\") | longest_first, a => alias_files(a, $ROOT))"
+  aliased(ROOT): >-
+    first(select_all(project(), '(__alias)') | longest_first, a => alias_files(a, $ROOT))
   alias_files(ROOT, imp):
     '(__alias $S:__scope) when eq($S, $imp | tag("alias_scope"))': 'files($imp | child_sym("__source_path") | map_prefix($ROOT, $ROOT | child_sym("__str")))'
     '(__alias !(__scope))': 'files($imp | child_sym("__source_path") | map_prefix($ROOT, $ROOT | child_sym("__str")))'
   submodule(ROOT, N): 'files($ROOT | tag("resolved_source") | concat("/", @$N))'
-  exported(module, name): "select(module, '(__def $N:__defname)', name) or select(module, '(__def $N:__default_export)', name) or select_all(module, '(__def #exports)' by $ROOT | tag(\"exports\"), name) or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, name) | reexported(name) | is_def or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, \"*\") | reexported(name) | is_def"
+  exported(module, name): >-
+    select(module, '(__def $N:__defname)', name)
+    or select(module, '(__def $N:__default_export)', name)
+    or select_all(module, '(__def #exports)' by $ROOT | tag("exports"), name)
+    or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, name) | reexported(name) | is_def
+    or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, "*") | reexported(name) | is_def
   offered(module, name): 'exported(module, name) or module'
   reexported(ROOT, N):
     '$I:(%import_kinds $ROOT:(__name "*"))': '$I | modules | offered($N)'
@@ -41,19 +53,19 @@ resolve:
 
   call:
     - '(__call (__callee $M:(__member $O:__object))) when $O | read | is_file':
-        calls: { to: '$O | read | is_file | offered($M) | callable(%callable_kinds, %value_kinds, %type_kinds) | foreign', site: $ROOT }
+        calls: { to: '$O | read | is_file | offered($M) | callable | foreign', site: $ROOT }
     - '(__call (__callee $M:(__member $O:__object)))':
         calls:
           - { to: '$O | type | member($M) | foreign', site: $ROOT }
           - { to: '$ROOT | sited(type_flow) | producing | member($M)', site: $ROOT }
     - '(__call (__callee $I:__ivar))':
-        calls: { to: 'lookup(@$I, $ROOT, %callable_kinds, %value_kinds, %type_kinds, enclosing | class) | foreign', site: $ROOT }
+        calls: { to: 'lookup(@$I, $ROOT, enclosing | class) | foreign', site: $ROOT }
     - '(__call (__callee "/./"))':
-        calls: { to: 'targets($ROOT, false, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds) | foreign', site: $ROOT }
+        calls: { to: 'targets($ROOT, false) | callable | foreign', site: $ROOT }
 
   decorator:
     - '$D:(__def $ROOT:__decorator)':
-        calls: { from: $D, to: '$ROOT | type | callable(%callable_kinds, %value_kinds, %type_kinds) | foreign' }
+        calls: { from: $D, to: '$ROOT | type | callable | foreign' }
 
   supertype:
     - '$D:(__def $ROOT:__supertype)':

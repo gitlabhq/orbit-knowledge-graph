@@ -22,53 +22,53 @@ link:
           - { from: $DI, to: '$DI | reference', site: '$ROOT | binding_site', resolution: reference }
     - '(__call (__callee $M:(__member $O:__object (__dispatch (__object))))) when $O | name | is_contract':
         type_flow: { to: '$M | receiver_calls', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
-    - '(__call #implicit_self (__callee "/./")) when targets($ROOT, true, %callable_kinds, %value_kinds, %type_kinds)':
-        calls: { to: 'targets($ROOT, true, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds)', site: $ROOT }
-        imports: { to: 'targets($ROOT, true, %callable_kinds, %value_kinds, %type_kinds) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
-        type_flow: { to: 'targets($ROOT, true, %callable_kinds, %value_kinds, %type_kinds) | produced', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
-    - '(__call #implicit_self (__callee %builtins)) when unresolved($ROOT, true, %callable_kinds, %value_kinds, %type_kinds)':
+    - '(__call #implicit_self (__callee "/./")) when targets($ROOT, true)':
+        calls: { to: 'targets($ROOT, true) | callable', site: $ROOT }
+        imports: { to: 'targets($ROOT, true) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
+        type_flow: { to: 'targets($ROOT, true) | produced', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
+    - '(__call #implicit_self (__callee %builtins)) when unresolved($ROOT, true)':
         imports: { to: '$ROOT | mod.ssa.wildcards | callable_import("callable")', site: $ROOT, resolution: reference }
-    - '(__call #implicit_self (__callee %providers)) when unresolved($ROOT, true, %callable_kinds, %value_kinds, %type_kinds)':
+    - '(__call #implicit_self (__callee %providers)) when unresolved($ROOT, true)':
         imports:
           - { to: '$ROOT | mod.ssa.wildcards | callable_import("callable") | sourced(%providers, true)', site: $ROOT, resolution: reference }
           - { to: '$ROOT | mod.ssa.wildcards | callable_import("callable") | sourced(%providers, false)', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
-    - '(__call #implicit_self (__callee "/./")) when unresolved($ROOT, true, %callable_kinds, %value_kinds, %type_kinds)':
+    - '(__call #implicit_self (__callee "/./")) when unresolved($ROOT, true)':
         imports: { to: '$ROOT | mod.ssa.wildcards | callable_import("callable")', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
     - '(__call #implicit_self (__callee "/./"))': none
     - '(__call $C:(__callee $M?:__member)) when $ROOT | mod.ssa.pending':
         type_flow:
           - { to: '$M | receiver_calls', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
           - { to: '$ROOT | mod.ssa.deferred | produced', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
-        calls: { to: '$ROOT | mod.ssa.deferred | callable(%callable_kinds, %value_kinds, %type_kinds)', site: $ROOT }
+        calls: { to: '$ROOT | mod.ssa.deferred | callable', site: $ROOT }
         imports: { to: '$ROOT | mod.ssa.deferred | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
     - '(__call (__callee $M:(__member $O:__object)))':
         type_flow:
           - { to: '$M | receiver_calls', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
-          - { to: '$O | type | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | produced', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
+          - { to: '$O | type | unmatched($M) | produced', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
           - { to: '$O | chain_head | type | typed_calls', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
-          - { to: '$ROOT | mod.ssa.deferred | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | produced', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
+          - { to: '$ROOT | mod.ssa.deferred | unmatched($M) | produced', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
         calls:
           - { to: '$O | type | member($M)', site: $ROOT }
-          - { to: '$O | type | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds)', site: $ROOT }
+          - { to: '$O | type | unmatched($M) | callable', site: $ROOT }
           - { to: '$ROOT | mod.ssa.deferred | member($M)', site: $ROOT }
-          - { to: '$ROOT | mod.ssa.deferred | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds)', site: $ROOT }
+          - { to: '$ROOT | mod.ssa.deferred | unmatched($M) | callable', site: $ROOT }
         imports:
-          - { to: '$O | type | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
-          - { to: '$ROOT | mod.ssa.deferred | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
+          - { to: '$O | type | unmatched($M) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
+          - { to: '$ROOT | mod.ssa.deferred | unmatched($M) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
     - '(__call (__callee (__member)))': none
     - '(__call (__callee $I:__ivar))':
-        calls: { to: 'lookup(@$I, $ROOT, %callable_kinds, %value_kinds, %type_kinds, enclosing | class)', site: $ROOT }
-    - '(__call (__callee "/./")) when targets($ROOT, false, %callable_kinds, %value_kinds, %type_kinds)':
-        calls: { to: 'targets($ROOT, false, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds)', site: $ROOT }
-        imports: { to: 'targets($ROOT, false, %callable_kinds, %value_kinds, %type_kinds) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
-        type_flow: { to: 'targets($ROOT, false, %callable_kinds, %value_kinds, %type_kinds) | produced', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
-    - '(__call (__callee %builtins)) when unresolved($ROOT, false, %callable_kinds, %value_kinds, %type_kinds)':
+        calls: { to: 'lookup(@$I, $ROOT, enclosing | class)', site: $ROOT }
+    - '(__call (__callee "/./")) when targets($ROOT, false)':
+        calls: { to: 'targets($ROOT, false) | callable', site: $ROOT }
+        imports: { to: 'targets($ROOT, false) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
+        type_flow: { to: 'targets($ROOT, false) | produced', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
+    - '(__call (__callee %builtins)) when unresolved($ROOT, false)':
         imports: { to: '$ROOT | mod.ssa.wildcards', site: $ROOT, resolution: reference }
-    - '(__call (__callee %providers)) when unresolved($ROOT, false, %callable_kinds, %value_kinds, %type_kinds)':
+    - '(__call (__callee %providers)) when unresolved($ROOT, false)':
         imports:
           - { to: '$ROOT | mod.ssa.wildcards | sourced(%providers, true)', site: $ROOT, resolution: reference }
           - { to: '$ROOT | mod.ssa.wildcards | sourced(%providers, false)', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
-    - '(__call (__callee "/./")) when unresolved($ROOT, false, %callable_kinds, %value_kinds, %type_kinds)':
+    - '(__call (__callee "/./")) when unresolved($ROOT, false)':
         imports: { to: '$ROOT | mod.ssa.wildcards', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
 
   member:
@@ -78,6 +78,6 @@ link:
     - '(__member $O:__object)':
         calls:
           - { to: '$O | type | member($ROOT)', resolution: reference }
-          - { to: '$O | type | unmatched($ROOT, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds)', resolution: reference }
-        imports: { to: '$O | type | unmatched($ROOT, %callable_kinds, %value_kinds, %type_kinds) | imported', site: '$ROOT | binding_site', resolution: reference }
-        type_flow: { to: '$O | type | unmatched($ROOT, %callable_kinds, %value_kinds, %type_kinds) | produced', resolution: reference }
+          - { to: '$O | type | unmatched($ROOT) | callable', resolution: reference }
+        imports: { to: '$O | type | unmatched($ROOT) | imported', site: '$ROOT | binding_site', resolution: reference }
+        type_flow: { to: '$O | type | unmatched($ROOT) | produced', resolution: reference }

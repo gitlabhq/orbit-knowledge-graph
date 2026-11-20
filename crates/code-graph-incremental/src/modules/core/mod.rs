@@ -12,13 +12,18 @@ use crate::tree::{Compact, EdgeKind, Mutable, Role, Tree};
 
 pub struct Core;
 
+/// The file language's role kind lists, read once when a run starts; they
+/// do not change within it.
 #[derive(Default)]
-pub struct State {}
+pub struct State {
+    roles: std::rc::Rc<Roles>,
+}
 
 type DefsByName = FxHashMap<u32, Vec<Loc>>;
 
 const NON_CALLABLE: &str = "non_callable";
 
+#[derive(Default)]
 pub(super) struct Roles {
     callable: Vals,
     value: Vals,
@@ -26,18 +31,6 @@ pub(super) struct Roles {
 }
 
 impl Roles {
-    fn of(args: &[Vals], at: usize) -> Self {
-        Self {
-            callable: args[at].clone(),
-            value: args[at + 1].clone(),
-            ty: args[at + 2].clone(),
-        }
-    }
-
-    fn args(&self) -> [Vals; 3] {
-        [self.callable.clone(), self.value.clone(), self.ty.clone()]
-    }
-
     fn has<S: Store>(&self, def: Cursor<'_, S>, role: Role) -> bool {
         let kinds = match role {
             Role::Callable => &self.callable,
@@ -225,11 +218,33 @@ impl Module for Core {
             build: defs_by_name,
         }]
     }
+
+    fn start<'t, S: Store>(cx: &mut Cx<'_, 't, Self, S>, root: Cursor<'t, S>) {
+        let at = one(Val::Node(root.into()));
+        let roles = Roles {
+            callable: cx.call(
+                crate::fn_id!("core", "callable_kinds"),
+                std::slice::from_ref(&at),
+            ),
+            value: cx.call(
+                crate::fn_id!("core", "value_kinds"),
+                std::slice::from_ref(&at),
+            ),
+            ty: cx.call(
+                crate::fn_id!("core", "type_kinds"),
+                std::slice::from_ref(&at),
+            ),
+        };
+        cx.write().roles = std::rc::Rc::new(roles);
+    }
 }
 
 static FUNCTIONS: &[Function<Core>] = &[
     function!(required Flow, "read", [one]),
     function!(required Flow, "supertypes", [one]),
+    function!(required Flow, "callable_kinds", [one]),
+    function!(required Flow, "value_kinds", [one]),
+    function!(required Flow, "type_kinds", [one]),
     function!(Flow, "enclosing", [], |cx, _| {
         let node = cx.enclosing();
         one(cx.node(node))
@@ -250,26 +265,32 @@ static FUNCTIONS: &[Function<Core>] = &[
         let attr = node(cx, a, 0).sym();
         cx.field(attr)
     }),
-    function!(Flow, "lookup", [one, one, set, set, set, set], @uses ["core"."declared"], |cx, a| {
+    function!(Flow, "lookup", [one, one, set], @uses ["core"."declared"], |cx, a| {
         let (Some(name), Some(site)) = (a[0].first().and_then(|&v| cx.text(v)), arg(cx, a, 1)) else {
             return Vals::new();
         };
-        cx.lookup(name, site_role(site), &Roles::of(a, 2), &a[5])
+        let roles = std::rc::Rc::clone(&cx.state().roles);
+        cx.lookup(name, site_role(site), &roles, &a[2])
     }),
-    function!(Flow, "meaning", [one, one, set, set, set], @uses ["core"."declared"], |cx, a| {
+    function!(Flow, "meaning", [one, one], @uses ["core"."declared"], |cx, a| {
         let site = node(cx, a, 1);
-        cx.meaning(a[0][0], site, &Roles::of(a, 2))
+        let roles = std::rc::Rc::clone(&cx.state().roles);
+        cx.meaning(a[0][0], site, &roles)
     }),
-    function!(Flow, "unmatched", [one, one, set, set, set], @uses ["core"."declared"], |cx, a| {
+    function!(Flow, "unmatched", [one, one], @uses ["core"."declared"], |cx, a| {
         match arg(cx, a, 1) {
-            Some(m) => cx.unmatched(a[0][0], m, &Roles::of(a, 2)),
+            Some(m) => {
+                let roles = std::rc::Rc::clone(&cx.state().roles);
+                cx.unmatched(a[0][0], m, &roles)
+            }
             None => Vals::new(),
         }
     }),
-    function!(Flow, "callable", [one, set, set, set], @uses ["core"."declared"], |cx, a| {
-        cx.callable(a[0][0], &Roles::of(a, 1))
+    function!(Flow, "callable", [one], @uses ["core"."declared"], |cx, a| {
+        let roles = std::rc::Rc::clone(&cx.state().roles);
+        cx.callable(a[0][0], &roles)
     }),
-    function!(Pure, "declared", [one, one, one, set, set, set], |cx, a| {
+    function!(Flow, "declared", [one, one, one], |cx, a| {
         let (owner, Some(&Val::Sym(name)), Some(&Val::Sym(role))) =
             (node(cx, a, 0), a[1].first(), a[2].first())
         else {
@@ -278,7 +299,7 @@ static FUNCTIONS: &[Function<Core>] = &[
         let defs = crate::tree::members_named(owner)
             .filter(|&(n, _)| n == name)
             .map(|(_, def)| owner.jump(owner.fi(), def));
-        let roles = Roles::of(a, 3);
+        let roles = std::rc::Rc::clone(&cx.state().roles);
         let role = role_of(role);
         let found =
             crate::tree::find_member_in(owner, defs, |d| roles.has(d, role), |d| roles.both(d));
@@ -386,12 +407,14 @@ static FUNCTIONS: &[Function<Core>] = &[
     function!(Flow, "receiver_calls", [one], @uses ["core"."read"], |cx, a| {
         cx.receiver_calls(node(cx, a, 0))
     }),
-    function!(Flow, "targets", [one, one, set, set, set], @uses ["core"."read", "core"."declared"], |cx, a| {
-        cx.call_targets(node(cx, a, 0), crate::engine::truthy(&a[1]), &Roles::of(a, 2))
+    function!(Flow, "targets", [one, one], @uses ["core"."read", "core"."declared"], |cx, a| {
+        let roles = std::rc::Rc::clone(&cx.state().roles);
+        cx.call_targets(node(cx, a, 0), crate::engine::truthy(&a[1]), &roles)
     }),
-    function!(Flow, "unresolved", [one, one, set, set, set], @uses ["core"."read", "core"."declared"], |cx, a| {
+    function!(Flow, "unresolved", [one, one], @uses ["core"."read", "core"."declared"], |cx, a| {
         let call = node(cx, a, 0);
-        match cx.unresolved(call, crate::engine::truthy(&a[1]), &Roles::of(a, 2)) {
+        let roles = std::rc::Rc::clone(&cx.state().roles);
+        match cx.unresolved(call, crate::engine::truthy(&a[1]), &roles) {
             true => one(Val::Node(call.into())),
             false => Vals::new(),
         }

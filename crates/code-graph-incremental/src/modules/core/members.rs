@@ -66,14 +66,11 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         role: Role,
         roles: &Roles,
     ) -> Option<Cursor<'t, S>> {
-        let [callable, value, ty] = roles.args();
+        let _ = roles;
         let args = [
             one(Val::Node(owner.into())),
             one(Val::Sym(name)),
             one(Val::Sym(role_code(role))),
-            callable,
-            value,
-            ty,
         ];
         let found = self.call(crate::fn_id!("core", "declared"), &args);
         found
