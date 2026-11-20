@@ -232,7 +232,7 @@ It does not include hosts that GitLab itself connects to, or the registries of t
 
 | Host | Used for | Setting | Offline behavior |
 |------|----------|---------|------------------|
-| `registry.gitlab.com` | Images and charts, at install time | `image.repository`, `dashboards.applyImage`, `splitTables.image.registry`, `waitForMigrations.image.repository`, `dashboards.image.repository` (with `dashboards.source: image`) | Use a mirror. |
+| `registry.gitlab.com` | Images and charts, at install time | `image.repository`, `dashboards.applyImage`, `splitTables.image.registry`, `splitTables.toolbox.image.repository` (with `splitTables.volumeMode: toolbox`), `waitForMigrations.image.repository`, `dashboards.image.repository` (with `dashboards.source: image`) | Use a mirror. |
 | `gcr.io`, `docker.io` | The `crane` and `busybox` images, only with `splitTables.volumeMode: initCopy` | `splitTables.initCopy.fetch.image.repository`, `splitTables.initCopy.extract.image.repository` | Use a mirror. |
 | `tuf-repo-cdn.sigstore.dev` | `cosign verify`, at install time | `--trusted-root` | Use a local trust file. |
 | `customers.gitlab.com` | Credits check on each query, from the webserver | `billing.quota.enabled`, `billing.quota.customers_dot_url` | Called only with an online cloud license. If the call fails, queries return `402`. |
