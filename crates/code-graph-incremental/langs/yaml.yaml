@@ -1,11 +1,3 @@
-# GitLab CI files (`.gitlab-ci.yml` and fragments): container images only.
-# Handles: `image:` (string or `name:`), `services:` entries (string or
-# `name:`) and `*_IMAGE` variables (string or `value:`), each an ImportedSymbol
-# named after the bare image with its tag and digest split out. Only the
-# positions GitLab CI defines count: the root, `default:` and a job for `image:`
-# and `services:`, and the root and a job `variables:`. Nothing else in the
-# file is indexed, an image reference is kept as written, `$VAR` included, and
-# a value with a YAML tag such as `!reference` is not an image.
 
 config:
   stdlib: []
@@ -28,9 +20,6 @@ stages:
       - match: '(plain_scalar (string_scalar "/^(true|false|True|False|TRUE|FALSE|yes|no|on|off|null|Null|NULL|~)$/"))'
         replace: '(__flag)'
 
-  # A quoted scalar keeps its quotes in the source text; every value and key
-  # becomes a scalar node with the bare text. Unquoted booleans, null and
-  # numbers stay out.
   - name: scalars
     rules:
       - match: '(plain_scalar $X:string_scalar)'
@@ -50,8 +39,6 @@ stages:
       - match: '(document (block_node (block_mapping $$$P)))'
         replace: '(document (block_node (__ci_root $$$P->__ci_rpair)))'
 
-  # Each stage reads a pair's own kind, so a pass is linear in the file. The
-  # kinds say where a pair sits: root, `default:`, a job, or a variables map.
   - name: root-sections
     rules:
       - match: '(__ci_rpair key: (flow_node (__scalar "default")) value: (block_node (block_mapping $$$P)))'

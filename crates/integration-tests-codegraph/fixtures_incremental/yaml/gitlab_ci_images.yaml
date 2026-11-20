@@ -337,7 +337,7 @@ tests:
     assert:
       - { row_count: 0 }
 
-  - name: "only CI files take the yaml language"
+  - name: "CI files and .yaml files are yaml, other names keep their extension"
     query: |
       MATCH (f:File)
       WHERE f.path IN [".gitlab-ci.yml.bak", "names/build.gitlab-ci.yml", "config/app.yaml", "ci/other.yml", "names/values.json"]
@@ -347,6 +347,9 @@ tests:
       - { row_count: 5 }
       - { row: { path: "names/build.gitlab-ci.yml", language: "yaml" } }
       - { row: { path: "names/values.json", language: "json" } }
+      - { row: { path: ".gitlab-ci.yml.bak", language: "bak" } }
+      - { row: { path: "config/app.yaml", language: "yaml" } }
+      - { row: { path: "ci/other.yml", language: "yml" } }
 
   - name: "YAML-tagged values are not images"
     query: |
