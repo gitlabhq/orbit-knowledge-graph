@@ -21,6 +21,8 @@ On GitLab Self-Managed, two components next to GitLab Orbit do this:
 
 Raw events never leave your cluster.
 The exporter follows the Service Ping settings of your GitLab instance, so nothing is sent while Service Ping is turned off.
+The Service Ping settings control only what the exporter sends.
+GitLab Orbit still sends its usage events to DIP, and ClickHouse stores them, until you [stop local collection](#point-gitlab-orbit-at-the-data-insights-platform).
 
 Prerequisites:
 
@@ -32,6 +34,7 @@ Prerequisites:
 - Outbound HTTPS from the exporter pod to `version.gitlab.com`.
 - Outbound HTTP (port 80) from the DIP pod to `iglucentral.com`, and outbound HTTPS to `gitlab-org.gitlab.io`, to resolve event schemas.
   DIP fetches schemas from `iglucentral.com` over HTTP, which the upstream Iglu client requires.
+  To use an internal Iglu mirror over HTTPS instead, set `single.pipeline.iglu.repositories` in the DIP values.
 
 Set up Service Ping for GitLab Orbit in this order:
 
@@ -52,8 +55,9 @@ Both components read three Secrets from that namespace:
    The exporter uses it to read the Service Ping settings of your instance.
 1. `dip-clickhouse-dsn`: the ClickHouse connection for DIP, as a user that can create databases and users.
    The DIP migrations run with it.
-   Limit who can read Secrets in the `dip` namespace, for example with Kubernetes RBAC.
-   The migrations run again on every upgrade, so keep this Secret in place.
+   The DIP pod also connects with it, so keep this Secret in place.
+   To keep the pod on a user that cannot create databases and users, give the migrations their own user with `migrate.adminUser` and `migrate.adminSecret`, as described in the [DIP chart README](https://gitlab.com/gitlab-org/analytics-section/platform-insights/data-insights-platform-helm-charts#clickhouse-user-for-the-migrations).
+   Either way, limit who can read Secrets in the `dip` namespace, for example with Kubernetes RBAC.
 1. `dip-serviceping-exporter`: a new password for the exporter's ClickHouse user.
    The DIP migrations create the user with it, and the exporter connects with it.
 
@@ -143,8 +147,9 @@ To install DIP:
 Adjust the values for your environment:
 
 - If NATS requires TLS client certificates, mount them with `natsClientCertsSecretName` and set `single.pipeline.nats.caCertPath`, `clientCertPath`, and `clientKeyPath`.
+  DIP mounts the Secret at `/etc/ssl/certs/custom`, so the paths are, for example, `/etc/ssl/certs/custom/ca.crt`, `tls.crt`, and `tls.key`.
 - A NATS server that requires a username and password is not supported. See [issue 225](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/work_items/225).
-- For ClickHouse over TLS, such as ClickHouse Cloud, add `?secure=true` to the DSN in the `dip-clickhouse-dsn` Secret.
+- For ClickHouse over TLS, such as ClickHouse Cloud, use the secure native port, 9440 by default, and add `?secure=true` to the DSN in the `dip-clickhouse-dsn` Secret, for example `clickhouse://<dip_user>:<dip_password>@<clickhouse_host>:9440?secure=true`.
 - DIP runs in single mode and creates its tables on one ClickHouse node.
   On a replicated ClickHouse cluster, point the DIP DSN and the exporter's `clickhouse.host` at the same node, not at a load balancer, because `single.pipeline.clickhouse.selfManaged: true` does not replicate the DIP tables yet.
   <!-- TODO: once core MR 271 is released and the DIP chart picks it up, replace this bullet with the selfManaged: true instructions and the DIP chart version that has it -->
@@ -199,7 +204,7 @@ Keep `command: dry-run` until [Verify the setup](#verify-the-setup) shows a payl
 Then set `command: run` and upgrade the release.
 From then on the CronJob posts every Monday at 03:00 UTC.
 
-For ClickHouse over TLS, store a full DSN for the `serviceping_exporter` user, ending in `?secure=true`, under the key `CLICKHOUSE_DSN` in a Secret. Then set `clickhouse.existingSecret` to its name instead of `clickhouse.host` and `clickhouse.passwordSecret`.
+For ClickHouse over TLS, store a full DSN for the `serviceping_exporter` user under the key `CLICKHOUSE_DSN` in a Secret, for example `clickhouse://serviceping_exporter:<exporter_password>@<clickhouse_host>:9440?secure=true`. Then set `clickhouse.existingSecret` to its name instead of `clickhouse.host` and `clickhouse.passwordSecret`.
 For every value, see the [exporter chart](https://gitlab.com/gitlab-org/analytics-section/analytics-instrumentation/serviceping-exporter/-/tree/main/charts/serviceping-exporter).
 
 ## Point GitLab Orbit at the Data Insights Platform
@@ -256,6 +261,8 @@ To verify the setup:
    In `dry-run` mode the log shows the JSON payload for each closed weekly window, followed by `dry run complete`.
    A window closes on Monday at 00:00 UTC, so the first payload appears after the first Monday that follows your first event.
    Until then, the log shows `nothing to send`.
+   If **Include optional data in Service Ping** is off in GitLab, the log shows `nothing to send, the Service Ping settings allow no metrics`, because every GitLab Orbit metric is optional.
+   To change it, see [Usage statistics](https://docs.gitlab.com/administration/settings/usage_statistics/).
 
 ## Upgrade
 
