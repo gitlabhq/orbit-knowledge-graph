@@ -3,36 +3,62 @@ name: "Dockerfile: EXPOSE, ENTRYPOINT and CMD become stage definitions"
 fixtures:
   - path: Dockerfile
     content: |
+      CMD ["before-from"]
+      EXPOSE 1
+      ARG PORT=9000
       FROM golang:1.22 AS builder
       CMD echo building
+      HEALTHCHECK --interval=5s CMD curl -f http://localhost/ || exit 1
+      ONBUILD CMD ["onbuild"]
+      ONBUILD EXPOSE 9999
 
       FROM alpine:3.19 AS runtime
-      EXPOSE 8080 8443/udp
+      EXPOSE 8080 8443/udp 80/tcp ${PORT}
       ENTRYPOINT ["/app/server"]
+      HEALTHCHECK CMD ["curl", "-f", "http://localhost/"]
       CMD ["--port", "8080"]
+      CMD ["--second"]
 
 tests:
-  - name: "each port, entrypoint and command is a typed definition"
+  - name: "each port, entrypoint and command is a typed definition keyed by the stage"
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type IN ['Port', 'Entrypoint', 'Command']
       RETURN d.fqn AS fqn, d.name AS name, d.definition_type AS kind
-      ORDER BY fqn
+      ORDER BY fqn, name
     assert:
-      - { row_count: 5 }
-      - { row: { fqn: "Dockerfile.builder.echo building", name: "echo building", kind: "Command" } }
+      - { row_count: 8 }
+      - { row: { fqn: "Dockerfile.builder.CMD", name: "echo building", kind: "Command" } }
       - { row: { fqn: "Dockerfile.runtime.8080", name: "8080", kind: "Port" } }
       - { row: { fqn: "Dockerfile.runtime.8443/udp", name: "8443/udp", kind: "Port" } }
-      - { row: { fqn: 'Dockerfile.runtime.["--port", "8080"]', name: '["--port", "8080"]', kind: "Command" } }
-      - { row: { fqn: 'Dockerfile.runtime.["/app/server"]', name: '["/app/server"]', kind: "Entrypoint" } }
+      - { row: { fqn: "Dockerfile.runtime.80/tcp", name: "80/tcp", kind: "Port" } }
+      - { row: { fqn: "Dockerfile.runtime.${PORT}", name: "${PORT}", kind: "Port" } }
+      - { row: { fqn: "Dockerfile.runtime.ENTRYPOINT", name: '["/app/server"]', kind: "Entrypoint" } }
+      - { row: { fqn: "Dockerfile.runtime.CMD", name: '["--port", "8080"]', kind: "Command" } }
+      - { row: { fqn: "Dockerfile.runtime.CMD", name: '["--second"]', kind: "Command" } }
 
   - name: "a stage defines its own ports and commands"
     query: |
       MATCH (s:Definition)-[:DEFINES]->(d:Definition)
-      WHERE s.definition_type = 'Class'
-      RETURN s.name AS stage, d.definition_type AS kind
-      ORDER BY stage, kind
+      WHERE s.definition_type = 'Class' AND d.definition_type IN ['Port', 'Entrypoint', 'Command']
+      RETURN s.name AS stage, d.definition_type AS kind, d.name AS name
+      ORDER BY stage, kind, name
     assert:
-      - { row_count: 5 }
-      - { row: { stage: "builder", kind: "Command" } }
-      - { row: { stage: "runtime", kind: "Entrypoint" } }
+      - { row: { stage: "builder", kind: "Command", name: "echo building" } }
+      - { row: { stage: "runtime", kind: "Command", name: '["--port", "8080"]' } }
+      - { row: { stage: "runtime", kind: "Command", name: '["--second"]' } }
+      - { row: { stage: "runtime", kind: "Entrypoint", name: '["/app/server"]' } }
+      - { row: { stage: "runtime", kind: "Port", name: "8080" } }
+      - { row: { stage: "runtime", kind: "Port", name: "8443/udp" } }
+      - { row: { stage: "runtime", kind: "Port", name: "80/tcp" } }
+      - { row: { stage: "runtime", kind: "Port", name: "${PORT}" } }
+
+  - name: "EXPOSE with an expansion still calls the variable from the stage"
+    query: |
+      MATCH (s:Definition)-[:CALLS]->(v:Definition)
+      WHERE v.definition_type = 'Variable'
+      RETURN s.name AS caller, v.name AS variable
+      ORDER BY caller
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "runtime", variable: "PORT" } }

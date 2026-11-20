@@ -22,6 +22,7 @@ const MAX_STAGES_PER_FILE: usize = 1_000;
 const MAX_VARIABLES_PER_FILE: usize = 10_000;
 const MAX_REFERENCES_PER_FILE: usize = 20_000;
 const MAX_NAME_BYTES: usize = 512;
+const MAX_INSTRUCTION_NAME_CHARS: usize = 512;
 
 type AstNode<'r> = Node<'r, StrDoc<SupportLang>>;
 
@@ -130,10 +131,12 @@ impl<'a> DockerfileParser<'a> {
             "from_instruction" => return self.visit_from(index, instruction),
             "arg_instruction" => self.visit_variables(instruction, "arg_pair"),
             "env_instruction" => self.visit_variables(instruction, "env_pair"),
-            kind @ ("expose_instruction" | "entrypoint_instruction" | "cmd_instruction") => {
-                self.visit_runtime_instruction(kind, instruction);
-                let enclosing = self.stage.as_ref().map(|s| s.definition as u32);
-                self.add_variable_refs(instruction, enclosing, None);
+            "expose_instruction" => self.visit_runtime_instruction("Port", None, instruction),
+            "entrypoint_instruction" => {
+                self.visit_runtime_instruction("Entrypoint", Some("ENTRYPOINT"), instruction)
+            }
+            "cmd_instruction" => {
+                self.visit_runtime_instruction("Command", Some("CMD"), instruction)
             }
             _ => {
                 let enclosing = self.stage.as_ref().map(|s| s.definition as u32);
@@ -221,14 +224,16 @@ impl<'a> DockerfileParser<'a> {
         ControlFlow::Continue(())
     }
 
-    fn visit_runtime_instruction(&mut self, kind: &str, instruction: &AstNode<'_>) {
+    fn visit_runtime_instruction(
+        &mut self,
+        definition_type: &'static str,
+        fqn_segment: Option<&str>,
+        instruction: &AstNode<'_>,
+    ) {
+        let enclosing = self.stage.as_ref().map(|s| s.definition as u32);
+        self.add_variable_refs(instruction, enclosing, None);
         let Some(stage) = &self.stage else {
             return;
-        };
-        let definition_type = match kind {
-            "expose_instruction" => "Port",
-            "entrypoint_instruction" => "Entrypoint",
-            _ => "Command",
         };
         for part in instruction.children().filter(|n| {
             matches!(
@@ -239,13 +244,22 @@ impl<'a> DockerfileParser<'a> {
             if self.variable_count >= MAX_VARIABLES_PER_FILE {
                 return;
             }
-            let name = truncate_name(&part.text());
+            let name: String = part
+                .text()
+                .chars()
+                .take(MAX_INSTRUCTION_NAME_CHARS)
+                .collect();
+            let segment = fqn_segment.unwrap_or(&name);
+            let range = match fqn_segment {
+                Some(_) => node_to_range(instruction),
+                None => node_to_range(&part),
+            };
             self.definitions.push(CanonicalDefinition {
                 definition_type,
                 kind: DefKind::Other,
-                fqn: Fqn::from_segments(&[self.stem, &stage.name, &name], "."),
+                fqn: Fqn::from_segments(&[self.stem, &stage.name, segment], "."),
                 name,
-                range: canonical_range(&node_to_range(&part)),
+                range: canonical_range(&range),
                 is_top_level: false,
                 metadata: None,
             });
