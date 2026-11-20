@@ -17,10 +17,8 @@ use orbit_observability::resilience::MetricsObserver;
 use orbit_utils::query_types::{ScalarType, SqlType};
 use serde::Serialize;
 use serde_json::Value;
-use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_util::io::SyncIoBridge;
 use tracing::Instrument;
 
 pub use clickhouse::QuerySummary;
@@ -608,34 +606,10 @@ impl ArrowQuery {
         self,
         max_block_size: Option<u64>,
     ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
-        let (cursor, first) = self.open_cursor(max_block_size).await?;
-
-        let handle = tokio::runtime::Handle::current();
-        let (tx, rx) = mpsc::channel::<Result<RecordBatch, ClickHouseError>>(2);
-
-        let span = tracing::Span::current();
-        tokio::task::spawn_blocking(move || {
-            let _entered = span.enter();
-            let body = Cursor::new(first.unwrap_or_default()).chain(cursor);
-            let bridge = SyncIoBridge::new_with_handle(body, handle);
-            let reader = match StreamReader::try_new(bridge, None) {
-                Ok(reader) => reader,
-                Err(err) => {
-                    let _ = tx.blocking_send(Err(ClickHouseError::ArrowDecode(err)));
-                    return;
-                }
-            };
-
-            for batch_result in reader {
-                let mapped: Result<RecordBatch, ClickHouseError> =
-                    batch_result.map_err(ClickHouseError::ArrowDecode);
-                if tx.blocking_send(mapped).is_err() {
-                    break;
-                }
-            }
-        });
-
-        Ok(ReceiverStream::new(rx).boxed())
+        let (batches, _summary) = self
+            .fetch_arrow_streamed_with_summary(max_block_size)
+            .await?;
+        Ok(batches)
     }
 
     pub async fn fetch_arrow_streamed_with_summary(
@@ -685,10 +659,17 @@ impl ArrowQuery {
                         return;
                     }
                 }
+                if tx.is_closed() {
+                    return;
+                }
+                // Take whole chunks: the cursor's AsyncRead loses bytes when the next chunk is late.
                 next = cursor.next().await;
             }
             if let Some(summary_tx) = summary_tx.take() {
                 let _ = summary_tx.send(cursor.summary().cloned());
+            }
+            if let Err(err) = decoder.finish() {
+                let _ = tx.send(Err(ClickHouseError::ArrowDecode(err))).await;
             }
         };
         tokio::spawn(task.in_current_span());
@@ -1047,6 +1028,122 @@ mod tests {
             matches!(err, ClickHouseError::CircuitOpen { .. }),
             "got {err}"
         );
+    }
+
+    fn arrow_stream(batches: usize, rows_per_batch: i64) -> Vec<u8> {
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        let mut writer = StreamWriter::try_new(Vec::new(), &schema).unwrap();
+        for _ in 0..batches {
+            let ids = Int64Array::from_iter_values(0..rows_per_batch);
+            let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(ids)]).unwrap();
+            writer.write(&batch).unwrap();
+        }
+        writer.finish().unwrap();
+        writer.into_inner().unwrap()
+    }
+
+    /// Sends a plain HTTP response in small chunks with gaps, like an uncompressed
+    /// ClickHouse response over a real network.
+    async fn serve_in_slow_chunks(
+        body: Vec<u8>,
+    ) -> (String, tokio::task::JoinHandle<std::io::Result<()>>) {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await?;
+            let mut socket = BufReader::new(socket);
+            let mut content_length = 0;
+            loop {
+                let mut line = String::new();
+                socket.read_line(&mut line).await?;
+                if line.trim().is_empty() {
+                    break;
+                }
+                let line = line.to_ascii_lowercase();
+                if let Some(value) = line.strip_prefix("content-length:") {
+                    content_length = value.trim().parse().unwrap();
+                }
+            }
+            let mut request_body = vec![0; content_length];
+            socket.read_exact(&mut request_body).await?;
+
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+                .await?;
+            for piece in body.chunks(1024) {
+                let framed = [format!("{:x}\r\n", piece.len()).as_bytes(), piece, b"\r\n"].concat();
+                socket.write_all(&framed).await?;
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            socket.write_all(b"0\r\n\r\n").await
+        });
+        (url, server)
+    }
+
+    fn client_for(url: &str) -> ArrowClickHouseClient {
+        ArrowClickHouseClient::new(
+            url,
+            "default",
+            "default",
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            "test",
+        )
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn streamed_read_keeps_every_byte_of_a_slow_chunked_response() {
+        let (url, server) = serve_in_slow_chunks(arrow_stream(200, 16)).await;
+
+        let mut batches = client_for(&url)
+            .query("SELECT id")
+            .fetch_arrow_streamed(None)
+            .await
+            .unwrap();
+        let mut rows = 0;
+        while let Some(batch) = batches.next().await {
+            rows += batch.unwrap().num_rows();
+        }
+
+        assert_eq!(rows, 200 * 16);
+        server.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_truncated_streamed_read_ends_with_an_error() {
+        let mut body = arrow_stream(200, 16);
+        body.truncate(body.len() - 9);
+        let (url, server) = serve_in_slow_chunks(body).await;
+
+        let batches: Vec<_> = client_for(&url)
+            .query("SELECT id")
+            .fetch_arrow_streamed(None)
+            .await
+            .unwrap()
+            .collect()
+            .await;
+
+        assert!(batches.last().unwrap().is_err());
+        server.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dropping_a_streamed_read_stops_the_download() {
+        let (url, server) = serve_in_slow_chunks(arrow_stream(2000, 16)).await;
+
+        let mut batches = client_for(&url)
+            .query("SELECT id")
+            .fetch_arrow_streamed(None)
+            .await
+            .unwrap();
+        batches.next().await.unwrap().unwrap();
+        drop(batches);
+
+        let sent = server.await.unwrap();
+        assert!(sent.is_err(), "the server sent the whole response");
     }
 
     #[test]
