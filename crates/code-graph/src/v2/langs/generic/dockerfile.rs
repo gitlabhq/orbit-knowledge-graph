@@ -130,6 +130,11 @@ impl<'a> DockerfileParser<'a> {
             "from_instruction" => return self.visit_from(index, instruction),
             "arg_instruction" => self.visit_variables(instruction, "arg_pair"),
             "env_instruction" => self.visit_variables(instruction, "env_pair"),
+            kind @ ("expose_instruction" | "entrypoint_instruction" | "cmd_instruction") => {
+                self.visit_runtime_instruction(kind, instruction);
+                let enclosing = self.stage.as_ref().map(|s| s.definition as u32);
+                self.add_variable_refs(instruction, enclosing, None);
+            }
             _ => {
                 let enclosing = self.stage.as_ref().map(|s| s.definition as u32);
                 self.add_copy_from_refs(instruction, enclosing);
@@ -214,6 +219,38 @@ impl<'a> DockerfileParser<'a> {
         self.add_variable_refs(instruction, enclosing, None);
         self.stage_definitions.insert(name, stage_definition);
         ControlFlow::Continue(())
+    }
+
+    fn visit_runtime_instruction(&mut self, kind: &str, instruction: &AstNode<'_>) {
+        let Some(stage) = &self.stage else {
+            return;
+        };
+        let definition_type = match kind {
+            "expose_instruction" => "Port",
+            "entrypoint_instruction" => "Entrypoint",
+            _ => "Command",
+        };
+        for part in instruction.children().filter(|n| {
+            matches!(
+                n.kind().as_ref(),
+                "expose_port" | "json_string_array" | "shell_command"
+            )
+        }) {
+            if self.variable_count >= MAX_VARIABLES_PER_FILE {
+                return;
+            }
+            let name = truncate_name(&part.text());
+            self.definitions.push(CanonicalDefinition {
+                definition_type,
+                kind: DefKind::Other,
+                fqn: Fqn::from_segments(&[self.stem, &stage.name, &name], "."),
+                name,
+                range: canonical_range(&node_to_range(&part)),
+                is_top_level: false,
+                metadata: None,
+            });
+            self.variable_count += 1;
+        }
     }
 
     fn visit_variables(&mut self, instruction: &AstNode<'_>, pair_kind: &str) {

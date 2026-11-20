@@ -1,0 +1,38 @@
+name: "Dockerfile: EXPOSE, ENTRYPOINT and CMD become stage definitions"
+
+fixtures:
+  - path: Dockerfile
+    content: |
+      FROM golang:1.22 AS builder
+      CMD echo building
+
+      FROM alpine:3.19 AS runtime
+      EXPOSE 8080 8443/udp
+      ENTRYPOINT ["/app/server"]
+      CMD ["--port", "8080"]
+
+tests:
+  - name: "each port, entrypoint and command is a typed definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type IN ['Port', 'Entrypoint', 'Command']
+      RETURN d.fqn AS fqn, d.name AS name, d.definition_type AS kind
+      ORDER BY fqn
+    assert:
+      - { row_count: 5 }
+      - { row: { fqn: "Dockerfile.builder.echo building", name: "echo building", kind: "Command" } }
+      - { row: { fqn: "Dockerfile.runtime.8080", name: "8080", kind: "Port" } }
+      - { row: { fqn: "Dockerfile.runtime.8443/udp", name: "8443/udp", kind: "Port" } }
+      - { row: { fqn: 'Dockerfile.runtime.["--port", "8080"]', name: '["--port", "8080"]', kind: "Command" } }
+      - { row: { fqn: 'Dockerfile.runtime.["/app/server"]', name: '["/app/server"]', kind: "Entrypoint" } }
+
+  - name: "a stage defines its own ports and commands"
+    query: |
+      MATCH (s:Definition)-[:DEFINES]->(d:Definition)
+      WHERE s.definition_type = 'Class'
+      RETURN s.name AS stage, d.definition_type AS kind
+      ORDER BY stage, kind
+    assert:
+      - { row_count: 5 }
+      - { row: { stage: "builder", kind: "Command" } }
+      - { row: { stage: "runtime", kind: "Entrypoint" } }
