@@ -8,7 +8,7 @@ const DEMO = "https://about.gitlab.com/sales/?contact-topic=request-demo";
 const HOME_MARKDOWN = `
 ## One context layer for all your agents
 
-The page opens with an example chat with an agent that uses GitLab Orbit. Its examples are "What breaks if I merge web-app!412? Answer with proof.", "Which of our services have CVE-2025-29927, and is a fix open?", and "Who depends on auth-client before I change its API?". For each one, the agent lists the graph queries it ran and answers with proof.
+The page opens with an example chat with an agent that uses GitLab Orbit. Its examples are "What breaks if I merge \`web-app!412\`? Answer with proof.", "Which of our services have CVE-2025-29927, and is a fix open?", and "Who depends on auth-client before I change its API?". For each one, the agent lists the graph queries it ran and answers with proof.
 
 ## Higher agent accuracy, lower token cost
 
@@ -96,7 +96,7 @@ In our testing, we indexed and searched 51,656 open source projects with their b
 
 ## Third-party data: your other tools, next to your code
 
-Orbit finds the path from tool to tool, checks your access in each one, and your agent ships the fix. The tools are GitLab, Linear, Slack, incident.io, and Grafana. An animated diagram shows an example: your agent starts at an incident in incident.io, follows the alert in Grafana to a deploy in GitLab, reads the Slack thread behind it, finds the line of code with code search, and ships the merge request that fixes it. Its log reads: the agent adds a timeout to cache.get, opens checkout-api!43, the pipeline passes, !43 deploys to production, and p95 is back to 420 ms, which resolves INC-77.
+Orbit finds the path from tool to tool, checks your access in each one, and your agent ships the fix. The tools are GitLab, Linear, Slack, incident.io, and Grafana. An animated diagram shows an example: your agent starts at an incident in incident.io, follows the alert in Grafana to a deploy in GitLab, reads the Slack thread behind it, finds the line of code with code search, and ships the merge request that fixes it. Its log reads: the agent adds a timeout to cache.get, opens \`checkout-api!43\`, the pipeline passes, \`!43\` deploys to production, and p95 is back to 420 ms, which resolves INC-77.
 
 This page contains information related to upcoming products, features, and functionality. It is important to note that the information presented is for informational purposes only. Please do not rely on this information for purchasing or planning purposes. The development, release, and timing of any products, features, or functionality may be subject to change or delay and remain at the sole discretion of GitLab Inc.
 `;
