@@ -11,7 +11,7 @@ use crate::clickhouse::ArrowClickHouseClient;
 use clickhouse_client::FromArrowColumn;
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::clickhouse::strings_per_array_param;
-use orbit_utils::traversal_path::TraversalPath;
+use orbit_utils::traversal_path::{TOP_LEVEL_PREFIX_REGEX, TraversalPath};
 
 use std::sync::LazyLock;
 
@@ -51,25 +51,45 @@ SELECT DISTINCT traversal_path FROM namespace_traversal_paths FINAL
 WHERE deleted = false AND startsWith(traversal_path, {traversal_path:String})
 "#;
 
+static LAST_VALID_ROOT_PATH: LazyLock<String> = LazyLock::new(|| {
+    let version = ontology::siphon_version_column();
+    format!(
+        "argMaxIf(traversal_path, {version}, match(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}$'))"
+    )
+});
+
 static DELETED_NAMESPACES_QUERY: LazyLock<String> = LazyLock::new(|| {
     let (version, watermark, del) = (
         ontology::siphon_version_column(),
         ontology::siphon_watermark_column(),
         ontology::siphon_deleted_column(),
     );
+    let path = &*LAST_VALID_ROOT_PATH;
     format!(
         r#"
 SELECT
-    namespaces.root_namespace_id AS namespace_id,
-    argMax(namespaces.traversal_path, namespaces.{version}) AS traversal_path,
-    toString(max(namespaces.{version})) AS deleted_at
-FROM siphon_knowledge_graph_enabled_namespaces AS namespaces
-WHERE namespaces.{watermark} > {{last_watermark:String}}
-  AND namespaces.{watermark} <= {{watermark:String}}
-GROUP BY namespaces.root_namespace_id, namespaces.id
-HAVING argMax(namespaces.{del}, namespaces.{version}) = true
-   AND argMax(namespaces.traversal_path, namespaces.{version}) != ''
+    root_namespace_id AS namespace_id,
+    {path} AS traversal_path,
+    toString(max({version})) AS deleted_at
+FROM siphon_knowledge_graph_enabled_namespaces
+WHERE (root_namespace_id, id) IN (
+    SELECT root_namespace_id, id
+    FROM siphon_knowledge_graph_enabled_namespaces
+    WHERE {watermark} > {{last_watermark:String}}
+      AND {watermark} <= {{watermark:String}}
+)
+GROUP BY root_namespace_id, id
+HAVING argMax({del}, {version}) = true
 "#
+    )
+});
+
+static LAST_VALID_ROOT_PATH_QUERY: LazyLock<String> = LazyLock::new(|| {
+    let path = &*LAST_VALID_ROOT_PATH;
+    format!(
+        "SELECT {path} AS traversal_path \
+         FROM siphon_knowledge_graph_enabled_namespaces \
+         WHERE root_namespace_id = {{namespace_id:Int64}}"
     )
 });
 
@@ -244,6 +264,11 @@ pub trait NamespaceDeletionStore: Send + Sync {
     async fn find_due_deletions(
         &self,
     ) -> Result<Vec<NamespaceScheduleEntry>, NamespaceDeletionStoreError>;
+
+    async fn find_last_valid_root_path(
+        &self,
+        namespace_id: i64,
+    ) -> Result<Option<TraversalPath>, NamespaceDeletionStoreError>;
 }
 
 pub struct ClickHouseNamespaceDeletionStore {
@@ -509,6 +534,27 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
 
         extract_schedule_entries(&batches)
     }
+
+    async fn find_last_valid_root_path(
+        &self,
+        namespace_id: i64,
+    ) -> Result<Option<TraversalPath>, NamespaceDeletionStoreError> {
+        let batches = self
+            .datalake
+            .query(&LAST_VALID_ROOT_PATH_QUERY)
+            .param("namespace_id", namespace_id)
+            .fetch_arrow()
+            .await
+            .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
+
+        let paths = String::extract_column(&batches, 0)
+            .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
+
+        Ok(paths
+            .into_iter()
+            .map(TraversalPath::new_unchecked)
+            .find(TraversalPath::is_valid))
+    }
 }
 
 fn extract_schedule_entries(
@@ -563,18 +609,14 @@ mod sql_tests {
             IS_NAMESPACE_STILL_DELETED.contains("argMax(_siphon_deleted, _siphon_replicated_at)")
         );
         assert!(DELETED_NAMESPACES_QUERY.contains(
-            "argMax(namespaces.traversal_path, namespaces._siphon_replicated_at) AS traversal_path"
-        ));
-        assert!(DELETED_NAMESPACES_QUERY.contains(
-            "HAVING argMax(namespaces._siphon_deleted, namespaces._siphon_replicated_at) = true"
+            "argMaxIf(traversal_path, _siphon_replicated_at, match(traversal_path, '^[0-9]+/[0-9]+/$')) AS traversal_path"
         ));
         assert!(
             DELETED_NAMESPACES_QUERY
-                .contains("namespaces._siphon_watermark > {last_watermark:String}")
+                .contains("HAVING argMax(_siphon_deleted, _siphon_replicated_at) = true")
         );
-        assert!(
-            DELETED_NAMESPACES_QUERY.contains("namespaces._siphon_watermark <= {watermark:String}")
-        );
+        assert!(DELETED_NAMESPACES_QUERY.contains("_siphon_watermark > {last_watermark:String}"));
+        assert!(DELETED_NAMESPACES_QUERY.contains("_siphon_watermark <= {watermark:String}"));
     }
 }
 
@@ -593,6 +635,7 @@ pub mod test_utils {
         newly_deleted: Vec<DeletedNamespaceEntry>,
         due_deletions: Vec<NamespaceScheduleEntry>,
         enabled_roots: Vec<TraversalPath>,
+        last_valid_root_path: Option<TraversalPath>,
         namespace_still_deleted: bool,
         fail_mark_complete: bool,
         fail_schedule: bool,
@@ -626,6 +669,7 @@ pub mod test_utils {
                 newly_deleted: Vec::<DeletedNamespaceEntry>::new(),
                 due_deletions: Vec::new(),
                 enabled_roots: Vec::new(),
+                last_valid_root_path: None,
                 namespace_still_deleted: true,
                 fail_mark_complete: false,
                 fail_schedule: false,
@@ -664,6 +708,11 @@ pub mod test_utils {
 
         pub fn with_enabled_roots(mut self, roots: Vec<TraversalPath>) -> Self {
             self.enabled_roots = roots;
+            self
+        }
+
+        pub fn with_last_valid_root_path(mut self, path: &str) -> Self {
+            self.last_valid_root_path = Some(TraversalPath::new_unchecked(path));
             self
         }
 
@@ -783,6 +832,13 @@ pub mod test_utils {
             &self,
         ) -> Result<Vec<NamespaceScheduleEntry>, NamespaceDeletionStoreError> {
             Ok(self.due_deletions.clone())
+        }
+
+        async fn find_last_valid_root_path(
+            &self,
+            _namespace_id: i64,
+        ) -> Result<Option<TraversalPath>, NamespaceDeletionStoreError> {
+            Ok(self.last_valid_root_path.clone())
         }
     }
 }

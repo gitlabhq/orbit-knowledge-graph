@@ -11,11 +11,13 @@ use crate::checkpoint::{Checkpoint, CheckpointStore};
 use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::durability::WriteDurability;
 use crate::modules::namespace_deletion::NamespaceDeletionStore;
+use crate::modules::namespace_deletion::store::NamespaceScheduleEntry;
 use crate::nats::NatsServices;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::topic::NamespaceDeletionRequest;
 use crate::types::Envelope;
 use orbit_server_config::{NamespaceDeletionSchedulerConfig, ScheduleConfiguration};
+use orbit_utils::traversal_path::TraversalPath;
 
 const CHECKPOINT_KEY: &str = "namespace_deletion_scheduler";
 const GRACE_PERIOD_DAYS: i64 = 30;
@@ -156,6 +158,15 @@ impl NamespaceDeletionScheduler {
         let mut recorded = 0u64;
 
         for entry in &entries {
+            if !entry.traversal_path.is_valid() {
+                warn!(
+                    safe(GL_ROOT_NAMESPACE_ID) = entry.namespace_id,
+                    expanded(ADDITIONAL_DETAILS) = entry.traversal_path.as_str(),
+                    "skipping deleted namespace with no valid traversal_path"
+                );
+                continue;
+            }
+
             let scheduled_deletion_date =
                 scheduled_deletion_date_for(&entry.deleted_at, GRACE_PERIOD_DAYS)?;
 
@@ -200,14 +211,15 @@ impl NamespaceDeletionScheduler {
         let mut skipped = 0u64;
 
         for entry in &entries {
+            let Some(entry) = self.repair_scheduled_path(entry).await? else {
+                continue;
+            };
+
             let span = info_span!(
                 "dispatch_namespace_deletion",
                 safe(GL_ROOT_NAMESPACE_ID) = entry.namespace_id,
-                safe(TRAVERSAL_PATH) = tracing::field::Empty,
+                safe(TRAVERSAL_PATH) = entry.traversal_path.as_str(),
             );
-            if entry.traversal_path.is_valid() {
-                span.record(safe::TRAVERSAL_PATH, entry.traversal_path.as_str());
-            }
             let dispatch = async {
                 let request = NamespaceDeletionRequest {
                     namespace_id: entry.namespace_id,
@@ -250,6 +262,55 @@ impl NamespaceDeletionScheduler {
             "dispatched due namespace deletions"
         );
         Ok(())
+    }
+
+    async fn repair_scheduled_path(
+        &self,
+        entry: &NamespaceScheduleEntry,
+    ) -> Result<Option<NamespaceScheduleEntry>, TaskError> {
+        if entry.traversal_path.is_valid() {
+            return Ok(Some(entry.clone()));
+        }
+
+        let resolved = self
+            .store
+            .find_last_valid_root_path(entry.namespace_id)
+            .await
+            .map_err(|error| {
+                self.metrics.record_error(self.name(), "query");
+                TaskError::new(error)
+            })?;
+
+        if let Some(traversal_path) = &resolved {
+            let now = Utc::now().format(TIMESTAMP_FORMAT).to_string();
+            self.store
+                .schedule_deletion(entry.namespace_id, traversal_path, &now)
+                .await
+                .map_err(|error| {
+                    self.metrics.record_error(self.name(), "insert");
+                    TaskError::new(error)
+                })?;
+        }
+
+        self.store
+            .mark_deletion_complete(entry.namespace_id, &entry.traversal_path)
+            .await
+            .map_err(|error| {
+                self.metrics.record_error(self.name(), "insert");
+                TaskError::new(error)
+            })?;
+
+        warn!(
+            safe(GL_ROOT_NAMESPACE_ID) = entry.namespace_id,
+            expanded(ADDITIONAL_DETAILS) = entry.traversal_path.as_str(),
+            safe(TRAVERSAL_PATH) = resolved.as_ref().map(TraversalPath::as_str),
+            "closed scheduled deletion with invalid traversal_path"
+        );
+
+        Ok(resolved.map(|traversal_path| NamespaceScheduleEntry {
+            namespace_id: entry.namespace_id,
+            traversal_path,
+        }))
     }
 }
 
@@ -373,6 +434,91 @@ mod tests {
         let published = nats.get_published();
         assert_eq!(published.len(), 1);
         assert!(published[0].0.subject.contains("namespace.deletion"));
+    }
+
+    #[tokio::test]
+    async fn skips_newly_deleted_namespace_without_valid_path() {
+        let store = Arc::new(MockNamespaceDeletionStore::new().with_newly_deleted(vec![
+            DeletedNamespaceEntry {
+                namespace_id: 11,
+                traversal_path: TraversalPath::new_unchecked(""),
+                deleted_at: "2025-04-01 12:00:00.000000".to_string(),
+            },
+        ]));
+
+        scheduler_with_store(store.clone()).run().await.unwrap();
+
+        assert!(store.schedule_calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn reschedules_due_deletion_with_invalid_path_under_resolved_path() {
+        let store = Arc::new(
+            MockNamespaceDeletionStore::new()
+                .with_due_deletions(vec![NamespaceScheduleEntry {
+                    namespace_id: 11,
+                    traversal_path: TraversalPath::new_unchecked("0/"),
+                }])
+                .with_last_valid_root_path("1/11/"),
+        );
+        let nats = Arc::new(MockNatsServices::new());
+        let scheduler = NamespaceDeletionScheduler::new(
+            store.clone(),
+            Arc::new(MockCheckpointStore),
+            nats.clone(),
+            ScheduledTaskMetrics::new(),
+            orbit_server_config::AppConfig::embedded_defaults()
+                .schedule
+                .tasks
+                .namespace_deletion,
+        );
+
+        scheduler.run().await.unwrap();
+
+        let scheduled: Vec<_> = store
+            .schedule_calls()
+            .into_iter()
+            .map(|(id, path, _)| (id, path))
+            .collect();
+        assert_eq!(scheduled, vec![(11, TraversalPath::new_unchecked("1/11/"))]);
+        assert_eq!(
+            store.mark_complete_calls(),
+            vec![(11, TraversalPath::new_unchecked("0/"))]
+        );
+        let published = nats.get_published();
+        assert_eq!(published.len(), 1);
+        let request: NamespaceDeletionRequest = published[0].1.to_event().unwrap();
+        assert_eq!(request.traversal_path, "1/11/");
+    }
+
+    #[tokio::test]
+    async fn closes_due_deletion_with_unresolvable_path_without_dispatch() {
+        let store = Arc::new(MockNamespaceDeletionStore::new().with_due_deletions(vec![
+            NamespaceScheduleEntry {
+                namespace_id: 11,
+                traversal_path: TraversalPath::new_unchecked("0/"),
+            },
+        ]));
+        let nats = Arc::new(MockNatsServices::new());
+        let scheduler = NamespaceDeletionScheduler::new(
+            store.clone(),
+            Arc::new(MockCheckpointStore),
+            nats.clone(),
+            ScheduledTaskMetrics::new(),
+            orbit_server_config::AppConfig::embedded_defaults()
+                .schedule
+                .tasks
+                .namespace_deletion,
+        );
+
+        scheduler.run().await.unwrap();
+
+        assert!(store.schedule_calls().is_empty());
+        assert_eq!(
+            store.mark_complete_calls(),
+            vec![(11, TraversalPath::new_unchecked("0/"))]
+        );
+        assert!(nats.get_published().is_empty());
     }
 
     #[tokio::test]

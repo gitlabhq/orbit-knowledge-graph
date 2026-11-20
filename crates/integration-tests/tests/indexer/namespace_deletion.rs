@@ -49,6 +49,83 @@ async fn deletes_namespace_data_and_marks_schedule_complete() {
     assert_sibling_code_checkpoints_retained(&context).await;
 }
 
+const TOMBSTONED_ROOT_ID: i64 = 11;
+const TOMBSTONED_ROOT_PATH: &str = "1/11/";
+
+#[tokio::test]
+async fn schedules_the_valid_path_when_tombstones_share_a_version() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
+    seed_group_deletion_tombstones(&context).await;
+
+    run_namespace_deletion_scheduler(&context).await;
+
+    assert_eq!(
+        active_schedule_paths(&context).await,
+        vec![TOMBSTONED_ROOT_PATH.to_string()]
+    );
+}
+
+#[tokio::test]
+async fn reschedules_a_stuck_schedule_row_under_the_valid_path() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
+    seed_group_deletion_tombstones(&context).await;
+    run_namespace_deletion_scheduler(&context).await;
+    context
+        .execute(&format!(
+            "INSERT INTO {} (namespace_id, traversal_path, scheduled_deletion_date, _deleted) VALUES \
+             ({TOMBSTONED_ROOT_ID}, '{TOMBSTONED_ROOT_PATH}', '2024-01-01 00:00:00.000000', true), \
+             ({TOMBSTONED_ROOT_ID}, '0/', '2024-01-01 00:00:00.000000', false)",
+            t("namespace_deletion_schedule")
+        ))
+        .await;
+
+    run_namespace_deletion_scheduler(&context).await;
+
+    assert_eq!(
+        active_schedule_paths(&context).await,
+        vec![TOMBSTONED_ROOT_PATH.to_string()]
+    );
+}
+
+async fn seed_group_deletion_tombstones(context: &TestContext) {
+    context
+        .execute(&format!(
+            "INSERT INTO siphon_knowledge_graph_enabled_namespaces \
+             (id, root_namespace_id, traversal_path, _siphon_deleted, _siphon_replicated_at) VALUES \
+             (2, {TOMBSTONED_ROOT_ID}, '{TOMBSTONED_ROOT_PATH}', false, '2024-01-01 00:00:00.000000'), \
+             (2, {TOMBSTONED_ROOT_ID}, '0/', true, '2024-01-02 00:00:00.000000'), \
+             (2, {TOMBSTONED_ROOT_ID}, '{TOMBSTONED_ROOT_PATH}', true, '2024-01-02 00:00:00.000000')"
+        ))
+        .await;
+}
+
+async fn active_schedule_paths(context: &TestContext) -> Vec<String> {
+    let batches = context
+        .query(&format!(
+            "SELECT traversal_path FROM {} \
+             GROUP BY namespace_id, traversal_path \
+             HAVING argMax(_deleted, _version) = false \
+             ORDER BY traversal_path",
+            t("namespace_deletion_schedule")
+        ))
+        .await;
+    batches
+        .iter()
+        .flat_map(|batch| {
+            let column = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .expect("traversal_path must be a string column");
+            column
+                .iter()
+                .flatten()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 async fn seed_graph_data(context: &TestContext) {
     context
         .execute(&format!(
