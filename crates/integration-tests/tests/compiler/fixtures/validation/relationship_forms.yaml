@@ -91,3 +91,108 @@ cases:
         MATCH (g:Group {id: 1})--(n) RETURN n
     logical:
       expect: ["(Input neighbors (Project ... (Filter g.id IN [1] (NodeScan Group AS g))))"]
+
+  - name: A relationship type list normalizes to type alternatives
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"MergeRequest"}],"relationships":[{"type":["AUTHORED","ASSIGNED"],"from":"a","to":"b"}]}
+      gql: |
+        MATCH (a:User {id: 1})-[:AUTHORED|ASSIGNED]->(b:MergeRequest) RETURN a, b
+    logical:
+      expect: ["(EdgeScan AUTHORED|ASSIGNED a->b AS e0)"]
+
+  - name: A incoming neighbors pattern with the endpoint written after the center is a neighbors query
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"rel_types":["AUTHORED"],"direction":"incoming"}}
+      gql: |
+        MATCH (n)-[:AUTHORED]->(center:WorkItem {id: 1}) RETURN center, n
+    logical:
+      expect: ["(Input neighbors (Project ... (Filter center.id IN [1] (NodeScan WorkItem AS center))))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=center direction=incoming ... (_))"]
+
+  - name: A incoming neighbors pattern with the endpoint written before the center is a neighbors query
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"rel_types":["AUTHORED"],"direction":"incoming"}}
+      gql: |
+        MATCH (center:WorkItem {id: 1})<-[:AUTHORED]-(n) RETURN center, n
+    logical:
+      expect: ["(Input neighbors (Project ... (Filter center.id IN [1] (NodeScan WorkItem AS center))))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=center direction=incoming ... (_))"]
+
+  - name: A outgoing neighbors pattern with the endpoint written after the center is a neighbors query
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"direction":"outgoing"}}
+      gql: |
+        MATCH (n)<--(center:WorkItem {id: 1}) RETURN center, n
+    logical:
+      expect: ["(Input neighbors (Project ... (Filter center.id IN [1] (NodeScan WorkItem AS center))))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=center direction=outgoing ... (_))"]
+
+  - name: A outgoing neighbors pattern with the endpoint written before the center is a neighbors query
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"direction":"outgoing"}}
+      gql: |
+        MATCH (center:WorkItem {id: 1})-->(n) RETURN center, n
+    logical:
+      expect: ["(Input neighbors (Project ... (Filter center.id IN [1] (NodeScan WorkItem AS center))))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=center direction=outgoing ... (_))"]
+
+  - name: A both neighbors pattern with the endpoint written after the center is a neighbors query
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"direction":"both"}}
+      gql: |
+        MATCH (n)--(center:WorkItem {id: 1}) RETURN center, n
+    logical:
+      expect: ["(Input neighbors (Project ... (Filter center.id IN [1] (NodeScan WorkItem AS center))))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=center direction=both ... (_))"]
+
+  - name: A both neighbors pattern with the endpoint written before the center is a neighbors query
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"direction":"both"}}
+      gql: |
+        MATCH (center:WorkItem {id: 1})--(n) RETURN center, n
+    logical:
+      expect: ["(Input neighbors (Project ... (Filter center.id IN [1] (NodeScan WorkItem AS center))))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=center direction=both ... (_))"]
+
+  - name: Returning a neighbors center by name is a neighbors query
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"center","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both"}}
+      gql: |
+        MATCH (center:User {id: 1})--(n) RETURN center, n
+    logical:
+      expect: ["(Input neighbors (Project ... (Filter center.id IN [1] (NodeScan User AS center))))"]
+
+  - name: Returning neighbors center properties projects them
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"center","entity":"User","node_ids":[1],"columns":["username","state"]}],"neighbors":{"direction":"both"}}
+      gql: |
+        MATCH (center:User {id: 1})--(n) RETURN center.username, center.state, n
+    logical:
+      expect: ["(Input neighbors (Project center.username, center.state (_)))"]

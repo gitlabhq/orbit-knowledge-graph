@@ -91,3 +91,21 @@ cases:
         MATCH (u:User) WHERE u.id IN ['7'] RETURN u
     logical:
       expect: ["(Filter u.id IN [7] (NodeScan User AS u))"]
+
+  - name: Ids above 2^53 and negative ids keep their exact values from integers and digit strings
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,"9007199254740993",-42]}]}
+      gql: |
+        MATCH (u:User) WHERE u.id IN [1, '9007199254740993', -42] RETURN u
+    logical:
+      expect: ["(Filter u.id IN [1, 9007199254740993, -42] (NodeScan User AS u))"]
+
+  - name: An id range takes an integer or a digit string above 2^53 at either end
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":9007199254740900,"end":"9007199254740993"}}]}
+      gql: |
+        MATCH (u:User) WHERE u.id >= 9007199254740900 AND u.id <= 9007199254740993 RETURN u
+    logical:
+      expect: ["(Filter u.id >= 9007199254740900, u.id <= 9007199254740993 (NodeScan User AS u))"]
