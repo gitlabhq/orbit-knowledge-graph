@@ -2,26 +2,40 @@ config:
   stdlib: []
 
 stages:
-  # Only top-level instructions after a FROM count, so HEALTHCHECK CMD, ONBUILD
-  # and anything before the first FROM define nothing.
-  - name: instruction-defs
-    repeat: true
-    rules:
-      - match: '(source_file $$$PRE $F:from_instruction $$$A (expose_instruction $$$X $Q:(expose_port $$$E) $$$Y) $$$B)'
-        replace: '(source_file @$ROOT $$$PRE $F $$$A (expose_instruction $$$X (__ports (__def (__defname @$Q|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__port)) $$$E) $$$Y) $$$B)'
-      - match: '(source_file $$$PRE $F:from_instruction $$$A (entrypoint_instruction $C:json_string_array) $$$B)'
-        replace: '(source_file @$ROOT $$$PRE $F $$$A (__def (__defname @$C|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__entrypoint) (__fqn_segment @$C|regex_replace("(?s)^.*$", "ENTRYPOINT"))) $$$B)'
-      - match: '(source_file $$$PRE $F:from_instruction $$$A (entrypoint_instruction $C:shell_command) $$$B)'
-        replace: '(source_file @$ROOT $$$PRE $F $$$A (__def (__defname @$C|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__entrypoint) (__fqn_segment @$C|regex_replace("(?s)^.*$", "ENTRYPOINT"))) $$$B)'
-      - match: '(source_file $$$PRE $F:from_instruction $$$A (cmd_instruction $C:json_string_array) $$$B)'
-        replace: '(source_file @$ROOT $$$PRE $F $$$A (__def (__defname @$C|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__command) (__fqn_segment @$C|regex_replace("(?s)^.*$", "CMD"))) $$$B)'
-      - match: '(source_file $$$PRE $F:from_instruction $$$A (cmd_instruction $C:shell_command) $$$B)'
-        replace: '(source_file @$ROOT $$$PRE $F $$$A (__def (__defname @$C|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__command) (__fqn_segment @$C|regex_replace("(?s)^.*$", "CMD"))) $$$B)'
-
   - name: normalize
     rules:
       - match: '(source_file $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
+
+  - name: set-aside-nested-instructions
+    rules:
+      - match: '(healthcheck_instruction $$$A (cmd_instruction $$$K) $$$B)'
+        replace: '(healthcheck_instruction $$$A (__inert $$$K) $$$B)'
+      - match: '(onbuild_instruction $$$A (cmd_instruction $$$K) $$$B)'
+        replace: '(onbuild_instruction $$$A (__inert $$$K) $$$B)'
+      - match: '(onbuild_instruction $$$A (entrypoint_instruction $$$K) $$$B)'
+        replace: '(onbuild_instruction $$$A (__inert $$$K) $$$B)'
+      - match: '(onbuild_instruction $$$A (expose_instruction $$$K) $$$B)'
+        replace: '(onbuild_instruction $$$A (__inert $$$K) $$$B)'
+
+  - name: set-aside-nested-ports
+    repeat: true
+    rules:
+      - match: '(__inert $$$A $Q:(expose_port $$$E) $$$B)'
+        replace: '(__inert $$$A (__inert $$$E) $$$B)'
+
+  - name: instruction-defs
+    rules:
+      - match: '$Q:(expose_port $$$E)'
+        replace: '(__ports (__def (__defname @$Q|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__port)) $$$E)'
+      - match: '(entrypoint_instruction $C:json_string_array)'
+        replace: '(__def (__defname @$C|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__entrypoint) (__fqn_segment @$C|regex_replace("(?s)^.*$", "ENTRYPOINT")))'
+      - match: '(entrypoint_instruction $C:shell_command)'
+        replace: '(__def (__defname @$C|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__entrypoint) (__fqn_segment @$C|regex_replace("(?s)^.*$", "ENTRYPOINT")))'
+      - match: '(cmd_instruction $C:json_string_array)'
+        replace: '(__def (__defname @$C|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__command) (__fqn_segment @$C|regex_replace("(?s)^.*$", "CMD")))'
+      - match: '(cmd_instruction $C:shell_command)'
+        replace: '(__def (__defname @$C|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__command) (__fqn_segment @$C|regex_replace("(?s)^.*$", "CMD")))'
 
   - name: drop-self-expansions
     repeat: true
@@ -100,6 +114,20 @@ stages:
     rules:
       - match: '(__from $$$H)'
         replace: '(__def $$$H)'
+
+  # Instructions before the first FROM belong to no stage and stay direct
+  # children of the file after grouping.
+  - name: drop-instructions-before-first-from
+    repeat: true
+    rules:
+      - match: '(__source_file $$$A (expose_instruction $$$X) $$$B)'
+        replace: '(__source_file @$ROOT $$$A $$$B)'
+      - match: '(__source_file $$$A (__def (__port)) $$$B)'
+        replace: '(__source_file @$ROOT $$$A $$$B)'
+      - match: '(__source_file $$$A (__def (__entrypoint)) $$$B)'
+        replace: '(__source_file @$ROOT $$$A $$$B)'
+      - match: '(__source_file $$$A (__def (__command)) $$$B)'
+        replace: '(__source_file @$ROOT $$$A $$$B)'
 
   - name: tag-defs
     rules:

@@ -44,6 +44,7 @@ tests:
       RETURN s.name AS stage, d.definition_type AS kind, d.name AS name
       ORDER BY stage, kind, name
     assert:
+      - { row_count: 8 }
       - { row: { stage: "builder", kind: "Command", name: "echo building" } }
       - { row: { stage: "runtime", kind: "Command", name: '["--port", "8080"]' } }
       - { row: { stage: "runtime", kind: "Command", name: '["--second"]' } }
