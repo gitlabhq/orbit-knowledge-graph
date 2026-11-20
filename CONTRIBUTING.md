@@ -38,8 +38,9 @@ For test layers and CI jobs, see [Testing](docs/pages/engineering/testing/README
   its area file under `scripts/linting/comments/ledger/`. See [the comment ban](scripts/linting/README.md#comment-ban).
 - Rust doc examples compile in `mise test:fast`, and `ignore` blocks fail it. Use a plain or `no_run` block with hidden setup lines starting with `#`, or `text` for pseudo-code.
 - Reuse infrastructure before you add new infrastructure.
-- Declare each crates.io or Git dependency once, in `[workspace.dependencies]` in
-  the root `Cargo.toml`. In the crate, inherit it with `name = { workspace = true }`,
+- Declare each crates.io, Git, or internal path dependency once, in
+  `[workspace.dependencies]` in the root `Cargo.toml` (an internal crate is
+  `name = { path = "crates/name" }`). In the crate, inherit it with `name = { workspace = true }`,
   and add `optional = true` or `features` there when the crate needs them.
   `mise lint:deps`, CI, and a pre-commit hook run
   `scripts/checks/check_workspace_deps.py` to find crate-local declarations.
