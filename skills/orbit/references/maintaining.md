@@ -57,7 +57,7 @@ without a graph query.
 6. "How many MRs were merged per project in the gitlab-org group last month?"
 7. "Which projects depend on the gitlab-shell gem?"
 8. "Which MRs touched both app/models/user.rb and app/models/project.rb?"
-9. "Who reviewed or approved the most MRs in gitlab-org/gitlab last quarter, humans only?" (per-user aggregation; see `references/per-user-period.md`)
+9. "Who merged the most MRs in gitlab-org/gitlab last quarter, humans only?"
 
 ### Should fire glab (not orbit)
 
