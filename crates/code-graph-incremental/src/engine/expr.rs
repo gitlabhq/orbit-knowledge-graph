@@ -50,6 +50,8 @@ pub enum Op {
     Unique,
     /// The values that stand for an instance of a type, not the type itself.
     Instances,
+    /// Each node value, an instance as its type's node.
+    Nodes,
 }
 
 /// A `select` pattern and its key, shared by every phase so trees can keep
@@ -363,11 +365,12 @@ impl<'s> Parser<'s, '_> {
             }
             "first" | "every" => return self.each(word, piped),
             "union" => return Ok(Expr::Union(self.args(piped)?.into())),
-            "minus" | "unique" | "instances" => {
+            "minus" | "unique" | "instances" | "nodes" => {
                 let args = self.args(piped)?;
                 let (op, arity) = match word {
                     "minus" => (Op::Minus, 2),
                     "unique" => (Op::Unique, 1),
+                    "nodes" => (Op::Nodes, 1),
                     _ => (Op::Instances, 1),
                 };
                 if args.len() != arity {

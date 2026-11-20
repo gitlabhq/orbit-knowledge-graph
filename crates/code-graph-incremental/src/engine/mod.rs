@@ -802,6 +802,13 @@ impl<'t, S: Store> Run<'t, S> {
                     }
                 }
             }
+            Op::Nodes => {
+                for &v in &args[0] {
+                    if let Val::Node(l) | Val::Type(l) = v {
+                        push(&mut out, Val::Node(l));
+                    }
+                }
+            }
             Op::Project => {
                 if let Some(project) = self.project {
                     push(

@@ -258,30 +258,10 @@ static FUNCTIONS: &[Function<Core>] = &[
         let attr = node(cx, a, 0).sym();
         cx.field(attr)
     }),
-    function!(Flow, "lookup", [one, one, set], @uses ["core"."declared"], |cx, a| {
-        let (Some(name), Some(site)) = (a[0].first().and_then(|&v| cx.text(v)), arg(cx, a, 1)) else {
-            return Vals::new();
-        };
-        let roles = std::rc::Rc::clone(&cx.state().roles);
-        cx.lookup(name, site_role(site), &roles, &a[2])
-    }),
     function!(Flow, "meaning", [one, one], @uses ["core"."declared"], |cx, a| {
         let site = node(cx, a, 1);
         let roles = std::rc::Rc::clone(&cx.state().roles);
         cx.meaning(a[0][0], site, &roles)
-    }),
-    function!(Flow, "unmatched", [one, one], @uses ["core"."declared"], |cx, a| {
-        match arg(cx, a, 1) {
-            Some(m) => {
-                let roles = std::rc::Rc::clone(&cx.state().roles);
-                cx.unmatched(a[0][0], m, &roles)
-            }
-            None => Vals::new(),
-        }
-    }),
-    function!(Flow, "callable", [one], @uses ["core"."declared"], |cx, a| {
-        let roles = std::rc::Rc::clone(&cx.state().roles);
-        cx.callable(a[0][0], &roles)
     }),
     function!(required Flow, "declared", [one, one, one]),
     function!(required Flow, "members", [one, one, one]),

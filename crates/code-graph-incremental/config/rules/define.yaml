@@ -1,4 +1,25 @@
 define:
+  site_role(ROOT):
+    '$C:(__call $ROOT:__callee)': 'call_role($C)'
+    '(__call)': 'call_role($ROOT)'
+    '$K:(__callee $ROOT)': 'site_role($K)'
+    '_': '"value"'
+  call_role(ROOT):
+    '(__call (__type))': '"type"'
+    '(__call (__property))': '"value"'
+    '_': '"callable"'
+  lookup(name, site, values): 'values | member_in(name, site_role(site))'
+  member_in(ROOT, name, role):
+    '(__def)': 'members(nodes($ROOT), name, role)'
+    '(__name)': 'plain($ROOT)'
+  unmatched(ROOT, m):
+    '_ when instances($ROOT)': none
+    '(__def) when members($ROOT, m, site_role(m))': none
+    '(_)': '$ROOT'
+  callable(ROOT):
+    '(__def $K:__callable) when instances($ROOT)': 'members(nodes($ROOT), $K, "callable")'
+    '_ when instances($ROOT)': 'nodes($ROOT)'
+    '(__def) when fills($ROOT, "callable")': 'plain($ROOT)'
   members(owner, name, role): >-
     declared(owner, name, role)
     or other_parts(owner) | declared(name, role)
@@ -65,9 +86,9 @@ define:
     '_': '$ROOT | named'
   on_object(ROOT, SITE):
     '(_ (__object !(__call) !(__object) !(__qualifier) !(__member) !(__ivar)))': 'on_named($ROOT, $SITE)'
-    '(_ $O:__object)': 'lookup($ROOT, $SITE, $O | type, $O | type | type_node | type)'
+    '(_ $O:__object)': 'lookup($ROOT, $SITE, union($O | type, $O | type | type_node | type))'
   on_named(ROOT, SITE):
-    '(_ $O:__object)': 'lookup($ROOT, $SITE, $O | type, $O | type | type_node | type)'
+    '(_ $O:__object)': 'lookup($ROOT, $SITE, union($O | type, $O | type | type_node | type))'
   named(ROOT):
     '(_ (__qualifier))': '$ROOT | name'
     '(_ $I:__ivar)': '$I | ivar | meaning($ROOT)'

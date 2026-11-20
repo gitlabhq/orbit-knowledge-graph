@@ -1,49 +1,14 @@
 use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
-use super::{Core, Ref, Roles, role_code, site_role, values};
+use super::{Core, Ref, Roles, role_code, values};
 use crate::canonical::Canonical as C;
-use crate::engine::{Cursor, Cx, Loc, Store, Val, Vals, of, one};
+use crate::engine::{Cursor, Cx, Loc, Store, Val, Vals, one};
 use crate::tree::Role;
 
 type Parts<'t, S> = SmallVec<[Cursor<'t, S>; 4]>;
 
 impl<'t, S: Store> Cx<'_, 't, Core, S> {
-    pub(super) fn lookup(&mut self, name: u32, role: Role, roles: &Roles, values: &[Val]) -> Vals {
-        let mut found = Vals::new();
-        for &v in values {
-            let hits = match self.view(v) {
-                Some(Ref::Def(n) | Ref::Type(n)) => {
-                    of(self.members(self.jump(n), name, role, roles))
-                }
-                Some(Ref::Import) => one(v),
-                _ => continue,
-            };
-            for hit in hits {
-                if !found.contains(&hit) {
-                    found.push(hit);
-                }
-            }
-        }
-        found
-    }
-
-    pub(super) fn unmatched(&mut self, value: Val, member: Cursor<'t, S>, roles: &Roles) -> Vals {
-        let keep = match self.view(value) {
-            Some(Ref::Type(_)) | None => false,
-            Some(Ref::Def(n)) => {
-                let role = site_role(member);
-                self.members(self.jump(n), member.sym(), role, roles)
-                    .is_empty()
-            }
-            Some(_) => true,
-        };
-        match keep {
-            true => one(value),
-            false => Vals::new(),
-        }
-    }
-
     fn parts(&mut self, owner: Cursor<'t, S>) -> Parts<'t, S> {
         let same_name = owner
             .child_sym(C::DefName)
@@ -112,20 +77,6 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
             .and_then(|class| self.members(class, name, role, roles).first().copied())
             .filter(|&member| !(both(target) && both(member)));
         member.map_or(value, |m| Val::Node(m.into()))
-    }
-
-    pub(super) fn callable(&mut self, target: Val, roles: &Roles) -> Vals {
-        match self.view(target) {
-            Some(Ref::Type(n)) => {
-                let class = self.jump(n);
-                match class.child_sym(C::Callable) {
-                    Some(name) => of(self.members(class, name, Role::Callable, roles)),
-                    None => of([class]),
-                }
-            }
-            Some(Ref::Def(n)) if roles.has(self.jump(n), Role::Callable) => one(target),
-            _ => Vals::new(),
-        }
     }
 
     fn ancestors(&mut self, class: Loc) -> FxHashSet<Loc> {
