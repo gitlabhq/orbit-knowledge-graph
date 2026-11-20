@@ -512,7 +512,14 @@ const MAX_FIXPOINT_ROUNDS: u32 = 64;
 
 enum Memo {
     Busy(Vals),
-    Done { vals: Vals, deps: u8, stamp: u64 },
+    /// A result; `within` holds, for a result that read unfinished calls, the
+    /// fixpoint round it belongs to and those calls.
+    Done {
+        vals: Vals,
+        deps: u8,
+        stamp: u64,
+        within: Option<(u64, Vec<Key>)>,
+    },
 }
 
 /// Results by call. An entry that read state stays until a sweep finds that
@@ -554,6 +561,8 @@ pub struct Run<'t, S: Store = Compact> {
     reading: u8,
     memo: Table,
     reads: FxHashSet<Key>,
+    /// Bumped each time a cycle head reruns, retiring results of the last round.
+    round: u64,
 }
 
 impl<'t, S: Store> Run<'t, S> {
@@ -614,6 +623,7 @@ impl<'t, S: Store> Run<'t, S> {
             reading: u8::MAX,
             memo: Table::default(),
             reads: FxHashSet::default(),
+            round: 0,
         }
     }
 
@@ -830,8 +840,11 @@ impl<'t, S: Store> Run<'t, S> {
         table.entries.retain(|_, memo| match memo {
             Memo::Busy(_) => true,
             Memo::Done {
-                deps, stamp: at, ..
-            } => stamp(epochs, *deps) == *at,
+                deps,
+                stamp: at,
+                within,
+                ..
+            } => within.is_none() && stamp(epochs, *deps) == *at,
         });
         table.swept = table.entries.len();
     }
@@ -877,9 +890,10 @@ impl<'t, S: Store> Run<'t, S> {
     }
 
     /// Cached calls compute least fixpoints. A call already in progress
-    /// yields its value so far (empty at first) and is noted as read; when the
-    /// call it heads finishes, the call reruns with the union of its results
-    /// until nothing grows. A result that read an unfinished call is never
+    /// yields its value so far (empty at first) and is noted as read. The
+    /// outermost unfinished call of a cycle reruns with the union of its
+    /// results until nothing grows; an inner one that read an outer call
+    /// returns its partial value, which the outer rerun recomputes. A result that read an unfinished call is never
     /// stored if Pure; a Flow one lives until its states change.
     fn memoized(&mut self, key: Key, deps: u8, mut compute: impl FnMut(&mut Self) -> Vals) -> Vals {
         match self.memo.entries.get(&key) {
@@ -888,8 +902,22 @@ impl<'t, S: Store> Run<'t, S> {
                 self.reads.insert(key);
                 return partial;
             }
-            Some(Memo::Done { vals, deps, stamp }) if self.stamp(*deps) == *stamp => {
-                return vals.clone();
+            Some(Memo::Done {
+                vals,
+                deps,
+                stamp,
+                within,
+            }) if self.stamp(*deps) == *stamp
+                && within
+                    .as_ref()
+                    .is_none_or(|(round, _)| *round == self.round) =>
+            {
+                let vals = vals.clone();
+                if let Some((_, read)) = within {
+                    let read = read.clone();
+                    self.reads.extend(read);
+                }
+                return vals;
             }
             _ => {}
         }
@@ -903,7 +931,8 @@ impl<'t, S: Store> Run<'t, S> {
         let mut rounds = 0;
         loop {
             found = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || compute(self));
-            if !self.reads.remove(&key) || rounds == MAX_FIXPOINT_ROUNDS {
+            let heads = self.reads.remove(&key);
+            if !heads || !self.reads.is_empty() || rounds == MAX_FIXPOINT_ROUNDS {
                 break;
             }
             let Some(Memo::Busy(partial)) = self.memo.entries.get(&key) else {
@@ -920,18 +949,26 @@ impl<'t, S: Store> Run<'t, S> {
                 break;
             }
             self.memo.entries.insert(key.clone(), Memo::Busy(grown));
+            self.round += 1;
             rounds += 1;
         }
-        let cut = !self.reads.is_empty();
+        let read: Vec<Key> = self.reads.iter().cloned().collect();
         self.reads.extend(outer);
-        if (cut && deps == 0) || epochs != self.epochs {
+        if epochs != self.epochs {
             self.memo.entries.remove(&key);
         } else {
             let stamp = self.stamp(deps);
+            let within = (!read.is_empty()).then(|| (self.round, read));
             let vals = found.clone();
-            self.memo
-                .entries
-                .insert(key, Memo::Done { vals, deps, stamp });
+            self.memo.entries.insert(
+                key,
+                Memo::Done {
+                    vals,
+                    deps,
+                    stamp,
+                    within,
+                },
+            );
         }
         found
     }
