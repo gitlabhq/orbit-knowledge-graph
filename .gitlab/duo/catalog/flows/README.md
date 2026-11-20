@@ -15,9 +15,9 @@ this table.
 
 | Setting | Value |
 |---|---|
-| `SKILLS_REF` in `docs-write.yml` | `7ff82867e8bb0b036dd0292af3db469141fa411b`, the squash commit of `team/skills` MR 30 on main |
+| `SKILLS_REF` in `docs-write.yml` | `fb09aa52de458d8f9295e644c9c05f700ea58914`, the head of `team/skills` MR 38 (unmerged). Re-pin to its squash commit once it merges. |
 | `MODE` in `docs-write.yml` | `full` |
-| `FLOW_USER` in `docs-write.yml` | `ai-docs-write-gitlab-org_510eee`: the service account that authors the flow's notes. Under composite identity `GET /user` returns the person who triggered the run, so the skills need the name. |
+| `FLOW_USER` in `docs-write.yml` | `44621578`, the user ID of `ai-docs-write-gitlab-org_510eee`, the service account that authors the flow's notes. Under composite identity `GET /user` returns the person who triggered the run, so the skills need it. An ID survives a rename. |
 | `DOCS_REVIEWERS` in `docs-write.yml` | `fneill,z_painter`: technical writers who approve and merge the docs MRs |
 | AI Catalog item in this project | `docs-write` (item 1020976), private, enabled. Trigger: **Mention** only during rollout. Service account `ai-docs-write-gitlab-org_510eee`, Reporter in `team/skills`. |
 
