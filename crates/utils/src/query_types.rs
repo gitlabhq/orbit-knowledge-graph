@@ -2,12 +2,12 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum TimeZone {
     Utc,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum ScalarType {
     String,
     Int64,
@@ -21,7 +21,7 @@ pub enum ScalarType {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum SqlType {
     String,
     Int64,
@@ -89,7 +89,7 @@ impl From<ScalarType> for SqlType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct ParamValue {
     pub data_type: SqlType,
     pub value: Value,

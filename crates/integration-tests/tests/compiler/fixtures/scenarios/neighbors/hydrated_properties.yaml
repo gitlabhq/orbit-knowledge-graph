@@ -15,4 +15,4 @@ cases:
         - 1/
     physical:
       clickhouse:
-        hydration: dynamic
+        hydration: { dynamic: {} }

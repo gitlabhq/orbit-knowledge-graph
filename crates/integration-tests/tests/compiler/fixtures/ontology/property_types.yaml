@@ -10,7 +10,7 @@ cases:
       expect: ["(Filter g.score = 42, ... (_))"]
     physical:
       clickhouse:
-        params: [{ value: 42, type: Float64 }]
+        params: [{ value: 1, data_type: Int64 }, { value: 67650, data_type: Int64 }, { value: " [truncated]", data_type: String }, { value: "", data_type: String }, { value: "Group", data_type: String }, { value: "1/", data_type: String }, { value: 42, data_type: Float64 }, { value: false, data_type: Bool }]
 
   - name: A filter on a property that cannot be filtered is rejected
     ontology_overlay: property_types

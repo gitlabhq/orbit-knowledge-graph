@@ -10,7 +10,8 @@ use crate::ast::Node;
 use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
 use crate::types::SecurityContext;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum HydrationPlan {
     None,
     /// One template per input node, with IDs to be filled at runtime.
@@ -20,8 +21,7 @@ pub enum HydrationPlan {
     Dynamic(Vec<DynamicEntityColumns>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, strum::IntoStaticStr)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum HydrationKind {
     None,
@@ -39,7 +39,7 @@ impl HydrationPlan {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct HydrationTemplate {
     pub entity_type: String,
     /// Used to correlate hydration results back to the base query's
@@ -66,7 +66,7 @@ pub struct HydrationTemplate {
 }
 
 /// Pre-resolved column spec for an entity type in dynamic hydration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct DynamicEntityColumns {
     pub entity_type: String,
     pub destination_table: String,
@@ -78,7 +78,7 @@ pub struct DynamicEntityColumns {
 }
 
 /// A column that must be resolved from a remote service rather than ClickHouse.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct VirtualColumnRequest {
     pub column_name: String,
     pub service: String,

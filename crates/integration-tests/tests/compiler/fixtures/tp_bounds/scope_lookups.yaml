@@ -27,6 +27,7 @@ cases:
           reject: ["(Scan Table(gl_work_item) AS rel)"]
         hydration:
           static:
+            - { node_alias: p, destination_table: gl_project, columns: [id, full_path, name, visibility_level] }
             - { node_alias: rel, destination_table: gl_work_item, injected_columns: [] }
 
   - name: A project filter on the callee bounds the caller's authorization scan

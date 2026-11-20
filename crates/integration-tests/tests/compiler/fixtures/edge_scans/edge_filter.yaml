@@ -26,7 +26,7 @@ physical:
     emitted:
       expect:
         - (Filter _orbit_edge_0.target_id = 2, ... (_))
-    params: [{ value: 2, type: Int64 }]
+    params: [{ value: "1/", data_type: String }, { value: "0/", data_type: String }, { value: 1, data_type: Int64 }, { value: CALLS, data_type: String }, { value: Definition, data_type: String }, { value: 2, data_type: Int64 }, { value: false, data_type: Bool }]
   duckdb:
     planned:
       expect:

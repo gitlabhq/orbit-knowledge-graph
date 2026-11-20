@@ -48,6 +48,7 @@ cases:
               entity_type: File
               virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
               columns: [id, name, project_id, commit_sha, branch, path]
+            - { node_alias: b, entity_type: Branch, columns: [id, name] }
 
   - name: A merge request diff stays out of the SQL and is hydrated
     query:
@@ -109,6 +110,7 @@ cases:
             - node_alias: f
               columns: [id, project_id, commit_sha, branch, path]
               injected_columns: [project_id, commit_sha, branch, path]
+            - { node_alias: b, entity_type: Branch, columns: [id, name] }
 
   - name: A definition and its file each hydrate their own content
     query:
@@ -140,7 +142,7 @@ cases:
         hydration:
           static:
             - node_alias: f
-              virtual_filters: [{ property: content, op: eq, value: x }]
+              virtual_filters: [[content, { op: eq, value: x }]]
               filter_injected_columns: []
 
   - name: A bare JSON value and an inline GQL property on a virtual property hydrate the same equality filter
@@ -154,7 +156,7 @@ cases:
         hydration:
           static:
             - node_alias: f
-              virtual_filters: [{ property: content, op: eq, value: abc }]
+              virtual_filters: [[content, { op: eq, value: abc }]]
 
   - name: A filter on an unselected virtual property resolves it only for the filter
     query:
@@ -168,7 +170,7 @@ cases:
           static:
             - node_alias: f
               virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
-              virtual_filters: [{ property: content, op: contains, value: needle }]
+              virtual_filters: [[content, { op: contains, value: needle }]]
               filter_injected_columns: [content]
 
   - name: A filter on a selected virtual property resolves it once and keeps it

@@ -277,6 +277,14 @@ pub(crate) fn subset_mismatch(
                 Some(found) => subset_mismatch(&format!("{path}.{key}"), value, found),
                 None => Some(format!("{path}.{key} is missing")),
             }),
+        (serde_json::Value::Object(expected), serde_json::Value::Array(actual)) => {
+            expected.iter().find_map(|(key, value)| {
+                match key.parse::<usize>().ok().and_then(|i| actual.get(i)) {
+                    Some(found) => subset_mismatch(&format!("{path}[{key}]"), value, found),
+                    None => Some(format!("{path}[{key}] is missing")),
+                }
+            })
+        }
         (serde_json::Value::Array(expected), serde_json::Value::Array(actual))
             if expected.len() == actual.len() =>
         {

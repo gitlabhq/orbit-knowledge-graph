@@ -13,7 +13,7 @@ cases:
         parameterized_sql:
           contains: ["mr.state = {p"]
           not_contains: [opened]
-        params: [{ value: opened, type: String }]
+        params: [{ value: "1/", data_type: String }, { value: "opened", data_type: String }, { value: false, data_type: Bool }, { value: 1, data_type: Int64 }, { value: 190650, data_type: Int64 }, { value: " [truncated]", data_type: String }, { value: "", data_type: String }, { value: "AUTHORED", data_type: String }, { value: "User", data_type: String }, { value: "MergeRequest", data_type: String }]
 
   - name: Rendered SQL inlines an IN filter array
     query:
