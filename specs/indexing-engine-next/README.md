@@ -68,7 +68,9 @@ What it doesn't prove:
 
 - The NATS behaviors are assumptions. A probe against a local NATS 2.12.4 confirmed the 11 that the spec uses. The integration tests of 1b will check them in CI.
 - A wipe and a duplicate together give 11M states or more, too many to compare as graphs.
-- Each pod has one slot, so the model can't show one pod with two runs of a key. A unit test covers the holder check for that case.
+- Each pod has one slot, so the model can't show one pod with two runs of a key. A unit test covers the holder check for that case, before and after a wipe.
+- A pod reads the generation and takes the lease in one step. In NATS, the generation and the lease are two key-value entries, so a wipe can come between the read and the write. Two runs can then get the same fence. 1b must make it one step: the recovery writes the generation into the lease value, or a run ID goes beside the fence.
+- The spec drops a republish while the task has a live copy. NATS drops a message ID only for 2 min after the first publish. A later republish stores a second copy, and the spec covers that only as its duplicate fault, at most once.
 - The liveness check needs faults to stop at some point. A cluster that keeps failing forever makes no progress, and no protocol can fix that.
 - The recovery campaign, the sweeps and the reconcilers aren't in the spec. The spec hands their work to them and stops there.
 
