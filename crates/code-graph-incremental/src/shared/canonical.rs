@@ -228,6 +228,15 @@ pub enum Canonical {
     ImportTag,
     #[strum(serialize = "__import_digest")]
     ImportDigest,
+    #[strum(serialize = "__port", props(def_type = "true", display = "Port"))]
+    Port,
+    #[strum(
+        serialize = "__entrypoint",
+        props(def_type = "true", display = "Entrypoint")
+    )]
+    Entrypoint,
+    #[strum(serialize = "__command", props(def_type = "true", display = "Command"))]
+    Command,
 }
 
 impl From<Canonical> for u16 {

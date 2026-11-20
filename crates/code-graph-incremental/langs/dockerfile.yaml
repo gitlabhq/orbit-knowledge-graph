@@ -2,7 +2,8 @@
 # Handles: FROM stages as class-like definitions (the base image is an
 # ImportedSymbol inside the stage), ARG and ENV pairs as variable definitions,
 # COPY --from=<stage> and FROM <stage> as calls to the stage, $VAR / ${VAR}
-# expansions as calls to the variable definition.
+# expansions as calls to the variable definition, EXPOSE ports and ENTRYPOINT/CMD
+# as Port, Entrypoint and Command definitions.
 
 config:
   stdlib: []
@@ -56,6 +57,19 @@ stages:
         replace: '(__def (__defname @$N) (__variable) $V)'
       - match: '(env_pair name: $N value:? $V)'
         replace: '(__def (__defname @$N) (__variable) $V)'
+
+  - name: instruction-defs
+    rules:
+      - match: '$P:expose_port'
+        replace: '(__def (__defname @$P) (__port))'
+      - match: '(entrypoint_instruction $C:json_string_array)'
+        replace: '(__def (__defname @$C) (__entrypoint))'
+      - match: '(entrypoint_instruction $C:shell_command)'
+        replace: '(__def (__defname @$C) (__entrypoint))'
+      - match: '(cmd_instruction $C:json_string_array)'
+        replace: '(__def (__defname @$C) (__command))'
+      - match: '(cmd_instruction $C:shell_command)'
+        replace: '(__def (__defname @$C) (__command))'
 
   - name: from-heads
     rules:
@@ -176,6 +190,12 @@ display:
         tag: { def_type: Impl }
       - match: '(__def (__variable))'
         tag: { def_type: Variable }
+      - match: '(__def (__port))'
+        tag: { def_type: Port }
+      - match: '(__def (__entrypoint))'
+        tag: { def_type: Entrypoint }
+      - match: '(__def (__command))'
+        tag: { def_type: Command }
       - match: '(__def (__constant))'
         tag: { def_type: Constant }
       - match: '(__def (__static_constant))'

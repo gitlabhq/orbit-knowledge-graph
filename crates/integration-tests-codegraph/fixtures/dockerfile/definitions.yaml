@@ -11,7 +11,6 @@ fixtures:
       FROM alpine:3.19 AS runtime
       ARG APP_USER=app
       ENV APP_HOME=/opt/${APP_USER}
-      EXPOSE 8080
 
 tests:
   - name: "each named stage is a Class definition and each ARG/ENV a Variable"
