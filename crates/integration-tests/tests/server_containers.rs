@@ -12,6 +12,7 @@ mod server {
     pub mod analytics;
     pub mod clickhouse_setup;
     pub mod cluster_health;
+    pub mod concurrent_queries;
     pub mod corpus_smoke;
     pub mod data_correctness;
     pub mod error_outcomes;
@@ -20,6 +21,7 @@ mod server {
     pub mod http_tls;
     pub mod performance;
     pub mod query_cache;
+    pub mod read_only_client;
     pub mod schema_readiness;
     pub mod status;
     pub mod telemetry;

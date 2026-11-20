@@ -278,6 +278,9 @@
             "null"
           ]
         },
+        "compatibility": {
+          "type": "string"
+        },
         "session_settings": {
           "type": "object",
           "additionalProperties": {
@@ -305,6 +308,7 @@
         "database",
         "url",
         "username",
+        "compatibility",
         "replicated",
         "profiling"
       ]

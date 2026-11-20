@@ -16,9 +16,6 @@ tempfile = { workspace = true }
 orbit-log-fields = { workspace = true }
 dunce = { workspace = true }
 
-[dev-dependencies]
-tempfile = { workspace = true }
-
 [lib]
 name = "gitalisk_core"
 path = "src/lib.rs"

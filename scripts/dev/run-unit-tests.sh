@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Run unit tests: --lib tests from all workspace crates plus --bin tests
 # for binary-only crates that contain test modules, plus the integration
-# test targets of code-graph-incremental (one --test per file in its tests/),
-# plus the workspace doctests.
+# test targets of code-graph-incremental and indexing-engine-next (one --test
+# per file in their tests/), plus the workspace doctests.
 #
 # integration-tests targets (local, containers, cli) run in their own CI
 # jobs to avoid pulling the entire dependency graph into this job.
@@ -23,7 +23,10 @@ args=(cargo nextest run --workspace \
   --test vfs_paths --test safe_fs \
   --test budgets --test export --test link --test parse --test pipeline \
   --test resolve --test rewrite --test snapshot --test tree_storage \
-  --test macros --test introduced_versions)
+  --test macros --test introduced_versions \
+  --test build --test config --test dedupe --test errors --test jobs \
+  --test lanes --test pools --test reconcilers --test sweeps --test testkit \
+  --test protocol --test simulator)
 
 # Append caller's arguments last (e.g. --profile ci) so they can
 # override defaults.

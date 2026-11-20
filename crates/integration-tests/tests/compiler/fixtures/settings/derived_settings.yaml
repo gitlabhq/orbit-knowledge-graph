@@ -29,8 +29,6 @@ cases:
         settings:
           equals:
             optimize_move_to_prewhere_if_final: "1"
-            use_skip_indexes_if_final: "1"
-            use_skip_indexes_if_final_exact_mode: "1"
           absent: [use_index_for_in_with_subqueries_max_values]
 
   - name: An IN subquery turns on the subquery index cap

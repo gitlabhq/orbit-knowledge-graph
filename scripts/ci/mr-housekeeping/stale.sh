@@ -13,37 +13,18 @@
 
 set -euo pipefail
 
-PROJECT_ID="${CI_PROJECT_ID:?CI_PROJECT_ID is required}"
+# shellcheck source=scripts/ci/mr-housekeeping/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
 IDLE_DAYS="${STALE_IDLE_DAYS:-5}"
 GRACE_DAYS="${STALE_GRACE_DAYS:-2}"
 PREFIX="${STALE_LABEL_PREFIX:-stale}"
-DRY_RUN="${DRY_RUN:-true}"
 
 KEEP_LABEL="${PREFIX}::keep"
 SCHEDULED_LABEL="${PREFIX}::scheduled_for_closing"
-EXCLUDE_LABEL="${STALE_EXCLUDE_LABEL:-Community contribution}"
 
-NOW_EPOCH="$(date -u +%s)"
 IDLE_CUTOFF_EPOCH=$(( NOW_EPOCH - IDLE_DAYS * 86400 ))
 GRACE_SECONDS=$(( GRACE_DAYS * 86400 ))
-
-log() { printf '%s\n' "$*" >&2; }
-
-# GitLab timestamps vary (".000Z", "+00:00"); strip the fractional part so GNU
-# date parses every variant. Empty/null inputs return 0 (treated as ancient by
-# callers only where that is safe — see get_last_activity_epoch).
-to_epoch() {
-  local timestamp="${1:-}"
-  if [ -z "$timestamp" ] || [ "$timestamp" = "null" ]; then
-    echo 0
-    return
-  fi
-  local normalized
-  normalized="$(printf '%s' "$timestamp" | sed -E 's/\.[0-9]+//')"
-  date -u -d "$normalized" +%s 2>/dev/null || echo 0
-}
-
-api() { glab api "$@"; }
 
 get_last_activity_epoch() {
   local iid="$1" created_at="$2"
@@ -130,22 +111,21 @@ EOF
 # a failure skips this MR rather than acting on defaulted data.
 process_mr() {
   local mr="$1"
-  local iid author created_at labels has_keep has_scheduled
+  local iid author created_at has_keep has_scheduled
 
   iid="$(printf '%s' "$mr" | jq -r '.iid')"
   author="$(printf '%s' "$mr" | jq -r '.author.username')"
   created_at="$(printf '%s' "$mr" | jq -r '.created_at')"
-  labels="$(printf '%s' "$mr" | jq -r '.labels[]?')"
 
-  if printf '%s\n' "$labels" | grep -qxF "$EXCLUDE_LABEL"; then
+  if has_label "$mr" "$EXCLUDE_LABEL"; then
     log "MR !$iid: has \"$EXCLUDE_LABEL\", left to triage-ops, skipping"
     return
   fi
 
   has_keep=false
   has_scheduled=false
-  printf '%s\n' "$labels" | grep -qxF "$KEEP_LABEL" && has_keep=true
-  printf '%s\n' "$labels" | grep -qxF "$SCHEDULED_LABEL" && has_scheduled=true
+  has_label "$mr" "$KEEP_LABEL" && has_keep=true
+  has_label "$mr" "$SCHEDULED_LABEL" && has_scheduled=true
 
   # KEEP_LABEL and SCHEDULED_LABEL share the "stale" scope, so adding keep makes
   # GitLab drop the scheduled label automatically — an MR never carries both, and
@@ -197,39 +177,5 @@ process_mr() {
   fi
 }
 
-BOT_USER="$(api "user")"
-BOT_USERNAME="$(printf '%s' "$BOT_USER" | jq -r '.username')"
-BOT_USER_ID="$(printf '%s' "$BOT_USER" | jq -r '.id')"
-log "Stale-MR sweeper: bot=$BOT_USERNAME idle=${IDLE_DAYS}d grace=${GRACE_DAYS}d prefix=$PREFIX dry_run=$DRY_RUN"
-
-# Fail before the sweep if the token cannot write here: labelling, warning and
-# closing all need Developer, and with less the run dies on its first write with
-# every MR behind it never evaluated. members/all resolves direct, inherited and
-# invited-group membership alike; a token minted in another project resolves 404.
-ACCESS_LEVEL="$(api "projects/$PROJECT_ID/members/all/$BOT_USER_ID" 2>/dev/null | jq -r '.access_level // 0' || true)"
-ACCESS_LEVEL="${ACCESS_LEVEL:-0}"
-if [ "$ACCESS_LEVEL" -lt 30 ]; then
-  if [ "$DRY_RUN" = "true" ]; then
-    log "WARNING: $BOT_USERNAME has access level $ACCESS_LEVEL on project $PROJECT_ID (writes need Developer/30); a non-dry run would fail on its first write"
-  else
-    log "FATAL: $BOT_USERNAME has access level $ACCESS_LEVEL on project $PROJECT_ID; the sweeper's writes need Developer (30)."
-    log "Mint the token on this project or an ancestor group (see the setup comment in .gitlab/ci/stale-mr.yml). Project bot users cannot be added to other projects."
-    exit 1
-  fi
-fi
-
-FAILED=0
-MR_LIST="$(api --paginate "projects/$PROJECT_ID/merge_requests?state=opened&per_page=100" | jq -c '.[]')"
-while IFS= read -r mr; do
-  [ -z "$mr" ] && continue
-  if ! process_mr "$mr"; then
-    log "MR !$(printf '%s' "$mr" | jq -r '.iid'): processing failed, continuing with the remaining MRs"
-    FAILED=$(( FAILED + 1 ))
-  fi
-done <<< "$MR_LIST"
-
-if [ "$FAILED" -gt 0 ]; then
-  log "Stale-MR sweeper: done, $FAILED MR(s) failed"
-  exit 1
-fi
-log "Stale-MR sweeper: done"
+log "stale: idle=${IDLE_DAYS}d grace=${GRACE_DAYS}d prefix=$PREFIX dry_run=$DRY_RUN"
+for_each_open_mr stale process_mr

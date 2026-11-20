@@ -151,6 +151,8 @@ pub struct ClickHouse {
     >,
     #[prost(message, optional, tag = "8")]
     pub profiling: ::core::option::Option<Profiling>,
+    #[prost(string, optional, tag = "9")]
+    pub compatibility: ::core::option::Option<::prost::alloc::string::String>,
 }
 impl ::prost::Name for ClickHouse {
     const NAME: &'static str = "ClickHouse";
@@ -465,7 +467,7 @@ pub struct Engine {
     pub handlers: ::core::option::Option<Handlers>,
     #[prost(message, optional, tag = "5")]
     pub datalake_retry: ::core::option::Option<DatalakeRetry>,
-    #[prost(enumeration = "IndexerModule", repeated, tag = "6")]
+    #[prost(enumeration = "IndexerModule", repeated, packed = "false", tag = "6")]
     pub modules: ::prost::alloc::vec::Vec<i32>,
 }
 impl ::prost::Name for Engine {
@@ -764,6 +766,7 @@ pub struct Grpc {
     pub stream_timeout_secs: ::core::option::Option<u64>,
     #[prost(uint32, optional, tag = "10")]
     pub max_header_list_size_bytes: ::core::option::Option<u32>,
+    /// GitLab Rails rejects gRPC messages over 8 MiB.
     #[prost(uint64, optional, tag = "11")]
     pub result_chunk_bytes: ::core::option::Option<u64>,
     #[prost(uint64, optional, tag = "12")]

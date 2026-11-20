@@ -1,6 +1,6 @@
 cases:
   - name: boolean_operator_no_literal_echo
-    description: The OR and XOR rejections do not echo a string literal from the query
+    description: The XOR rejection does not echo a string literal from the query
     query:
       gql: |
         MATCH (u:User {id: 1})
