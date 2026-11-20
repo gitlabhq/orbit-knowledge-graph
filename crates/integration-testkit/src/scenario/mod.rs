@@ -265,18 +265,32 @@ pub(crate) fn database_name(scenario_name: &str) -> String {
         .collect()
 }
 
+pub(crate) const EXACT_KEYS: &str = "$exact";
+
 pub(crate) fn subset_mismatch(
     path: &str,
     expected: &serde_json::Value,
     actual: &serde_json::Value,
 ) -> Option<String> {
     match (expected, actual) {
-        (serde_json::Value::Object(expected), serde_json::Value::Object(actual)) => expected
-            .iter()
-            .find_map(|(key, value)| match actual.get(key) {
-                Some(found) => subset_mismatch(&format!("{path}.{key}"), value, found),
-                None => Some(format!("{path}.{key} is missing")),
-            }),
+        (serde_json::Value::Object(expected), serde_json::Value::Object(actual)) => {
+            let (listed, exact) = match expected.get(EXACT_KEYS) {
+                Some(serde_json::Value::Object(listed)) => (listed, true),
+                _ => (expected, false),
+            };
+            let extra = actual
+                .keys()
+                .find(|key| exact && !listed.contains_key(*key))
+                .map(|key| format!("{path}.{key} is not listed in {EXACT_KEYS}"));
+            extra.or_else(|| {
+                listed
+                    .iter()
+                    .find_map(|(key, value)| match actual.get(key) {
+                        Some(found) => subset_mismatch(&format!("{path}.{key}"), value, found),
+                        None => Some(format!("{path}.{key} is missing")),
+                    })
+            })
+        }
         (serde_json::Value::Array(expected), serde_json::Value::Array(actual))
             if expected.len() == actual.len() =>
         {

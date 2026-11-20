@@ -75,3 +75,4 @@ cases:
       clickhouse:
         result_context:
           neighbors_center: null
+          labels: { $exact: {} }

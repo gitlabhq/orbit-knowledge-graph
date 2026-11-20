@@ -44,10 +44,12 @@ cases:
           not_contains: [f_content, f.content]
         hydration:
           static:
-            f:
-              entity_type: File
-              virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
-              columns: [id, name, project_id, commit_sha, branch, path]
+            $exact:
+              f:
+                entity_type: File
+                virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
+                columns: [id, name, project_id, commit_sha, branch, path]
+              b: { entity_type: Branch, columns: [id, name] }
 
   - name: A merge request diff stays out of the SQL and is hydrated
     query:
@@ -61,11 +63,12 @@ cases:
           not_contains: [mr_diff, mr.diff]
         hydration:
           static:
-            mr:
-              entity_type: MergeRequest
-              virtual_columns: [{ column_name: diff, service: gitaly, lookup: mr_raw_patch }]
-              columns: [project_id, iid]
-              injected_columns: [project_id, iid]
+            $exact:
+              mr:
+                entity_type: MergeRequest
+                virtual_columns: [{ column_name: diff, service: gitaly, lookup: mr_raw_patch }]
+                columns: [project_id, iid]
+                injected_columns: [project_id, iid]
 
   - name: A search hydrates a selected virtual property and injects its dependencies
     query:
@@ -77,11 +80,12 @@ cases:
       clickhouse:
         hydration:
           static:
-            f:
-              entity_type: File
-              virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
-              columns: [project_id, commit_sha, branch, path]
-              injected_columns: [project_id, commit_sha, branch, path]
+            $exact:
+              f:
+                entity_type: File
+                virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
+                columns: [project_id, commit_sha, branch, path]
+                injected_columns: [project_id, commit_sha, branch, path]
 
   - name: An aggregation hydrates a selected virtual property
     query:
@@ -93,8 +97,9 @@ cases:
       clickhouse:
         hydration:
           static:
-            f:
-              virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
+            $exact:
+              f:
+                virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
 
   - name: A traversal injects the dependencies of a virtual property on the unpinned node
     query:
@@ -106,9 +111,11 @@ cases:
       clickhouse:
         hydration:
           static:
-            f:
-              columns: [id, project_id, commit_sha, branch, path]
-              injected_columns: [project_id, commit_sha, branch, path]
+            $exact:
+              f:
+                columns: [id, project_id, commit_sha, branch, path]
+                injected_columns: [project_id, commit_sha, branch, path]
+              b: { entity_type: Branch, columns: [id, name] }
 
   - name: A definition and its file each hydrate their own content
     query:
@@ -120,12 +127,13 @@ cases:
       clickhouse:
         hydration:
           static:
-            f:
-              virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
-            def:
-              entity_type: Definition
-              virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
-              columns: [id, name, project_id, commit_sha, branch, file_path, start_byte, end_byte]
+            $exact:
+              f:
+                virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
+              def:
+                entity_type: Definition
+                virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
+                columns: [id, name, project_id, commit_sha, branch, file_path, start_byte, end_byte]
 
   - name: A virtual property filter stays out of the SQL and filters after hydration
     query:
@@ -139,9 +147,10 @@ cases:
           not_contains: [content]
         hydration:
           static:
-            f:
-              virtual_filters: { content: { op: eq, value: x } }
-              filter_injected_columns: []
+            $exact:
+              f:
+                virtual_filters: { content: { op: eq, value: x } }
+                filter_injected_columns: []
 
   - name: A bare JSON value and an inline GQL property on a virtual property hydrate the same equality filter
     query:
@@ -153,8 +162,9 @@ cases:
       clickhouse:
         hydration:
           static:
-            f:
-              virtual_filters: { content: { op: eq, value: abc } }
+            $exact:
+              f:
+                virtual_filters: { content: { op: eq, value: abc } }
 
   - name: A filter on an unselected virtual property resolves it only for the filter
     query:
@@ -166,10 +176,11 @@ cases:
       clickhouse:
         hydration:
           static:
-            f:
-              virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
-              virtual_filters: { content: { op: contains, value: needle } }
-              filter_injected_columns: [content]
+            $exact:
+              f:
+                virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
+                virtual_filters: { content: { op: contains, value: needle } }
+                filter_injected_columns: [content]
 
   - name: A filter on a selected virtual property resolves it once and keeps it
     query:
@@ -181,6 +192,7 @@ cases:
       clickhouse:
         hydration:
           static:
-            f:
-              virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
-              filter_injected_columns: []
+            $exact:
+              f:
+                virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
+                filter_injected_columns: []
