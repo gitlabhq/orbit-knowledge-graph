@@ -180,8 +180,8 @@ enum Body {
     Rows(Vec<Vec<(Match, Vec<RowRule>)>>),
 }
 
-/// A named expression; with cases, tried on its first argument in order,
-/// the first match with a non-empty value wins.
+/// A named expression; with cases, tried in order on each value of its first
+/// argument, the first match with a non-empty value winning for that value.
 pub struct Def {
     pub(super) name: Box<str>,
     params: usize,
@@ -212,6 +212,19 @@ impl Def {
                 let mut bound: Vec<Vals> = vec![Vals::new(); self.slots.max(self.params)];
                 bound[..args.len()].clone_from_slice(args);
                 expr.eval(run, &bound)
+            }
+            DefImpl::Cases(_) if args[0].len() > 1 => {
+                let mut out = Vals::new();
+                let mut each = args.to_vec();
+                for &v in &args[0] {
+                    each[0] = SmallVec::from_elem(v, 1);
+                    for found in self.eval(run, &each) {
+                        if !out.contains(&found) {
+                            out.push(found);
+                        }
+                    }
+                }
+                out
             }
             DefImpl::Cases(cases) => {
                 let head = args[0].first().and_then(|v| v.loc());
