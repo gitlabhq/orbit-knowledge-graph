@@ -1,12 +1,21 @@
 use rand::RngExt;
 
 use crate::protocol::{Lease, TaskId};
-use crate::testkit::simulator::MessageState;
 
+use super::MessageState;
 use super::world::{Stall, StepKind, World};
 
 const MAX_STALL_TICKS: u64 = 8;
 const MAX_RECOVERY_TICKS: u64 = 2;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FaultBudget {
+    pub stalls: u32,
+    pub crashes: u32,
+    pub wipes: u32,
+    pub duplicates: u32,
+    pub losses: u32,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Fault {

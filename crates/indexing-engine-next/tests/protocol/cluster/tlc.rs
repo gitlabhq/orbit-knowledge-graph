@@ -5,7 +5,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use indexing_engine_next::protocol::TaskId;
-use indexing_engine_next::testkit::simulator::MessageState;
+use indexing_engine_next::testkit::simulation::MessageState;
 
 use super::{Cluster, Holder};
 

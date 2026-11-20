@@ -1,7 +1,7 @@
 use std::fmt::Write;
 use std::path::Path;
 
-use crate::testkit::simulator::MessageState;
+use super::MessageState;
 
 use super::world::{ACKNOWLEDGE_WAIT_TICKS, Stall, StepOrder, World, ticks_at};
 use super::{Simulation, SimulationReport};

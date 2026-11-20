@@ -1,5 +1,9 @@
+mod broker;
+mod database;
 mod faults;
+mod key_value;
 mod ports;
+mod tick_clock;
 mod trace;
 mod worker;
 mod world;
@@ -18,8 +22,13 @@ use crate::payload::{TaskInput, Tenant};
 use crate::port::TaskMessage;
 use crate::protocol::{HolderId, LeaseRules};
 use crate::serve::{serve, submit_task};
-use crate::testkit::simulator::FaultBudget;
 use crate::worker::Worker;
+
+pub use broker::{BrokerMessage, MessageState, SimulatedBroker};
+pub use database::{DatabaseWrite, SimulatedDatabase};
+pub use faults::FaultBudget;
+pub use key_value::{RevisionConflict, SimulatedKeyValue};
+pub use tick_clock::TickClock;
 
 use ports::build_ports;
 use worker::{SimulatedWrite, WriteInput};

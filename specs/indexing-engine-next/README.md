@@ -25,8 +25,8 @@ So far, TLC found 7 ways to break the rules and one gap in the recovery after a 
                   │ crates/indexing-engine-next                               │
                   │  src/protocol/            the rules as code               │
                   │  src/serve/               the lane loop, on ports         │
-                  │  src/testkit/simulator/   clock, key-value store, broker  │
-                  │  src/testkit/simulation/  the ports on a seeded world     │
+                  │  src/testkit/simulation/  key-value store, broker, db,    │
+                  │                           and the ports on a seeded world │
                   │  tests/protocol/          simulated cluster               │
                   └───────────────────────────────────────────────────────────┘
 ```
@@ -39,13 +39,12 @@ So far, TLC found 7 ways to break the rules and one gap in the recovery after a 
 | `counterexamples/`, `liveness/counterexamples/` | 8 configs that must break a rule |
 | `code-check/` | The 4 small clusters of the code check |
 | `src/protocol/` in the crate | The rules as code with no IO. The NATS lane loop of 1b calls it. |
-| `src/testkit/simulator/` in the crate | A simulated clock, key-value store, broker and database |
+| `src/testkit/simulation/` in the crate | A simulated tick clock, key-value store, broker and database, with the ports on one seeded world |
 | `tests/protocol/` in the crate | A simulated cluster with one method for each spec action |
 | `LeaseDedupeTraceCheck.tla` | The trace check: TLC follows each recorded run step by step |
 | `src/port.rs` in the crate | The ports of the lane loop: clock, task stream, lease store, marker store, protocol log |
 | `src/serve/` in the crate | The lane loop and the submit path, written against the ports |
-| `src/testkit/simulation/` in the crate | The ports on one seeded world, with faults, the rules, and the trace writer |
-| `tests/simulation.rs` in the crate | The seeds, the coverage of each fault, and the trace writer for TLC |
+| `tests/simulation.rs` in the crate | The rules of the simulated parts, the seeds, the coverage of each fault, and the trace writer for TLC |
 
 ## Why
 
@@ -87,7 +86,7 @@ What it doesn't prove:
 - In the simulator, each step of the lane loop is atomic in time. A stall can come between two steps, but not between the clock read and the write of one step. In production, a pod can stall there. Then the lease that it writes expires earlier than the spec says, and the fence keeps the writes safe.
 - Interleaved runs let other steps run inside a step, so a CAS write can lose its race. They check the rules and the liveness in Rust, but TLC can't follow them.
 - The simulator has one key, one lane, one slot for each process and one planner, the same shape as the spec. A worker that isn't exclusive skips the lease, and no check covers that path yet.
-- The simulator replaces NATS with the parts in `src/testkit/simulator/`. The NATS adapters of the ports come in the next MR, with the same scenarios on a real NATS server.
+- The simulator replaces NATS with the simulated parts in `src/testkit/simulation/`. The NATS adapters of the ports come in the next MR, with the same scenarios on a real NATS server.
 
 ## How it works
 
@@ -133,7 +132,7 @@ tests/simulation.rs                 src/testkit/simulation/             LeaseDed
 ```
 
 1. The lane loop talks to the outside only through the ports in `src/port.rs`. Each step reads the clock once at its start and logs one protocol event with that time.
-2. The simulator implements the ports on one world: the key-value store, the broker and the database of `src/testkit/simulator/`. It runs 2 or 3 real lane loops in one process on a paused clock. A seed picks the order of the steps, the faults and their targets.
+2. The simulator implements the ports on one world: a simulated key-value store, broker and database. It runs 2 or 3 real lane loops in one process on a paused clock. A seed picks the order of the steps, the faults and their targets.
 3. After each step, the world writes its state in the variables of the spec. The pod state comes from the protocol events, and the rest comes from the simulated stores.
 4. TLC starts from the first state of each trace. For each next state, it looks for a step of `Next` that leads there. When it finds none, it stops with a deadlock and prints the trace and the step.
 

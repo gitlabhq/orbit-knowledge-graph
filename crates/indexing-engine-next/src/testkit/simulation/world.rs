@@ -8,11 +8,9 @@ use rand::{RngExt, SeedableRng};
 use tokio::sync::Notify;
 use tokio::time::Instant;
 
+use super::{DatabaseWrite, FaultBudget, SimulatedBroker, SimulatedDatabase, SimulatedKeyValue};
 use crate::port::TaskMessage;
 use crate::protocol::{Fence, Generation, HolderId, Lease, ProtocolEvent, Revision, TaskId};
-use crate::testkit::simulator::{
-    DatabaseWrite, FaultBudget, SimulatedBroker, SimulatedDatabase, SimulatedKeyValue,
-};
 
 pub(super) const TICK: Duration = Duration::from_secs(20);
 pub(super) const ACKNOWLEDGE_WAIT_TICKS: u64 = 2;

@@ -6,9 +6,9 @@ use std::time::{Duration, SystemTime};
 use indexing_engine_next::protocol::{
     Claim, Generation, Hold, HolderId, Lease, LeaseRules, Renewal, TaskId,
 };
-use indexing_engine_next::testkit::simulator::{
-    DatabaseWrite, FaultBudget, MessageState, SimulatedBroker, SimulatedClock, SimulatedDatabase,
-    SimulatedKeyValue,
+use indexing_engine_next::testkit::simulation::{
+    DatabaseWrite, FaultBudget, MessageState, SimulatedBroker, SimulatedDatabase,
+    SimulatedKeyValue, TickClock,
 };
 use uuid::Uuid;
 
@@ -221,7 +221,7 @@ struct Holder {
 struct Cluster {
     bounds: Bounds,
     rules: LeaseRules,
-    clock: SimulatedClock,
+    clock: TickClock,
     holders: Vec<Holder>,
     lease: SimulatedKeyValue<Lease>,
     marker: SimulatedKeyValue<TaskId>,
@@ -266,7 +266,7 @@ impl Cluster {
                 renew_every: UNIT,
                 skew_margin: UNIT * SKEW_MARGIN,
             },
-            clock: SimulatedClock::new(UNIT),
+            clock: TickClock::new(UNIT),
             holders,
             lease: SimulatedKeyValue::default(),
             marker: SimulatedKeyValue::default(),

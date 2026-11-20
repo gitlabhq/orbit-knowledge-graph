@@ -1,7 +1,6 @@
 mod ledger;
 mod runtime;
-mod simulation;
-pub mod simulator;
+pub mod simulation;
 mod timeline;
 
 use std::sync::{Arc, OnceLock};
@@ -17,7 +16,6 @@ use crate::trigger::Fired;
 use crate::worker::Worker;
 
 pub use ledger::TaskSummary;
-pub use simulation::{Simulation, SimulationReport};
 
 use runtime::KitRuntime;
 
