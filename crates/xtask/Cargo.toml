@@ -51,16 +51,16 @@ tabled = { workspace = true }
 orbit-log-fields = { workspace = true }
 tracing-subscriber = { workspace = true }
 orbit-observability = { workspace = true }
-ontology = { path = "../ontology" }
+ontology = { workspace = true }
 clickhouse = { workspace = true }
-clickhouse-client = { path = "../clickhouse-client" }
-orbit-utils = { path = "../utils" }
-orbit-migrations = { path = "../orbit-migrations" }
-orbit-versions = { path = "../orbit-versions" }
-query-engine = { path = "../query-engine" }
+clickhouse-client = { workspace = true }
+orbit-utils = { workspace = true }
+orbit-migrations = { workspace = true }
+orbit-versions = { workspace = true }
+query-engine = { workspace = true }
 # Load-test subcommand: gRPC client + JWT auth, reusing the canonical proto
 # and claims from orbit-server (no vendored proto, no hand-rolled JWT).
-orbit-server = { path = "../orbit-server", optional = true }
+orbit-server = { workspace = true, optional = true }
 tonic = { workspace = true, optional = true }
 tokio-stream = { workspace = true, optional = true }
 jsonwebtoken = { workspace = true, optional = true }

@@ -7,9 +7,9 @@ license = "LicenseRef-EE"
 [dependencies]
 arrow = { workspace = true }
 async-trait = { workspace = true }
-duckdb-client = { path = "../../duckdb-client" }
-indexer = { path = ".." }
-orbit-arrow = { path = "../../utils/arrow" }
+duckdb-client = { workspace = true }
+indexer = { workspace = true }
+orbit-arrow = { workspace = true }
 tokio = { workspace = true }
 
 [lints]

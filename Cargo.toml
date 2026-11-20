@@ -258,6 +258,34 @@ tree-sitter-typescript = "0.23.2"
 tree-sitter-yaml = "0.7.2"
 tree-sitter-zig = "1.1.2"
 twox-hash = { version = "2.1", default-features = false }
+code-graph = { path = "crates/code-graph" }
+code-graph-incremental = { path = "crates/code-graph-incremental" }
+compiler = { path = "crates/query-engine/compiler" }
+compiler-pipeline-macros = { path = "crates/query-engine/compiler-pipeline-macros" }
+duckdb-client = { path = "crates/duckdb-client" }
+formatters = { path = "crates/query-engine/formatters" }
+gitaly-protos = { path = "crates/gitaly-protos" }
+indexer = { path = "crates/indexer" }
+indexer-duckdb = { path = "crates/indexer/duckdb" }
+integration-testkit = { path = "crates/integration-testkit" }
+named-queries = { path = "crates/named-queries" }
+ontology = { path = "crates/ontology" }
+orbit-analytics = { path = "crates/orbit-analytics" }
+orbit-arrow = { path = "crates/utils/arrow" }
+orbit-billing = { path = "crates/orbit-billing" }
+orbit-migrations = { path = "crates/orbit-migrations" }
+orbit-prompts = { path = "crates/orbit-prompts" }
+orbit-search = { path = "crates/orbit-search" }
+orbit-server = { path = "crates/orbit-server" }
+orbit-server-config = { path = "crates/orbit-server-config" }
+orbit-utils = { path = "crates/utils" }
+orbit-versions = { path = "crates/orbit-versions" }
+pipeline = { path = "crates/query-engine/pipeline" }
+query-data-model = { path = "crates/query-data-model" }
+query-engine = { path = "crates/query-engine" }
+shared = { path = "crates/query-engine/shared" }
+treesitter-visit = { path = "crates/code-graph/treesitter-visit" }
+types = { path = "crates/query-engine/types" }
 
 [profile.dev]
 debug = "line-tables-only"

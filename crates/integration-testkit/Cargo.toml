@@ -6,21 +6,21 @@ edition = "2024"
 [dependencies]
 arrow = { workspace = true }
 async-trait = { workspace = true }
-clickhouse-client = { path = "../clickhouse-client" }
-duckdb-client = { path = "../duckdb-client" }
-orbit-server-config = { path = "../orbit-server-config" }
+clickhouse-client = { workspace = true }
+duckdb-client = { workspace = true }
+orbit-server-config = { workspace = true }
 gitalisk-core = { workspace = true }
-orbit-utils = { path = "../utils" }
-orbit-arrow = { path = "../utils/arrow" }
-orbit-versions = { path = "../orbit-versions" }
+orbit-utils = { workspace = true }
+orbit-arrow = { workspace = true }
+orbit-versions = { workspace = true }
 futures = { workspace = true }
 jsonschema = { workspace = true }
-named-queries = { path = "../named-queries" }
-orbit-server = { path = "../orbit-server" }
-ontology = { path = "../ontology" }
-orbit-migrations = { path = "../orbit-migrations" }
-query-data-model = { path = "../query-data-model" }
-query-engine = { path = "../query-engine", features = ["testutils"] }
+named-queries = { workspace = true }
+orbit-server = { workspace = true }
+ontology = { workspace = true }
+orbit-migrations = { workspace = true }
+query-data-model = { workspace = true }
+query-engine = { workspace = true, features = ["testutils"] }
 regex = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }

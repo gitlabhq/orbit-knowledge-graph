@@ -9,13 +9,13 @@ default = []
 testutils = []
 
 [dependencies]
-orbit-utils = { path = "../../utils" }
-orbit-arrow = { path = "../../utils/arrow" }
-orbit-versions = { path = "../../orbit-versions" }
+orbit-utils = { workspace = true }
+orbit-arrow = { workspace = true }
+orbit-versions = { workspace = true }
 indexmap = { workspace = true }
-shared = { path = "../shared" }
-types = { path = "../types" }
-compiler = { path = "../compiler" }
+shared = { workspace = true }
+types = { workspace = true }
+compiler = { workspace = true }
 serde = { workspace = true }
 semver = { workspace = true }
 serde_json = { workspace = true }

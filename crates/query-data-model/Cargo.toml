@@ -5,7 +5,7 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
-ontology = { path = "../ontology" }
+ontology = { workspace = true }
 thiserror = { workspace = true }
 
 [lints]

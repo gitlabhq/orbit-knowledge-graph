@@ -7,8 +7,8 @@ license = "LicenseRef-EE"
 [dependencies]
 circuit-breaker = { workspace = true }
 orbit-observability = { workspace = true }
-orbit-server-config = { path = "../orbit-server-config" }
-orbit-utils = { path = "../utils" }
+orbit-server-config = { workspace = true }
+orbit-utils = { workspace = true }
 rand = { workspace = true }
 arrow = { workspace = true }
 arrow-ipc = { workspace = true, features = ["lz4"] }

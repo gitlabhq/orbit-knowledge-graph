@@ -9,26 +9,26 @@ publish = false
 # Shared helpers live in tests/common/ (subdirectory, ignored by auto-discovery).
 
 [dev-dependencies]
-clickhouse-client = { path = "../clickhouse-client" }
-compiler = { path = "../query-engine/compiler" }
-orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
-code-graph = { path = "../code-graph" }
-duckdb-client = { path = "../duckdb-client" }
-orbit-server = { path = "../orbit-server", features = ["testkit"] }
-orbit-server-config = { path = "../orbit-server-config" }
-orbit-utils = { path = "../utils" }
-orbit-arrow = { path = "../utils/arrow" }
+clickhouse-client = { workspace = true }
+compiler = { workspace = true }
+orbit-analytics = { workspace = true, features = ["testkit"] }
+code-graph = { workspace = true }
+duckdb-client = { workspace = true }
+orbit-server = { workspace = true, features = ["testkit"] }
+orbit-server-config = { workspace = true }
+orbit-utils = { workspace = true }
+orbit-arrow = { workspace = true }
 jsonschema = { workspace = true }
 jsonwebtoken = { workspace = true }
-indexer = { path = "../indexer", features = ["testkit"] }
-indexer-duckdb = { path = "../indexer/duckdb" }
-named-queries = { path = "../named-queries" }
+indexer = { workspace = true, features = ["testkit"] }
+indexer-duckdb = { workspace = true }
+named-queries = { workspace = true }
 nats-client = { workspace = true, features = ["testkit"] }
-integration-testkit = { path = "../integration-testkit" }
-ontology = { path = "../ontology" }
-orbit-migrations = { path = "../orbit-migrations" }
-query-data-model = { path = "../query-data-model" }
-query-engine = { path = "../query-engine", features = ["testutils"] }
+integration-testkit = { workspace = true }
+ontology = { workspace = true }
+orbit-migrations = { workspace = true }
+query-data-model = { workspace = true }
+query-engine = { workspace = true, features = ["testutils"] }
 arrow = { workspace = true }
 async-nats = { workspace = true }
 async-trait = { workspace = true }
@@ -39,7 +39,7 @@ chrono = { workspace = true }
 comrak = { workspace = true }
 flate2 = { workspace = true }
 futures = { workspace = true }
-gitaly-protos = { path = "../gitaly-protos" }
+gitaly-protos = { workspace = true }
 gitlab-client = { workspace = true }
 parking_lot = { workspace = true }
 prost = { workspace = true }
@@ -62,7 +62,7 @@ tracing-subscriber = { workspace = true }
 tempfile = { workspace = true }
 cargo_metadata = { workspace = true }
 reqwest = { workspace = true, features = ["stream", "rustls"] }
-health-check = { path = "../health-check" }
+health-check = { workspace = true }
 labkit = { workspace = true, features = ["health", "tls"] }
 labkit-events = { workspace = true }
 opentelemetry = { workspace = true }

@@ -5,14 +5,14 @@ edition = "2024"
 publish = false
 
 [dependencies]
-compiler = { path = "../query-engine/compiler" }
+compiler = { workspace = true }
 bolero = { workspace = true }
 serde_json.workspace = true
 pest_meta = { workspace = true }
 
 [dev-dependencies]
-code-graph = { path = "../code-graph" }
-indexer = { path = "../indexer" }
+code-graph = { workspace = true }
+indexer = { workspace = true }
 
 [[test]]
 name = "fuzz_compile"

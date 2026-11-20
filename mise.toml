@@ -237,7 +237,7 @@ description = "Check log, span and print call sites against the red data rules (
 [tasks."lint:deps"]
 run = [
   "cargo shear",
-  "python3 scripts/checks/check_workspace_deps.py --registry-only",
+  "python3 scripts/checks/check_workspace_deps.py",
 ]
 description = "Check for unused dependencies and crate-local dependency declarations"
 

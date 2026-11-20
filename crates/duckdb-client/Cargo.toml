@@ -12,10 +12,10 @@ bundled = ["duckdb/bundled", "duckdb/json"]
 [dependencies]
 duckdb = { workspace = true }
 arrow = { workspace = true }
-orbit-search = { path = "../orbit-search" }
-orbit-utils = { path = "../utils" }
+orbit-search = { workspace = true }
+orbit-utils = { workspace = true }
 anyhow = { workspace = true }
-ontology = { path = "../ontology" }
+ontology = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
