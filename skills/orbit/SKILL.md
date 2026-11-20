@@ -74,6 +74,7 @@ Read [`references/gql.md`](references/gql.md) before you construct a query. Thes
 - To find MRs that ever touched a file, use `HAS_DIFF`; see [file history](references/gql.md#merge-requests-that-touched-a-file). Use `HAS_LATEST_DIFF` for one MR's current revision.
 - Issues, epics, tasks, and incidents are the `WorkItem` node. There is no `Issue` node.
 - There is no `OR`, `XOR`, `RETURN DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`. `DISTINCT` works only inside `count()`: `count(DISTINCT pl)`.
+- For "who reviewed, approved or merged the most MRs in a period" questions, read [`references/per-user-period.md`](references/per-user-period.md) first: it has the query shape and the bot-handling workaround.
 - For packages, their files, dependencies and vulnerabilities, and container repositories, load the `orbit-package-registry` skill first: `glab orbit skills get orbit-package-registry`.
 
 ## Iteration budget
