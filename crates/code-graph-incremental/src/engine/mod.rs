@@ -809,6 +809,11 @@ impl<'t, S: Store> Run<'t, S> {
                     }
                 }
             }
+            Op::Last => {
+                if let Some(&v) = args[0].last() {
+                    push(&mut out, v);
+                }
+            }
             Op::Project => {
                 if let Some(project) = self.project {
                     push(

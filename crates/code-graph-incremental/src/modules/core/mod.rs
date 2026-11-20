@@ -210,11 +210,6 @@ static FUNCTIONS: &[Function<Core>] = &[
         let attr = node(cx, a, 0).sym();
         cx.field(attr)
     }),
-    function!(Flow, "meaning", [one, one], @uses ["core"."member_for"], |cx, a| {
-        let site = node(cx, a, 1);
-        cx.meaning(a[0][0], site)
-    }),
-    function!(required Flow, "member_for", [one, one]),
     function!(Flow, "supers", [one], |cx, a| {
         let def = Loc::from(node(cx, a, 0));
         of(cx.supers(def))
@@ -262,9 +257,6 @@ static FUNCTIONS: &[Function<Core>] = &[
         Some(Ref::Call(n)) => of(values::declared_type(cx.jump(n))),
         _ => Vals::new(),
     }),
-    function!(Pure, "tail", [one], |cx, a| of(
-        arg(cx, a, 0).map(Cursor::tail_expr)
-    )),
     function!(Pure, "initialized", [one], |cx, a| {
         cx.keep(a[0][0], |r, cx| {
         matches!(r, Ref::Def(n) if cx.jump(n).initializer().and_then(Cursor::rhs_callee).is_some())

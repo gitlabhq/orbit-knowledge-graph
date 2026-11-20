@@ -17,12 +17,6 @@ pub(super) fn declared_type<S: Store>(v: Cursor<'_, S>) -> Option<Cursor<'_, S>>
     }
 }
 
-pub(super) fn field_value<S: Store>(def: Cursor<'_, S>) -> Option<Val> {
-    let binding = def.child(C::Binding).filter(|b| b.typed().is_some())?;
-    let stored = def.has(C::FieldDef) || def.has(C::Property);
-    stored.then(|| Val::Node(def.jump(def.fi(), producer(binding)).into()))
-}
-
 impl<'t, S: Store> Cx<'_, 't, Core, S> {
     fn value(&mut self, t: Cursor<'t, S>) -> Vals {
         if C::try_from_u16(t.kind()).is_some_and(C::is_opaque_value) {

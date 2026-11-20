@@ -1,7 +1,7 @@
 use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
-use super::{Core, Ref, values};
+use super::{Core, Ref};
 use crate::canonical::Canonical as C;
 use crate::engine::{Cursor, Cx, Loc, Store, Val, Vals, one};
 
@@ -21,20 +21,6 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
             }
         }
         parts
-    }
-
-    pub(super) fn meaning(&mut self, value: Val, site: Cursor<'t, S>) -> Vals {
-        let value = self.member_for(value, site);
-        match self.view(value) {
-            Some(Ref::Def(d)) => one(values::field_value(self.jump(d)).unwrap_or(value)),
-            _ => one(value),
-        }
-    }
-
-    pub(super) fn member_for(&mut self, value: Val, site: Cursor<'t, S>) -> Val {
-        let args = [one(value), one(Val::Node(site.into()))];
-        let found = self.call(crate::fn_id!("core", "member_for"), &args);
-        found.first().copied().unwrap_or(value)
     }
 
     fn ancestors(&mut self, class: Loc) -> FxHashSet<Loc> {

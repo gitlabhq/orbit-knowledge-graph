@@ -1,4 +1,53 @@
 define:
+  meaning(ROOT, site): 'member_for($ROOT, site) | stored_value'
+  stored_value(ROOT):
+    '_ when instances($ROOT)': '$ROOT'
+    '(__def)': 'field_value($ROOT) or $ROOT'
+    '_': '$ROOT'
+  field_value(ROOT):
+    '(__def $B:__binding) when stored_typed($ROOT, $B)': 'producer($B)'
+  stored_typed(ROOT, binding):
+    '_ when typed(binding)': 'stored($ROOT)'
+  stored(ROOT):
+    '(__def (__field_def))': '$ROOT'
+    '(__def (__property))': '$ROOT'
+  producer(ROOT):
+    '(__binding (__ssa_typed))': '$ROOT'
+    '(__binding $R:__rhs)': 'rhs_call($R) | member_call or $ROOT'
+    '_': '$ROOT'
+  member_call(ROOT):
+    '(__call (__callee (__member)))': '$ROOT'
+  typed(ROOT):
+    '(__binding $T:__ssa_typed)': '$T'
+    '(__binding $R:__rhs)': 'rhs_call($R) | callee_of or value_member($R)'
+  callee_of(ROOT):
+    '(__call $K:__callee)': '$K'
+  value_member(ROOT):
+    '(_ #!labelled $M:__member)': '$M'
+    '(_ $M:(__member #!lifted))': '$M'
+  value_call(ROOT):
+    '(_ #!labelled $C:__call)': '$C'
+    '(_ $C:(__call #!lifted))': '$C'
+  rhs_call(ROOT):
+    '_ when same(tail($ROOT), $ROOT)': 'value_call($ROOT)'
+    '_': 'tail($ROOT) | is_call'
+  is_call(ROOT):
+    '(__call)': '$ROOT'
+  tail(ROOT):
+    '(%value_nodes)': '$ROOT'
+    '(__ssa_branch)': '$ROOT'
+    '(__ssa_return)': '$ROOT'
+    '_': 'last_named($ROOT) | stands_under($ROOT) | tail or $ROOT'
+  last_named(ROOT):
+    '(_ $$$K)': 'last($K | named_kid)'
+  named_kid(ROOT):
+    '(__side_effect)': none
+    '(_ #named)': '$ROOT'
+  stands_under(ROOT, parent):
+    '(_ #lifted) when labelled(parent)': none
+    '_': '$ROOT'
+  labelled(ROOT):
+    '(_ #labelled)': '$ROOT'
   targets(ROOT, implicit):
     '(__call $K:(__callee "/./")) when read($K)': 'read($K) | read_target(implicit) | member_for($ROOT)'
     '(__call $K:(__callee "/./")) when implicit': 'members(enclosing | class, $K, cursor_role($ROOT))'
