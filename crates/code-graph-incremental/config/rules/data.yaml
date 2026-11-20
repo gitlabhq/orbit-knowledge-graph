@@ -1,4 +1,5 @@
 data:
+  opaque_nodes: [__obj, __arr, __lambda]
   value_nodes: [__call, __member, __ivar, __obj, __arr, __lambda]
   search: [external, roots, stdlib]
   callable_kinds: [__function, __method, __class, __lambda, __enum_variant]

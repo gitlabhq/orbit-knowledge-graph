@@ -84,10 +84,6 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         self.call1(crate::fn_id!("core", "read"), Val::Node(c.into()))
     }
 
-    fn ivar(&mut self, c: Cursor<'_, S>) -> Vals {
-        self.call1(crate::fn_id!("core", "ivar"), Val::Node(c.into()))
-    }
-
     fn enclosing_class(&mut self) -> Option<Cursor<'t, S>> {
         let enclosing = self.enclosing();
         class_of(self.at(enclosing))
@@ -206,18 +202,6 @@ static FUNCTIONS: &[Function<Core>] = &[
             Some(sym) => one(Val::Sym(sym)),
             None => Vals::new(),
         }
-    }),
-    function!(Flow, "value_of", [one], @uses ["core"."read", "core"."ivar"], |cx, a| {
-        cx.value_of(node(cx, a, 0))
-    }),
-    function!(Flow, "valued", [one], @uses ["core"."read", "core"."ivar"], |cx, a| {
-        match cx.valued(node(cx, a, 0)) {
-            true => a[0].clone(),
-            false => Vals::new(),
-        }
-    }),
-    function!(Flow, "receiver_calls", [one], @uses ["core"."read"], |cx, a| {
-        cx.receiver_calls(node(cx, a, 0))
     }),
     function!(Flow, "resolution", [one, set], @uses ["core"."read"], |cx, a| {
         let target = node(cx, a, 0);

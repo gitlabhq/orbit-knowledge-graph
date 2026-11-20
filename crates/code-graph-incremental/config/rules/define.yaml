@@ -1,4 +1,29 @@
 define:
+  value(ROOT):
+    '(%opaque_nodes)': 'opaque'
+    '(__call)': '$ROOT'
+    '(__ivar)': '$ROOT | ivar or opaque'
+  value_of(ROOT):
+    '(__ssa_arm)': 'minus(value(tail($ROOT)), opaque)'
+    '(__binding (__ssa_typed))': '$ROOT'
+    '(_ $R:(__rhs !(_))) when read($R) | imported': '$ROOT'
+    '(__binding $R:__rhs) when tail($R) | unread_member': '$ROOT'
+    '(__binding $R:__rhs)': 'value(tail($R))'
+    '(__binding)': 'opaque'
+    '_': 'value($ROOT)'
+  unread_member(ROOT):
+    '(__member) when read($ROOT)': none
+    '(__member)': '$ROOT'
+  valued(ROOT):
+    '_ when tail($ROOT) | ends_flow': none
+    '_ when value_of($ROOT)': '$ROOT'
+    '_ when value(tail($ROOT))': none
+    '_ when minus(read(tail($ROOT)), opaque)': '$ROOT'
+  ends_flow(ROOT):
+    '(__ssa_branch)': '$ROOT'
+    '(__ssa_return)': '$ROOT'
+  receiver_calls(ROOT):
+    '(__member (__dispatch $O:__object))': 'read($O) | produced'
   class(ROOT): 'is_class($ROOT) or first(ancestors($ROOT), a => is_class(a))'
   type_node(ROOT):
     '_ when instances($ROOT)': none
