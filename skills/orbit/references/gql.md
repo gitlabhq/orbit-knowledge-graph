@@ -266,6 +266,31 @@ ORDER BY mr.created_at DESC
 SKIP 0 LIMIT 20
 ```
 
+### Most reviews, approvals or merged MRs per user in a period
+
+Use one `count()` aggregation grouped by user, ordered by the count. Do not list
+rows and count them yourself: a listing stops at `LIMIT` and returns
+`has_more: true`. Anchor on a project or group, and set the window explicitly:
+`merged_at` with `state = 'merged'` for "merged last quarter". Use `created_at`
+only when the question asks about opened MRs.
+
+```gql orbit-query
+MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 77960826})
+WHERE mr.state = 'merged' AND mr.merged_at >= '2026-07-01' AND mr.merged_at < '2026-10-01'
+RETURN u.username, u.user_type, count(mr) AS merged_mrs
+ORDER BY merged_mrs DESC
+LIMIT 50
+```
+
+Swap `AUTHORED` for `REVIEWER` or `APPROVED` to rank reviewers or approvers.
+`REVIEWER` means the user was assigned as a reviewer; the edge carries no review
+state. `APPROVED` means the user approved the MR.
+
+Return `u.user_type` and drop bots (any value other than `human`, such as
+`project_bot` or `duo_code_review_bot`) after the query. Do not filter on
+`u.user_type` in `WHERE` for `REVIEWER` or `APPROVED` yet: it drops most rows.
+Once #1559 and #1439 are fixed, switch to `WHERE u.user_type = 'human'`.
+
 ### Shortest path between two nodes
 
 Name the relationship type and keep the hop range small. An untyped
