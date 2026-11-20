@@ -63,6 +63,35 @@ static FUNCTIONS: &[Function<Text>] = &[
             .filter(|v| v.loc().is_some_and(|l| l.fi != here))
             .collect()
     }),
+    function!(Pure, "map_prefix", [one, one, one], |cx, a| {
+        let texts: Vec<String> = (0..3)
+            .map(|i| {
+                a[i].first()
+                    .and_then(|&v| text(cx, v))
+                    .unwrap_or("")
+                    .to_owned()
+            })
+            .collect();
+        let (path, pattern, to) = (&texts[0], &texts[1], &texts[2]);
+        let mapped = match (pattern.strip_suffix('*'), to.strip_suffix('*')) {
+            (Some(prefix), Some(target)) => path
+                .strip_prefix(prefix)
+                .map(|rest| format!("{target}{rest}")),
+            _ => path
+                .strip_prefix(pattern.as_str())
+                .filter(|rest| rest.is_empty() || rest.starts_with('/'))
+                .map(|rest| format!("{to}{rest}")),
+        };
+        mapped.map_or_else(Vals::new, |m| one(Val::Sym(cx.lang().syms.intern(&m))))
+    }),
+    function!(Pure, "longest_first", [set], |cx, a| {
+        let mut vals: Vec<(usize, Val)> = a[0]
+            .iter()
+            .map(|&v| (text(cx, v).map_or(0, str::len), v))
+            .collect();
+        vals.sort_by_key(|&(len, _)| std::cmp::Reverse(len));
+        vals.into_iter().map(|(_, v)| v).collect()
+    }),
     function!(Pure, "in", [set, set], |cx, a| {
         let texts: Vec<u32> = a[1].iter().filter_map(|&v| cx.text(v)).collect();
         yes(a[0]

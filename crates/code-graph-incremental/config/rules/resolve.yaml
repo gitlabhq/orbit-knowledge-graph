@@ -14,9 +14,13 @@ define:
     '_ when in(place, "roots")': 'file_at(path) or first(roots(path), r => file_at(r | concat("/", path)))'
   outside(path, names):
     '_ when in(path | split_first("/"), names)': 'opaque'
-  modules(ROOT): 'files($ROOT | tag("resolved_source"))'
+  modules(ROOT): 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
+  aliased(ROOT): "first(select_all(project(), '(__alias)' by \"alias\", \"alias\") | longest_first, a => alias_files(a, $ROOT))"
+  alias_files(ROOT, imp):
+    '(__alias $S:__scope) when eq($S, $imp | tag("alias_scope"))': 'files($imp | child_sym("__source_path") | map_prefix($ROOT, $ROOT | child_sym("__str")))'
+    '(__alias !(__scope))': 'files($imp | child_sym("__source_path") | map_prefix($ROOT, $ROOT | child_sym("__str")))'
   submodule(ROOT, N): 'files($ROOT | tag("resolved_source") | concat("/", @$N))'
-  exported(module, name): "select(module, '(__def $N:__defname)', name) or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, name) | reexported(name) | is_def or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, \"*\") | reexported(name) | is_def"
+  exported(module, name): "select(module, '(__def $N:__defname)', name) or select(module, '(__def $N:__default_export)', name) or select_all(module, '(__def #exports)' by $ROOT | tag(\"exports\"), name) or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, name) | reexported(name) | is_def or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, \"*\") | reexported(name) | is_def"
   offered(module, name): 'exported(module, name) or module'
   reexported(ROOT, N):
     '$I:(%import_kinds $ROOT:(__name "*"))': '$I | modules | offered($N)'
