@@ -14,6 +14,11 @@
   - crates/indexing-engine-next/src/testkit/simulator/**/*
   - crates/indexing-engine-next/tests/protocol/**/*
 
+.indexing-engine-loop-changes: &indexing-engine-loop-changes
+  - specs/indexing-engine-next/**/*
+  - crates/indexing-engine-next/src/**/*
+  - crates/indexing-engine-next/tests/simulation.rs
+
 engine-spec-model-check:
   extends: .indexing-engine-spec
   tags:
@@ -58,3 +63,12 @@ engine-spec-code-graph:
       changes: *indexing-engine-code-changes
   script:
     - mise run spec:engine:code
+
+engine-spec-trace:
+  extends: .indexing-engine-spec
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes: *indexing-engine-loop-changes
+  script:
+    - mise run spec:engine:trace

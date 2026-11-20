@@ -10,7 +10,7 @@ use cluster::{
 };
 use indexing_engine_next::protocol::{
     Claim, Fence, Generation, HolderId, Lease, LeaseEntry, LeaseRules, Publish, Renewal, Revision,
-    TaskId, decide_submit,
+    TaskId, decide_submit, start_clears_marker,
 };
 use uuid::Uuid;
 
@@ -181,15 +181,9 @@ fn a_renewal_is_lost_once_the_same_holder_took_the_lease_again_for_another_run()
 
 #[test]
 fn a_start_clears_only_the_marker_of_its_own_task() {
-    let claim = Claim::deliver(holder("p1"), task(1));
-    let lease = claim
-        .acquire_lease(&RULES, &held_by("p0", 0, 3), at(10))
-        .unwrap();
-    let hold = claim.hold(&RULES, &lease, Revision(4), FIRST_GENERATION, at(10));
-
-    assert!(hold.start_clears_marker(Some(task(1))));
-    assert!(!hold.start_clears_marker(Some(task(2))));
-    assert!(!hold.start_clears_marker(None));
+    assert!(start_clears_marker(Some(task(1)), task(1)));
+    assert!(!start_clears_marker(Some(task(2)), task(1)));
+    assert!(!start_clears_marker(None, task(1)));
 }
 
 #[test]

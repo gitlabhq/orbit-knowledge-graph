@@ -14,14 +14,18 @@ impl TaskId {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Publish {
-    New(TaskId),
-    Pending(TaskId),
+pub enum Publish<T = TaskId> {
+    New(T),
+    Pending(T),
 }
 
-pub fn decide_submit(marker: Option<TaskId>, new_task: TaskId) -> Publish {
+pub fn decide_submit<T>(marker: Option<T>, new_task: T) -> Publish<T> {
     match marker {
         None => Publish::New(new_task),
         Some(pending) => Publish::Pending(pending),
     }
+}
+
+pub fn start_clears_marker(marker: Option<TaskId>, started: TaskId) -> bool {
+    marker == Some(started)
 }

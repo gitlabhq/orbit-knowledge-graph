@@ -1,0 +1,575 @@
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use parking_lot::{Mutex, MutexGuard};
+use rand::rngs::StdRng;
+use rand::{RngExt, SeedableRng};
+use tokio::sync::Notify;
+use tokio::time::Instant;
+
+use crate::port::TaskMessage;
+use crate::protocol::{Fence, Generation, HolderId, Lease, ProtocolEvent, Revision, TaskId};
+use crate::testkit::simulator::{
+    DatabaseWrite, FaultBudget, SimulatedBroker, SimulatedDatabase, SimulatedKeyValue,
+};
+
+pub(super) const TICK: Duration = Duration::from_secs(20);
+pub(super) const ACKNOWLEDGE_WAIT_TICKS: u64 = 2;
+const MAX_CALLS_PER_TICK: u64 = 10_000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Actor {
+    Planner,
+    Process { index: usize, incarnation: usize },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum StepOrder {
+    Atomic,
+    Interleaved,
+}
+
+#[derive(Clone)]
+pub(super) struct SharedWorld {
+    world: Arc<Mutex<World>>,
+    changed: Arc<Notify>,
+}
+
+pub(super) struct World {
+    seed: u64,
+    started_at: Instant,
+    seen_tick: u64,
+    calls_this_tick: u64,
+    pub(super) rng: StdRng,
+    step_order: StepOrder,
+    pub(super) lease: SimulatedKeyValue<Lease>,
+    pub(super) marker: SimulatedKeyValue<TaskMessage>,
+    pub(super) nats_generation: Option<Generation>,
+    pub(super) recover_at: Option<u64>,
+    pub(super) broker: SimulatedBroker,
+    payloads: HashMap<TaskId, TaskMessage>,
+    pub(super) database: SimulatedDatabase,
+    pub(super) processes: Vec<ProcessState>,
+    holders: HashMap<HolderId, usize>,
+    pub(super) publishing: Option<TaskId>,
+    pub(super) ids: Vec<TaskId>,
+    pub(super) covers: Vec<TaskId>,
+    pub(super) started: BTreeSet<TaskId>,
+    pub(super) lost_in_wipe: BTreeSet<TaskId>,
+    pub(super) faults_left: FaultBudget,
+    pub(super) planner_crash_armed: bool,
+    pub(super) rejected_current: bool,
+    pub(super) submits: usize,
+    trace: Vec<String>,
+    timeline: Vec<String>,
+    broken: Option<String>,
+    counts: BTreeMap<String, usize>,
+}
+
+pub(super) struct ProcessState {
+    pub(super) offset: u64,
+    pub(super) incarnation: usize,
+    pub(super) phase: Phase,
+    pub(super) held: Option<usize>,
+    pub(super) token: Fence,
+    pub(super) seen: Revision,
+    pub(super) expiry: u64,
+    pub(super) renew_at: u64,
+    pub(super) stall: Stall,
+    pub(super) renewal_fails: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Phase {
+    Idle,
+    Leasing,
+    Leased,
+    Running,
+    Writing,
+    Done,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Stall {
+    Awake,
+    Armed { ticks: u64, at: StepKind },
+    Stalled { until: u64 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum StepKind {
+    Any,
+    Commit,
+}
+
+pub(super) struct WorldOutcome {
+    pub(super) seed: u64,
+    pub(super) broken: Option<String>,
+    pub(super) timeline: Vec<String>,
+    pub(super) trace: Vec<String>,
+    pub(super) counts: BTreeMap<String, usize>,
+}
+
+impl SharedWorld {
+    pub(super) fn new(
+        seed: u64,
+        processes: usize,
+        submits: usize,
+        faults: FaultBudget,
+        step_order: StepOrder,
+    ) -> Self {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let processes = (0..processes)
+            .map(|_| ProcessState::idle(rng.random_range(0..=1)))
+            .collect();
+        let world = World {
+            seed,
+            started_at: Instant::now(),
+            seen_tick: 0,
+            calls_this_tick: 0,
+            rng,
+            step_order,
+            lease: SimulatedKeyValue::default(),
+            marker: SimulatedKeyValue::default(),
+            nats_generation: Some(Generation(1)),
+            recover_at: None,
+            broker: SimulatedBroker::new(ACKNOWLEDGE_WAIT_TICKS),
+            payloads: HashMap::new(),
+            database: SimulatedDatabase::default(),
+            processes,
+            holders: HashMap::new(),
+            publishing: None,
+            ids: Vec::new(),
+            covers: Vec::new(),
+            started: BTreeSet::new(),
+            lost_in_wipe: BTreeSet::new(),
+            faults_left: faults,
+            planner_crash_armed: false,
+            rejected_current: false,
+            submits,
+            trace: Vec::new(),
+            timeline: Vec::new(),
+            broken: None,
+            counts: BTreeMap::new(),
+        };
+        let shared = Self {
+            world: Arc::new(Mutex::new(world)),
+            changed: Arc::new(Notify::new()),
+        };
+        shared.lock().record_initial_state();
+        shared
+    }
+
+    pub(super) fn lock(&self) -> MutexGuard<'_, World> {
+        let mut world = self.world.lock();
+        world.record_passed_ticks();
+        world
+    }
+
+    pub(super) fn notify_changed(&self) {
+        self.changed.notify_waiters();
+    }
+
+    pub(super) async fn yield_randomly(&self) {
+        let yields = self.lock().rng.random_range(0..3);
+        for _ in 0..yields {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    pub(super) async fn begin_step(&self, actor: Actor, kind: StepKind) -> SystemTime {
+        self.yield_randomly().await;
+        self.wait_while_stalled(actor, kind).await;
+        self.enter(actor).await;
+        self.lock().local_time(actor)
+    }
+
+    pub(super) async fn enter(&self, actor: Actor) {
+        if !self.lock().admit_call(actor) {
+            std::future::pending::<()>().await;
+        }
+    }
+
+    pub(super) async fn enter_inside_step(&self, actor: Actor) {
+        self.enter(actor).await;
+        let interleave = {
+            let mut world = self.lock();
+            world.step_order == StepOrder::Interleaved && world.rng.random_bool(0.5)
+        };
+        if interleave {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    pub(super) async fn wait_for_ready_message(&self) {
+        loop {
+            let changed = self.changed.notified();
+            if self.lock().broker.ready_messages().next().is_some() {
+                return;
+            }
+            changed.await;
+        }
+    }
+
+    pub(super) fn into_outcome(self) -> WorldOutcome {
+        let mut world = self.world.lock();
+        WorldOutcome {
+            seed: world.seed,
+            broken: world.broken.take(),
+            timeline: std::mem::take(&mut world.timeline),
+            trace: std::mem::take(&mut world.trace),
+            counts: std::mem::take(&mut world.counts),
+        }
+    }
+
+    async fn wait_while_stalled(&self, actor: Actor, kind: StepKind) {
+        let Actor::Process { index, .. } = actor else {
+            return;
+        };
+        loop {
+            let changed = self.changed.notified();
+            if !self.lock().stall_if_armed(index, kind) {
+                return;
+            }
+            changed.await;
+            self.yield_randomly().await;
+        }
+    }
+}
+
+impl World {
+    pub(super) fn now_tick(&self) -> u64 {
+        let elapsed = Instant::now().duration_since(self.started_at);
+        u64::try_from(elapsed.as_millis() / TICK.as_millis()).unwrap_or(u64::MAX)
+    }
+
+    pub(super) fn seen_tick(&self) -> u64 {
+        self.seen_tick
+    }
+
+    pub(super) fn local_time(&self, actor: Actor) -> SystemTime {
+        UNIX_EPOCH + Instant::now().duration_since(self.started_at) + TICK * self.offset_of(actor)
+    }
+
+    pub(super) fn instant_at(&self, actor: Actor, local: SystemTime) -> Instant {
+        let since_epoch = local.duration_since(UNIX_EPOCH).unwrap_or_default();
+        self.started_at + since_epoch.saturating_sub(TICK * self.offset_of(actor))
+    }
+
+    pub(super) fn draw(&mut self, range: std::ops::RangeInclusive<u64>) -> u64 {
+        self.rng.random_range(range)
+    }
+
+    pub(super) fn is_broken(&self) -> bool {
+        self.broken.is_some()
+    }
+
+    pub(super) fn start_process(&mut self, holder: HolderId, index: usize) -> Actor {
+        self.holders.insert(holder, index);
+        Actor::Process {
+            index,
+            incarnation: self.processes[index].incarnation,
+        }
+    }
+
+    pub(super) fn count(&mut self, name: &str) {
+        *self.counts.entry(name.to_owned()).or_default() += 1;
+    }
+
+    pub(super) fn publish(&mut self, message: &TaskMessage) {
+        self.payloads.insert(message.task, message.clone());
+        self.broker.publish(message.task);
+    }
+
+    pub(super) fn deliver(&mut self, process: usize, message: usize) -> Option<TaskMessage> {
+        let now = self.now_tick();
+        self.processes[process].held = Some(message);
+        let task = self.broker.deliver(message, process, now);
+        self.payloads.get(&task).cloned()
+    }
+
+    pub(super) fn has_submits_left(&self) -> bool {
+        self.covers.len() < self.submits && self.publishing.is_none()
+    }
+
+    pub(super) fn are_all_submits_done(&self) -> bool {
+        self.publishing.is_none()
+            && self.covers.len() == self.submits
+            && self
+                .covers
+                .iter()
+                .all(|task| self.lost_in_wipe.contains(task) || self.broker.is_done(*task))
+    }
+
+    pub(super) fn apply_event(&mut self, actor: Actor, at: SystemTime, event: ProtocolEvent) {
+        if at != self.local_time(actor) {
+            self.break_rule(format!(
+                "{actor:?} logged {at:?}, which is not the time of its step"
+            ));
+        }
+        match (actor, event) {
+            (Actor::Planner, ProtocolEvent::Submitted { task, found_marker }) => {
+                if !found_marker {
+                    self.ids.push(task);
+                }
+                self.publishing = Some(task);
+                let id = self.find_spec_id(task);
+                self.record_step(format!("Submit, task {id}"));
+            }
+            (Actor::Planner, ProtocolEvent::Published(task)) => {
+                self.publishing = None;
+                self.covers.push(task);
+                let id = self.find_spec_id(task);
+                self.record_step(format!("Publish, task {id}"));
+            }
+            (Actor::Process { index, .. }, ProtocolEvent::Delivered(task)) => {
+                self.processes[index].phase = Phase::Leasing;
+                let copy = self.processes[index].held.map_or(0, |copy| copy + 1);
+                let id = self.find_spec_id(task);
+                self.record_step(format!("Deliver(p{}, {copy}), task {id}", index + 1));
+            }
+            (Actor::Process { index, .. }, ProtocolEvent::LeaseAcquired(hold)) => {
+                let process = &mut self.processes[index];
+                process.phase = Phase::Leased;
+                process.token = hold.fence();
+                process.seen = hold.seen_revision();
+                process.expiry = ticks_at(hold.expires_at());
+                process.renew_at = ticks_at(hold.renew_at());
+                self.record_step(format!("AcquireLease(p{})", index + 1));
+            }
+            (Actor::Process { index, .. }, ProtocolEvent::Started { task, .. }) => {
+                self.started.insert(task);
+                self.processes[index].phase = Phase::Running;
+                self.record_step(format!("StartTask(p{})", index + 1));
+            }
+            (Actor::Process { index, .. }, ProtocolEvent::Renewed(hold)) => {
+                let process = &mut self.processes[index];
+                process.seen = hold.seen_revision();
+                process.expiry = ticks_at(hold.expires_at());
+                process.renew_at = ticks_at(hold.renew_at());
+                self.record_step(format!("Renew(p{})", index + 1));
+            }
+            (Actor::Process { index, .. }, ProtocolEvent::RenewalLost(_)) => {
+                self.drop_run(index);
+                self.record_step(format!("Renew(p{}), lost", index + 1));
+            }
+            (Actor::Process { index, .. }, ProtocolEvent::RenewalFailed(_)) => {
+                self.drop_run(index);
+                self.record_step(format!("RenewFails(p{})", index + 1));
+            }
+            (Actor::Process { index, .. }, ProtocolEvent::Finished { .. }) => {
+                self.drop_run(index);
+                self.record_step(format!("Finish(p{})", index + 1));
+            }
+            (Actor::Process { index, .. }, ProtocolEvent::Abandoned(_)) => {
+                self.drop_run(index);
+                self.record_step(format!("Abandon(p{})", index + 1));
+            }
+            (actor, event) => {
+                self.break_rule(format!(
+                    "{actor:?} logged {event:?}, which only the other actor sends"
+                ));
+            }
+        }
+    }
+
+    pub(super) fn begin_write(&mut self, process: usize) {
+        self.processes[process].phase = Phase::Writing;
+        self.record_step(format!("BeginWrite(p{})", process + 1));
+    }
+
+    pub(super) fn commit_write(&mut self, process: usize, fence: Fence) -> bool {
+        if fence != self.processes[process].token {
+            self.break_rule(format!(
+                "p{} wrote with the fence {fence:?}, which is not the fence of its lease",
+                process + 1
+            ));
+        }
+        let holds_current = self.holds_current_lease(process);
+        let kept = self.database.write(fence) == DatabaseWrite::Kept;
+        if kept {
+            self.processes[process].phase = Phase::Done;
+        } else {
+            self.count("RejectedWrite");
+            self.rejected_current |= holds_current;
+            self.drop_run(process);
+        }
+        self.record_step(format!("CommitWrite(p{}), kept {kept}", process + 1));
+        kept
+    }
+
+    pub(super) fn redeliver_expired_messages(&mut self) -> bool {
+        let now = self.now_tick();
+        let expired: Vec<usize> = self.broker.expired_messages(now).collect();
+        for message in &expired {
+            self.broker.redeliver(*message);
+            self.record_step(format!("Redeliver({})", message + 1));
+        }
+        !expired.is_empty()
+    }
+
+    pub(super) fn break_rule(&mut self, rule: String) {
+        if self.broken.is_none() {
+            self.timeline
+                .push(format!("t{} broken: {rule}", self.seen_tick));
+            self.broken = Some(rule);
+        }
+    }
+
+    pub(super) fn find_spec_id(&self, task: TaskId) -> usize {
+        self.ids
+            .iter()
+            .position(|id| *id == task)
+            .map_or(0, |index| index + 1)
+    }
+
+    pub(super) fn find_lease_holder(&self) -> Option<usize> {
+        self.lease
+            .get()
+            .and_then(|lease| self.holders.get(&lease.holder).copied())
+    }
+
+    pub(super) fn drop_run(&mut self, process: usize) {
+        self.processes[process].phase = Phase::Idle;
+        self.processes[process].held = None;
+    }
+
+    pub(super) fn record_step(&mut self, step: String) {
+        let name = step.split(['(', ',', ' ']).next().unwrap_or_default();
+        self.count(name);
+        if step != "Tick" {
+            self.timeline.push(format!("t{} {step}", self.seen_tick));
+        }
+        if self.step_order == StepOrder::Atomic {
+            let state = self.format_spec_state();
+            if self.trace.last() != Some(&state) {
+                self.trace.push(state);
+            }
+        }
+        if let Some(rule) = self.find_broken_rule() {
+            self.break_rule(rule.to_owned());
+        }
+    }
+
+    pub(super) fn admit_call(&mut self, actor: Actor) -> bool {
+        self.calls_this_tick += 1;
+        if self.calls_this_tick > MAX_CALLS_PER_TICK {
+            self.break_rule(format!(
+                "{actor:?} made {MAX_CALLS_PER_TICK} port calls in one tick, so time can't pass"
+            ));
+        }
+        match actor {
+            Actor::Planner => true,
+            Actor::Process { index, incarnation } => {
+                self.processes[index].incarnation == incarnation && !self.is_broken()
+            }
+        }
+    }
+
+    fn offset_of(&self, actor: Actor) -> u32 {
+        match actor {
+            Actor::Planner => 0,
+            Actor::Process { index, .. } => {
+                u32::try_from(self.processes[index].offset).unwrap_or(u32::MAX)
+            }
+        }
+    }
+
+    fn holds_current_lease(&self, process: usize) -> bool {
+        self.find_lease_holder() == Some(process)
+            && self.lease.revision() == self.processes[process].seen
+    }
+
+    fn record_initial_state(&mut self) {
+        self.timeline.push("t0 Init".to_owned());
+        if self.step_order == StepOrder::Atomic {
+            self.trace.push(self.format_spec_state());
+        }
+    }
+
+    fn record_passed_ticks(&mut self) {
+        while self.seen_tick < self.now_tick() {
+            self.seen_tick += 1;
+            self.calls_this_tick = 0;
+            self.record_step("Tick".to_owned());
+        }
+    }
+
+    fn find_broken_rule(&self) -> Option<&'static str> {
+        if self.rejected_current {
+            return Some("NoRejectedCurrentHolder");
+        }
+        let marker = self.marker.get().map(|pending| pending.task);
+        let pending_beside_marker = self
+            .ids
+            .iter()
+            .filter(|task| self.is_pending(**task))
+            .any(|task| Some(*task) != marker);
+        if pending_beside_marker {
+            return Some("AtMostOnePending");
+        }
+        if !self.covers.iter().all(|task| self.is_covered(*task)) {
+            return Some("EverySubmitCovered");
+        }
+        None
+    }
+
+    fn is_pending(&self, task: TaskId) -> bool {
+        !self.started.contains(&task)
+            && !self.lost_in_wipe.contains(&task)
+            && self.broker.has_live_message(task)
+    }
+
+    fn is_covered(&self, task: TaskId) -> bool {
+        self.started.contains(&task)
+            || self.broker.has_live_message(task)
+            || self.publishing == Some(task)
+            || self.lost_in_wipe.contains(&task)
+    }
+}
+
+impl ProcessState {
+    fn idle(offset: u64) -> Self {
+        Self {
+            offset,
+            incarnation: 0,
+            phase: Phase::Idle,
+            held: None,
+            token: Fence {
+                generation: Generation(0),
+                revision: Revision(0),
+            },
+            seen: Revision(0),
+            expiry: 0,
+            renew_at: 0,
+            stall: Stall::Awake,
+            renewal_fails: false,
+        }
+    }
+}
+
+impl Phase {
+    pub(super) fn is_holding(self) -> bool {
+        match self {
+            Phase::Leased | Phase::Running | Phase::Writing | Phase::Done => true,
+            Phase::Idle | Phase::Leasing => false,
+        }
+    }
+
+    pub(super) fn spec_name(self) -> &'static str {
+        match self {
+            Phase::Idle => "idle",
+            Phase::Leasing => "leasing",
+            Phase::Leased => "leased",
+            Phase::Running => "running",
+            Phase::Writing => "writing",
+            Phase::Done => "done",
+        }
+    }
+}
+
+pub(super) fn ticks_at(time: SystemTime) -> u64 {
+    let since_epoch = time.duration_since(UNIX_EPOCH).unwrap_or_default();
+    u64::try_from(since_epoch.as_millis() / TICK.as_millis()).unwrap_or(u64::MAX)
+}

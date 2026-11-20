@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use tokio::runtime::{Handle, RuntimeFlavor};
 use tokio::sync::Notify;
-use tokio::task::{JoinError, JoinSet};
+use tokio::task::JoinSet;
 use tokio::time::Instant;
 use uuid::Uuid;
 
@@ -19,7 +19,9 @@ use crate::lane::Lane;
 use crate::ledger::JobSummary;
 use crate::payload::{Key, TaskInput, Tenant};
 use crate::planner::{Plan, PlanError, PlannedTask};
+use crate::protocol::{Fence, Generation, Revision};
 use crate::reconciler::{ReconcileBackend, ReconcileContext, ReconcileError};
+use crate::serve::resume_panic;
 use crate::testkit::ledger::{MemoryLedger, TaskSummary};
 use crate::testkit::timeline::{TaskEvent, Timeline};
 use crate::trigger::{EventBatch, Fired};
@@ -39,6 +41,7 @@ struct KitState {
     queue: Vec<QueuedTask>,
     pending: HashSet<(&'static str, Key)>,
     running_keys: HashSet<(&'static str, Key)>,
+    fences: HashMap<(&'static str, Key), u64>,
     busy_slots: HashMap<String, u32>,
     paused_lanes: HashMap<String, Instant>,
     ledger: MemoryLedger,
@@ -218,7 +221,12 @@ impl KitRuntime {
             let error = anyhow!("no module registered the worker {}", task.input.worker);
             return Attempt::Failed(TaskError::permanent(error));
         };
-        let ctx = TaskContext::new(Arc::clone(&self.pools));
+        let fence = self
+            .engine
+            .registry
+            .is_exclusive(task.input.worker)
+            .then(|| self.state.lock().take_next_fence(task));
+        let ctx = TaskContext::new(Arc::clone(&self.pools), fence);
         match tokio::time::timeout(lane.timeout, worker.run(&ctx, &task.input.bytes)).await {
             Ok(Ok(outcome)) => Attempt::Finished(outcome),
             Ok(Err(error)) => Attempt::Failed(error),
@@ -383,6 +391,15 @@ impl KitState {
         }
     }
 
+    fn take_next_fence(&mut self, task: &QueuedTask) -> Fence {
+        let revision = self.fences.entry(task.worker_key()).or_default();
+        *revision += 1;
+        Fence {
+            generation: Generation(1),
+            revision: Revision(*revision),
+        }
+    }
+
     fn count_busy_slots(&self, task: &QueuedTask) -> u32 {
         self.busy_slots
             .get(&task.format_lane_id())
@@ -472,13 +489,5 @@ impl QueuedTask {
             error_class,
             error_message,
         }
-    }
-}
-
-fn resume_panic(joined: Result<(), JoinError>) {
-    if let Err(error) = joined
-        && error.is_panic()
-    {
-        std::panic::resume_unwind(error.into_panic());
     }
 }

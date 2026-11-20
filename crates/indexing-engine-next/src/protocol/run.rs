@@ -84,10 +84,6 @@ impl Hold {
         self.renew_at
     }
 
-    pub fn start_clears_marker(&self, marker: Option<TaskId>) -> bool {
-        marker == Some(self.task)
-    }
-
     pub fn is_renew_due(&self, local_now: SystemTime) -> bool {
         local_now >= self.renew_at
     }

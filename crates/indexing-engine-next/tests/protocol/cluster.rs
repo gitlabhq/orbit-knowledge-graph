@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime};
 
 use indexing_engine_next::protocol::{
     Claim, Generation, Hold, HolderId, Lease, LeaseRules, Publish, Renewal, TaskId, decide_submit,
+    start_clears_marker,
 };
 use indexing_engine_next::testkit::simulator::{
     DatabaseWrite, FaultBudget, MessageState, SimulatedBroker, SimulatedClock, SimulatedDatabase,
@@ -483,7 +484,7 @@ impl Cluster {
         };
         self.started.insert(hold.task());
         let marker = self.marker.get().copied();
-        if hold.start_clears_marker(marker) {
+        if start_clears_marker(marker, hold.task()) {
             let cleared = self.marker.put(self.marker.revision(), None);
             assert!(cleared.is_ok(), "a start is atomic in the spec");
         } else if marker.is_some() {
