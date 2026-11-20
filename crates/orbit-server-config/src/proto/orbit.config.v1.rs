@@ -151,6 +151,8 @@ pub struct ClickHouse {
     >,
     #[prost(message, optional, tag = "8")]
     pub profiling: ::core::option::Option<Profiling>,
+    #[prost(string, optional, tag = "9")]
+    pub compatibility: ::core::option::Option<::prost::alloc::string::String>,
 }
 impl ::prost::Name for ClickHouse {
     const NAME: &'static str = "ClickHouse";

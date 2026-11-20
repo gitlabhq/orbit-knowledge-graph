@@ -81,6 +81,7 @@ message ClickHouse {
   map<string, string> session_settings = 6;
   map<string, string> insert_settings = 7;
   Profiling profiling = 8 [(buf.validate.field).required = true];
+  optional string compatibility = 9 [(buf.validate.field).required = true, (buf.validate.field).string.min_len = 1];
 }
 
 message Profiling {

@@ -131,6 +131,15 @@ impl Dictionary {
     }
 }
 
+/// ClickHouse runs dictionary loads and view refreshes without the client's session settings,
+/// so their SQL repeats the session's `compatibility`.
+pub fn compatibility_clause(compatibility: Option<&str>) -> String {
+    match compatibility {
+        Some(version) => format!(" SETTINGS compatibility = {}", quote_sql_literal(version)),
+        None => String::new(),
+    }
+}
+
 #[derive(Debug)]
 pub struct DictionaryCredentials {
     pub database: String,
@@ -403,7 +412,11 @@ impl View {
 }
 
 impl Dictionary {
-    pub fn to_create_sql(&self, credentials: &DictionaryCredentials) -> String {
+    pub fn to_create_sql(
+        &self,
+        credentials: &DictionaryCredentials,
+        compatibility: Option<&str>,
+    ) -> String {
         let key_type = self
             .attributes
             .iter()
@@ -444,12 +457,13 @@ impl Dictionary {
 
         let source_query = format!(
             "SELECT {outer} FROM (SELECT {inner} FROM `{db}`.{table} GROUP BY {key} \
-             HAVING argMax({DELETED_COLUMN}, {VERSION_COLUMN}) = false)",
+             HAVING argMax({DELETED_COLUMN}, {VERSION_COLUMN}) = false){settings}",
             outer = outer_selects.join(", "),
             inner = inner_selects.join(", "),
             db = credentials.database,
             table = self.source_table,
             key = self.key,
+            settings = compatibility_clause(compatibility),
         );
 
         let credentials_clause = match &credentials.password {
@@ -613,6 +627,22 @@ mod tests {
                 "{}",
                 definition.name
             );
+        }
+    }
+
+    #[test]
+    fn dictionary_source_query_carries_compatibility() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let schema = GraphSchema::from_ontology(&ontology).unwrap();
+        let credentials = DictionaryCredentials {
+            database: "default".into(),
+            user: "default".into(),
+            password: None,
+        };
+
+        for dictionary in &schema.dictionaries {
+            let sql = dictionary.to_create_sql(&credentials, Some("26.6"));
+            assert!(sql.contains(" SETTINGS compatibility = '26.6'$q$"), "{sql}");
         }
     }
 }
