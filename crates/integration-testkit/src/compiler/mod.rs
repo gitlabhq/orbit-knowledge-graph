@@ -1708,6 +1708,7 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
                 dynamic,
                 path_segment_budget: budget,
             },
+            plan::TopK::Pruned,
         )
         .unwrap();
         let plan::QueryPlan::Hydration(hydration) = &plan else {

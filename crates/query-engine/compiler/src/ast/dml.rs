@@ -244,6 +244,13 @@ impl OrderExpr {
     pub fn desc(expr: Expr) -> Self {
         Self { expr, desc: true }
     }
+
+    pub fn directed(expr: Expr, direction: crate::input::OrderDirection) -> Self {
+        Self {
+            expr,
+            desc: direction == crate::input::OrderDirection::Desc,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

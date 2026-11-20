@@ -191,6 +191,11 @@
               "description": "Whether this field can change after creation. False lets the planner filter on it before the latest-row pick.",
               "default": true
             },
+            "rises_with_id": {
+              "type": "boolean",
+              "description": "Whether values rise with the row id, like a creation time. Requires mutable false. Lets ORDER BY on this field with a LIMIT skip older granules.",
+              "default": false
+            },
             "terminal_values": {
               "type": "array",
               "items": {

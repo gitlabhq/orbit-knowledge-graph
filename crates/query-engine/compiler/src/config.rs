@@ -12,7 +12,7 @@ use crate::passes::frontend;
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::lower::LoweredMetadata;
 use crate::passes::plan::HydrationCompileOptions;
-use crate::passes::plan::QueryPlan;
+use crate::passes::plan::{QueryPlan, TopK};
 use crate::passes::result_contract::ResultContext;
 use crate::passes::{
     codegen, hydrate, lower, normalize, page, plan, relationships, response_policy, restrict,
@@ -34,6 +34,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub input: Input,
         pub tp_bounds: crate::tp_bounds::TpBounds,
         pub hydration_options: HydrationCompileOptions,
+        pub top_k: TopK,
         pub query_plan: QueryPlan,
         pub node: Node,
         pub lowered_metadata: LoweredMetadata,
@@ -77,12 +78,12 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         plan_clickhouse {
             reads_env: [data_model]
-            reads_state: [hydration_options]
+            reads_state: [hydration_options, top_k]
             mutates: [input, query_plan]
         }
         plan_duckdb {
             reads_env: [data_model]
-            reads_state: [hydration_options]
+            reads_state: [hydration_options, top_k]
             mutates: [input, query_plan]
         }
         tp_bounds {
@@ -139,31 +140,31 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse_json_dsl {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            state: [raw, input, tp_bounds, hydration_options, top_k, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
             phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, settings, security, security_check, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            state: [raw, input, tp_bounds, hydration_options, top_k, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
             phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, settings, security, security_check, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            state: [input, tp_bounds, hydration_options, top_k, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
             phases: [validate_conditions, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, settings, security, security_check, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
+            state: [raw, input, tp_bounds, hydration_options, top_k, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
             phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, paginate, result_contract, duckdb_codegen]
         }
         duckdb_gql {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
+            state: [raw, input, tp_bounds, hydration_options, top_k, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
             phases: [gql_parse, validate_local, validate_relationships, normalize, plan_duckdb, lower, paginate, result_contract, duckdb_codegen]
         }
         validate_normalize_gql {
@@ -254,7 +255,7 @@ fn plan_duckdb(
 
 fn plan_with<C>(
     ctx: &mut C,
-    build: impl FnOnce(&Input, &C::Model, HydrationCompileOptions) -> Result<QueryPlan>,
+    build: impl FnOnce(&Input, &C::Model, HydrationCompileOptions, TopK) -> Result<QueryPlan>,
 ) -> Result<()>
 where
     C: CompilerCtx,
@@ -265,7 +266,8 @@ where
         .as_ref()
         .copied()
         .unwrap_or_default();
-    let query_plan = build(&input, ctx.data_model(), hydration_options)?;
+    let top_k = ctx.top_k().as_ref().copied().unwrap_or_default();
+    let query_plan = build(&input, ctx.data_model(), hydration_options, top_k)?;
     ctx.set_input(input);
     ctx.set_query_plan(query_plan);
     Ok(())
@@ -379,6 +381,7 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
         hydration,
         input,
         has_virtual_columns,
+        fallback: None,
     });
     Ok(())
 }
@@ -398,6 +401,7 @@ fn duckdb_codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
         hydration,
         input,
         has_virtual_columns,
+        fallback: None,
     });
     Ok(())
 }

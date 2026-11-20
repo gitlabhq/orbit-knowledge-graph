@@ -49,6 +49,15 @@ impl<T> Plan<T> {
     }
 }
 
+/// Whether a traversal ordered by a column that rises with id reads only past a raw top-k threshold.
+/// A `Pruned` page shorter than the fetch limit reruns as `Exact`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TopK {
+    #[default]
+    Pruned,
+    Exact,
+}
+
 pub enum QueryPlan {
     Traversal(Plan<Traversal>),
     Aggregation(Plan<Aggregation>),
@@ -64,6 +73,17 @@ impl QueryPlan {
             Self::Aggregation(plan) => &plan.relations,
             _ => &[],
         }
+    }
+
+    pub fn prunes_top_k(&self) -> bool {
+        let Self::Traversal(plan) = self else {
+            return false;
+        };
+        plan.operation
+            .execution
+            .graph
+            .iter()
+            .any(|(_, node)| matches!(node, graph::RelationNode::TopK { .. }))
     }
 
     pub fn is_point_lookup(&self) -> bool {
@@ -111,28 +131,33 @@ pub fn plan_clickhouse(
     input: &Input,
     model: &query_data_model::ClickHouseDataModel,
     hydration_options: HydrationCompileOptions,
+    top_k: TopK,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options)
+    plan(input, model, hydration_options, top_k)
 }
 
 pub fn plan_duckdb(
     input: &Input,
     model: &query_data_model::DuckDbDataModel,
     hydration_options: HydrationCompileOptions,
+    top_k: TopK,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options)
+    plan(input, model, hydration_options, top_k)
 }
 
 fn plan<M>(
     input: &Input,
     model: &M,
     hydration_options: HydrationCompileOptions,
+    top_k: TopK,
 ) -> Result<QueryPlan>
 where
     M: OrbitQueryModel + ?Sized,
 {
     Ok(match input.query_type {
-        QueryType::Traversal => QueryPlan::Traversal(query_types::traversal::plan(input, model)?),
+        QueryType::Traversal => {
+            QueryPlan::Traversal(query_types::traversal::plan(input, model, top_k)?)
+        }
         QueryType::Aggregation => {
             QueryPlan::Aggregation(query_types::aggregation::plan(input, model)?)
         }

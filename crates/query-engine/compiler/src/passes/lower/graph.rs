@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use super::predicates::{column, predicate, projections};
 use super::sql::latest_row_dedup;
 use super::{EmitOutput, NodeBinding};
-use crate::ast::{Cte, Expr, Query, SelectExpr, TableRef};
+use crate::ast::{Cte, Expr, OrderExpr, Query, SelectExpr, TableRef};
 use crate::constants::internal_column_prefix;
 use crate::passes::plan::graph::{
     ExecutionPlan, ReadOwner, RelationGraph, RelationId, RelationNode, RelationRef,
@@ -141,6 +141,7 @@ pub(super) fn exposed_alias(id: RelationId, graph: &RelationGraph) -> Option<Str
         | RelationNode::UnionAll { alias, .. }
         | RelationNode::Bind { alias, .. }
         | RelationNode::Latest { alias, .. } => Some(alias.clone()),
+        RelationNode::TopK { column, .. } => Some(column.source.clone()),
         RelationNode::Filter { input, .. } => input
             .alias
             .clone()
@@ -243,6 +244,24 @@ fn emit_node(id: RelationId, reads: &Reads<'_>, current: Option<RelationId>) -> 
             RelationOutput {
                 from: TableRef::subquery(dedup, alias),
                 predicates: condition.iter().map(predicate).collect(),
+            }
+        }
+        RelationNode::TopK {
+            input,
+            column: value,
+            direction,
+            limit,
+        } => {
+            let ordered = column(value);
+            let rows = Query {
+                select: vec![SelectExpr::new(ordered.clone(), &value.name)],
+                order_by: vec![OrderExpr::directed(ordered, *direction)],
+                limit: Some(*limit),
+                ..emit_ref(input, reads, current).query(vec![])
+            };
+            RelationOutput {
+                from: TableRef::subquery(rows, &value.source),
+                predicates: vec![],
             }
         }
     }

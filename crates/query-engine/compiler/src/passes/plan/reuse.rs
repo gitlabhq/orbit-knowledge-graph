@@ -39,11 +39,14 @@ impl RelationUsage {
         for input in node.inputs() {
             self.visit(input.id, graph);
         }
-        for leaf in node.predicates().iter().flat_map(Predicate::leaves) {
-            if let Predicate::Membership { relation, .. } = leaf {
-                self.materialize(*relation);
-                self.visit(*relation, graph);
-            }
+        for relation in node
+            .predicates()
+            .iter()
+            .flat_map(Predicate::leaves)
+            .filter_map(Predicate::relation)
+        {
+            self.materialize(relation);
+            self.visit(relation, graph);
         }
     }
 
@@ -58,9 +61,9 @@ impl RelationUsage {
                 }
                 !selective.is_empty() || Self::reusable(input.id, graph)
             }
-            RelationNode::Project { input, .. } | RelationNode::Bind { input, .. } => {
-                Self::reusable(input.id, graph)
-            }
+            RelationNode::Project { input, .. }
+            | RelationNode::Bind { input, .. }
+            | RelationNode::TopK { input, .. } => Self::reusable(input.id, graph),
             RelationNode::UnionAll { .. }
             | RelationNode::Join { .. }
             | RelationNode::Latest { .. } => true,

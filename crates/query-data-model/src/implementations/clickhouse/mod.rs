@@ -217,6 +217,12 @@ impl RelationalMapping for ClickHouseBindings {
             .is_none_or(|facts| facts.mutable)
     }
 
+    fn property_rises_with_id(&self, property: PropertyId) -> bool {
+        self.property_facts
+            .get(property.index())
+            .is_some_and(|facts| facts.rises_with_id)
+    }
+
     fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]> {
         self.table(table)
             .map(|layout| layout.path_columns.as_slice())

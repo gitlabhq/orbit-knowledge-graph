@@ -205,6 +205,8 @@ struct PropertyYaml {
     #[serde(default = "PropertyYaml::default_mutable")]
     mutable: bool,
     #[serde(default)]
+    rises_with_id: bool,
+    #[serde(default)]
     terminal_values: Option<Vec<String>>,
     #[serde(default)]
     binary: bool,
@@ -375,6 +377,13 @@ impl NodeYaml {
                     )));
                 }
 
+                if prop_def.rises_with_id && prop_def.mutable {
+                    return Err(OntologyError::Validation(format!(
+                        "property '{prop_name}' on node '{name}': \
+                         'rises_with_id: true' requires 'mutable: false'"
+                    )));
+                }
+
                 if prop_def.data_type == DataType::Enum
                     && prop_def.values.as_ref().is_none_or(BTreeMap::is_empty)
                 {
@@ -410,6 +419,7 @@ impl NodeYaml {
                         }
                     }),
                     mutable: prop_def.mutable,
+                    rises_with_id: prop_def.rises_with_id,
                     terminal_values: prop_def.terminal_values,
                     binary: prop_def.binary,
                 })

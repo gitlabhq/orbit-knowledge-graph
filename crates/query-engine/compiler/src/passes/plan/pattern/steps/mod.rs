@@ -13,6 +13,7 @@ use query_data_model::OrbitQueryModel;
 use super::{EdgeRelation, NodePlan, Pattern};
 use crate::constants::*;
 use crate::error::{QueryError, Result};
+use crate::passes::plan::TopK;
 use crate::passes::plan::graph::{BindingSource, ExecutionPlan, RelationGraph, RelationId};
 use crate::passes::plan::predicates::{Column, OutputValue, Predicate, Projection, membership};
 
@@ -25,6 +26,7 @@ pub(super) struct RelationBuilder<'a, M: OrbitQueryModel + ?Sized> {
     nodes: HashMap<String, PlannedNode>,
     graph: RelationGraph,
     tagged: HashSet<(String, String, usize)>,
+    top_k: TopK,
 }
 
 #[derive(Default)]
@@ -36,7 +38,7 @@ struct PlannedNode {
 }
 
 impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
-    pub fn new(pattern: &'a Pattern<'a, M>) -> Self {
+    pub fn new(pattern: &'a Pattern<'a, M>, top_k: TopK) -> Self {
         Self {
             pattern,
             root: None,
@@ -44,6 +46,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             nodes: HashMap::new(),
             graph: RelationGraph::new(pattern.model.supports_selective_latest_rows()),
             tagged: HashSet::new(),
+            top_k,
         }
     }
 
@@ -91,7 +94,8 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             .values()
             .next()
             .ok_or_else(|| QueryError::Lowering("no nodes in plan".into()))?;
-        let root = self.pattern.node_read(&mut self.graph, node)?;
+        let driving = self.driving_node(node);
+        let root = self.pattern.node_read(&mut self.graph, &driving)?;
         Ok(ExecutionPlan {
             graph: self.graph,
             root,
@@ -198,7 +202,13 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         node: &NodePlan,
         on: impl FnOnce(&Self) -> Result<(Column, Column)>,
     ) -> Result<()> {
-        let scan = self.node_read(node)?;
+        let scan = match self.root {
+            Some(_) => self.node_read(node)?,
+            None => {
+                let driving = self.driving_node(node);
+                self.node_read(&driving)?
+            }
+        };
         self.join_root(scan, &node.alias, on)?;
         self.outputs.extend(node.outputs());
         self.bind_table(node);
@@ -223,6 +233,16 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                 .zip(suffixes)
                 .map(|(value, suffix)| Projection::new(value, format!("{prefix}{suffix}"))),
         );
+    }
+
+    /// The node whose read starts the chain; under `TopK::Pruned` it carries the ordered column's threshold.
+    fn driving_node(&mut self, node: &NodePlan) -> NodePlan {
+        let mut driving = node.clone();
+        if self.top_k == TopK::Pruned {
+            let threshold = self.pattern.top_k_threshold(&mut self.graph, node);
+            driving.predicates.extend(threshold);
+        }
+        driving
     }
 
     fn node_read(&mut self, node: &NodePlan) -> Result<RelationId> {

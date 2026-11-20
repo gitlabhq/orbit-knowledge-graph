@@ -2,7 +2,7 @@ use super::Emitted;
 use crate::ast::*;
 use crate::constants::EDGE_KIND_SUFFIX;
 use crate::error::{QueryError, Result};
-use crate::input::{Input, OrderDirection};
+use crate::input::Input;
 use crate::passes::lower::{graph, predicates};
 use crate::passes::plan::{EdgeRelation, Plan, Traversal, property_value};
 use crate::tp_bounds::TpBounds;
@@ -24,7 +24,7 @@ pub(crate) fn emit(
     let nodes = output.take_bindings(plan, input)?;
     let mut query = output.into_query(vec![], vec![], vec![], input.limit);
     query.order_by = match (&input.order_by, &input.relationship_return.sort) {
-        (Some(order), _) => vec![ordered(
+        (Some(order), _) => vec![OrderExpr::directed(
             predicates::output_value(&property_value(
                 &plan.nodes,
                 &order.node,
@@ -41,7 +41,7 @@ pub(crate) fn emit(
                 .ok_or_else(|| {
                     QueryError::Lowering("sorted relationship has no edge type column".into())
                 })?;
-            vec![ordered(edge_type, sort.direction)]
+            vec![OrderExpr::directed(edge_type, sort.direction)]
         }
         (None, None) => Vec::new(),
     };
@@ -70,14 +70,6 @@ pub(crate) fn emit(
         nodes,
         stable_order,
     })
-}
-
-fn ordered(expr: Expr, direction: OrderDirection) -> OrderExpr {
-    if direction == OrderDirection::Desc {
-        OrderExpr::desc(expr)
-    } else {
-        OrderExpr::asc(expr)
-    }
 }
 
 fn multi_type_edge_types(query: &Query, relations: &[EdgeRelation]) -> Vec<Expr> {

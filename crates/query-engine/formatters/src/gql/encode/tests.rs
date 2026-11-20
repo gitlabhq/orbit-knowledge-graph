@@ -54,6 +54,7 @@ fn output(
             hydration: HydrationPlan::None,
             input,
             has_virtual_columns: false,
+            fallback: None,
         }),
         query_result,
         result_context,

@@ -1,0 +1,40 @@
+cases:
+  - name: A latest-first read on a column that rises with id keeps rows past the raw top-k threshold
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","columns":["name"],"filters":{"ref":"master"}}],"order_by":"-j.created_at","limit":10}
+      gql: |
+        MATCH (j:Job) WHERE j.ref = 'master' RETURN j.name ORDER BY j.created_at DESC LIMIT 10
+    physical:
+      clickhouse:
+        planned:
+          bind:
+            - (CTE $threshold (Limit 11 BY j.created_at DESC (Filter ..., j._deleted = false, j.created_at IS NOT NULL (Scan Table(gl_job) AS j))))
+          expect:
+            - (Deduplicate LimitBy j.traversal_path, j.id (Filter ..., j.created_at >= MIN($threshold.created_at) (Scan Table(gl_job) AS j)))
+
+  - name: An oldest-first read keeps rows up to the largest of the first raw values
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["title"],"filters":{"state":"opened"}}],"order_by":"mr.created_at","limit":20}
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.state = 'opened' RETURN mr.title ORDER BY mr.created_at ASC LIMIT 20
+    physical:
+      clickhouse:
+        planned:
+          bind:
+            - (CTE $threshold (Limit 21 BY mr.created_at ASC (...)))
+          expect:
+            - (Filter ..., mr.created_at <= MAX($threshold.created_at) (_))
+
+  - name: An order on a time column that does not rise with id reads without a threshold
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["title"],"filters":{"state":"opened"}}],"order_by":"-mr.updated_at","limit":20}
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.state = 'opened' RETURN mr.title ORDER BY mr.updated_at DESC LIMIT 20
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Scan Table(gl_merge_request) AS mr ...)"]
+          reject: ["(Limit ... (_))"]

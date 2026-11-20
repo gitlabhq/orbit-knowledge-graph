@@ -554,6 +554,20 @@ fn relation_node(
                 relation_ref(input, graph, materialized, current),
             )],
         ),
+        RelationNode::TopK {
+            input,
+            column,
+            direction,
+            limit,
+        } => Tree::node(
+            Operator::Limit,
+            format!(
+                "{limit} BY {} {}",
+                planned_column(column),
+                direction_text(*direction)
+            ),
+            vec![relation_ref(input, graph, materialized, current)],
+        ),
         RelationNode::Join {
             endpoints,
             predicates,
@@ -645,6 +659,29 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             relation.0,
             membership_keys(keys)
         )],
+        Predicate::Threshold {
+            column,
+            direction,
+            relation,
+        } => {
+            let (op, last) = match direction {
+                OrderDirection::Desc => (">=", "MIN"),
+                OrderDirection::Asc => ("<=", "MAX"),
+            };
+            vec![format!(
+                "{} {op} {last}(_orbit_relation_{}.{})",
+                planned_column(column),
+                relation.0,
+                column.name
+            )]
+        }
+    }
+}
+
+fn direction_text(direction: OrderDirection) -> &'static str {
+    match direction {
+        OrderDirection::Desc => "DESC",
+        OrderDirection::Asc => "ASC",
     }
 }
 

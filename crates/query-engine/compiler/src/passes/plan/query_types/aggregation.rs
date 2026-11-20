@@ -47,7 +47,7 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
     model: &M,
 ) -> Result<Plan<Aggregation>> {
     let pattern = Pattern::new(input, model)?;
-    let execution = pattern.execution()?;
+    let execution = pattern.execution(crate::passes::plan::TopK::Exact)?;
     let result = aggregation_plan(input, &pattern.nodes, &execution);
     Ok(pattern.into_plan(execution, |execution| Aggregation { execution, result }))
 }
@@ -181,7 +181,9 @@ fn latest_row_condition(execution: &ExecutionPlan) -> Vec<Predicate> {
             | RelationNode::Filter { input, .. }
             | RelationNode::Project { input, .. }
             | RelationNode::Bind { input, .. } => source = input.id,
-            RelationNode::Read { .. } | RelationNode::UnionAll { .. } => break vec![],
+            RelationNode::Read { .. }
+            | RelationNode::UnionAll { .. }
+            | RelationNode::TopK { .. } => break vec![],
         }
     }
 }

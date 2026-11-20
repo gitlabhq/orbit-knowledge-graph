@@ -6,6 +6,7 @@ use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 
 use super::predicates::{Column, Predicate, Projection};
 use super::reuse::RelationUsage;
+use crate::input::OrderDirection;
 
 pub struct ExecutionPlan {
     pub graph: RelationGraph,
@@ -128,6 +129,13 @@ pub enum RelationNode {
         sort_key: Vec<String>,
         condition: Vec<Predicate>,
     },
+    /// The first `limit` values of `column` in `direction`, read without the latest-row pick.
+    TopK {
+        input: RelationRef,
+        column: Column,
+        direction: OrderDirection,
+        limit: u32,
+    },
 }
 
 impl RelationNode {
@@ -138,7 +146,8 @@ impl RelationNode {
             | Self::Filter { input, .. }
             | Self::Project { input, .. }
             | Self::Bind { input, .. }
-            | Self::Latest { input, .. } => vec![input],
+            | Self::Latest { input, .. }
+            | Self::TopK { input, .. } => vec![input],
             Self::UnionAll { inputs, .. } => inputs.iter().collect(),
             Self::Join { left, right, .. } => vec![left, right],
         }
@@ -164,7 +173,8 @@ impl RelationNode {
             | Self::Filter { input, .. }
             | Self::Project { input, .. }
             | Self::Bind { input, .. }
-            | Self::Latest { input, .. } => replace(input),
+            | Self::Latest { input, .. }
+            | Self::TopK { input, .. } => replace(input),
             Self::UnionAll { inputs, .. } => inputs.iter_mut().for_each(replace),
             Self::Join { left, right, .. } => {
                 replace(left);
@@ -428,6 +438,21 @@ impl RelationGraph {
         self.add(RelationNode::Bind {
             input: input.into(),
             alias: alias.into(),
+        })
+    }
+
+    pub fn top_k(
+        &mut self,
+        input: impl Into<RelationRef>,
+        column: Column,
+        direction: OrderDirection,
+        limit: u32,
+    ) -> RelationId {
+        self.add(RelationNode::TopK {
+            input: input.into(),
+            column,
+            direction,
+            limit,
         })
     }
 

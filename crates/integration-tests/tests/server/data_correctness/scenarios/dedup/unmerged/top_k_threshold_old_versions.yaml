@@ -1,0 +1,66 @@
+description: Old versions that fill the raw top-k of created_at still return a complete, exact page
+
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      merge_request: [9900, 9901, 9902, 9903, 9904, 9905, 9906]
+      project: [1000]
+  extra_seed:
+    gl_merge_request:
+      - { id: 9900, iid: 900, title: newest v1, state: opened, project_id: 1000, traversal_path: "1/100/1000/", created_at: "2030-01-05 00:00:00", _version: "2030-01-05 00:00:00" }
+      - { id: 9900, iid: 900, title: newest v2, state: opened, project_id: 1000, traversal_path: "1/100/1000/", created_at: "2030-01-05 00:00:00", _version: "2030-01-06 00:00:00" }
+      - { id: 9900, iid: 900, title: newest v3, state: merged, project_id: 1000, traversal_path: "1/100/1000/", created_at: "2030-01-05 00:00:00", _version: "2030-01-07 00:00:00" }
+      - { id: 9901, iid: 901, title: second v1, state: opened, project_id: 1000, traversal_path: "1/100/1000/", created_at: "2030-01-04 00:00:00", _version: "2030-01-04 00:00:00" }
+      - { id: 9901, iid: 901, title: second v2, state: opened, project_id: 1000, traversal_path: "1/100/1000/", created_at: "2030-01-04 00:00:00", _version: "2030-01-05 00:00:00" }
+      - { id: 9902, iid: 902, title: third, state: opened, project_id: 1000, traversal_path: "1/100/1000/", created_at: "2030-01-03 00:00:00", _version: "2030-01-03 00:00:00" }
+      - { id: 9903, iid: 903, title: oldest v1, state: opened, project_id: 1000, traversal_path: "1/100/1000/", created_at: "2030-01-01 00:00:00", _version: "2030-01-01 00:00:00" }
+      - { id: 9903, iid: 903, title: oldest v2, state: opened, project_id: 1000, traversal_path: "1/100/1000/", created_at: "2030-01-01 00:00:00", _version: "2030-01-02 00:00:00" }
+      - { id: 9903, iid: 903, title: oldest v3, state: closed, project_id: 1000, traversal_path: "1/100/1000/", created_at: "2030-01-01 00:00:00", _version: "2030-01-03 00:00:00" }
+      - { id: 9904, iid: 904, title: second oldest, state: opened, project_id: 1000, traversal_path: "1/100/1000/", created_at: "2030-01-02 00:00:00", _version: "2030-01-02 00:00:00" }
+      - { id: 9905, iid: 905, title: no creation time, state: opened, project_id: 1000, traversal_path: "1/100/1000/", _version: "2030-01-02 00:00:00" }
+      - { id: 9906, iid: 906, title: deleted v1, state: opened, project_id: 1000, traversal_path: "1/100/1000/", created_at: "2030-01-06 00:00:00", _version: "2030-01-06 00:00:00" }
+      - { id: 9906, iid: 906, title: deleted v2, state: opened, project_id: 1000, traversal_path: "1/100/1000/", created_at: "2030-01-06 00:00:00", _version: "2030-01-07 00:00:00", _deleted: true }
+
+cases:
+  - name: desc_page_reruns_when_old_versions_fill_the_threshold
+    description: The live version of deleted MR 9906 and 2 versions of MR 9900 are the raw top 3, so the pruned page holds 1 MR and the exact rerun returns the newest 2 live MRs
+    query:
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id >= 9900 AND mr.id <= 9910 RETURN mr.title, mr.created_at ORDER BY mr.created_at DESC LIMIT 2
+    expect:
+      node_count: 2
+      has_more: true
+      nodes:
+        MergeRequest:
+          order: [9900, 9901]
+          absent: [9906]
+          rows:
+            - { id: 9900, title: newest v3, created_at: "2030-01-05T00:00:00Z" }
+            - { id: 9901, title: second v2 }
+
+  - name: asc_page_reruns_when_old_versions_fill_the_threshold
+    description: The 3 versions of MR 9903 are the raw bottom 3, and the null creation time of MR 9905 sorts last
+    query:
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id >= 9900 AND mr.id <= 9910 RETURN mr.title ORDER BY mr.created_at ASC LIMIT 2
+    expect:
+      node_count: 2
+      has_more: true
+      nodes:
+        MergeRequest:
+          order: [9903, 9904]
+          rows:
+            - { id: 9903, title: oldest v3 }
+
+  - name: driving_read_reruns_through_the_project_join
+    description: MRs ordered by created_at and joined to their project return the newest 2 MRs
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000}) WHERE mr.id >= 9900 AND mr.id <= 9910 RETURN mr.title ORDER BY mr.created_at DESC LIMIT 2
+    expect:
+      nodes:
+        MergeRequest:
+          order: [9900, 9901]
+      edges:
+        IN_PROJECT: [[9900, 1000], [9901, 1000]]

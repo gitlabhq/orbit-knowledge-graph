@@ -12,10 +12,10 @@ use std::collections::{HashMap, HashSet};
 
 use query_data_model::OrbitQueryModel;
 
-use super::filters::{BoundFilter, NullAsEpochColumns};
+use super::filters::{BoundFilter, FilterOwner, NullAsEpochColumns, bind_filter};
 use super::graph::{ExecutionPlan, ReadOwner, ReadScope, RelationGraph, RelationId};
 use super::predicates::{Column, Predicate, kind_column};
-use super::{DenormalizedKey, DenormalizedProperty, Plan, sort_key};
+use super::{DenormalizedKey, DenormalizedProperty, Plan, TopK, sort_key};
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
@@ -91,6 +91,62 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
         ))
     }
 
+    /// Keeps the ordered node's rows at or past the last of the first `sorted_rows` raw values of a
+    /// column that rises with id, so ClickHouse skips older granules before the latest-row pick.
+    fn top_k_threshold(&self, graph: &mut RelationGraph, node: &NodePlan) -> Vec<Predicate> {
+        let Some(order) = self
+            .input
+            .order_by
+            .as_ref()
+            .filter(|order| order.node == node.alias)
+        else {
+            return vec![];
+        };
+        let (Some(table), Some(entity)) = (node.table.as_deref(), node.entity.as_deref()) else {
+            return vec![];
+        };
+        let Some(entity) = self.model.graph().entity_id(entity) else {
+            return vec![];
+        };
+        let rising = self
+            .model
+            .property_for_entity_id(entity, &order.property)
+            .is_some_and(|property| self.model.property_rises_with_id(property.id));
+        if !rising {
+            return vec![];
+        }
+        let column = Column::new(&node.alias, &order.property);
+        let not_null = bind_filter(
+            &order.property,
+            InputFilter {
+                op: Some(FilterOp::IsNotNull),
+                ..Default::default()
+            },
+            &FilterOwner::Entity(entity),
+            self.model,
+        )
+        .at(column.clone());
+        let mut conditions = self.node_conditions(node);
+        conditions.push(not_null.clone());
+        let read = graph.read(table, &node.alias, false);
+        let owned = graph.owned(read, ReadOwner::Node(node.alias.clone()), &node.alias);
+        let rows = graph.filter(owned, conditions);
+        let relation = graph.top_k(
+            rows,
+            column.clone(),
+            order.direction,
+            self.input.sorted_rows(),
+        );
+        vec![
+            not_null,
+            Predicate::Threshold {
+                column,
+                direction: order.direction,
+                relation,
+            },
+        ]
+    }
+
     fn node_conditions(&self, node: &NodePlan) -> Vec<Predicate> {
         let mut conditions = node.conditions();
         conditions.extend(self.shared_column_predicates(node));
@@ -131,8 +187,8 @@ impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
     }
 
     /// The relation graph for the pattern, with the conditions that span nodes applied at its root.
-    pub(super) fn execution(&self) -> Result<ExecutionPlan> {
-        let mut execution = steps::RelationBuilder::new(self).build()?;
+    pub(super) fn execution(&self, top_k: TopK) -> Result<ExecutionPlan> {
+        let mut execution = steps::RelationBuilder::new(self, top_k).build()?;
         let conditions = self
             .input
             .predicates

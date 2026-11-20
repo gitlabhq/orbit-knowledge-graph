@@ -1,6 +1,7 @@
 use super::sql;
 use crate::ast::*;
-use crate::input::BooleanExpression;
+use crate::input::{AggFunction, BooleanExpression, OrderDirection};
+use crate::passes::plan::graph::RelationId;
 use crate::passes::plan::predicates::{Column, OutputValue, Predicate, Projection};
 
 pub(super) fn column(value: &Column) -> Expr {
@@ -93,7 +94,29 @@ fn lower_predicate(value: &Predicate, negated: bool) -> Expr {
             cte_name: super::graph::relation_name(*relation),
             columns: keys.clone(),
         },
+        Predicate::Threshold {
+            column: value,
+            direction,
+            relation,
+        } => threshold(value, *direction, *relation),
     }
+}
+
+fn threshold(value: &Column, direction: OrderDirection, relation: RelationId) -> Expr {
+    let (op, last) = match direction {
+        OrderDirection::Desc => (Op::Ge, AggFunction::Min),
+        OrderDirection::Asc => (Op::Le, AggFunction::Max),
+    };
+    let name = super::graph::relation_name(relation);
+    let last_value = Query {
+        select: vec![SelectExpr::new(
+            Expr::aggregate(last, Some(Expr::col(&name, &value.name))),
+            &value.name,
+        )],
+        from: TableRef::cte(&name, &name),
+        ..Default::default()
+    };
+    Expr::binary(op, column(value), Expr::Scalar(Box::new(last_value)))
 }
 
 pub(super) fn output_value(value: &OutputValue) -> Expr {

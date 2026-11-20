@@ -660,6 +660,7 @@ mod tests {
                 }))
                 .unwrap(),
                 has_virtual_columns: false,
+                fallback: None,
             }),
             query_result: qr,
             result_context: result_ctx,
@@ -713,6 +714,7 @@ mod tests {
                 }))
                 .unwrap(),
                 has_virtual_columns: false,
+                fallback: None,
             }),
             query_result: qr,
             result_context: result_ctx,
@@ -904,6 +906,7 @@ mod tests {
                 }))
                 .unwrap(),
                 has_virtual_columns: false,
+                fallback: None,
             }),
             query_result: qr,
             result_context: result_ctx,
@@ -1036,6 +1039,7 @@ mod tests {
                 }))
                 .unwrap(),
                 has_virtual_columns: false,
+                fallback: None,
             }),
             query_result: qr,
             result_context: result_ctx,
@@ -1134,6 +1138,7 @@ mod tests {
                 }))
                 .unwrap(),
                 has_virtual_columns: false,
+                fallback: None,
             }),
             query_result: qr,
             result_context: result_ctx,

@@ -208,3 +208,12 @@ cases:
           expect:
             - (Limit 3 (Offset 2 (Sort _orbit_neighbor_edge.traversal_path, _orbit_neighbor_edge.relationship_kind, _orbit_neighbor_edge.source_id, _orbit_neighbor_edge.target_id, _orbit_neighbor_edge.source_kind, _orbit_neighbor_edge.target_kind (_))))
           reject: ["(Sort _orbit_neighbor_edge.source_id, _orbit_neighbor_edge.target_id, _orbit_neighbor_edge.relationship_kind (_))"]
+
+  - name: A skipped window sizes the threshold by every row the sort materializes
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.ref = 'master' RETURN j.name ORDER BY j.created_at DESC SKIP 20 LIMIT 10
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(CTE _ (Limit 31 BY j.created_at DESC (_)))"]

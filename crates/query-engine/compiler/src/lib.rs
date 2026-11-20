@@ -87,9 +87,29 @@ use std::sync::Arc;
 
 use config::CompilerCtx as _;
 
+/// Compiles the query, and again without the top-k threshold when the plan pruned one, so a short
+/// page can rerun exact.
 fn finish<C: config::CompilerCtx>(
+    make: impl Fn() -> C,
+    run: impl Fn(&mut C) -> Result<()>,
+) -> Result<CompiledQueryContext> {
+    let mut ctx = make();
+    let mut compiled = output(&mut ctx, &run)?;
+    if ctx
+        .query_plan()
+        .as_ref()
+        .is_some_and(passes::plan::QueryPlan::prunes_top_k)
+    {
+        let mut exact = make();
+        exact.set_top_k(passes::plan::TopK::Exact);
+        compiled.fallback = Some(output(&mut exact, &run)?.base);
+    }
+    Ok(compiled)
+}
+
+fn output<C: config::CompilerCtx>(
     ctx: &mut C,
-    run: impl FnOnce(&mut C) -> Result<()>,
+    run: impl Fn(&mut C) -> Result<()>,
 ) -> Result<CompiledQueryContext> {
     run(ctx)
         .and_then(|()| {
@@ -119,16 +139,22 @@ pub fn compile_model(
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     match fe {
-        Frontend::JsonDsl => {
-            let mut ctx = config::ClickhouseJsonDslCtx::new(ctx.clone(), Arc::clone(data_model));
-            ctx.set_raw(raw.to_string());
-            finish(&mut ctx, config::run_clickhouse_json_dsl)
-        }
-        Frontend::Gql => {
-            let mut ctx = config::ClickhouseGqlCtx::new(ctx.clone(), Arc::clone(data_model));
-            ctx.set_raw(raw.to_string());
-            finish(&mut ctx, config::run_clickhouse_gql)
-        }
+        Frontend::JsonDsl => finish(
+            || {
+                let mut c = config::ClickhouseJsonDslCtx::new(ctx.clone(), Arc::clone(data_model));
+                c.set_raw(raw.to_string());
+                c
+            },
+            config::run_clickhouse_json_dsl,
+        ),
+        Frontend::Gql => finish(
+            || {
+                let mut c = config::ClickhouseGqlCtx::new(ctx.clone(), Arc::clone(data_model));
+                c.set_raw(raw.to_string());
+                c
+            },
+            config::run_clickhouse_gql,
+        ),
     }
 }
 
@@ -148,16 +174,22 @@ pub fn compile_local(
     let data_model = data_model::duckdb(Arc::clone(&ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
     match fe {
-        Frontend::JsonDsl => {
-            let mut c = config::DuckdbJsonDslCtx::new(Arc::clone(&data_model));
-            c.set_raw(raw.to_string());
-            finish(&mut c, config::run_duckdb_json_dsl)
-        }
-        Frontend::Gql => {
-            let mut c = config::DuckdbGqlCtx::new(Arc::clone(&data_model));
-            c.set_raw(raw.to_string());
-            finish(&mut c, config::run_duckdb_gql)
-        }
+        Frontend::JsonDsl => finish(
+            || {
+                let mut c = config::DuckdbJsonDslCtx::new(Arc::clone(&data_model));
+                c.set_raw(raw.to_string());
+                c
+            },
+            config::run_duckdb_json_dsl,
+        ),
+        Frontend::Gql => finish(
+            || {
+                let mut c = config::DuckdbGqlCtx::new(Arc::clone(&data_model));
+                c.set_raw(raw.to_string());
+                c
+            },
+            config::run_duckdb_gql,
+        ),
     }
 }
 
@@ -543,6 +575,25 @@ mod tests {
             sql.contains(">=") && sql.contains("<"),
             "both range predicates must appear in SQL, got:\n{sql}"
         );
+    }
+
+    #[test]
+    fn rising_order_reruns_exact_only_on_a_short_page() {
+        let query = "MATCH (j:Job) WHERE j.ref = 'master' RETURN j.name ORDER BY j.created_at DESC LIMIT 10";
+        let compiled = compile(query, Frontend::Gql, &ONTOLOGY, &security_ctx()).unwrap();
+        let threshold = "j.created_at >= (SELECT MIN(";
+        assert!(compiled.base.render().contains(threshold));
+
+        let fallback = compiled.fallback_for(10).expect("a short page reruns");
+        assert!(!fallback.render().contains(threshold));
+        assert!(compiled.fallback_for(11).is_none());
+    }
+
+    #[test]
+    fn non_rising_order_compiles_no_fallback() {
+        let query = "MATCH (mr:MergeRequest) WHERE mr.state = 'opened' RETURN mr.title ORDER BY mr.updated_at DESC LIMIT 10";
+        let compiled = compile(query, Frontend::Gql, &ONTOLOGY, &security_ctx()).unwrap();
+        assert!(compiled.fallback.is_none());
     }
 
     #[test]

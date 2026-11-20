@@ -32,16 +32,14 @@ pub(super) fn required_columns(
                 .push((Some(id), input.alias.clone()));
         }
         for leaf in node.predicates().iter().flat_map(Predicate::leaves) {
-            if let Predicate::Membership {
-                relation,
-                keys: wanted,
-                ..
-            } = leaf
-            {
-                keys.entry(*relation)
-                    .or_default()
-                    .extend(wanted.iter().cloned());
-            }
+            let (relation, wanted) = match leaf {
+                Predicate::Membership { relation, keys, .. } => (relation, keys.clone()),
+                Predicate::Threshold {
+                    relation, column, ..
+                } => (relation, vec![column.name.clone()]),
+                _ => continue,
+            };
+            keys.entry(*relation).or_default().extend(wanted);
         }
     }
     let mut root_columns = root.to_vec();
@@ -118,6 +116,7 @@ fn node_expressions(node: &RelationNode) -> Vec<Expr> {
         RelationNode::Project { outputs, .. } => {
             exprs.extend(projections(outputs).into_iter().map(|select| select.expr));
         }
+        RelationNode::TopK { column: value, .. } => exprs.push(column(value)),
         _ => {}
     }
     exprs

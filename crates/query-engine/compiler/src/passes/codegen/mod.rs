@@ -56,6 +56,16 @@ pub struct CompiledQueryContext {
     pub hydration: HydrationPlan,
     pub input: Input,
     pub has_virtual_columns: bool,
+    /// The same query without the top-k threshold, for a pruned page shorter than the fetch limit.
+    pub fallback: Option<ParameterizedQuery>,
+}
+
+impl CompiledQueryContext {
+    pub fn fallback_for(&self, result_rows: usize) -> Option<&ParameterizedQuery> {
+        self.fallback
+            .as_ref()
+            .filter(|_| result_rows < self.input.fetch_limit() as usize)
+    }
 }
 
 impl ParameterizedQuery {

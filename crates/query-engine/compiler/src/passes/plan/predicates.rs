@@ -5,7 +5,7 @@ use ontology::constants::*;
 
 use super::filters::{BoundFilter, NullAsEpoch, NullAsEpochColumns};
 use super::graph::RelationId;
-use crate::input::{BooleanExpression, FilterOp, InputFilter};
+use crate::input::{BooleanExpression, FilterOp, InputFilter, OrderDirection};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Column {
@@ -70,6 +70,12 @@ pub enum Predicate {
         relation: RelationId,
         keys: Vec<String>,
     },
+    /// Keeps rows at or past the last value of a `RelationNode::TopK` read in the order's direction.
+    Threshold {
+        column: Column,
+        direction: OrderDirection,
+        relation: RelationId,
+    },
 }
 
 impl Predicate {
@@ -123,6 +129,13 @@ impl Predicate {
         }
     }
 
+    pub fn relation(&self) -> Option<RelationId> {
+        match self {
+            Self::Membership { relation, .. } | Self::Threshold { relation, .. } => Some(*relation),
+            _ => None,
+        }
+    }
+
     pub fn leaves(&self) -> Vec<&Predicate> {
         match self {
             Self::Boolean(expression) => expression
@@ -153,6 +166,7 @@ impl Predicate {
             | Self::IdRange { column, .. }
             | Self::EntityKind { column, .. } => in_key(&column.name),
             Self::Membership { columns, .. } => columns.iter().all(|column| in_key(&column.name)),
+            Self::Threshold { .. } => true,
             Self::RelationshipKinds { .. } => in_key(RELATIONSHIP_KIND_COLUMN),
             _ => false,
         }

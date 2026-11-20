@@ -15,6 +15,7 @@ pub(super) struct PropertyBackendFacts {
     has_text_index: bool,
     unique: bool,
     mutable: bool,
+    rises_with_id: bool,
     null_as_epoch: bool,
     foreign_key: bool,
 }
@@ -84,6 +85,7 @@ pub(crate) fn entity_facts(ontology: &ontology::Ontology, local: bool) -> Vec<En
                                     && text_indexed.contains(&field.name.as_str()),
                                 unique: field.unique,
                                 mutable: field.mutable,
+                                rises_with_id: !local && field.rises_with_id,
                                 foreign_key: references.contains(field.name.as_str()),
                                 null_as_epoch: !local
                                     && field.nullable
@@ -112,6 +114,7 @@ fn derive_property_backend_facts(
             has_text_index: false,
             unique: false,
             mutable: true,
+            rises_with_id: false,
             null_as_epoch: false,
             foreign_key: false,
         };

@@ -203,6 +203,10 @@ pub trait OrbitQueryModel {
         self.query_backend().property_mutable(property)
     }
 
+    fn property_rises_with_id(&self, property: PropertyId) -> bool {
+        self.query_backend().property_rises_with_id(property)
+    }
+
     fn admin_only(&self, entity: &str, property: &str) -> bool {
         self.property(entity, property)
             .is_some_and(|property| self.query_authorization().is_admin_only(property.id))
