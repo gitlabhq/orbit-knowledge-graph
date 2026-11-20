@@ -68,11 +68,4 @@ impl LeaseRules {
             expires_at: local_now + self.ttl,
         }
     }
-
-    pub(super) fn is_free(&self, entry: &LeaseEntry, local_now: SystemTime) -> bool {
-        match &entry.lease {
-            None => true,
-            Some(lease) => local_now >= lease.expires_at + self.skew_margin,
-        }
-    }
 }

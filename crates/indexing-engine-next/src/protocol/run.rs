@@ -20,9 +20,12 @@ impl Claim {
         entry: &LeaseEntry,
         local_now: SystemTime,
     ) -> Option<Lease> {
+        let free = match &entry.lease {
+            None => true,
+            Some(lease) => local_now >= lease.expires_at + rules.skew_margin,
+        };
         let recovered = entry.generation.is_some();
-        (recovered && rules.is_free(entry, local_now))
-            .then(|| rules.lease_for(&self.holder, local_now))
+        (recovered && free).then(|| rules.lease_for(&self.holder, local_now))
     }
 
     pub fn into_hold(
