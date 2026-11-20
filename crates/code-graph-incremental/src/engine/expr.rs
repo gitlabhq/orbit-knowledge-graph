@@ -360,6 +360,7 @@ impl<'s> Parser<'s, '_> {
                 };
             }
             "first" | "every" => return self.each(word, piped),
+            "union" => return Ok(Expr::Union(self.args(piped)?.into())),
             "minus" | "unique" | "instances" => {
                 let args = self.args(piped)?;
                 let (op, arity) = match word {
