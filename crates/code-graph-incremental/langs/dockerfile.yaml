@@ -37,6 +37,10 @@ stages:
       - match: '(cmd_instruction $C:shell_command)'
         replace: '(__def (__defname @$C|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__command) (__fqn_segment @$C|regex_replace("(?s)^.*$", "CMD")))'
 
+  # `ENV PATH=$GOPATH/bin:$PATH` reads the previous value. Each pass drops the
+  # first expansion that names the variable itself, or sets aside the first
+  # one that does not, so a self-reference is found in any position and never
+  # becomes a call from the variable to itself.
   - name: drop-self-expansions
     repeat: true
     rules:
@@ -121,8 +125,6 @@ stages:
     repeat: true
     rules:
       - match: '(__source_file $$$A (expose_instruction $$$X) $$$B)'
-        replace: '(__source_file @$ROOT $$$A $$$B)'
-      - match: '(__source_file $$$A (__def (__port)) $$$B)'
         replace: '(__source_file @$ROOT $$$A $$$B)'
       - match: '(__source_file $$$A (__def (__entrypoint)) $$$B)'
         replace: '(__source_file @$ROOT $$$A $$$B)'
