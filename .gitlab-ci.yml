@@ -49,11 +49,16 @@ workflow:
         RUNNER_LARGE_ARM: saas-linux-medium-arm64
     # Canonical project — original behavior
     - if: $CI_COMMIT_TAG
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_MERGE_REQUEST_EVENT_TYPE == 'merge_train'
       # Every path outside docs/, plus the docs/ files that code checks read.
       # Keep that list in sync with docs-in-code-mr-check.
-      changes:
+      changes: &code-changes
         regexp: '\A(?!docs/)|\Adocs/(docs-gitlab-com/queries/query-language|pages/engineering/development/agents-crate-map)\.md\z'
+      auto_cancel:
+        on_new_commit: interruptible
+        on_job_failure: all
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes: *code-changes
       auto_cancel:
         on_new_commit: interruptible
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
