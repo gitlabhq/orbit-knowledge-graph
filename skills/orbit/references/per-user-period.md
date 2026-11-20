@@ -1,4 +1,4 @@
-# Most reviews, approvals or merged MRs per user in a period
+# Most MRs authored, merged, reviewed or approved per user in a period
 
 Read this for "who authored, merged, reviewed or approved the most MRs in a
 period" questions. For query syntax, see [`gql.md`](gql.md).
@@ -17,9 +17,9 @@ ORDER BY merged_mrs DESC
 LIMIT 100
 ```
 
-Swap `AUTHORED` for `MERGED`, `REVIEWER` or `APPROVED` to rank mergers, reviewers
-or approvers. `AUTHORED` means the user wrote the MR and `MERGED` means the user
-merged it. `REVIEWER` means the user was assigned as a reviewer; the edge carries no review
+Swap `AUTHORED` for `MERGED`, `REVIEWER` or `APPROVED` to rank mergers,
+reviewers or approvers. `AUTHORED` means the user wrote the MR and `MERGED`
+means the user merged it. `REVIEWER` means the user was assigned as a reviewer; the edge carries no review
 state. `APPROVED` means the user approved the MR.
 
 ```gql orbit-query
@@ -48,14 +48,17 @@ LIMIT 100
 
 ## Bots
 
-Do not filter on any `User` property in `WHERE` for `REVIEWER` or `APPROVED`
-yet, such as `u.user_type`, `u.state` or `u.is_admin`. Those properties are
-copied onto the edge, and the filter gives wrong counts, positive or negated:
-`= 'human'` drops most rows and `NOT ... IN` lets bots through. Filtering by
-`u.username` is safe.
+Do not filter on any `User` property other than `u.username` in `WHERE` for
+`REVIEWER` or `APPROVED` yet, such as `u.user_type`, `u.state` or `u.is_admin`.
+Those properties are copied onto the edge, and the filter gives wrong counts,
+positive or negated: `= 'human'` drops most rows and `NOT ... IN` lets bots
+through. `AUTHORED` and `MERGED` come from the MR's own author and merge-user
+columns, so a `WHERE u.user_type = 'human'` filter is exact there.
 
-Instead, return `u.user_type` and drop bots (any value other than `human`, such
-as `project_bot` or `duo_code_review_bot`) after the query. Bot rows use up
-`LIMIT` slots, so ask for more rows than the answer needs, then rank after
-dropping bots. Once gitlab-org/orbit/knowledge-graph#1559 is fixed, switch to
+For `REVIEWER` and `APPROVED`, return `u.user_type` and drop bots (any value
+other than `human`, such as `project_bot` or `duo_code_review_bot`) after the
+query. Bot rows use up `LIMIT` slots, so ask for more rows than the answer
+needs, then rank after dropping bots. If fewer humans remain than you need and
+`has_more` is true, raise `LIMIT` (max 1000). Once
+gitlab-org/orbit/knowledge-graph#1559 is fixed, switch to
 `WHERE u.user_type = 'human'`.
