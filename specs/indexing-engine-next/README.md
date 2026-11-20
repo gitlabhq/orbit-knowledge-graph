@@ -229,7 +229,7 @@ In CI, the jobs live in `.gitlab/ci/indexing-engine-spec.yml`. The model check, 
 - A new variable in the spec: add it to `state_lines` in `tests/protocol/cluster/tlc.rs`.
 - A new action in the spec: add it to the `Action` enum and to the cluster. Until then, the spec has steps that the code lacks, and the code check fails.
 - A new fault: add a budget to `FaultBudget`, an action to the spec and to the cluster, and a counterexample if it breaks a rule.
-- A new step in the lane loop: read the clock at its start, and log one protocol event at its end. Then map the event to the spec state in `World::apply_event`. Until the spec has the step, the trace check fails.
+- A new step in the lane loop: read the clock at its start, and log one protocol event at its end. Then map the event to the spec state in `World::apply_protocol_event`. Until the spec has the step, the trace check fails.
 
 ## Results
 
@@ -279,12 +279,12 @@ We broke the lane loop in 9 ways, one at a time:
 | A renewal skips the progress ack | passes | fails |
 | A lost renewal takes the lease anyway | `NoRejectedCurrentHolder` | fails |
 | The fence is the revision that the pod read, not the one that it wrote | `EverySubmitIsDone` | fails |
-| A finished run releases a lease that it doesn't hold | busy loop | fails |
+| A finished run releases a lease that it doesn't hold | passes | fails |
 | The marker clears at delivery, before the lease | passes | fails |
 | A take of the lease ignores the lease rules | passes | fails |
 | A failed run acks its task | passes | passes |
 
-The checks catch 8 of 9, and only TLC catches 3 of them. The last one is a gap. The simulated worker fails only on a fence rejection. By then, a newer run has acked the same message, so the extra ack changes nothing. The error table of the next MR adds other worker errors, and then the spec needs a step for each one.
+The checks catch 8 of 9, and only TLC catches 4 of them. The last one is a gap. The simulated worker fails only on a fence rejection. By then, a newer run has acked the same message, so the extra ack changes nothing. The error table of the next MR adds other worker errors, and then the spec needs a step for each one.
 
 ### What NATS confirmed
 

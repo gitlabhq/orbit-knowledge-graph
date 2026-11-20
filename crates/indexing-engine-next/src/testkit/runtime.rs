@@ -21,7 +21,7 @@ use crate::payload::{Key, TaskInput, Tenant};
 use crate::planner::{Plan, PlanError, PlannedTask};
 use crate::protocol::{Fence, Generation, Revision};
 use crate::reconciler::{ReconcileBackend, ReconcileContext, ReconcileError};
-use crate::serve::resume_panic;
+use crate::serve::resume_if_panicked;
 use crate::testkit::ledger::{MemoryLedger, TaskSummary};
 use crate::testkit::timeline::{TaskEvent, Timeline};
 use crate::trigger::{EventBatch, Fired};
@@ -137,7 +137,7 @@ impl KitRuntime {
                 }
             };
             tokio::select! {
-                Some(joined) = running.join_next() => resume_panic(joined),
+                Some(joined) = running.join_next() => resume_if_panicked(joined),
                 () = wake => {}
                 () = self.submitted.notified() => {}
             }

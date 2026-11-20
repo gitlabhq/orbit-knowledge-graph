@@ -98,7 +98,7 @@ impl World {
         }
     }
 
-    pub(super) fn heal(&mut self) -> bool {
+    pub(super) fn stop_faults(&mut self) -> bool {
         self.planner_crash_armed = false;
         for process in &mut self.processes {
             process.renewal_fails = false;
@@ -152,7 +152,11 @@ impl World {
         }
     }
 
-    pub(super) fn take_renewal_failure(&mut self, process: usize, lease: Option<&Lease>) -> bool {
+    pub(super) fn consume_renewal_failure(
+        &mut self,
+        process: usize,
+        lease: Option<&Lease>,
+    ) -> bool {
         let state = &self.processes[process];
         let fails = state.renewal_fails
             && state.phase.is_holding()
@@ -165,7 +169,7 @@ impl World {
         fails
     }
 
-    pub(super) fn take_planner_crash(&mut self) -> bool {
+    pub(super) fn consume_planner_crash(&mut self) -> bool {
         let crashes = self.planner_crash_armed && self.faults_left.crashes > 0;
         if crashes {
             self.faults_left.crashes -= 1;

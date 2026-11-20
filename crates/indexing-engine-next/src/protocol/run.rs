@@ -10,11 +10,11 @@ pub struct Claim {
 }
 
 impl Claim {
-    pub fn deliver(holder: HolderId, task: TaskId) -> Self {
+    pub fn new(holder: HolderId, task: TaskId) -> Self {
         Self { holder, task }
     }
 
-    pub fn acquire_lease(
+    pub fn lease_if_free(
         &self,
         rules: &LeaseRules,
         entry: &LeaseEntry,
@@ -25,7 +25,7 @@ impl Claim {
             .then(|| rules.lease_for(&self.holder, local_now))
     }
 
-    pub fn hold(
+    pub fn into_hold(
         self,
         rules: &LeaseRules,
         lease: &Lease,
@@ -88,7 +88,12 @@ impl Hold {
         local_now >= self.renew_at
     }
 
-    pub fn renew(&self, rules: &LeaseRules, entry: &LeaseEntry, local_now: SystemTime) -> Renewal {
+    pub fn build_renewal(
+        &self,
+        rules: &LeaseRules,
+        entry: &LeaseEntry,
+        local_now: SystemTime,
+    ) -> Renewal {
         if entry.is_held_by(&self.holder, self.fence.generation, self.seen) {
             Renewal::Extend(rules.lease_for(&self.holder, local_now))
         } else {
@@ -96,7 +101,7 @@ impl Hold {
         }
     }
 
-    pub fn renewed(
+    pub fn record_renewal(
         &mut self,
         rules: &LeaseRules,
         lease: &Lease,
@@ -108,7 +113,7 @@ impl Hold {
         self.renew_at = local_now + rules.renew_every;
     }
 
-    pub fn release(&self, entry: &LeaseEntry) -> Option<Revision> {
+    pub fn revision_to_release(&self, entry: &LeaseEntry) -> Option<Revision> {
         entry
             .is_held_by(&self.holder, self.fence.generation, self.seen)
             .then_some(entry.revision)

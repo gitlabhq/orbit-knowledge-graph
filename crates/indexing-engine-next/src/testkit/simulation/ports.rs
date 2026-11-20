@@ -83,7 +83,7 @@ impl Clock for SimulatedClock {
     }
 
     async fn sleep_until(&self, local: SystemTime) {
-        self.world.enter(self.actor).await;
+        self.world.stop_unless_allowed(self.actor).await;
         let wake_at = self.world.lock().instant_at(self.actor, local);
         tokio::time::sleep_until(wake_at).await;
     }
@@ -92,10 +92,10 @@ impl Clock for SimulatedClock {
 #[async_trait]
 impl TaskStream for SimulatedStream {
     async fn publish(&self, message: TaskMessage) -> anyhow::Result<()> {
-        self.world.enter(self.actor).await;
+        self.world.stop_unless_allowed(self.actor).await;
         {
             let mut world = self.world.lock();
-            if world.take_planner_crash() {
+            if world.consume_planner_crash() {
                 return Err(anyhow!("the planner crashed before it published the task"));
             }
             world.publish(&message);
@@ -105,7 +105,7 @@ impl TaskStream for SimulatedStream {
     }
 
     async fn pull(&self, _lane_id: &str, max: usize) -> anyhow::Result<Vec<Delivery>> {
-        self.world.enter(self.actor).await;
+        self.world.stop_unless_allowed(self.actor).await;
         let Actor::Process {
             index: consumer, ..
         } = self.actor
@@ -135,7 +135,7 @@ impl TaskStream for SimulatedStream {
     }
 
     async fn wait_for_ready(&self, _lane_id: &str) {
-        self.world.enter(self.actor).await;
+        self.world.stop_unless_allowed(self.actor).await;
         self.world.wait_for_ready_message().await;
     }
 }
@@ -143,13 +143,13 @@ impl TaskStream for SimulatedStream {
 #[async_trait]
 impl InFlight for SimulatedInFlight {
     async fn acknowledge(&self) -> anyhow::Result<()> {
-        self.world.enter(self.actor).await;
+        self.world.stop_unless_allowed(self.actor).await;
         self.world.lock().broker.acknowledge(self.message);
         Ok(())
     }
 
     async fn acknowledge_progress(&self) -> anyhow::Result<()> {
-        self.world.enter(self.actor).await;
+        self.world.stop_unless_allowed(self.actor).await;
         let mut world = self.world.lock();
         let now = world.now_tick();
         world
@@ -162,7 +162,7 @@ impl InFlight for SimulatedInFlight {
 #[async_trait]
 impl LeaseStore for SimulatedLeases {
     async fn read(&self, _key: &WorkerKey) -> anyhow::Result<LeaseEntry> {
-        self.world.enter_inside_step(self.actor).await;
+        self.world.interleave_inside_step(self.actor).await;
         let world = self.world.lock();
         Ok(world.lease.entry(world.nats_generation))
     }
@@ -173,10 +173,10 @@ impl LeaseStore for SimulatedLeases {
         expected: Revision,
         lease: Option<Lease>,
     ) -> anyhow::Result<LeaseWrite> {
-        self.world.enter_inside_step(self.actor).await;
+        self.world.interleave_inside_step(self.actor).await;
         let mut world = self.world.lock();
         if let Actor::Process { index, .. } = self.actor
-            && world.take_renewal_failure(index, lease.as_ref())
+            && world.consume_renewal_failure(index, lease.as_ref())
         {
             return Err(anyhow!("the renewal did not reach the key-value store"));
         }
@@ -200,7 +200,7 @@ impl LeaseStore for SimulatedLeases {
 #[async_trait]
 impl MarkerStore for SimulatedMarkers {
     async fn read(&self, _key: &WorkerKey) -> anyhow::Result<MarkerEntry> {
-        self.world.enter_inside_step(self.actor).await;
+        self.world.interleave_inside_step(self.actor).await;
         let world = self.world.lock();
         Ok(MarkerEntry {
             pending: world.marker.get().cloned(),
@@ -214,7 +214,7 @@ impl MarkerStore for SimulatedMarkers {
         expected: Revision,
         pending: Option<TaskMessage>,
     ) -> anyhow::Result<MarkerWrite> {
-        self.world.enter_inside_step(self.actor).await;
+        self.world.interleave_inside_step(self.actor).await;
         let mut world = self.world.lock();
         match world.marker.put(expected, pending) {
             Ok(_) => Ok(MarkerWrite::Written),
@@ -229,8 +229,8 @@ impl MarkerStore for SimulatedMarkers {
 impl ProtocolLog for SimulatedLog {
     fn record(&self, at: SystemTime, event: ProtocolEvent) {
         let mut world = self.world.lock();
-        if world.admit_call(self.actor) {
-            world.apply_event(self.actor, at, event);
+        if world.allow_port_call(self.actor) {
+            world.apply_protocol_event(self.actor, at, event);
         }
     }
 }

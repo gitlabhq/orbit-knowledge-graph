@@ -119,7 +119,7 @@ impl Simulation {
                 break;
             }
         }
-        cluster.stop()
+        cluster.stop_and_report()
     }
 
     pub(super) fn count_ticks(&self) -> u32 {
@@ -167,7 +167,7 @@ impl Cluster {
         let mut changed = world.redeliver_expired_messages();
         changed |= world.resume_stalls(false);
         if healed {
-            changed |= world.heal();
+            changed |= world.stop_faults();
         } else if let Some(fault) = world.draw_fault() {
             let crashed = world.inject_fault(fault);
             drop(world);
@@ -187,7 +187,7 @@ impl Cluster {
     async fn submit_when_drawn(&self, healed: bool) {
         let drawn = {
             let mut world = self.world.lock();
-            world.has_submits_left() && (healed || world.draw(0..=1) == 0)
+            world.has_submits_left() && (healed || world.draw_number(0..=1) == 0)
         };
         if !drawn {
             return;
@@ -203,7 +203,7 @@ impl Cluster {
         world.is_broken() || (healed && world.are_all_submits_done())
     }
 
-    fn stop(self) -> SimulationReport {
+    fn stop_and_report(self) -> SimulationReport {
         {
             let mut world = self.world.lock();
             if !world.are_all_submits_done() {

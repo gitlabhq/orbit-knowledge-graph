@@ -66,8 +66,8 @@ impl Worker for SimulatedWrite {
 impl SimulatedStore {
     fn draw_durations(&self) -> (u32, u32) {
         let mut world = self.world.lock();
-        let work = world.draw(0..=2);
-        let write = world.draw(0..=1);
+        let work = world.draw_number(0..=2);
+        let write = world.draw_number(0..=1);
         (
             u32::try_from(work).unwrap_or(0),
             u32::try_from(write).unwrap_or(0),

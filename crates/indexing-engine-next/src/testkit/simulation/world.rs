@@ -181,18 +181,18 @@ impl SharedWorld {
     pub(super) async fn begin_step(&self, actor: Actor, kind: StepKind) -> SystemTime {
         self.yield_randomly().await;
         self.wait_while_stalled(actor, kind).await;
-        self.enter(actor).await;
+        self.stop_unless_allowed(actor).await;
         self.lock().local_time(actor)
     }
 
-    pub(super) async fn enter(&self, actor: Actor) {
-        if !self.lock().admit_call(actor) {
+    pub(super) async fn stop_unless_allowed(&self, actor: Actor) {
+        if !self.lock().allow_port_call(actor) {
             std::future::pending::<()>().await;
         }
     }
 
-    pub(super) async fn enter_inside_step(&self, actor: Actor) {
-        self.enter(actor).await;
+    pub(super) async fn interleave_inside_step(&self, actor: Actor) {
+        self.stop_unless_allowed(actor).await;
         let interleave = {
             let mut world = self.lock();
             world.step_order == StepOrder::Interleaved && world.rng.random_bool(0.5)
@@ -257,7 +257,7 @@ impl World {
         self.started_at + since_epoch.saturating_sub(TICK * self.offset_of(actor))
     }
 
-    pub(super) fn draw(&mut self, range: std::ops::RangeInclusive<u64>) -> u64 {
+    pub(super) fn draw_number(&mut self, range: std::ops::RangeInclusive<u64>) -> u64 {
         self.rng.random_range(range)
     }
 
@@ -302,7 +302,12 @@ impl World {
                 .all(|task| self.lost_in_wipe.contains(task) || self.broker.is_done(*task))
     }
 
-    pub(super) fn apply_event(&mut self, actor: Actor, at: SystemTime, event: ProtocolEvent) {
+    pub(super) fn apply_protocol_event(
+        &mut self,
+        actor: Actor,
+        at: SystemTime,
+        event: ProtocolEvent,
+    ) {
         if at != self.local_time(actor) {
             self.break_rule(format!(
                 "{actor:?} logged {at:?}, which is not the time of its step"
@@ -452,7 +457,7 @@ impl World {
         }
     }
 
-    pub(super) fn admit_call(&mut self, actor: Actor) -> bool {
+    pub(super) fn allow_port_call(&mut self, actor: Actor) -> bool {
         self.calls_this_tick += 1;
         if self.calls_this_tick > MAX_CALLS_PER_TICK {
             self.break_rule(format!(

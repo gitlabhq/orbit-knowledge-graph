@@ -9,8 +9,7 @@ use cluster::{
     SMALL_CLUSTER_WITH_TWO_TASKS, StateGraph, explore_graph, read_spec_graph,
 };
 use indexing_engine_next::protocol::{
-    Claim, Fence, Generation, HolderId, Lease, LeaseEntry, LeaseRules, Publish, Renewal, Revision,
-    TaskId, decide_submit, start_clears_marker,
+    Claim, Fence, Generation, HolderId, Lease, LeaseEntry, LeaseRules, Renewal, Revision, TaskId,
 };
 use uuid::Uuid;
 
@@ -104,12 +103,12 @@ fn describe_difference(code: &StateGraph, spec: &StateGraph) -> String {
 
 #[test]
 fn an_expired_lease_is_free_only_after_the_skew_margin() {
-    let claim = Claim::deliver(holder("p2"), task(1));
+    let claim = Claim::new(holder("p2"), task(1));
     let entry = held_by("p1", 100, 7);
 
-    assert_eq!(claim.acquire_lease(&RULES, &entry, at(104)), None);
+    assert_eq!(claim.lease_if_free(&RULES, &entry, at(104)), None);
     assert_eq!(
-        claim.acquire_lease(&RULES, &entry, at(105)),
+        claim.lease_if_free(&RULES, &entry, at(105)),
         Some(Lease {
             holder: holder("p2"),
             expires_at: at(165)
@@ -119,17 +118,17 @@ fn an_expired_lease_is_free_only_after_the_skew_margin() {
 
 #[test]
 fn the_fence_is_the_lease_revision_when_the_holder_took_it() {
-    let claim = Claim::deliver(holder("p1"), task(1));
+    let claim = Claim::new(holder("p1"), task(1));
     let lease = claim
-        .acquire_lease(&RULES, &held_by("p0", 0, 3), at(10))
+        .lease_if_free(&RULES, &held_by("p0", 0, 3), at(10))
         .unwrap();
-    let mut hold = claim.hold(&RULES, &lease, Revision(4), FIRST_GENERATION, at(10));
+    let mut hold = claim.into_hold(&RULES, &lease, Revision(4), FIRST_GENERATION, at(10));
 
-    let renewal = hold.renew(&RULES, &held_by("p1", 70, 4), at(30));
+    let renewal = hold.build_renewal(&RULES, &held_by("p1", 70, 4), at(30));
     let Renewal::Extend(renewed) = renewal else {
         panic!("the holder of the current lease renews it");
     };
-    hold.renewed(&RULES, &renewed, Revision(5), at(30));
+    hold.record_renewal(&RULES, &renewed, Revision(5), at(30));
 
     assert_eq!(
         hold.fence(),
@@ -143,68 +142,58 @@ fn the_fence_is_the_lease_revision_when_the_holder_took_it() {
 
 #[test]
 fn a_renewal_is_lost_once_another_holder_took_the_lease() {
-    let claim = Claim::deliver(holder("p1"), task(1));
+    let claim = Claim::new(holder("p1"), task(1));
     let lease = claim
-        .acquire_lease(&RULES, &held_by("p0", 0, 3), at(10))
+        .lease_if_free(&RULES, &held_by("p0", 0, 3), at(10))
         .unwrap();
-    let hold = claim.hold(&RULES, &lease, Revision(4), FIRST_GENERATION, at(10));
+    let hold = claim.into_hold(&RULES, &lease, Revision(4), FIRST_GENERATION, at(10));
 
     assert_eq!(
-        hold.renew(&RULES, &held_by("p2", 200, 5), at(90)),
+        hold.build_renewal(&RULES, &held_by("p2", 200, 5), at(90)),
         Renewal::Lost
     );
-    assert_eq!(hold.release(&held_by("p2", 200, 5)), None);
-    assert_eq!(hold.release(&held_by("p1", 70, 4)), Some(Revision(4)));
+    assert_eq!(hold.revision_to_release(&held_by("p2", 200, 5)), None);
+    assert_eq!(
+        hold.revision_to_release(&held_by("p1", 70, 4)),
+        Some(Revision(4))
+    );
 }
 
 #[test]
 fn a_renewal_is_lost_once_the_same_holder_took_the_lease_again_for_another_run() {
-    let claim = Claim::deliver(holder("p1"), task(1));
+    let claim = Claim::new(holder("p1"), task(1));
     let lease = claim
-        .acquire_lease(&RULES, &held_by("p0", 0, 3), at(10))
+        .lease_if_free(&RULES, &held_by("p0", 0, 3), at(10))
         .unwrap();
-    let hold = claim.hold(&RULES, &lease, Revision(4), FIRST_GENERATION, at(10));
+    let hold = claim.into_hold(&RULES, &lease, Revision(4), FIRST_GENERATION, at(10));
 
     assert_eq!(
-        hold.renew(&RULES, &held_by("p1", 200, 6), at(90)),
+        hold.build_renewal(&RULES, &held_by("p1", 200, 6), at(90)),
         Renewal::Lost
     );
-    assert_eq!(hold.release(&held_by("p1", 200, 6)), None);
+    assert_eq!(hold.revision_to_release(&held_by("p1", 200, 6)), None);
 
     let after_wipe = LeaseEntry {
         generation: Some(Generation(2)),
         ..held_by("p1", 200, 4)
     };
-    assert_eq!(hold.renew(&RULES, &after_wipe, at(90)), Renewal::Lost);
-    assert_eq!(hold.release(&after_wipe), None);
-}
-
-#[test]
-fn a_start_clears_only_the_marker_of_its_own_task() {
-    assert!(start_clears_marker(Some(task(1)), task(1)));
-    assert!(!start_clears_marker(Some(task(2)), task(1)));
-    assert!(!start_clears_marker(None, task(1)));
-}
-
-#[test]
-fn a_submit_that_finds_a_marker_publishes_that_task_again() {
-    assert_eq!(decide_submit(None, task(2)), Publish::New(task(2)));
     assert_eq!(
-        decide_submit(Some(task(1)), task(2)),
-        Publish::Pending(task(1))
+        hold.build_renewal(&RULES, &after_wipe, at(90)),
+        Renewal::Lost
     );
+    assert_eq!(hold.revision_to_release(&after_wipe), None);
 }
 
 #[test]
 fn no_lease_is_taken_until_the_key_value_store_is_recovered_after_a_wipe() {
-    let claim = Claim::deliver(holder("p1"), task(1));
+    let claim = Claim::new(holder("p1"), task(1));
     let wiped = LeaseEntry {
         lease: None,
         revision: Revision(0),
         generation: None,
     };
 
-    assert_eq!(claim.acquire_lease(&RULES, &wiped, at(10)), None);
+    assert_eq!(claim.lease_if_free(&RULES, &wiped, at(10)), None);
 }
 
 #[test]
