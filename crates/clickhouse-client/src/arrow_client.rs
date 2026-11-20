@@ -659,11 +659,12 @@ impl ArrowQuery {
                         return;
                     }
                 }
-                if tx.is_closed() {
-                    return;
-                }
                 // Take whole chunks: the cursor's AsyncRead loses bytes when the next chunk is late.
-                next = cursor.next().await;
+                next = tokio::select! {
+                    biased;
+                    _ = tx.closed() => return,
+                    next = cursor.next() => next,
+                };
             }
             if let Some(summary_tx) = summary_tx.take() {
                 let _ = summary_tx.send(cursor.summary().cloned());
@@ -1126,7 +1127,10 @@ mod tests {
             .collect()
             .await;
 
-        assert!(batches.last().unwrap().is_err());
+        assert!(matches!(
+            batches.last(),
+            Some(Err(ClickHouseError::ArrowDecode(_)))
+        ));
         server.await.unwrap().unwrap();
     }
 
