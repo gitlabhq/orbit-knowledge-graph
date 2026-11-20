@@ -31,6 +31,7 @@ Prerequisites:
 - A ClickHouse account that can create databases and users, for the DIP migrations.
 - Outbound HTTPS from the exporter pod to `version.gitlab.com`.
 - Outbound HTTP (port 80) from the DIP pod to `iglucentral.com`, and outbound HTTPS to `gitlab-org.gitlab.io`, to resolve event schemas.
+  DIP fetches schemas from `iglucentral.com` over HTTP, which the upstream Iglu client requires.
 
 Set up Service Ping for GitLab Orbit in this order:
 
@@ -51,6 +52,8 @@ Both components read three Secrets from that namespace:
    The exporter uses it to read the Service Ping settings of your instance.
 1. `dip-clickhouse-dsn`: the ClickHouse connection for DIP, as a user that can create databases and users.
    The DIP migrations run with it.
+   Limit who can read Secrets in the `dip` namespace, for example with Kubernetes RBAC.
+   The migrations run again on every upgrade, so keep this Secret in place.
 1. `dip-serviceping-exporter`: a new password for the exporter's ClickHouse user.
    The DIP migrations create the user with it, and the exporter connects with it.
 
@@ -225,6 +228,9 @@ To point GitLab Orbit at DIP:
 The webserver, indexer, and dispatcher pods restart, and GitLab Orbit sends every usage event to DIP from then on.
 To stop local collection, set `enabled: false` and upgrade again.
 The URL can stay.
+
+GitLab Orbit sends events to DIP over HTTP inside the cluster.
+To limit which pods can reach DIP, add a NetworkPolicy that allows only the GitLab Orbit namespace on port 8082.
 
 ## Verify the setup
 
