@@ -120,7 +120,7 @@ To verify and install the charts:
    ```
 
 1. Install GitLab Orbit from the mirror.
-   Add `--plain-http` if the mirror serves HTTP:
+   Serve the mirror over HTTPS. Over HTTP, the chart that Helm downloads can differ from the one that `cosign` verified:
 
    ```shell
    helm upgrade --install orbit oci://<mirror>/gitlab-org/orbit/orbit-helm-charts/orbit \
