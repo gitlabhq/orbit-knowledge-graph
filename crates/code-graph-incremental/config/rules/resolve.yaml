@@ -29,7 +29,7 @@ define:
     '(__alias !(__scope))': 'files($imp | child_sym("__source_path") | map_prefix($ROOT, $ROOT | child_sym("__str")))'
   submodule(ROOT, N): 'files($ROOT | tag("resolved_source") | concat("/", @$N))'
   exported(module, name): >-
-    select_all(module, '(__def $N:__defname)', name) | is_class
+    select(module, '(__def $N:__defname)', name)
     or select_all(module, '(__def $N:__defname)', name)
     or select(module, '(__def $N:__default_export)', name)
     or select(module, '(__module_export (__default_export))' by $ROOT | child_sym("__default_export"), name) | target_of
