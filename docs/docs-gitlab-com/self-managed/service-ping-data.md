@@ -21,11 +21,8 @@ Service Ping never sends the raw events, which stay in your ClickHouse database.
 ## Prerequisites
 
 - GitLab 19.6 or later.
-- GitLab Orbit 1.3.0 or later.
+- GitLab Orbit 1.3.0 or later, with Helm chart 7.1.0 or later.
 - The Data Insights Platform and the Service Ping exporter, installed as described in [Set up Service Ping for GitLab Orbit](service-ping.md).
-
-<!-- TODO: Add the Helm chart version that has `analytics.local_collector`
-once orbit-helm-charts!209 is released. -->
 
 ## How GitLab Orbit usage data flows
 
