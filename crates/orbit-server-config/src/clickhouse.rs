@@ -12,6 +12,7 @@ pub struct ClickHouseConfiguration {
     pub url: String,
     pub username: String,
     pub password: Option<String>,
+    pub compatibility: String,
     #[serde(default)]
     pub session_settings: HashMap<String, String>,
     pub replicated: bool,
