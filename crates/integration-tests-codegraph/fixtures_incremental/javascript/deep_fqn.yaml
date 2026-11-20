@@ -1,5 +1,8 @@
 name: "JavaScript: a definition nested past the qualified name limit keeps its innermost segments"
 
+limited:
+  - { path: deep.js, label: fqn }
+
 fixtures:
   - path: deep.js
     content:

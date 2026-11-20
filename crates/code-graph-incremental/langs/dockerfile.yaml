@@ -37,10 +37,6 @@ stages:
       - match: '(cmd_instruction $C:shell_command)'
         replace: '(__def (__defname @$C|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__command) (__fqn_segment @$C|regex_replace("(?s)^.*$", "CMD")))'
 
-  # `ENV PATH=$GOPATH/bin:$PATH` reads the previous value. Each pass drops the
-  # first expansion that names the variable itself, or sets aside the first
-  # one that does not, so a self-reference is found in any position and never
-  # becomes a call from the variable to itself.
   - name: drop-self-expansions
     repeat: true
     rules:
@@ -119,8 +115,6 @@ stages:
       - match: '(__from $$$H)'
         replace: '(__def $$$H)'
 
-  # Instructions before the first FROM belong to no stage and stay direct
-  # children of the file after grouping.
   - name: drop-instructions-before-first-from
     repeat: true
     rules:
@@ -172,16 +166,20 @@ display:
           fqn: '@$M|stem|split_last("/")'
           file_path: '@$M'
           language: '@$M|split_last("/")|regex_replace("(?i)^(.*)\.(tt|erb|template|tmpl|tpl|j2|jinja|jinja2|in|diff|patch|md|txt|bak|orig|dockerignore|yml|yaml|json|toml|lock)$", "_.${2}")|regex_replace("(?i)^((docker|container)file(\..*)?|.*\.(docker|container)file)$", "dockerfile.dockerfile")|split_last(".")'
-      - match: '(__def !(__impl))'
+      - match: '(__def !(__impl) !(__entrypoint) !(__command))'
         tag:
           entity: Definition
           fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")|keep_last(".", "64", "4096")'
           file_path: '@$ROOT|ancestor_tag("file_path")'
       - match: '(__def (__entrypoint))'
         tag:
+          entity: Definition
+          file_path: '@$ROOT|ancestor_tag("file_path")'
           fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__fqn_segment")'
       - match: '(__def (__command))'
         tag:
+          entity: Definition
+          file_path: '@$ROOT|ancestor_tag("file_path")'
           fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__fqn_segment")'
       - match: '(__def (__impl))'
         tag:
