@@ -8,7 +8,7 @@ title: Set up data replication
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
+- Tier: [Premium, Ultimate](../trial.md)
 - Offering: GitLab Self-Managed
 
 {{< /details >}}

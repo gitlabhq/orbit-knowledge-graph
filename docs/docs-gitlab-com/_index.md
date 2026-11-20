@@ -12,14 +12,10 @@ Software lifecycle context graph for AI agents
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
+- Tier: [Premium, Ultimate](trial.md)
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
-
-> [!note]
-> GitLab Orbit is available to Premium and Ultimate customers as a separate purchase.
-> Eligible customers can [start a trial](trial.md) before purchasing.
 
 <section class="product-landing product-hero">
 

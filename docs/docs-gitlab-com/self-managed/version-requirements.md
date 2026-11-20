@@ -8,7 +8,7 @@ title: Version requirements for GitLab Orbit
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
+- Tier: [Premium, Ultimate](../trial.md)
 - Offering: GitLab Self-Managed
 
 {{< /details >}}

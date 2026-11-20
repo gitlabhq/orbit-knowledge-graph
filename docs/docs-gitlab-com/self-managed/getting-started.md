@@ -8,7 +8,7 @@ title: Get started with GitLab Orbit on GitLab Self-Managed
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
+- Tier: [Premium, Ultimate](../trial.md)
 - Offering: GitLab Self-Managed
 
 {{< /details >}}
