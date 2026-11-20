@@ -225,7 +225,7 @@ For pod sizes, see [GitLab Orbit sizing](sizing.md).
 
 GitLab Orbit reports usage to GitLab and checks that your subscription has GitLab Credits available.
 The Helm chart configures billing by default.
-Allow outbound HTTPS from the webserver to `customers.gitlab.com` and `billing.prdsub.gitlab.net`.
+If the instance has an online cloud license, allow outbound HTTPS from the webserver to `customers.gitlab.com` and `billing.prdsub.gitlab.net`.
 For more information, see [Billing connections](networking.md#billing-connections).
 
 When your subscription has no GitLab Credits available, queries fail with the [`GitLab credits exhausted`](../troubleshooting.md#error-gitlab-credits-exhausted) error.
