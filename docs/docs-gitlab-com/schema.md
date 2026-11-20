@@ -8,7 +8,7 @@ title: GitLab Orbit indexed data
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
+- Tier: [Premium, Ultimate](https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/#trials-and-purchases)
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
