@@ -1,4 +1,18 @@
 define:
+  members(owner, name, role): >-
+    declared(owner, name, role)
+    or other_parts(owner) | declared(name, role)
+    or union(owner, other_parts(owner)) | supers | members(name, role)
+  other_parts(ROOT): >-
+    minus(union(select_all(file($ROOT), '(__def $N:__defname)', $ROOT | child_sym("__defname")),
+    select_all(project, '(__def $N:__defname)', $ROOT | child_sym("__defname"))), $ROOT)
+    | impl_pair($ROOT)
+  impl_pair(ROOT, owner):
+    '(__def (__impl))': '$ROOT'
+    '_ when owner | is_impl': '$ROOT'
+  is_impl(ROOT):
+    '(__def (__impl))': '$ROOT'
+  supers(ROOT): 'union(supertypes($ROOT) | is_def, follow($ROOT, extends))'
   declared(owner, name, role): >-
     first(member_defs(owner, name) | fills(role), d => single_role(d))
     or first(member_defs(owner, name) | fills(role), d => d)

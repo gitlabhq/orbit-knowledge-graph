@@ -284,6 +284,7 @@ static FUNCTIONS: &[Function<Core>] = &[
         cx.callable(a[0][0], &roles)
     }),
     function!(required Flow, "declared", [one, one, one]),
+    function!(required Flow, "members", [one, one, one]),
     function!(Flow, "supers", [one], |cx, a| {
         let def = Loc::from(node(cx, a, 0));
         of(cx.supers(def))

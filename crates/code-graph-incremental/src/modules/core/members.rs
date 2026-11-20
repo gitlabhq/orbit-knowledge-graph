@@ -59,26 +59,6 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         parts
     }
 
-    fn declared(
-        &mut self,
-        owner: Cursor<'t, S>,
-        name: u32,
-        role: Role,
-        roles: &Roles,
-    ) -> Option<Cursor<'t, S>> {
-        let _ = roles;
-        let args = [
-            one(Val::Node(owner.into())),
-            one(Val::Sym(name)),
-            one(Val::Sym(role_code(self.lang(), role))),
-        ];
-        let found = self.call(crate::fn_id!("core", "declared"), &args);
-        found
-            .first()
-            .and_then(|v| v.loc())
-            .map(|loc| self.jump(loc))
-    }
-
     pub(super) fn members(
         &mut self,
         owner: Cursor<'t, S>,
@@ -86,41 +66,18 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         role: Role,
         roles: &Roles,
     ) -> Vec<Cursor<'t, S>> {
-        let mut seen: FxHashSet<Loc> = FxHashSet::from_iter([owner.into()]);
-        let mut level: Parts<'t, S> = SmallVec::from_elem(owner, 1);
-        while !level.is_empty() {
-            let mut found: Vec<Cursor<'t, S>> = Vec::new();
-            let mut parts: Parts<'t, S> = SmallVec::new();
-            for &owner in &level {
-                let own = self.parts(owner);
-                let members: Parts<'t, S> = match self.declared(own[0], name, role, roles) {
-                    Some(member) => SmallVec::from_elem(member, 1),
-                    None => own[1..]
-                        .iter()
-                        .filter_map(|&p| self.declared(p, name, role, roles))
-                        .collect(),
-                };
-                for member in members {
-                    if !found.iter().any(|f| Loc::from(*f) == Loc::from(member)) {
-                        found.push(member);
-                    }
-                }
-                parts.extend(own);
-            }
-            if !found.is_empty() {
-                return found;
-            }
-            let mut next = Parts::new();
-            for part in parts {
-                for s in self.supers(part.into()) {
-                    if seen.insert(s) {
-                        next.push(self.jump(s));
-                    }
-                }
-            }
-            level = next;
-        }
-        Vec::new()
+        let _ = roles;
+        let args = [
+            one(Val::Node(owner.into())),
+            one(Val::Sym(name)),
+            one(Val::Sym(role_code(self.lang(), role))),
+        ];
+        let found = self.call(crate::fn_id!("core", "members"), &args);
+        found
+            .iter()
+            .filter_map(|v| v.loc())
+            .map(|loc| self.jump(loc))
+            .collect()
     }
 
     pub(super) fn meaning(&mut self, value: Val, site: Cursor<'t, S>, roles: &Roles) -> Vals {
