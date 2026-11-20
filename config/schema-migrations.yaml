@@ -16,6 +16,14 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 125
+  scope: "*"
+  note: >-
+    Link-table edges copy only immutable endpoint properties into their tags. A
+    link row does not change when its endpoint does, so a copied state went stale. Nodes
+    keep only immutable enrichment_props, and link-table edges stop enriching
+    MergeRequest and WorkItem endpoints. Queries stop trusting the stale copies at once;
+    the rebuild clears them.
 - version: 124
   scope: sdlc
   entities:
