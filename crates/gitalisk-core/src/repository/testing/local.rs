@@ -255,7 +255,9 @@ impl LocalGitRepository {
     }
 
     pub fn add_paths(&mut self, paths: &[&str]) -> &mut Self {
-        LocalGitCommand::new(&self.path, "git", &["add", &paths.join(" ")]).execute();
+        let mut args = vec!["add", "--"];
+        args.extend(paths);
+        LocalGitCommand::new(&self.path, "git", &args).execute();
         self
     }
 
