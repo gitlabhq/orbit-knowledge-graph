@@ -347,11 +347,12 @@ fn sources(
             ));
             break;
         }
-        if let Some(content) = read(&file.path) {
-            configs.push(SourceFile {
+        match read(&file.path) {
+            Some(content) => configs.push(SourceFile {
                 path: file.path.to_string(),
                 content,
-            });
+            }),
+            None => report.unread_files.push(file.path.to_string()),
         }
     }
     (files, configs)

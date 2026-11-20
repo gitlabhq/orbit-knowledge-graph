@@ -47,11 +47,19 @@ define:
     '(__call)': '$ROOT | sited(calls) | returned'
     '(__binding $R:__rhs)': '$R | tail | producing'
     '_': '$ROOT | type'
+  linked_file(ROOT): "select_all(project, '(__source_file)' by $ROOT, @ROOT)"
+  linked_section(ROOT, anchor): "select_all(linked_file($ROOT), '(__def $N:__anchor)', @anchor)"
   returned(ROOT):
     '_ when $ROOT | returns | is_class': '$ROOT | returns'
     '_': 'visible($ROOT | returns, $ROOT)'
 
 resolve:
+  link:
+    - '(__link $A:__anchor) when linked_section($ROOT, $A)':
+        links: { from: 'file($ROOT)', to: 'linked_section($ROOT, $A)' }
+    - '(__link) when linked_file($ROOT)':
+        links: { from: 'file($ROOT)', to: 'linked_file($ROOT)' }
+
   import:
     - '$I:(%import_kinds $ROOT:__name) when $I | modules':
         imports: { from: $ROOT, to: '$I | modules | offered(written($ROOT)) | foreign' }
