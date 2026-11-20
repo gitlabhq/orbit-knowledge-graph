@@ -21,14 +21,14 @@ physical:
     result_contract:
       result_ctx: {query_type: traversal, nodes: {u: {entity_type: User}}}
     hydrate_plan:
-      hydration_plan: static
+      hydration_plan: {static: {}}
     security:
       node: {expect: ["(Filter false, ... (_))"]}
     codegen:
       output:
         sql: {contains: [gl_merge_request], not_contains: [gl_edge]}
         parameterized_sql: {contains: ["{p"], not_contains: [opened]}
-        params: [{value: opened, type: String}]
+        params: [{value: '1/', data_type: String}, {value: opened, data_type: String}]
         indexes: [{table: gl_merge_request, name: idx_title}]
 ```
 
@@ -55,64 +55,40 @@ contract:
 | State field | Contract |
 |---|---|
 | `input` | Patterns on the logical tree |
-| `tp_bounds` | The traversal path bound of each listed node alias |
 | `query_plan` | Patterns on the planned tree, and `point_lookup` |
 | `node` | Patterns on the SQL AST |
 | `query_config` | `exact`, `equals`, and `absent` on the resolved ClickHouse settings |
-| `hydration_plan` | `none`, `static`, or `dynamic`, or the templates of a static or dynamic plan |
-| `result_ctx` | The query type, node entries, neighbors center, and entity labels of the result context |
-| `output` | `sql` and `parameterized_sql` text checks, bound `params`, and `indexes` that the layout declares and the final query scans |
+| `hydration_plan` | The serialized hydration plan |
+| `result_ctx` | The serialized result context |
+| `output` | `sql` and `parameterized_sql` text checks, the serialized bound `params`, and `indexes` that the layout declares and the final query scans |
 
 In `input`, the `Input` head names the query type, then `include_debug_sql`
 and `dynamic_columns=*` when the query sets them. A head without them asserts
 the defaults.
 
-`hydration_plan` also takes a list of templates under the plan kind. Each
-listed template must match one template of the plan on every field it names.
-Fields match like a format `value` check: a map matches on the keys it lists,
-a list matches by length and position, and other values compare exactly. A
-field the template does not have is reported missing. Static templates
-have `entity_type`, `node_alias`, `destination_table`, `columns`,
-`virtual_columns`, `injected_columns`, `has_traversal_path`, `virtual_filters`,
-and `filter_injected_columns`. Dynamic templates have the same fields without
-`node_alias`, `virtual_filters`, and `filter_injected_columns`.
+`hydration_plan`, `result_ctx`, and `params` are compared as JSON. The runner
+serializes the state and matches it with the fixture value. A map matches on
+the keys it lists, a list matches by length and position, and other values
+compare exactly. A map of indexes matches the listed positions of a list. A
+failure names the JSON path that differs. A plan serializes as `none`,
+`{static: [...]}`, or `{dynamic: [...]}`, so `{static: {}}` checks only the
+kind. `params` is the list of bound parameters in binding order, each with
+`value` and `data_type`.
 
 ```yaml
 hydration:
   static:
     - node_alias: f
       virtual_columns: [{column_name: content, service: gitaly, lookup: blob_content}]
-      virtual_filters: [{property: content, op: contains, value: needle}]
-      filter_injected_columns: [content]
-```
-
-`result_ctx` checks only the keys it lists. `nodes` must list every node alias
-of the result context, and each entry checks the fields it names:
-`entity_type`, `pk_column`, `id_column`, and `type_column`. `neighbors_center`
-takes `{entity, id}`, or `null` for no center. `labels` maps an entity to its
-label property, or to `null` for no label.
-
-```yaml
+      virtual_filters: [[content, {op: contains, value: needle}]]
 result_context:
-  neighbors_center: {entity: User, id: 1}
+  neighbors_center: [User, 1]
   labels: {User: username}
-```
-
-`tp_bounds` maps a node alias to the predicate that bounds its traversal path,
-or to `null` for no bound. A trailing `...` matches a prefix of the predicate.
-
-```yaml
-tp_bounds:
-  tp_bounds:
-    nodes:
-      a: StartsWith(a.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 1)) ...
-      b: null
+params: [{value: opened, data_type: String}, {value: 1, data_type: {Array: Int64}}]
 ```
 
 `sql` checks the rendered SQL, with parameter values inlined.
-`parameterized_sql` checks the SQL that is sent with bound parameters. Each
-`params` entry must match one bound parameter by its value and its ClickHouse
-type name.
+`parameterized_sql` checks the SQL that is sent with bound parameters.
 
 Every case that compiles gets two more checks without an assertion. DuckDB
 runs the rendered SQL of each DuckDB case on an empty database of the local

@@ -2,7 +2,7 @@
 
 use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use orbit_utils::traversal_path::TraversalPath;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use strum::VariantNames;
@@ -163,6 +163,7 @@ fn default_limit() -> u32 {
     PartialEq,
     Eq,
     Deserialize,
+    Serialize,
     strum::Display,
     strum::IntoStaticStr,
     strum::VariantNames,
@@ -177,7 +178,7 @@ pub enum QueryType {
     /// Internal-only: consolidated hydration for multiple entity types.
     /// Generates a UNION ALL of search-like arms, one per node. Skips
     /// security context injection (IDs are pre-authorized by the pipeline).
-    #[serde(skip)]
+    #[serde(skip_deserializing)]
     Hydration,
 }
 
@@ -296,7 +297,7 @@ where
         .collect()
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct InputFilter {
     pub op: Option<FilterOp>,
     pub value: Option<Value>,
@@ -312,7 +313,9 @@ impl InputFilter {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr, strum::VariantNames)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, strum::AsRefStr, strum::VariantNames,
+)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum FilterOp {

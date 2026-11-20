@@ -248,12 +248,11 @@ struct HydrationSetup {
 #[serde(default, deny_unknown_fields)]
 struct StateAssertions {
     input: Option<Assertions>,
-    tp_bounds: Option<TpBoundsAssertions>,
     query_plan: Option<PlanAssertions>,
     node: Option<Assertions>,
     query_config: Option<SettingsAssertions>,
-    hydration_plan: Option<HydrationAssertions>,
-    result_ctx: Option<ResultContextAssertions>,
+    hydration_plan: Option<serde_json::Value>,
+    result_ctx: Option<serde_json::Value>,
     output: Option<OutputAssertions>,
 }
 
@@ -261,7 +260,6 @@ impl StateAssertions {
     fn fields(&self) -> impl Iterator<Item = &'static str> + '_ {
         [
             ("input", self.input.is_some()),
-            ("tp_bounds", self.tp_bounds.is_some()),
             ("query_plan", self.query_plan.is_some()),
             ("node", self.node.is_some()),
             ("query_config", self.query_config.is_some()),
@@ -271,52 +269,6 @@ impl StateAssertions {
         ]
         .into_iter()
         .filter_map(|(field, present)| present.then_some(field))
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TpBoundsAssertions {
-    nodes: BTreeMap<String, Option<String>>,
-}
-
-impl TpBoundsAssertions {
-    fn check(
-        &self,
-        bounds: &compiler::tp_bounds::TpBounds,
-        aliases: &[&str],
-        label: &str,
-    ) -> Result<(), String> {
-        if self.nodes.is_empty() {
-            return Err(format!("{label}: needs nodes"));
-        }
-        for (alias, expected) in &self.nodes {
-            if !aliases.contains(&alias.as_str()) {
-                return Err(format!(
-                    "{label}.nodes.{alias}: the query has no node {alias}; nodes: {aliases:?}"
-                ));
-            }
-            let actual = bounds
-                .node_predicate(alias)
-                .map(|predicate| explain::expression(&predicate));
-            let matched = match (expected, &actual) {
-                (None, None) => true,
-                (Some(expected), Some(actual)) => match expected.strip_suffix("...") {
-                    Some(prefix) => {
-                        terms::match_prefix(prefix.trim_end(), actual, &terms::Captures::new())
-                            .is_some()
-                    }
-                    None => terms::match_text(expected, actual, &terms::Captures::new()).is_some(),
-                },
-                _ => false,
-            };
-            if !matched {
-                return Err(format!(
-                    "{label}.nodes.{alias}: {actual:?}, expected {expected:?}"
-                ));
-            }
-        }
-        Ok(())
     }
 }
 
@@ -365,244 +317,19 @@ struct SettingsAssertions {
 struct OutputAssertions {
     sql: Option<SqlAssertions>,
     parameterized_sql: Option<SqlAssertions>,
-    params: Vec<ParamAssertion>,
+    params: Option<serde_json::Value>,
     indexes: Vec<IndexAssertion>,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ParamAssertion {
-    value: serde_json::Value,
-    #[serde(rename = "type")]
-    data_type: String,
-}
-
-#[derive(Deserialize)]
-#[serde(try_from = "serde_json::Value")]
-struct HydrationAssertions {
-    kind: compiler::HydrationKind,
-    templates: Vec<serde_json::Map<String, serde_json::Value>>,
-}
-
-impl TryFrom<serde_json::Value> for HydrationAssertions {
-    type Error = String;
-
-    fn try_from(value: serde_json::Value) -> Result<Self, String> {
-        let usage = || {
-            "hydration_plan takes none, static, dynamic, or {static: [...]} or {dynamic: [...]} with nonempty template field maps".to_string()
-        };
-        let kind = |value| serde_json::from_value(value).map_err(|_| usage());
-        match value {
-            serde_json::Value::String(_) => Ok(Self {
-                kind: kind(value)?,
-                templates: vec![],
-            }),
-            serde_json::Value::Object(entries) if entries.len() == 1 => {
-                let (name, templates) = entries.into_iter().next().unwrap();
-                let kind = kind(serde_json::Value::String(name))?;
-                let templates: Vec<serde_json::Map<_, _>> =
-                    serde_json::from_value(templates).map_err(|_| usage())?;
-                if kind == compiler::HydrationKind::None
-                    || templates.is_empty()
-                    || templates.iter().any(serde_json::Map::is_empty)
-                {
-                    return Err(usage());
-                }
-                Ok(Self { kind, templates })
-            }
-            _ => Err(usage()),
-        }
-    }
-}
-
-impl HydrationAssertions {
-    fn check(&self, plan: &compiler::HydrationPlan, label: &str) -> Result<(), String> {
-        use serde_json::json;
-        if plan.kind() != self.kind {
-            return Err(format!(
-                "{label}: {:?}, expected {:?}",
-                plan.kind(),
-                self.kind
-            ));
-        }
-        let virtual_columns = |columns: &[compiler::VirtualColumnRequest]| {
-            columns
-                .iter()
-                .map(|column| {
-                    json!({"column_name": column.column_name, "service": column.service, "lookup": column.lookup})
-                })
-                .collect::<Vec<_>>()
-        };
-        let actual: Vec<_> = match plan {
-            compiler::HydrationPlan::None => vec![],
-            compiler::HydrationPlan::Static(templates) => templates
-                .iter()
-                .map(|template| {
-                    json!({
-                        "entity_type": template.entity_type,
-                        "node_alias": template.node_alias,
-                        "destination_table": template.destination_table,
-                        "columns": template.columns,
-                        "virtual_columns": virtual_columns(&template.virtual_columns),
-                        "injected_columns": template.injected_columns,
-                        "has_traversal_path": template.has_traversal_path,
-                        "virtual_filters": template.virtual_filters.iter().map(|(property, filter)| {
-                            json!({"property": property, "op": filter.op.map(|op| op.as_ref().to_string()), "value": filter.value})
-                        }).collect::<Vec<_>>(),
-                        "filter_injected_columns": template.filter_injected_columns,
-                    })
-                })
-                .collect(),
-            compiler::HydrationPlan::Dynamic(entities) => entities
-                .iter()
-                .map(|entity| {
-                    json!({
-                        "entity_type": entity.entity_type,
-                        "destination_table": entity.destination_table,
-                        "columns": entity.columns,
-                        "virtual_columns": virtual_columns(&entity.virtual_columns),
-                        "injected_columns": entity.injected_columns,
-                        "has_traversal_path": entity.has_traversal_path,
-                    })
-                })
-                .collect(),
-        };
-        for (index, expected) in self.templates.iter().enumerate() {
-            let label = format!("{label}[{index}]");
-            let expected = serde_json::Value::Object(expected.clone());
-            let mismatches: Vec<_> = actual
-                .iter()
-                .map(|template| crate::scenario::subset_mismatch(&label, &expected, template))
-                .collect();
-            if !mismatches.iter().any(Option::is_none) {
-                let related: Vec<_> = actual
-                    .iter()
-                    .zip(&mismatches)
-                    .filter(|(template, _)| {
-                        ["node_alias", "entity_type"].iter().any(|key| {
-                            expected
-                                .get(*key)
-                                .is_some_and(|value| template.get(*key) == Some(value))
-                        })
-                    })
-                    .map(|(_, mismatch)| mismatch.clone().unwrap())
-                    .collect();
-                return Err(format!(
-                    "{label}: no template matches {expected}\nsame entity or alias: {related:?}"
-                ));
-            }
-        }
-        Ok(())
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ResultContextAssertions {
-    query_type: Option<compiler::QueryType>,
-    nodes: Option<BTreeMap<String, serde_json::Map<String, serde_json::Value>>>,
-    #[serde(default, deserialize_with = "present")]
-    neighbors_center: Option<Option<NeighborsCenter>>,
-    #[serde(default)]
-    labels: BTreeMap<String, Option<String>>,
-}
-
-#[derive(Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-struct NeighborsCenter {
-    entity: String,
-    id: i64,
-}
-
-fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    T::deserialize(deserializer).map(Some)
-}
-
-impl ResultContextAssertions {
-    fn check(
-        &self,
-        context: &compiler::ResultContext,
-        entity_exists: &dyn Fn(&str) -> bool,
-        label: &str,
-    ) -> Result<(), String> {
-        if self.query_type.is_none()
-            && self.nodes.is_none()
-            && self.neighbors_center.is_none()
-            && self.labels.is_empty()
-        {
-            return Err(format!(
-                "{label}: needs query_type, nodes, neighbors_center, or labels"
-            ));
-        }
-        if let Some(expected) = self.query_type
-            && context.query_type != Some(expected)
-        {
-            return Err(format!(
-                "{label}.query_type: {:?}, expected {expected:?}",
-                context.query_type
-            ));
-        }
-        if let Some(nodes) = &self.nodes {
-            let actual: BTreeMap<_, _> = context
-                .nodes()
-                .map(|node| {
-                    (
-                        node.alias.as_str(),
-                        serde_json::json!({
-                            "entity_type": node.entity_type,
-                            "pk_column": node.pk_column,
-                            "id_column": node.id_column,
-                            "type_column": node.type_column,
-                        }),
-                    )
-                })
-                .collect();
-            if !actual.keys().copied().eq(nodes.keys().map(String::as_str)) {
-                return Err(format!(
-                    "{label}.nodes: aliases {:?}, expected {:?}",
-                    actual.keys().collect::<Vec<_>>(),
-                    nodes.keys().collect::<Vec<_>>()
-                ));
-            }
-            for (alias, expected) in nodes {
-                if let Some(mismatch) = crate::scenario::subset_mismatch(
-                    &format!("{label}.nodes.{alias}"),
-                    &serde_json::Value::Object(expected.clone()),
-                    &actual[alias.as_str()],
-                ) {
-                    return Err(mismatch);
-                }
-            }
-        }
-        if let Some(expected) = &self.neighbors_center {
-            let actual = context
-                .neighbors_center()
-                .map(|(entity, id)| NeighborsCenter {
-                    entity: entity.to_string(),
-                    id,
-                });
-            if actual != *expected {
-                return Err(format!(
-                    "{label}.neighbors_center: {actual:?}, expected {expected:?}"
-                ));
-            }
-        }
-        for (entity, expected) in &self.labels {
-            if !entity_exists(entity) {
-                return Err(format!("{label}.labels.{entity}: no such entity"));
-            }
-            let actual = context.label(entity);
-            if actual != expected.as_deref() {
-                return Err(format!(
-                    "{label}.labels.{entity}: {actual:?}, expected {expected:?}"
-                ));
-            }
-        }
-        Ok(())
+fn state_mismatch(
+    expected: &serde_json::Value,
+    state: &impl serde::Serialize,
+    label: &str,
+) -> Result<(), String> {
+    let actual = serde_json::to_value(state).map_err(|error| format!("{label}: {error}"))?;
+    match crate::scenario::subset_mismatch(label, expected, &actual) {
+        Some(mismatch) => Err(mismatch),
+        None => Ok(()),
     }
 }
 
@@ -988,19 +715,11 @@ fn check_pipeline(
             .table(table)
             .is_some_and(|table| table.options.indexes.iter().any(|item| item.name == index))
     };
-    let entity_exists = |entity: &str| {
-        use query_data_model::OrbitQueryModel;
-        match backend {
-            "duckdb" => models.local.entity(entity).is_some(),
-            _ => remote.entity(entity).is_some(),
-        }
-    };
     let observe = Expectations {
         phases,
         rejection: scenario.rejected.get(backend),
         frontend: language,
         index_exists: &index_exists,
-        entity_exists: &entity_exists,
         local_database: (backend == "duckdb").then_some(&models.local_database),
         reads_other_cte: &models.reads_other_cte,
         label,
@@ -1103,7 +822,6 @@ struct Expectations<'a> {
     rejection: Option<&'a Rejection>,
     frontend: &'a str,
     index_exists: &'a dyn Fn(&str, &str) -> bool,
-    entity_exists: &'a dyn Fn(&str) -> bool,
     local_database: Option<&'a DuckDbClient>,
     reads_other_cte: &'a std::cell::Cell<bool>,
     label: &'a str,
@@ -1240,20 +958,6 @@ impl Expectations<'_> {
                 }),
             );
         }
-        if let Some(assertions) = &state.tp_bounds {
-            check(
-                "tp_bounds",
-                ctx.tp_bounds().as_ref().map(|bounds| {
-                    let aliases: Vec<&str> = ctx
-                        .input()
-                        .iter()
-                        .flat_map(|input| &input.nodes)
-                        .map(|node| node.id.as_str())
-                        .collect();
-                    assertions.check(bounds, &aliases, &format!("{label}.tp_bounds"))
-                }),
-            );
-        }
         if let Some(assertions) = &state.query_plan {
             check(
                 "query_plan",
@@ -1291,16 +995,16 @@ impl Expectations<'_> {
         if let Some(assertions) = &state.hydration_plan {
             check(
                 "hydration_plan",
-                ctx.hydration_plan()
-                    .as_ref()
-                    .map(|plan| assertions.check(plan, &format!("{label}.hydration_plan"))),
+                ctx.hydration_plan().as_ref().map(|plan| {
+                    state_mismatch(assertions, plan, &format!("{label}.hydration_plan"))
+                }),
             );
         }
         if let Some(assertions) = &state.result_ctx {
             check(
                 "result_ctx",
                 ctx.result_ctx().as_ref().map(|context| {
-                    assertions.check(context, self.entity_exists, &format!("{label}.result_ctx"))
+                    state_mismatch(assertions, context, &format!("{label}.result_ctx"))
                 }),
             );
         }
@@ -1323,7 +1027,7 @@ impl Expectations<'_> {
     ) -> Result<(), String> {
         if assertions.sql.is_none()
             && assertions.parameterized_sql.is_none()
-            && assertions.params.is_empty()
+            && assertions.params.is_none()
             && assertions.indexes.is_empty()
         {
             return Err(format!(
@@ -1344,29 +1048,11 @@ impl Expectations<'_> {
                 failures.extend(checks.check(&sql, &format!("{label}.{field}")));
             }
         }
-        let params: BTreeMap<_, _> = output
-            .base
-            .params
-            .iter()
-            .map(|(name, param)| {
-                (
-                    name,
-                    (
-                        orbit_utils::clickhouse::type_name(param.data_type),
-                        &param.value,
-                    ),
-                )
-            })
-            .collect();
-        for expected in &assertions.params {
-            if !params.values().any(|(data_type, value)| {
-                *data_type == expected.data_type && **value == expected.value
-            }) {
-                failures.push(format!(
-                    "{label}.params: no {} parameter {}\nparams: {params:?}",
-                    expected.data_type, expected.value
-                ));
-            }
+        if let Some(expected) = &assertions.params {
+            let mut params: Vec<_> = output.base.params.iter().collect();
+            params.sort_by_key(|(name, _)| (name.len(), name.as_str()));
+            let params: Vec<_> = params.into_iter().map(|(_, param)| param).collect();
+            failures.extend(state_mismatch(expected, &params, &format!("{label}.params")).err());
         }
         for index in &assertions.indexes {
             if !(self.index_exists)(&index.table, &index.name) {
@@ -1863,7 +1549,7 @@ fn rejections_check_the_phase_reason_and_message() {
 }
 
 #[test]
-fn output_hydration_and_result_context_assertions_check_their_fields() {
+fn state_assertions_match_serialized_state_by_json_path() {
     let run = |physical: &str| {
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(
@@ -1883,71 +1569,35 @@ fn output_hydration_and_result_context_assertions_check_their_fields() {
     };
     assert_eq!(
         run(
-            "{params: [{value: alice, type: String}, {value: 1, type: Int64}], parameterized_sql: {contains: ['{p'], not_contains: [alice]}, result_context: {query_type: traversal, nodes: {u: {entity_type: User, id_column: _orbit_u_id}}, neighbors_center: null, labels: {User: null}}, hydration: none}"
+            "{params: [{value: '1/', data_type: String}, {value: alice, data_type: String}, {value: 1, data_type: Int64}, {value: false, data_type: Bool}, {value: 67650, data_type: Int64}, {value: ' [truncated]', data_type: String}, {value: '', data_type: String}, {value: User, data_type: String}], parameterized_sql: {contains: ['{p'], not_contains: [alice]}, result_context: {query_type: traversal, nodes: {u: {entity_type: User, id_column: _orbit_u_id}}, neighbors_center: null, labels: {}}, hydration: none}"
         ),
         ""
     );
     for (physical, expected) in [
         (
-            "{params: [{value: alice, type: Int64}]}",
-            "no Int64 parameter \"alice\"",
+            "{params: [{value: alice, data_type: Int64}]}",
+            "output.params has",
         ),
         (
-            "{parameterized_sql: {contains: [alice]}}",
-            "parameterized_sql missing 'alice'",
-        ),
-        (
-            "{result_context: {}}",
-            "needs query_type, nodes, neighbors_center, or labels",
+            "{params: {1: {value: alice, data_type: Int64}}}",
+            "output.params[1].data_type is \"String\", expected \"Int64\"",
         ),
         (
             "{result_context: {query_type: neighbors}}",
-            "Some(Traversal), expected Neighbors",
-        ),
-        (
-            "{result_context: {nodes: {}}}",
-            "aliases [\"u\"], expected []",
-        ),
-        (
-            "{result_context: {nodes: {u: {entity: User}}}}",
-            "nodes.u.entity is missing",
+            "result_ctx.query_type is \"traversal\", expected \"neighbors\"",
         ),
         (
             "{result_context: {nodes: {u: {entity_type: Project}}}}",
-            "nodes.u.entity_type is \"User\", expected \"Project\"",
-        ),
-        (
-            "{result_context: {neighbors_center: {entity: User, id: 1}}}",
-            "neighbors_center: None",
+            "result_ctx.nodes.u.entity_type is \"User\", expected \"Project\"",
         ),
         (
             "{result_context: {labels: {User: username}}}",
-            "labels.User: None",
+            "result_ctx.labels.User is missing",
         ),
-        (
-            "{result_context: {labels: {Nope: username}}}",
-            "labels.Nope: no such entity",
-        ),
-        ("{hydration: static}", "None, expected Static"),
+        ("{hydration: {static: {}}}", "hydration_plan is \"none\""),
     ] {
         let failures = run(physical);
         assert!(failures.contains(expected), "{physical}: {failures}");
-    }
-    for (state, expected) in [
-        ("output: {params: [{value: alice}]}", "missing field `type`"),
-        ("hydration_plan: {static: []}", "hydration_plan takes"),
-        (
-            "hydration_plan: {none: [{node_alias: u}]}",
-            "hydration_plan takes",
-        ),
-        ("hydration_plan: {static: [{}]}", "hydration_plan takes"),
-        ("result_ctx: {node: {}}", "unknown field `node`"),
-    ] {
-        let error = orbit_utils::yaml::from_str::<StateAssertions>(state)
-            .err()
-            .map(|error| error.to_string())
-            .unwrap_or_default();
-        assert!(error.contains(expected), "{state}: {error}");
     }
 }
 
@@ -1959,36 +1609,6 @@ fn run_one(fixture: &str, ontology: ontology::Ontology) -> String {
         .err()
         .unwrap_or_default()
         .join("\n")
-}
-
-#[test]
-fn tp_bounds_assertions_check_each_listed_alias() {
-    let fixture = |nodes: &str| {
-        format!(
-            "name: bounds\nsecurity: {{paths: [1/9970/]}}\nquery:\n  json: '{{\"query_type\":\"traversal\",\"nodes\":[{{\"id\":\"u\",\"entity\":\"User\"}},{{\"id\":\"p\",\"entity\":\"Project\",\"node_ids\":[7]}}],\"relationships\":[{{\"type\":\"MEMBER_OF\",\"from\":\"u\",\"to\":\"p\"}}]}}'\n  gql: 'MATCH (u:User)-[:MEMBER_OF]->(p:Project {{id: 7}}) RETURN u, p'\nphysical:\n  clickhouse:\n    tp_bounds:\n      tp_bounds: {{nodes: {nodes}}}\n"
-        )
-    };
-    let ontology = || ontology::Ontology::load_embedded().unwrap();
-    assert_eq!(
-        run_one(
-            &fixture(
-                "{p: 'StartsWith(p.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 7)) ...'}"
-            ),
-            ontology()
-        ),
-        ""
-    );
-    for (nodes, expected) in [
-        ("{p: null}", "tp_bounds.nodes.p: Some("),
-        (
-            "{p: 'StartsWith(u.traversal_path, ...'}",
-            "tp_bounds.nodes.p: Some(",
-        ),
-        ("{x: null}", "the query has no node x"),
-    ] {
-        let failures = run_one(&fixture(nodes), ontology());
-        assert!(failures.contains(expected), "{nodes}: {failures}");
-    }
 }
 
 #[test]

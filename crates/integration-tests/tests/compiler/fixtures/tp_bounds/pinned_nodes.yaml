@@ -93,10 +93,8 @@ cases:
         MATCH (u:User)-[:MEMBER_OF]->(p:Project {id: 15846663}) RETURN u, p
     physical:
       clickhouse:
-        tp_bounds:
-          tp_bounds:
-            nodes:
-              p: "StartsWith(p.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663) = '0/')"
+        emitted:
+          expect: ["(Filter StartsWith(_orbit_edge_0.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663) = '0/'), ... (Scan Table(gl_edge) AS _orbit_edge_0))"]
 
   - name: A prune-to-target bound does not cross a user hub
     security: { paths: [1/9970/] }
@@ -107,8 +105,8 @@ cases:
         MATCH (a:Project {id: 15846663})<-[:MEMBER_OF]-(u:User)-[:MEMBER_OF]->(b:Project) RETURN a, u, b
     physical:
       clickhouse:
-        tp_bounds:
-          tp_bounds:
-            nodes:
-              a: "StartsWith(a.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663) = '0/')"
-              b: null
+        emitted:
+          expect: ["(Filter StartsWith(_orbit_edge_0.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663) = '0/'), ... (Scan Table(gl_edge) AS _orbit_edge_0))"]
+          reject:
+            - "(Filter StartsWith(_orbit_edge_1.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663) = '0/'), ... (_))"
+            - "(Filter StartsWith(b.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663) = '0/'), ... (_))"
