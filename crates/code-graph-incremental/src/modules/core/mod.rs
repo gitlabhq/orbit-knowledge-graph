@@ -210,12 +210,10 @@ static FUNCTIONS: &[Function<Core>] = &[
         let attr = node(cx, a, 0).sym();
         cx.field(attr)
     }),
-    function!(Flow, "meaning", [one, one], @uses ["core"."declared"], |cx, a| {
+    function!(Flow, "meaning", [one, one], @uses ["core"."member_for"], |cx, a| {
         let site = node(cx, a, 1);
         cx.meaning(a[0][0], site)
     }),
-    function!(required Flow, "declared", [one, one, one]),
-    function!(required Flow, "members", [one, one, one]),
     function!(required Flow, "member_for", [one, one]),
     function!(Flow, "supers", [one], |cx, a| {
         let def = Loc::from(node(cx, a, 0));
@@ -238,7 +236,7 @@ static FUNCTIONS: &[Function<Core>] = &[
         true => one(Val::Opaque),
         false => a[0].clone(),
     }),
-    function!(Flow, "lub", [set], @uses ["core"."declared"], |cx, a| {
+    function!(Flow, "lub", [set], @uses ["core"."supertypes"], |cx, a| {
         match a[0].contains(&Val::Opaque) {
             true => Vals::new(),
             false => cx.lub(&a[0]),
@@ -287,16 +285,6 @@ static FUNCTIONS: &[Function<Core>] = &[
     }),
     function!(Flow, "receiver_calls", [one], @uses ["core"."read"], |cx, a| {
         cx.receiver_calls(node(cx, a, 0))
-    }),
-    function!(Flow, "targets", [one, one], @uses ["core"."read", "core"."declared"], |cx, a| {
-        cx.call_targets(node(cx, a, 0), crate::engine::truthy(&a[1]))
-    }),
-    function!(Flow, "unresolved", [one, one], @uses ["core"."read", "core"."declared"], |cx, a| {
-        let call = node(cx, a, 0);
-        match cx.unresolved(call, crate::engine::truthy(&a[1])) {
-            true => one(Val::Node(call.into())),
-            false => Vals::new(),
-        }
     }),
     function!(Flow, "resolution", [one, set], @uses ["core"."read"], |cx, a| {
         let target = node(cx, a, 0);

@@ -1,4 +1,17 @@
 define:
+  targets(ROOT, implicit):
+    '(__call $K:(__callee "/./"))': 'read($K) | read_target(implicit) | member_for($ROOT)'
+    '(__call $K:__callee) when read($K)': none
+    '(__call $K:(__callee "/./")) when implicit': 'members(enclosing | class, $K, cursor_role($ROOT))'
+  read_target(ROOT, implicit):
+    '_ when implicit': 'named_value($ROOT)'
+    '(_)': '$ROOT'
+  unresolved(ROOT, implicit):
+    '(__call $K:__callee) when read($K)': none
+    '_ when implicit_targets($ROOT, implicit)': none
+    '(__call (__callee "/^[^\s()\[\]{}<>*&,;\x27\x22=+/%^|~]+$/"))': '$ROOT'
+  implicit_targets(ROOT, implicit):
+    '_ when implicit': 'targets($ROOT, true)'
   site_role(ROOT):
     '$K:(__callee $ROOT)': 'cursor_role($K)'
     '_': 'cursor_role($ROOT)'

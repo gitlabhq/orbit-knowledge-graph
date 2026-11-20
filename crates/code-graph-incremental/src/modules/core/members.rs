@@ -1,10 +1,9 @@
 use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
-use super::{Core, Ref, role_code, values};
+use super::{Core, Ref, values};
 use crate::canonical::Canonical as C;
 use crate::engine::{Cursor, Cx, Loc, Store, Val, Vals, one};
-use crate::tree::Role;
 
 type Parts<'t, S> = SmallVec<[Cursor<'t, S>; 4]>;
 
@@ -22,25 +21,6 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
             }
         }
         parts
-    }
-
-    pub(super) fn members(
-        &mut self,
-        owner: Cursor<'t, S>,
-        name: u32,
-        role: Role,
-    ) -> Vec<Cursor<'t, S>> {
-        let args = [
-            one(Val::Node(owner.into())),
-            one(Val::Sym(name)),
-            one(Val::Sym(role_code(self.lang(), role))),
-        ];
-        let found = self.call(crate::fn_id!("core", "members"), &args);
-        found
-            .iter()
-            .filter_map(|v| v.loc())
-            .map(|loc| self.jump(loc))
-            .collect()
     }
 
     pub(super) fn meaning(&mut self, value: Val, site: Cursor<'t, S>) -> Vals {
