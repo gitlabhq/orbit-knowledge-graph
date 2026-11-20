@@ -52,6 +52,9 @@ pub struct BudgetSpec {
 struct PipelineSpec {
     scopes: Vec<String>,
     edges: Vec<String>,
+    kinds: Vec<String>,
+    #[serde(default)]
+    modules: BTreeMap<String, ModuleSpec>,
     phases: Vec<PhaseSpec>,
 }
 
@@ -268,10 +271,68 @@ pub struct Phase {
     pub(super) overrides: Vec<HashMap<u16, u16>>,
     pub(super) index_count: usize,
     pub(super) enclosing: Vec<u16>,
+    pub(super) roles: Vec<Roles>,
     pub rows: Vec<RowShape>,
     indexers: Vec<Indexer>,
     body: Body,
     slots: usize,
+}
+
+/// How pipeline.yaml fills one module's kind and tag roles.
+#[derive(serde::Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct ModuleSpec {
+    #[serde(default)]
+    kinds: BTreeMap<String, String>,
+    #[serde(default)]
+    tags: BTreeMap<String, String>,
+}
+
+/// A module's roles, resolved to ids.
+#[derive(Clone, Default)]
+pub struct Roles {
+    pub kinds: Vec<u16>,
+    pub tags: Vec<u32>,
+}
+
+/// Each module's roles, by slot: every role bound, every kind in the vocabulary.
+fn roles(spec: &PipelineSpec, lang: &Lang) -> Result<Vec<Roles>, LoadError> {
+    let known: std::collections::HashSet<&str> = spec.kinds.iter().map(String::as_str).collect();
+    crate::modules::ALL
+        .iter()
+        .map(|module| {
+            let empty = ModuleSpec::default();
+            let bound = spec.modules.get(module.name).unwrap_or(&empty);
+            let pick = |map: &BTreeMap<String, String>, role: &str, what: &str| {
+                map.get(role).cloned().ok_or_else(|| {
+                    LoadError(format!(
+                        "module {}: {what} role {role} is not bound",
+                        module.name
+                    ))
+                })
+            };
+            let kinds = module
+                .kinds
+                .iter()
+                .map(|role| {
+                    let kind = pick(&bound.kinds, role, "kind")?;
+                    match known.contains(kind.as_str()) {
+                        true => Ok(lang.intern_kind(&kind)),
+                        false => Err(LoadError(format!(
+                            "module {}: kind {kind} is not in pipeline.yaml kinds",
+                            module.name
+                        ))),
+                    }
+                })
+                .collect::<Result<_, _>>()?;
+            let tags = module
+                .tags
+                .iter()
+                .map(|role| Ok(lang.syms.intern(&pick(&bound.tags, role, "tag")?)))
+                .collect::<Result<_, LoadError>>()?;
+            Ok(Roles { kinds, tags })
+        })
+        .collect()
 }
 
 pub struct Pipeline {
@@ -297,6 +358,7 @@ impl Pipeline {
             .collect();
         let values = data_values(&files, lang)?;
         let enclosing: Vec<u16> = spec.scopes.iter().map(|k| lang.intern_kind(k)).collect();
+        let roles = roles(&spec, lang)?;
         let indexes = RefCell::new(Vec::new());
         let mut phases = spec
             .phases
@@ -305,6 +367,7 @@ impl Pipeline {
                 let mut phase = Phase::load(p, &files, &names, lang, &indexes)?;
                 phase.data = values.clone();
                 phase.enclosing = enclosing.clone();
+                phase.roles = roles.clone();
                 Ok(phase)
             })
             .collect::<Result<Vec<_>, LoadError>>()?;
@@ -600,6 +663,7 @@ impl Phase {
             overrides,
             index_count: 0,
             enclosing: Vec::new(),
+            roles: Vec::new(),
             rows,
             indexers: Vec::new(),
             body,

@@ -1,7 +1,6 @@
 use std::rc::Rc;
 
-use super::{BlockId, Frame, Key, Ssa, Value};
-use crate::canonical::Canonical as C;
+use super::{BlockId, Frame, Key, Kinds, Ssa, Value};
 use crate::constants::PATH_SEP;
 use crate::engine::{Cursor, Cx, Store, Vals};
 
@@ -32,7 +31,8 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     }
 
     fn declare(&mut self, node: Cursor<'_, S>, name: u32) -> u32 {
-        let binding = match node.child_sym(C::Declaration) {
+        let k = self.state().k;
+        let binding = match node.child_sym(k.declaration) {
             Some(_) => self.binding(name),
             None => self.key(Key::Declaration(node.index(), name)),
         };
@@ -81,6 +81,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
         hoisted: bool,
         resume: Option<BlockId>,
     ) {
+        let k = self.state().k;
         let label = label.unwrap_or(scope.sym());
         let s = self.write();
         let wildcards = s.wildcards.len();
@@ -93,16 +94,16 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
             return;
         }
         let boundary = move |n: Cursor<'_, S>| {
-            n.is(C::Def) || n.is(C::Lambda) || (n.is(C::Scope) && n.sym() == label)
+            n.is(k.def) || n.is(k.lambda) || (n.is(k.scope) && n.sym() == label)
         };
         let mut declarations: Vec<_> = scope
             .descendants_pruned(boundary)
-            .filter(|n| n.child_sym(C::Declaration) == Some(label))
+            .filter(|n| n.child_sym(k.declaration) == Some(label))
             .collect();
-        declarations.sort_by_key(|n| !n.has(C::Alias));
+        declarations.sort_by_key(|n| !n.has(k.alias));
         for declaration in declarations {
             let name = declaration
-                .child_sym(C::DefName)
+                .child_sym(k.defname)
                 .unwrap_or(declaration.sym());
             let key = self.key(Key::Declaration(declaration.index(), name));
             let unbound = self.key(Key::Name(name));
@@ -111,7 +112,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
             if s.visible.get(&name).is_some_and(|&(_, at)| at == depth) {
                 continue;
             }
-            if let Some(owner) = declaration.child_sym(C::Alias) {
+            if let Some(owner) = declaration.child_sym(k.alias) {
                 let at = s.scopes[..depth]
                     .iter()
                     .rposition(|(l, _)| *l == owner)
@@ -127,21 +128,23 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     }
 
     pub(super) fn predeclare(&mut self, scope: Cursor<'t, S>) {
+        let k = self.state().k;
         for def in scope
             .children()
-            .filter(|d| d.is(C::Def) && !d.has(C::Declaration))
+            .filter(|d| d.is(k.def) && !d.has(k.declaration))
         {
             self.declare_def(def);
         }
     }
 
     fn declare_def(&mut self, def: Cursor<'t, S>) {
-        let Some(name) = def.child_sym(C::DefName) else {
+        let k = self.state().k;
+        let Some(name) = def.child_sym(k.defname) else {
             return;
         };
-        let aliases = def.children_of(C::Alias).map(|a| a.sym());
+        let aliases = def.children_of(k.alias).map(|a| a.sym());
         for sym in std::iter::once(name).chain(aliases) {
-            let merged = sym == name && def.has(C::ImplBlock) && !self.lookup(name).is_empty();
+            let merged = sym == name && def.has(k.impl_block) && !self.lookup(name).is_empty();
             if !merged {
                 self.define(def, sym, Value::LocalDef(def.index()));
             }
@@ -149,7 +152,8 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     }
 
     pub(super) fn enter_def(&mut self, def: Cursor<'t, S>, scoped: Option<Option<u32>>) {
-        if def.child_sym(C::DefName).is_none() {
+        let k = self.state().k;
+        if def.child_sym(k.defname).is_none() {
             return;
         }
         self.declare_def(def);
@@ -162,16 +166,17 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     }
 
     pub(super) fn bind_import(&mut self, import: Cursor<'t, S>, shadows: bool, type_only: u32) {
+        let k = self.state().k;
         if !self.write().bound.insert(import.index()) {
             return;
         }
         let module = self.inline_module(import);
-        for name in import.children_of(C::Name) {
+        for name in import.children_of(k.name) {
             let local = name
-                .child_sym(C::Alias)
-                .or(name.child_sym(C::SsaHint))
+                .child_sym(k.alias)
+                .or(name.child_sym(k.ssa_hint))
                 .unwrap_or(name.sym());
-            if import.is(C::ImportType) || name.has_tag(type_only) {
+            if import.is(k.import_type) || name.has_tag(type_only) {
                 let binding = self.declare(name, local);
                 let s = self.write();
                 s.graph.write_variable(binding, s.cur, Value::Opaque);
@@ -193,9 +198,9 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
             }
             self.define(name, local, Value::ImportRef(name.index()));
             let binding = self.binding(local);
-            for alias in [C::Alias, C::SsaHint]
+            for alias in [k.alias, k.ssa_hint]
                 .into_iter()
-                .filter_map(|k| name.child_sym(k))
+                .filter_map(|kind| name.child_sym(kind))
             {
                 self.bind_name(alias, binding);
             }
@@ -203,9 +208,10 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     }
 
     fn inline_module(&mut self, import: Cursor<'t, S>) -> Option<Cursor<'t, S>> {
+        let k = self.state().k;
         let syms = &self.lang().syms;
         let path = import
-            .child_sym(C::SourcePath)
+            .child_sym(k.source_path)
             .map_or("", |p| syms.resolve(p));
         let mut segments = path.split(PATH_SEP).filter(|s| !s.is_empty());
         let Some(first) = segments.next() else {
@@ -219,19 +225,20 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
                 _ => None,
             })?;
         for segment in segments {
-            module = child_def(module, syms.lookup(segment))?;
+            module = child_def(k, module, syms.lookup(segment))?;
         }
         Some(module)
     }
 
     fn bind_from_def(&mut self, module: Cursor<'t, S>, name: Cursor<'t, S>, local: u32) -> bool {
+        let k = self.state().k;
         let targets: Vec<(u32, u32)> = match name.sym() == self.state().wildcard {
             true => module
                 .children()
-                .filter(|d| d.is(C::Def))
-                .filter_map(|d| Some((d.child_sym(C::DefName)?, d.index())))
+                .filter(|d| d.is(k.def))
+                .filter_map(|d| Some((d.child_sym(k.defname)?, d.index())))
                 .collect(),
-            false => child_def(module, name.sym())
+            false => child_def(k, module, name.sym())
                 .map(|d| (local, d.index()))
                 .into_iter()
                 .collect(),
@@ -289,7 +296,8 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     }
 
     pub(super) fn read(&mut self, c: Cursor<'t, S>) -> Vals {
-        if c.has(C::Qualifier) {
+        let k = self.state().k;
+        if c.has(k.qualifier) {
             let found = self.lookup_static(c.sym());
             return self.vals(found.as_slice());
         }
@@ -298,7 +306,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
             let found = self.state().graph.resolve_value(&value);
             return self.vals(&found);
         }
-        if c.is(C::Member) {
+        if c.is(k.member) {
             return Vals::new();
         }
         let found = self.lookup(c.sym());
@@ -306,8 +314,8 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     }
 }
 
-fn child_def<S: Store>(module: Cursor<'_, S>, name: u32) -> Option<Cursor<'_, S>> {
+fn child_def<S: Store>(k: Kinds, module: Cursor<'_, S>, name: u32) -> Option<Cursor<'_, S>> {
     module
         .children()
-        .find(|d| d.is(C::Def) && d.child_sym(C::DefName) == Some(name))
+        .find(|d| d.is(k.def) && d.child_sym(k.defname) == Some(name))
 }

@@ -3,26 +3,25 @@ use std::collections::hash_map::Entry;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::{SmallVec, smallvec};
 
-use super::{Key, Ssa, Value};
-use crate::canonical::Canonical as C;
+use super::{Key, Kinds, Ssa, Value};
 use crate::engine::{Cursor, Cx, Store, Val};
 
 type Fields = FxHashMap<u32, u32>;
 
-fn member_of<S: Store>(node: Cursor<'_, S>) -> Option<Cursor<'_, S>> {
+fn member_of<S: Store>(k: Kinds, node: Cursor<'_, S>) -> Option<Cursor<'_, S>> {
     Some(node)
-        .filter(|n| n.is(C::Member))
-        .or_else(|| node.child(C::Member))
-        .or_else(|| node.child(C::Ivar))
+        .filter(|n| n.is(k.member))
+        .or_else(|| node.child(k.member))
+        .or_else(|| node.child(k.ivar))
 }
 
-fn object_of<S: Store>(member: Cursor<'_, S>) -> Option<Cursor<'_, S>> {
-    member.child(C::Object).filter(|o| !o.has(C::Qualifier))
+fn object_of<S: Store>(k: Kinds, member: Cursor<'_, S>) -> Option<Cursor<'_, S>> {
+    member.child(k.object).filter(|o| !o.has(k.qualifier))
 }
 
-fn tail_sym<S: Store>(node: Cursor<'_, S>) -> u32 {
-    match super::tail_child(node) {
-        Some(c) if c.size() > 1 => tail_sym(c),
+fn tail_sym<S: Store>(k: Kinds, node: Cursor<'_, S>) -> u32 {
+    match super::tail_child(k, node) {
+        Some(c) if c.size() > 1 => tail_sym(k, c),
         Some(c) => c.sym(),
         None => node.sym(),
     }
@@ -30,8 +29,9 @@ fn tail_sym<S: Store>(node: Cursor<'_, S>) -> u32 {
 
 impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     fn member_binding(&mut self, node: Cursor<'_, S>) -> Option<(u32, u32)> {
-        let member = member_of(node)?;
-        let root = self.object_binding(object_of(member)?);
+        let k = self.state().k;
+        let member = member_of(k, node)?;
+        let root = self.object_binding(object_of(k, member)?);
         let tracked = root != 0 && !self.state().statics.contains_key(&root);
         tracked.then_some((root, member.sym()))
     }
@@ -39,6 +39,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     /// The binding a chain object stands for, or 0: its name's binding, or
     /// the field its inner member reads off the object below it.
     fn object_binding(&mut self, object: Cursor<'_, S>) -> u32 {
+        let k = self.state().k;
         let mut path = SmallVec::<[(u32, u32); 4]>::new();
         let mut at = object;
         let mut root = loop {
@@ -48,7 +49,8 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
             if let Some(&known) = self.state().chains.get(&at.index()) {
                 break known;
             }
-            let Some((inner, below)) = member_of(at).and_then(|m| Some((m, object_of(m)?))) else {
+            let Some((inner, below)) = member_of(k, at).and_then(|m| Some((m, object_of(k, m)?)))
+            else {
                 break 0;
             };
             path.push((at.index(), inner.sym()));
@@ -76,6 +78,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     }
 
     pub(super) fn target(&mut self, c: Cursor<'t, S>) -> Option<u32> {
+        let k = self.state().k;
         let field = self.member_binding(c).map(|(root, field)| {
             let key = self.key(Key::Field(root, field));
             *self
@@ -86,21 +89,22 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
                 .entry(field)
                 .or_insert(key)
         });
-        let declares = c.has(C::Declaration) && c.child_sym(C::Declaration).is_none();
-        let lhs = match (declares || c.has(C::Qualifier), field) {
+        let declares = c.has(k.declaration) && c.child_sym(k.declaration).is_none();
+        let lhs = match (declares || c.has(k.qualifier), field) {
             (true, _) => self.key(Key::Declaration(c.index(), c.sym())),
             (false, Some(field)) => field,
             (false, None) => self.binding(c.sym()),
         };
-        (lhs != 0 && !(c.has(C::Ivar) && field.is_none())).then_some(lhs)
+        (lhs != 0 && !(c.has(k.ivar) && field.is_none())).then_some(lhs)
     }
 
     fn value(&self, val: Val) -> Option<Value> {
+        let k = Kinds::bound(self.kinds());
         match val {
             Val::Type(loc) => Some(Value::Type(loc.node)),
             Val::Node(loc) => Some(match self.jump(loc) {
-                n if n.is(C::Def) => Value::LocalDef(loc.node),
-                n if n.is(C::Name) => Value::ImportRef(loc.node),
+                n if n.is(k.def) => Value::LocalDef(loc.node),
+                n if n.is(k.name) => Value::ImportRef(loc.node),
                 _ => Value::Call(loc.node),
             }),
             Val::Opaque => Some(Value::Opaque),
@@ -109,10 +113,11 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     }
 
     fn held(&mut self, node: Cursor<'t, S>) -> Value {
+        let k = self.state().k;
         if let Some(slot) = self.field_slot(node) {
             return self.read_value(slot);
         }
-        let sym = tail_sym(node);
+        let sym = tail_sym(k, node);
         if sym == 0 {
             return Value::Opaque;
         }
@@ -120,7 +125,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
         let binding = self.binding(sym);
         match self.state().graph.read_variable_internal(binding, block) {
             Value::Undefined => Value::Opaque,
-            Value::LocalDef(def) if super::is_class(self.at(def)) => Value::Type(def),
+            Value::LocalDef(def) if super::is_class(k, self.at(def)) => Value::Type(def),
             value => value,
         }
     }
@@ -131,10 +136,11 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
         values: &[Val],
         from: Option<Cursor<'t, S>>,
     ) {
+        let k = self.state().k;
         let Some(lhs) = self.target(target) else {
             return;
         };
-        let record = from.is_some_and(|f| f.is(C::Obj) || f.is(C::Args));
+        let record = from.is_some_and(|f| f.is(k.obj) || f.is(k.args));
         let written: SmallVec<[Value; 2]> = match (values.is_empty(), from) {
             (false, _) => values.iter().filter_map(|&v| self.value(v)).collect(),
             (true, Some(from)) if !record => smallvec![self.held(from)],
@@ -160,7 +166,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
                 s.cur = s.graph.add_sealed_join(arms);
             }
         }
-        if target.has(C::Qualifier)
+        if target.has(k.qualifier)
             && let [value] = values
             && let Some(value) = self.value(*value)
         {
@@ -169,19 +175,20 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
         if let Some(from) = from {
             self.bind_fields(lhs, from);
         }
-        let declares = target.has(C::Declaration) && target.child_sym(C::Declaration).is_none();
-        if declares || target.has(C::Qualifier) {
+        let declares = target.has(k.declaration) && target.child_sym(k.declaration).is_none();
+        if declares || target.has(k.qualifier) {
             self.bind_name(target.sym(), lhs);
         }
     }
 
     fn bind_fields(&mut self, lhs: u32, from: Cursor<'t, S>) {
-        let sources: Fields = if from.is(C::Obj) || from.is(C::Args) {
-            from.children_of(C::ConfigField)
+        let k = self.state().k;
+        let sources: Fields = if from.is(k.obj) || from.is(k.args) {
+            from.children_of(k.config_field)
                 .map(|field| {
                     let source = field
-                        .child_sym(C::Binding)
-                        .or_else(|| field.child_sym(C::Rhs));
+                        .child_sym(k.binding)
+                        .or_else(|| field.child_sym(k.rhs));
                     (field.sym(), self.binding(source.unwrap_or(0)))
                 })
                 .collect()

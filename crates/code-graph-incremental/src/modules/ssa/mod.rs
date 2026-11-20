@@ -8,7 +8,6 @@ use std::rc::Rc;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
-use crate::canonical::Canonical as C;
 use crate::constants::WILDCARD;
 use crate::engine::{Cursor, Cx, Function, Module, Store, Val, Vals, of, yes};
 use crate::modules::{function, node};
@@ -44,8 +43,45 @@ enum Pending {
 
 type Undo = Vec<(u32, Option<(u32, usize)>)>;
 
+/// Declares a table of role ids and the role names pipeline.yaml binds.
+macro_rules! roles {
+    ($name:ident: $id:ty { $($role:ident),* $(,)? }) => {
+        #[derive(Clone, Copy, Default)]
+        pub(super) struct $name {
+            $(pub(super) $role: $id,)*
+        }
+
+        impl $name {
+            const NAMES: &'static [&'static str] = &[$(stringify!($role)),*];
+
+            fn bound(ids: &[$id]) -> Self {
+                let mut ids = ids.iter().copied();
+                Self { $($role: ids.next().unwrap_or_default(),)* }
+            }
+        }
+    };
+}
+
+roles!(Kinds: u16 { declaration, def, rhs, member, defname, binding, qualifier, alias, ssa_branch, import_type, call, ssa_arm, import, ssa_loop, ssa_hint, object, ivar, side_effect, scope, obj, name, lambda, impl_block, decorator, callee, args, trait_type, supertype, struct_type, source_path, interface, enum_type, dispatch, destructure, config_field, class, arr });
+roles!(Tags: u32 { scoped, hoisted, lifted, implicit_self, type_only, weak });
+
+impl Kinds {
+    fn class_like(self) -> [u16; 6] {
+        [
+            self.class,
+            self.struct_type,
+            self.impl_block,
+            self.interface,
+            self.trait_type,
+            self.enum_type,
+        ]
+    }
+}
+
 #[derive(Default)]
 pub struct State {
+    k: Kinds,
+    t: Tags,
     graph: SsaEngine,
     cur: BlockId,
     frames: Vec<Frame>,
@@ -82,10 +118,16 @@ impl Module for Ssa {
         FUNCTIONS
     }
 
+    const KINDS: &'static [&'static str] = Kinds::NAMES;
+    const TAGS: &'static [&'static str] = Tags::NAMES;
+
     fn start<'t, S: Store>(cx: &mut Cx<'_, 't, Self, S>, root: Cursor<'t, S>) {
         let wildcard = cx.lang().syms.intern(WILDCARD);
         let label = root.sym();
+        let (k, t) = (Kinds::bound(cx.kinds()), Tags::bound(cx.tags()));
         let s = cx.write();
+        s.k = k;
+        s.t = t;
         s.cur = s.graph.add_block();
         s.graph.seal_block(s.cur);
         s.wildcard = wildcard;
@@ -115,7 +157,8 @@ static FUNCTIONS: &[Function<Ssa>] = &[
     function!(Flow, "slot", [one], |cx, a| {
         cx.walked();
         let c = node(cx, a, 0);
-        let slot = match c.is(C::Binding) {
+        let k = cx.state().k;
+        let slot = match c.is(k.binding) {
             true => cx.target(c),
             false => cx.field_slot(c),
         };
@@ -158,10 +201,11 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     }
 
     fn fork(&mut self, sink: Option<Cursor<'t, S>>) {
+        let k = self.state().k;
         let s = self.write();
         let sink = match sink {
-            Some(c) if c.is(C::Binding) => Some(c.index()),
-            Some(c) if c.is(C::SsaBranch) => s
+            Some(c) if c.is(k.binding) => Some(c.index()),
+            Some(c) if c.is(k.ssa_branch) => s
                 .frames
                 .iter()
                 .rev()
@@ -203,7 +247,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
 
     fn loop_header(&mut self, c: Cursor<'t, S>) {
         if self.state().loop_ends.is_empty() {
-            let (ends, assigned) = loop_spans(self.tree().root());
+            let (ends, assigned) = loop_spans(self.state().k, self.tree().root());
             let s = self.write();
             (s.loop_ends, s.assigned) = (ends, assigned);
         }
@@ -251,13 +295,14 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     }
 
     fn defer(&mut self, call: Cursor<'t, S>) {
-        let Some(callee) = call.child(C::Callee) else {
+        let k = self.state().k;
+        let Some(callee) = call.child(k.callee) else {
             return;
         };
         if let Some(value) = self.pending(callee) {
             let named = callee.sym_opt().is_some()
-                && !callee.has(C::Member)
-                && !callee.has(C::Ivar)
+                && !callee.has(k.member)
+                && !callee.has(k.ivar)
                 && is_name_text(self.lang().syms.resolve(callee.sym()));
             let fallback = named.then(|| Rc::clone(&self.state().wildcards));
             let s = self.write();
@@ -265,7 +310,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
                 .insert(call.index(), Pending::Callee(value, fallback));
             return;
         }
-        let Some(object) = callee.child(C::Member).and_then(|m| m.child(C::Object)) else {
+        let Some(object) = callee.child(k.member).and_then(|m| m.child(k.object)) else {
             return;
         };
         let leaf = !self.state().loops.is_empty() && object.children().next().is_none();
@@ -306,7 +351,10 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     }
 }
 
-fn loop_spans<S: Store>(root: Cursor<'_, S>) -> (FxHashMap<u32, u32>, FxHashMap<u32, Vec<u32>>) {
+fn loop_spans<S: Store>(
+    k: Kinds,
+    root: Cursor<'_, S>,
+) -> (FxHashMap<u32, u32>, FxHashMap<u32, Vec<u32>>) {
     let (mut ends, mut assigned) = (FxHashMap::default(), FxHashMap::<u32, Vec<u32>>::default());
     let mut stack = vec![(root, false)];
     let mut last = root.index();
@@ -316,19 +364,19 @@ fn loop_spans<S: Store>(root: Cursor<'_, S>) -> (FxHashMap<u32, u32>, FxHashMap<
             continue;
         }
         last = node.index();
-        if node.is(C::Import) || node.is(C::ImportType) {
+        if node.is(k.import) || node.is(k.import_type) {
             for name in std::iter::once(node).chain(node.descendants()) {
                 assigned.entry(name.sym()).or_default().push(last);
             }
             continue;
         }
-        let assigns = [C::Binding, C::DefName, C::Alias, C::SsaHint]
+        let assigns = [k.binding, k.defname, k.alias, k.ssa_hint]
             .into_iter()
             .any(|kind| node.is(kind));
-        if assigns || node.has(C::Declaration) {
+        if assigns || node.has(k.declaration) {
             assigned.entry(node.sym()).or_default().push(last);
         }
-        if node.is(C::SsaLoop) {
+        if node.is(k.ssa_loop) {
             stack.push((node, true));
         }
         stack.extend(node.children_rev().map(|child| (child, false)));
@@ -343,15 +391,16 @@ fn is_name_text(text: &str) -> bool {
             .any(|c| c.is_whitespace() || "()[]{}<>*&,;'\"=+/%^|~".contains(c))
 }
 
-fn is_class<S: Store>(c: Cursor<'_, S>) -> bool {
+fn is_class<S: Store>(k: Kinds, c: Cursor<'_, S>) -> bool {
+    let class_like = k.class_like();
     c.children()
-        .any(|k| walk::CLASS_LIKE.iter().any(|&kind| k.is(kind)))
+        .any(|n| class_like.iter().any(|&kind| n.is(kind)))
 }
 
 /// The last named child that is not a side effect and stands for its parent.
-fn tail_child<S: Store>(node: Cursor<'_, S>) -> Option<Cursor<'_, S>> {
+fn tail_child<S: Store>(k: Kinds, node: Cursor<'_, S>) -> Option<Cursor<'_, S>> {
     node.children()
-        .filter(|c| c.named() && !c.is(C::SideEffect))
+        .filter(|c| c.named() && !c.is(k.side_effect))
         .last()
         .filter(|c| !(node.labelled() && c.lifted()))
 }

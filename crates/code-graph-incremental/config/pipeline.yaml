@@ -1,5 +1,47 @@
 scopes: [__def]
 edges: [calls, defines, imports, extends, type_flow, links]
+kinds: [__def, __defname, __ssa_return_type, __supertype, __decorator, __callable, __visibility, __import, __import_type, __source, __source_path, __name, __alias, __call, __callee, __args, __member, __object, __type, __ivar, __binding, __rhs, __ssa_branch, __ssa_arm, __ssa_loop, __ssa_return, __ssa_typed, __module_export, __default_export, __obj, __arr, __field, __str, __num, __bool, __unknown, __source_file, __root, __dir, __file, __package, __source_root, __function, __method, __class, __struct, __impl, __trait, __interface, __enum, __variable, __constant, __static_constant, __type_alias, __property, __lambda, __field_def, __enum_variant, __macro, __ssa_hint, __destructure, __positional, __scope, __declaration, __dispatch, __qualifier, __section, __fqn_segment, __front_matter, __front_matter_name, __front_matter_description, __front_matter_license, __front_matter_compatibility, __front_matter_allowed_tools, __front_matter_metadata, __front_matter_title, __front_matter_stage, __front_matter_group, __front_matter_info, __front_matter_version, __front_matter_category, __side_effect, __link, __anchor]
+modules:
+  ssa:
+    kinds:
+      declaration: __declaration
+      def: __def
+      rhs: __rhs
+      member: __member
+      defname: __defname
+      binding: __binding
+      qualifier: __qualifier
+      alias: __alias
+      ssa_branch: __ssa_branch
+      import_type: __import_type
+      call: __call
+      ssa_arm: __ssa_arm
+      import: __import
+      ssa_loop: __ssa_loop
+      ssa_hint: __ssa_hint
+      object: __object
+      ivar: __ivar
+      side_effect: __side_effect
+      scope: __scope
+      obj: __obj
+      name: __name
+      lambda: __lambda
+      impl_block: __impl
+      decorator: __decorator
+      callee: __callee
+      args: __args
+      trait_type: __trait
+      supertype: __supertype
+      struct_type: __struct
+      source_path: __source_path
+      interface: __interface
+      enum_type: __enum
+      dispatch: __dispatch
+      destructure: __destructure
+      config_field: __field
+      class: __class
+      arr: __arr
+    tags: { scoped: scoped, hoisted: hoisted, lifted: lifted, implicit_self: implicit_self, type_only: type_only, weak: weak }
 
 phases:
   - { name: canonicalize, over: tree, does: rewrite, budget: { label: rewrite, tree: file_rewrite_ms, skip: skip_timeout_walk } }

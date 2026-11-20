@@ -1,7 +1,6 @@
 use std::ops::ControlFlow;
 
 use super::{Edge, Mutable, Node, Storage, Tree};
-use crate::canonical::Canonical as C;
 
 pub enum Step<R> {
     Into,
@@ -216,8 +215,8 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn sym_opt(self) -> Option<u32> {
         Some(self.sym()).filter(|&sym| sym != 0)
     }
-    pub fn is(self, kind: C) -> bool {
-        self.kind() == kind
+    pub fn is(self, kind: impl Into<u16>) -> bool {
+        self.kind() == kind.into()
     }
     pub fn named(self) -> bool {
         self.node().named
@@ -254,20 +253,22 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
             .find(|node| node.kind() == kind)
             .and_then(|node| node.sym_opt())
     }
-    pub fn children_of(self, kind: C) -> impl Iterator<Item = Self> + 'a {
+    pub fn children_of(self, kind: impl Into<u16>) -> impl Iterator<Item = Self> + 'a {
+        let kind = kind.into();
         self.children()
             .filter(move |node| node.is(kind) && node.sym_opt().is_some())
     }
     pub fn follow(self, edge: &Edge) -> Self {
         self.jump(edge.to_tree, edge.to_node)
     }
-    pub fn child(self, kind: C) -> Option<Self> {
+    pub fn child(self, kind: impl Into<u16>) -> Option<Self> {
+        let kind = kind.into();
         self.children().find(|node| node.is(kind))
     }
-    pub fn child_sym(self, kind: C) -> Option<u32> {
+    pub fn child_sym(self, kind: impl Into<u16>) -> Option<u32> {
         self.child(kind).and_then(|node| node.sym_opt())
     }
-    pub fn has(self, kind: C) -> bool {
+    pub fn has(self, kind: impl Into<u16>) -> bool {
         self.child(kind).is_some()
     }
 }

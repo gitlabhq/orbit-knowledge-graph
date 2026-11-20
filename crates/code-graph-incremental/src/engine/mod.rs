@@ -163,6 +163,11 @@ pub trait Module: Sized + 'static {
     fn indexes() -> &'static [IndexDecl] {
         &[]
     }
+    /// The node kinds the module recognizes, by role; pipeline.yaml binds each
+    /// role to a kind of the vocabulary.
+    const KINDS: &'static [&'static str] = &[];
+    /// The tags the module reads, by role, bound the same way.
+    const TAGS: &'static [&'static str] = &[];
 }
 
 /// An index a module declares over a family's trees and edges. The engine
@@ -307,6 +312,8 @@ pub struct Registration {
     compact: Hooks<Compact>,
     mutable: Hooks<Mutable>,
     indexes: fn() -> &'static [IndexDecl],
+    pub(crate) kinds: &'static [&'static str],
+    pub(crate) tags: &'static [&'static str],
 }
 
 pub const fn register<M: Module>() -> Registration {
@@ -325,6 +332,8 @@ pub const fn register<M: Module>() -> Registration {
             finish: finish::<M, Mutable>,
         },
         indexes: M::indexes,
+        kinds: M::KINDS,
+        tags: M::TAGS,
     }
 }
 
@@ -565,6 +574,7 @@ pub struct Run<'t, S: Store = Compact> {
     /// Bumped each time a cycle head reruns, retiring results of the last round.
     round: u64,
     profile: Option<Box<profile::Profile>>,
+    roles: &'t [program::Roles],
     /// Each node's nearest ancestor that is a scope or the root, filled on use.
     scopes: FxHashMap<Loc, Option<Loc>>,
 }
@@ -586,6 +596,7 @@ impl<'t, S: Store> Run<'t, S> {
         run.fns = &phase.defs;
         run.overrides = phase.overrides.get(rules);
         run.enclosing_kinds = &phase.enclosing;
+        run.roles = &phase.roles;
         run
     }
 
@@ -629,6 +640,7 @@ impl<'t, S: Store> Run<'t, S> {
             reads: FxHashSet::default(),
             round: 0,
             profile: profile::ON.then(Box::default),
+            roles: &[],
             scopes: FxHashMap::default(),
         }
     }
@@ -1375,6 +1387,22 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
 
     pub fn lang(&self) -> &'t crate::intern::Lang {
         self.run.lang_ref
+    }
+
+    /// The kind ids bound to the module's `KINDS` roles, in their order.
+    pub fn kinds(&self) -> &'t [u16] {
+        self.run
+            .roles
+            .get(usize::from(self.slot))
+            .map_or(&[], |r| &r.kinds)
+    }
+
+    /// The tag ids bound to the module's `TAGS` roles, in their order.
+    pub fn tags(&self) -> &'t [u32] {
+        self.run
+            .roles
+            .get(usize::from(self.slot))
+            .map_or(&[], |r| &r.tags)
     }
 
     /// One of this module's declared indexes, in a family run.
