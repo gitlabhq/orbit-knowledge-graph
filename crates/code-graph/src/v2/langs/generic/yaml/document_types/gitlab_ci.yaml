@@ -3,10 +3,17 @@
 # includes pull in.
 # Root entries are either global keywords or author-named jobs (hidden
 # `.template` jobs included); global variables and stages are named
-# children; `include:` statements become imports.
-# Import columns: path = source (project path, component spec, template
-# name, local path, or URL), name = file within a project include,
-# alias = pinned ref or component version.
+# children; `include:` statements and container images become imports.
+# Include import columns: path = source (project path, component spec,
+# template name, local path, or URL), name = file within a project
+# include, alias = pinned ref or component version.
+# CiImage imports come from `image:` and `services:` at the top level,
+# under `default:` or in a job (as a string, a mapping with `name:`, or a
+# list of either), and from `IMAGE` and `*_IMAGE` variables (a string or a
+# mapping with `value:`) in global or job `variables:`. Image import
+# columns: path and name = the bare image, without tag or digest; tag =
+# the part after the last colon outside a registry port or `${...}`;
+# digest = the part after `@`.
 name: gitlab_ci
 match:
   filename_suffixes: [.gitlab-ci.yml, .gitlab-ci.yaml]
