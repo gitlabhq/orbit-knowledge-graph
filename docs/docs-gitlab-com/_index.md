@@ -12,7 +12,7 @@ Software lifecycle context graph for AI agents
 
 {{< details >}}
 
-- Tier: [Premium, Ultimate](trial.md)
+- Tier: [Premium, Ultimate](https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/#trials-and-purchases)
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
