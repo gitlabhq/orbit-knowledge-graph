@@ -13,10 +13,19 @@ pub fn matches<S: Storage<Node = Node>>(
 ) -> bool {
     caps.iter_mut().for_each(Cap::clear);
     let root = anchor.unwrap_or(id);
+    let mut path = smallvec::SmallVec::new();
+    if anchor.is_some() {
+        let mut at = Some(S::index(root));
+        while let Some(node) = at.filter(|&n| n != S::index(id)) {
+            path.push(node);
+            at = t.storage.parent(node);
+        }
+    }
     let m = Matcher {
         t,
         lang,
         root: S::index(root),
+        path,
     };
     if !m.at(S::index(id), p, caps) {
         return false;
@@ -59,6 +68,9 @@ struct Matcher<'a, S: Storage> {
     t: &'a Tree<S>,
     lang: &'a Lang,
     root: u32,
+    /// The anchor and its ancestors below the matched node: a kid pattern
+    /// that holds `$ROOT` can only match the one of these under its parent.
+    path: smallvec::SmallVec<[u32; 8]>,
 }
 
 impl<S: Storage<Node = Node>> Matcher<'_, S> {
@@ -174,6 +186,21 @@ impl<S: Storage<Node = Node>> Matcher<'_, S> {
                         return false;
                     }
                 }
+                Pat::Node { optional, .. } | Pat::Cap { optional, .. }
+                    if !self.path.is_empty() && holds_root(kid) =>
+                {
+                    let pinned = self
+                        .path
+                        .iter()
+                        .copied()
+                        .find(|&p| storage.parent(p) == Some(raw))
+                        .filter(|&c| self.at(c, kid, caps) && self.reaches(next, c));
+                    match pinned {
+                        Some(c) => next = storage.next_sibling(c),
+                        None if *optional => clear(kid, caps),
+                        None => return false,
+                    }
+                }
                 Pat::Node { optional, .. } | Pat::Cap { optional, .. } => {
                     let from = next;
                     let mut found = false;
@@ -195,6 +222,28 @@ impl<S: Storage<Node = Node>> Matcher<'_, S> {
             }
         }
         true
+    }
+}
+
+impl<S: Storage<Node = Node>> Matcher<'_, S> {
+    fn reaches(&self, mut from: Option<u32>, to: u32) -> bool {
+        while let Some(n) = from {
+            if n == to {
+                return true;
+            }
+            from = self.t.storage.next_sibling(n);
+        }
+        false
+    }
+}
+
+fn holds_root(p: &Pat) -> bool {
+    match p {
+        Pat::Cap { slot: 0, .. } => true,
+        Pat::Cap { guard, .. } => guard.as_deref().is_some_and(holds_root),
+        Pat::Node { kids, .. } => kids.iter().any(holds_root),
+        Pat::Not(inner) | Pat::Desc(inner, _) => holds_root(inner),
+        Pat::Var { .. } => false,
     }
 }
 

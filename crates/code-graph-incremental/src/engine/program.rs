@@ -78,6 +78,7 @@ pub fn resolution(name: &str) -> Option<CallResolution> {
 }
 
 struct Match {
+    src: Box<str>,
     pat: Pat,
     depth: u8,
     kinds: Vec<u16>,
@@ -864,8 +865,13 @@ impl Loader<'_> {
             true => vec![0],
             false => filter.kinds.clone(),
         };
+        let src: Box<str> = match when {
+            Some(w) => format!("{pattern} when {w}").into(),
+            None => pattern.into(),
+        };
         let when = when.map(|src| self.expr(src, &slots)).transpose()?;
         Ok(Match {
+            src,
             pat,
             depth,
             kinds,
@@ -1500,8 +1506,22 @@ impl Phase {
                         let list = rules.by_kind.get(&c.kind()).unwrap_or(&rules.any);
                         for &i in list {
                             let (m, emits) = &rules.rules[usize::from(i)];
-                            if w.matches(run, m, c) && w.holds(run, m) {
+                            let started = run.profiling().then(std::time::Instant::now);
+                            let fired = w.matches(run, m, c) && w.holds(run, m);
+                            let matched = started.map(|s| s.elapsed());
+                            if fired {
                                 emits.iter().for_each(|e| e.run(run, &w.vals));
+                            }
+                            if let (Some(s), Some(matching)) = (started, matched) {
+                                run.profile_rule(
+                                    m as *const Match as usize,
+                                    &m.src,
+                                    fired,
+                                    matching,
+                                    s.elapsed(),
+                                );
+                            }
+                            if fired {
                                 break;
                             }
                         }

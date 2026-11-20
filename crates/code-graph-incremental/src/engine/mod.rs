@@ -994,6 +994,23 @@ impl<'t, S: Store> Run<'t, S> {
         std::mem::take(&mut self.edges)
     }
 
+    pub(crate) fn profiling(&self) -> bool {
+        self.profile.is_some()
+    }
+
+    pub(crate) fn profile_rule(
+        &mut self,
+        id: usize,
+        src: &str,
+        fired: bool,
+        matching: std::time::Duration,
+        total: std::time::Duration,
+    ) {
+        if let Some(p) = &mut self.profile {
+            p.rule(id, src, fired, matching, total);
+        }
+    }
+
     fn scope_above(&mut self, at: Loc) -> Option<Loc> {
         let kinds = self.enclosing_kinds;
         let mut path = Vec::new();

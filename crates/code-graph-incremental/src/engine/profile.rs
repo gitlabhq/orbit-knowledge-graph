@@ -3,7 +3,7 @@
 
 use std::fmt::Write;
 use std::sync::{LazyLock, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rustc_hash::FxHashMap;
 
@@ -44,6 +44,7 @@ pub struct Profile {
     pub stats: FxHashMap<FnId, Stat>,
     children: Vec<u64>,
     active: FxHashMap<FnId, u32>,
+    rules: FxHashMap<usize, (Box<str>, Stat)>,
 }
 
 impl Profile {
@@ -81,10 +82,25 @@ impl Profile {
         s.self_ns += total.saturating_sub(inner);
     }
 
+    /// One attempt of a rule: self time is matching, total adds its emits.
+    pub fn rule(&mut self, id: usize, src: &str, fired: bool, matching: Duration, total: Duration) {
+        let (_, s) = self
+            .rules
+            .entry(id)
+            .or_insert_with(|| (src.into(), Stat::default()));
+        s.calls += 1;
+        s.hits += u64::from(fired);
+        s.self_ns += matching.as_nanos() as u64;
+        s.total_ns += total.as_nanos() as u64;
+    }
+
     pub fn merge(&mut self, name: impl Fn(FnId) -> String) {
         let mut total = TOTAL.lock().unwrap_or_else(|e| e.into_inner());
         for (id, stat) in self.stats.drain() {
             add(&mut total, name(id), &stat);
+        }
+        for (_, (src, stat)) in self.rules.drain() {
+            add(&mut total, format!("rule {src}"), &stat);
         }
     }
 }
