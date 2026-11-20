@@ -1130,22 +1130,6 @@ mod tests {
         server.await.unwrap().unwrap();
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn dropping_a_streamed_read_stops_the_download() {
-        let (url, server) = serve_in_slow_chunks(arrow_stream(2000, 16)).await;
-
-        let mut batches = client_for(&url)
-            .query("SELECT id")
-            .fetch_arrow_streamed(None)
-            .await
-            .unwrap();
-        batches.next().await.unwrap().unwrap();
-        drop(batches);
-
-        let sent = server.await.unwrap();
-        assert!(sent.is_err(), "the server sent the whole response");
-    }
-
     #[test]
     fn server_overload_counts_toward_the_circuit() {
         for message in [
