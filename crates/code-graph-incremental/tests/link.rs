@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::tree::{Compact, EdgeKind};
 type Cursor<'a> = code_graph_incremental::tree::Cursor<'a, Compact>;
 use code_graph_incremental::language::SupportLang;
@@ -38,7 +37,7 @@ fn python_env(limits: Limits) -> Env {
 
 fn label(env: &Env, node: Cursor) -> String {
     let sym = node
-        .child_sym_of_kind(C::DefName as u16)
+        .child_sym_of_kind(env.lang.lookup_kind("__defname"))
         .or(node.sym_opt())
         .unwrap_or(0);
     env.lang.syms.resolve(sym).to_string()

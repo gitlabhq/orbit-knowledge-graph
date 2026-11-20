@@ -1,6 +1,5 @@
 use orbit_utils::markdown::{self, FRONT_MATTER_FIELDS, FRONT_MATTER_NAME, LineIndex};
 
-use crate::canonical::Canonical;
 use crate::intern::Lang;
 use crate::tree::{Node, Tree};
 
@@ -79,7 +78,7 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
             id,
             node(lang.intern_kind("section_key"), segment, start, end),
         );
-        tree.append(id, node(Canonical::Anchor.into(), anchor, start, end));
+        tree.append(id, node(lang.tree_kinds().anchor, anchor, start, end));
         ids.push(id);
     }
     let end = source.len();
@@ -87,7 +86,7 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
         let link = tree.append(
             tree.root,
             node(
-                Canonical::Link.into(),
+                lang.tree_kinds().link,
                 lang.syms.intern(&target.path),
                 end,
                 end,
@@ -97,7 +96,7 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
             tree.append(
                 link,
                 node(
-                    Canonical::Anchor.into(),
+                    lang.tree_kinds().anchor,
                     lang.syms.intern(&anchor),
                     end,
                     end,

@@ -92,3 +92,5 @@ impl<S: Storage> Tree<S> {
             .map(|tag| tag.val)
     }
 }
+
+crate::roles!(TreeKinds: u16 { source_file, root, dir, file, field, str, num, bool, obj, arr, anchor, link });

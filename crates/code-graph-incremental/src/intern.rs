@@ -1,7 +1,4 @@
 use lasso::{Key, Spur, ThreadedRodeo};
-use strum::IntoEnumIterator;
-
-use crate::canonical::{self, CANONICAL_BASE, Canonical};
 
 pub struct Interner {
     pub(crate) rodeo: ThreadedRodeo,
@@ -56,6 +53,11 @@ impl Interner {
         self.rodeo.resolve(&spur)
     }
 
+    fn try_resolve(&self, i: u32) -> Option<&str> {
+        let spur = Spur::try_from_usize((i as usize).checked_sub(1)?)?;
+        self.rodeo.try_resolve(&spur)
+    }
+
     pub fn lookup(&self, s: &str) -> u32 {
         self.rodeo
             .get(s)
@@ -78,6 +80,10 @@ pub struct Lang {
     pub fields: Interner,
     pub syms: Interner,
     pub edges: Interner,
+    /// The canonical kinds pipeline.yaml declares, by name.
+    pub vocabulary: Interner,
+    /// The kinds the engine's own tree builders use, bound in pipeline.yaml.
+    pub tree: std::sync::OnceLock<crate::tree::TreeKinds>,
 }
 
 impl Lang {
@@ -86,22 +92,21 @@ impl Lang {
     }
 
     pub fn intern_kind(&self, s: &str) -> u16 {
-        if let Ok(ck) = s.parse::<Canonical>() {
-            return ck as u16;
-        }
-        let id = self.kinds.intern(s) as u16;
-        debug_assert!(
-            id < CANONICAL_BASE,
-            "dynamic kind ID {id} collides with canonical range"
-        );
-        id
+        self.kinds.intern(s) as u16
     }
 
     pub fn lookup_kind(&self, s: &str) -> u16 {
-        if let Ok(ck) = s.parse::<Canonical>() {
-            return ck as u16;
-        }
         self.kinds.lookup(s) as u16
+    }
+
+    pub fn in_vocabulary(&self, kind: u16) -> bool {
+        self.kinds
+            .try_resolve(u32::from(kind))
+            .is_some_and(|name| self.vocabulary.lookup(name) != 0)
+    }
+
+    pub fn tree_kinds(&self) -> crate::tree::TreeKinds {
+        self.tree.get().copied().unwrap_or_default()
     }
 
     pub fn intern_field(&self, s: &str) -> u16 {
@@ -109,17 +114,7 @@ impl Lang {
     }
 
     pub fn kind_name(&self, k: u16) -> &str {
-        if canonical::is_canonical(k) {
-            for ck in Canonical::iter() {
-                if ck as u16 == k {
-                    let s: &'static str = ck.into();
-                    return s;
-                }
-            }
-            Canonical::Unknown.into()
-        } else {
-            self.kinds.resolve(k as u32)
-        }
+        self.kinds.resolve(k as u32)
     }
 
     pub fn field_name(&self, f: u16) -> &str {

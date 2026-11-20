@@ -43,27 +43,9 @@ enum Pending {
 
 type Undo = Vec<(u32, Option<(u32, usize)>)>;
 
-/// Declares a table of role ids and the role names pipeline.yaml binds.
-macro_rules! roles {
-    ($name:ident: $id:ty { $($role:ident),* $(,)? }) => {
-        #[derive(Clone, Copy, Default)]
-        pub(super) struct $name {
-            $(pub(super) $role: $id,)*
-        }
-
-        impl $name {
-            const NAMES: &'static [&'static str] = &[$(stringify!($role)),*];
-
-            fn bound(ids: &[$id]) -> Self {
-                let mut ids = ids.iter().copied();
-                Self { $($role: ids.next().unwrap_or_default(),)* }
-            }
-        }
-    };
-}
-
-roles!(Kinds: u16 { declaration, def, rhs, member, defname, binding, qualifier, alias, ssa_branch, import_type, call, ssa_arm, import, ssa_loop, ssa_hint, object, ivar, side_effect, scope, obj, name, lambda, impl_block, decorator, callee, args, trait_type, supertype, struct_type, source_path, interface, enum_type, dispatch, destructure, config_field, class, arr });
-roles!(Tags: u32 { scoped, hoisted, lifted, implicit_self, type_only, weak });
+crate::roles!(Kinds: u16 {
+    source_file, declaration, def, rhs, member, defname, binding, qualifier, alias, ssa_branch, import_type, call, ssa_arm, import, ssa_loop, ssa_hint, object, ivar, side_effect, scope, obj, name, lambda, impl_block, decorator, callee, args, trait_type, supertype, struct_type, source_path, interface, enum_type, dispatch, destructure, config_field, class, arr });
+crate::roles!(Tags: u32 { scoped, hoisted, lifted, implicit_self, type_only, weak });
 
 impl Kinds {
     fn class_like(self) -> [u16; 6] {
@@ -132,7 +114,7 @@ impl Module for Ssa {
         s.graph.seal_block(s.cur);
         s.wildcard = wildcard;
         s.scopes = vec![(label, Vec::new())];
-        for scope in crate::modules::top_level(root) {
+        for scope in crate::modules::top_level(root, k.source_file) {
             cx.predeclare(scope);
         }
     }

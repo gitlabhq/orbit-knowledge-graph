@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use code_graph_incremental::canonical::{Canonical as C, def_type_of, is_canonical};
 use code_graph_incremental::tree::Compact;
 type Tree = code_graph_incremental::tree::Tree<Compact>;
 type Cursor<'a> = code_graph_incremental::tree::Cursor<'a, Compact>;
@@ -30,12 +29,15 @@ fn python_env(limits: Limits) -> Env {
     Env::with_limits(SupportLang::Python, limits).unwrap()
 }
 
-fn nodes<'a>(tree: &'a Tree, kind: C) -> impl Iterator<Item = Cursor<'a>> {
+fn nodes<'a>(env: &Env, tree: &'a Tree, kind: &str) -> impl Iterator<Item = Cursor<'a>> {
+    let kind = env.lang.lookup_kind(kind);
     tree.root().descendants().filter(move |c| c.is(kind))
 }
 
 fn name_of(env: &Env, node: Cursor) -> String {
-    let sym = node.child_sym_of_kind(C::Name as u16).unwrap_or(0);
+    let sym = node
+        .child_sym_of_kind(env.lang.lookup_kind("__name"))
+        .unwrap_or(0);
     env.lang.syms.resolve(sym).to_string()
 }
 
@@ -57,7 +59,7 @@ fn a_python_file_rewrites_into_only_canonical_nodes() {
     let foreign: Vec<_> = tree
         .root()
         .descendants()
-        .filter(|c| !is_canonical(c.kind()))
+        .filter(|c| !env.lang.in_vocabulary(c.kind()))
         .map(|c| env.lang.kinds.resolve(c.kind() as u32).to_string())
         .collect();
     assert!(foreign.is_empty(), "language nodes survived: {foreign:?}");
@@ -72,24 +74,29 @@ fn definitions_carry_their_type_and_name() {
     let (items, _) = rewrite_repo(&env, repo.path());
 
     let tree = &items[0];
-    let mut defs: Vec<(String, &str)> = nodes(tree, C::Def)
+    let def_types = ["__class", "__method", "__function"];
+    let mut defs: Vec<(String, &str)> = nodes(&env, tree, "__def")
         .map(|d| {
             let name = d
-                .children_of(C::DefName)
+                .children_of(env.lang.lookup_kind("__defname"))
                 .next()
                 .and_then(|n| n.sym_opt())
                 .map(|s| env.lang.syms.resolve(s).to_string())
                 .unwrap_or_default();
-            (name, def_type_of(d).map_or("", |t| t.display_name()))
+            let def_type = def_types
+                .into_iter()
+                .find(|t| d.has(env.lang.lookup_kind(t)))
+                .unwrap_or("");
+            (name, def_type)
         })
         .collect();
     defs.sort();
     assert_eq!(
         defs,
         [
-            ("Greeter".to_string(), "Class"),
-            ("greet".to_string(), "Method"),
-            ("run".to_string(), "Function"),
+            ("Greeter".to_string(), "__class"),
+            ("greet".to_string(), "__method"),
+            ("run".to_string(), "__function"),
         ]
     );
 }
@@ -103,11 +110,13 @@ fn imports_and_calls_become_canonical_nodes() {
     let (items, _) = rewrite_repo(&env, repo.path());
 
     let tree = &items[0];
-    let mut imports: Vec<String> = nodes(tree, C::Import).map(|i| name_of(&env, i)).collect();
+    let mut imports: Vec<String> = nodes(&env, tree, "__import")
+        .map(|i| name_of(&env, i))
+        .collect();
     imports.sort();
     assert_eq!(imports, ["helper", "os"]);
     assert!(
-        nodes(tree, C::Call).count() >= 3,
+        nodes(&env, tree, "__call").count() >= 3,
         "Greeter(), g.greet(), os.getcwd()"
     );
 }

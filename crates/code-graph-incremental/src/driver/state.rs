@@ -177,6 +177,7 @@ impl From<LangSnapshot> for Lang {
             fields: Interner::from(s.fields),
             syms: Interner::from(s.syms),
             edges: Interner::from(s.edges),
+            ..Lang::default()
         }
     }
 }
@@ -335,7 +336,7 @@ struct Shared {
 
 /// Bump when any snapshot struct changes shape; an older file then fails
 /// with a clear message instead of a decode error.
-pub const SNAPSHOT_VERSION: u32 = 18;
+pub const SNAPSHOT_VERSION: u32 = 19;
 
 const FILES_PER_BLOCK: usize = 64;
 

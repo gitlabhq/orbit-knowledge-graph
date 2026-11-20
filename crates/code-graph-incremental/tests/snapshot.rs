@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::driver::{self, SNAPSHOT_VERSION};
 use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Env, Sentinel, State};
@@ -57,8 +56,8 @@ fn def_names(state: &State, env: &Env) -> Vec<String> {
         .trees
         .iter()
         .flat_map(|t| t.root().descendants())
-        .filter(|c| c.is(C::Def))
-        .filter_map(|c| c.child_sym(C::DefName))
+        .filter(|c| c.is(env.lang.lookup_kind("__def")))
+        .filter_map(|c| c.child_sym(env.lang.lookup_kind("__defname")))
         .map(|s| env.lang.syms.resolve(s).to_string())
         .collect();
     names.sort();

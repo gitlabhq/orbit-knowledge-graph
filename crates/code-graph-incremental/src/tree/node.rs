@@ -1,7 +1,6 @@
 use indextree::NodeId;
 
 use super::{Mutable, Storage, Tree};
-use crate::canonical;
 use crate::intern::Lang;
 
 #[derive(Clone, Copy, Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -56,7 +55,7 @@ impl<S: Storage<Node = Node>> Tree<S> {
 impl Tree {
     pub fn unparsed(lang: &Lang, path: &str, size: u64, reason: &str) -> Self {
         let mut tree = Self::new(Node {
-            kind: canonical::Canonical::SourceFile.into(),
+            kind: lang.tree_kinds().source_file,
             named: true,
             sym: lang.syms.intern(path),
             end: size as u32,
@@ -84,12 +83,12 @@ impl Tree {
     pub(crate) fn node_mut(&mut self, id: NodeId) -> &mut Node {
         self.storage.0[id].get_mut()
     }
-    pub fn prune(&mut self) {
+    pub fn prune(&mut self, lang: &Lang) {
         for id in self.preorder().into_iter().skip(1) {
-            if !canonical::is_canonical(self.node(id).kind) {
+            if !lang.in_vocabulary(self.node(id).kind) {
                 let children: Vec<_> = id.children(&self.storage.0).collect();
                 for child in children {
-                    if canonical::is_canonical(self.node(child).kind) {
+                    if lang.in_vocabulary(self.node(child).kind) {
                         self.node_mut(child).lifted = true;
                     }
                     child.detach(&mut self.storage.0);
@@ -153,7 +152,7 @@ mod tests {
         assert_eq!(Tree::to_raw(reused), Tree::to_raw(replaced));
         assert_eq!(tree.get_tag(Tree::to_raw(reused), 7), None);
         tree.set_tag(Tree::to_raw(reused), 8, 80);
-        tree.prune();
+        tree.prune(&Lang::new());
         assert_eq!(tree.tags.keys().collect::<Vec<_>>(), Vec::<&u32>::new());
     }
 }

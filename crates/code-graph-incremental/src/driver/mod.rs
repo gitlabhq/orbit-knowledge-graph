@@ -210,8 +210,8 @@ impl Stage {
 /// the source.
 fn canonical(env: &Env, mut tree: Tree<Mutable>) -> Tree<Compact> {
     let root = tree.root;
-    tree.node_mut(root).kind = crate::canonical::Canonical::SourceFile.into();
-    tree.prune();
+    tree.node_mut(root).kind = env.lang.tree_kinds().source_file;
+    tree.prune(&env.lang);
     for id in tree.preorder() {
         let sym = tree.sym_of(id, &env.lang);
         tree.node_mut(id).sym = sym;

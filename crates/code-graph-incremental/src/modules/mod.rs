@@ -14,11 +14,11 @@ fn node<'t, M: Module, S: Store>(cx: &Cx<'_, 't, M, S>, args: &[Vals], at: usize
     cx.jump(args[at][0].loc().expect("this argument is a node"))
 }
 
-fn top_level<S: Store>(root: Cursor<'_, S>) -> impl Iterator<Item = Cursor<'_, S>> {
-    std::iter::once(root).chain(
-        root.children()
-            .filter(|c| c.is(crate::canonical::Canonical::SourceFile)),
-    )
+fn top_level<S: Store>(
+    root: Cursor<'_, S>,
+    source_file: u16,
+) -> impl Iterator<Item = Cursor<'_, S>> {
+    std::iter::once(root).chain(root.children().filter(move |c| c.is(source_file)))
 }
 
 macro_rules! function {

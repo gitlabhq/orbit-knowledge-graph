@@ -6,7 +6,6 @@ use smallvec::SmallVec;
 
 use super::pattern::Slots;
 use super::{Arg, FnId, Kind, Run, Store, Val, Vals, function, lookup, module_of};
-use crate::canonical::Canonical as C;
 use crate::error::LoadError;
 use crate::intern::Lang;
 use crate::tree::EdgeKind;
@@ -309,9 +308,10 @@ impl<'s> Parser<'s, '_> {
         }
         if self.eat("\"") {
             let text = self.quoted('"')?;
-            return Ok(Expr::Lit(match text.parse::<C>() {
-                Ok(kind) => Val::Kind(kind as u16),
-                Err(_) => Val::Sym(self.scope.lang.syms.intern(text)),
+            let lang = self.scope.lang;
+            return Ok(Expr::Lit(match lang.vocabulary.lookup(text) {
+                0 => Val::Sym(lang.syms.intern(text)),
+                _ => Val::Kind(lang.intern_kind(text)),
             }));
         }
         let start = self.at;

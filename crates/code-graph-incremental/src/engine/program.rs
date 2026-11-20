@@ -14,7 +14,6 @@ use super::pattern::{self, Cap, Pat, Slots, Tpl};
 use indextree::NodeId;
 
 use super::{Cursor, FnId, Kind, Loc, Run, Store, Tree, Val, Vals};
-use crate::canonical::Canonical as C;
 use crate::env::Env;
 use crate::error::LoadError;
 use crate::intern::Lang;
@@ -297,42 +296,44 @@ pub struct Roles {
 
 /// Each module's roles, by slot: every role bound, every kind in the vocabulary.
 fn roles(spec: &PipelineSpec, lang: &Lang) -> Result<Vec<Roles>, LoadError> {
-    let known: std::collections::HashSet<&str> = spec.kinds.iter().map(String::as_str).collect();
     crate::modules::ALL
         .iter()
-        .map(|module| {
-            let empty = ModuleSpec::default();
-            let bound = spec.modules.get(module.name).unwrap_or(&empty);
-            let pick = |map: &BTreeMap<String, String>, role: &str, what: &str| {
-                map.get(role).cloned().ok_or_else(|| {
-                    LoadError(format!(
-                        "module {}: {what} role {role} is not bound",
-                        module.name
-                    ))
-                })
-            };
-            let kinds = module
-                .kinds
-                .iter()
-                .map(|role| {
-                    let kind = pick(&bound.kinds, role, "kind")?;
-                    match known.contains(kind.as_str()) {
-                        true => Ok(lang.intern_kind(&kind)),
-                        false => Err(LoadError(format!(
-                            "module {}: kind {kind} is not in pipeline.yaml kinds",
-                            module.name
-                        ))),
-                    }
-                })
-                .collect::<Result<_, _>>()?;
-            let tags = module
-                .tags
-                .iter()
-                .map(|role| Ok(lang.syms.intern(&pick(&bound.tags, role, "tag")?)))
-                .collect::<Result<_, LoadError>>()?;
-            Ok(Roles { kinds, tags })
-        })
+        .map(|module| bind_roles(spec, lang, module.name, module.kinds, module.tags))
         .collect()
+}
+
+/// The ids pipeline.yaml binds to one user's kind and tag roles.
+fn bind_roles(
+    spec: &PipelineSpec,
+    lang: &Lang,
+    user: &str,
+    kinds: &[&str],
+    tags: &[&str],
+) -> Result<Roles, LoadError> {
+    let empty = ModuleSpec::default();
+    let bound = spec.modules.get(user).unwrap_or(&empty);
+    let pick = |map: &BTreeMap<String, String>, role: &str, what: &str| {
+        map.get(role)
+            .cloned()
+            .ok_or_else(|| LoadError(format!("{user}: {what} role {role} is not bound")))
+    };
+    let kinds = kinds
+        .iter()
+        .map(|role| {
+            let kind = pick(&bound.kinds, role, "kind")?;
+            match spec.kinds.contains(&kind) {
+                true => Ok(lang.intern_kind(&kind)),
+                false => Err(LoadError(format!(
+                    "{user}: kind {kind} is not in pipeline.yaml kinds"
+                ))),
+            }
+        })
+        .collect::<Result<_, _>>()?;
+    let tags = tags
+        .iter()
+        .map(|role| Ok(lang.syms.intern(&pick(&bound.tags, role, "tag")?)))
+        .collect::<Result<_, LoadError>>()?;
+    Ok(Roles { kinds, tags })
 }
 
 pub struct Pipeline {
@@ -348,6 +349,12 @@ impl Pipeline {
         for edge in &spec.edges {
             lang.edges.intern(edge);
         }
+        for kind in &spec.kinds {
+            lang.vocabulary.intern(kind);
+            lang.intern_kind(kind);
+        }
+        let tree = bind_roles(&spec, lang, "tree", crate::tree::TreeKinds::NAMES, &[])?;
+        let _ = lang.tree.set(crate::tree::TreeKinds::bound(&tree.kinds));
         let files = super::lang::load(languages)?;
         let names: HashMap<String, u16> = files
             .shared
@@ -449,9 +456,9 @@ fn data_vals(spec: &DataSpec, lang: &Lang, out: &mut Vals) {
     match spec {
         DataSpec::Bool(b) => out.push(Val::Bool(*b)),
         DataSpec::Num(n) => out.push(Val::Sym(*n)),
-        DataSpec::Str(s) => out.push(match s.parse::<C>() {
-            Ok(kind) => Val::Kind(kind as u16),
-            Err(_) => Val::Sym(lang.syms.intern(s)),
+        DataSpec::Str(s) => out.push(match lang.vocabulary.lookup(s) {
+            0 => Val::Sym(lang.syms.intern(s)),
+            _ => Val::Kind(lang.intern_kind(s)),
         }),
         DataSpec::List(items) => items.iter().for_each(|i| data_vals(i, lang, out)),
     }

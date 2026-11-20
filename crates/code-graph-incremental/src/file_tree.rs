@@ -1,7 +1,6 @@
 use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::canonical::Canonical as C;
 use crate::constants::PATH_SEP;
 use crate::driver::SourceFile;
 use crate::env::{Env, ParseFormat, Project};
@@ -52,7 +51,7 @@ impl<'a> ProjectTree<'a> {
             paths,
             files,
             tree: Tree::new(Node {
-                kind: C::Root.into(),
+                kind: lang.tree_kinds().root,
                 named: true,
                 ..Default::default()
             }),
@@ -133,7 +132,8 @@ impl<'a> ProjectTree<'a> {
                 continue;
             };
             stack.push((dir, parent_nid, next + 1));
-            let kind: u16 = if is_file { C::File } else { C::Dir }.into();
+            let tk = self.lang.tree_kinds();
+            let kind = if is_file { tk.file } else { tk.dir };
             let sym = self.lang.syms.intern(segment);
             let nid = self.tree.append(
                 parent_nid,
@@ -176,7 +176,7 @@ impl<'a> ProjectTree<'a> {
 
     fn collect_file_tags(&self) -> Vec<(String, Vec<Tag>)> {
         self.tree.root().fold_tree(Vec::new(), |out, file, _w| {
-            if !file.is(C::File) {
+            if !file.is(self.lang.tree_kinds().file) {
                 return;
             }
             let mut tags: Vec<Tag> = Vec::new();
@@ -194,7 +194,7 @@ impl<'a> ProjectTree<'a> {
     fn node_path(&self, cursor: Cursor) -> String {
         let mut parts: Vec<&str> = std::iter::once(cursor)
             .chain(cursor.ancestors())
-            .take_while(|n| !n.is(C::Root))
+            .take_while(|n| !n.is(self.lang.tree_kinds().root))
             .map(|n| self.lang.syms.resolve(n.sym()))
             .collect();
         parts.reverse();
@@ -218,7 +218,7 @@ fn inline_config(
                 let field = tree.append(
                     parent,
                     Node {
-                        kind: C::ConfigField.into(),
+                        kind: lang.tree_kinds().field,
                         named: true,
                         sym: lang.syms.intern(key.as_str()),
                         ..Default::default()
@@ -227,7 +227,7 @@ fn inline_config(
                 tree.append(
                     field,
                     Node {
-                        kind: C::Str.into(),
+                        kind: lang.tree_kinds().str,
                         named: true,
                         sym: lang.syms.intern(val_str),
                         ..Default::default()
@@ -279,7 +279,7 @@ fn emit_json_value(
             let obj = tree.append(
                 parent,
                 Node {
-                    kind: C::Obj.into(),
+                    kind: lang.tree_kinds().obj,
                     named: true,
                     ..Default::default()
                 },
@@ -288,7 +288,7 @@ fn emit_json_value(
                 let field = tree.append(
                     obj,
                     Node {
-                        kind: C::ConfigField.into(),
+                        kind: lang.tree_kinds().field,
                         named: true,
                         sym: lang.syms.intern(key),
                         ..Default::default()
@@ -301,7 +301,7 @@ fn emit_json_value(
             let arr_node = tree.append(
                 parent,
                 Node {
-                    kind: C::Arr.into(),
+                    kind: lang.tree_kinds().arr,
                     named: true,
                     ..Default::default()
                 },
@@ -314,7 +314,7 @@ fn emit_json_value(
             tree.append(
                 parent,
                 Node {
-                    kind: C::Str.into(),
+                    kind: lang.tree_kinds().str,
                     named: true,
                     sym: lang.syms.intern(s),
                     ..Default::default()
@@ -325,7 +325,7 @@ fn emit_json_value(
             tree.append(
                 parent,
                 Node {
-                    kind: C::ConfigNum.into(),
+                    kind: lang.tree_kinds().num,
                     named: true,
                     sym: lang.syms.intern(&n.to_string()),
                     ..Default::default()
@@ -336,7 +336,7 @@ fn emit_json_value(
             tree.append(
                 parent,
                 Node {
-                    kind: C::ConfigBool.into(),
+                    kind: lang.tree_kinds().bool,
                     named: true,
                     sym: lang.syms.intern(if *b { "true" } else { "false" }),
                     ..Default::default()

@@ -16,6 +16,8 @@ impl Module for Text {
     const NAME: &'static str = "text";
     type State = ();
 
+    const KINDS: &'static [&'static str] = &["dir"];
+
     fn functions() -> &'static [Function<Self>] {
         FUNCTIONS
     }
@@ -259,12 +261,13 @@ fn file_dir<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals]) -> Vals {
         return Vals::new();
     };
     let syms = &cx.lang().syms;
+    let dir_kind = cx.kinds()[0];
     let label = &cx.jump(loc).tree().label;
     let dirs = label.rsplit_once('/').map_or("", |(dirs, _)| dirs);
     for segment in dirs.split('/').filter(|s| !s.is_empty()) {
         let Some(dir) = at
             .children()
-            .find(|c| c.is(crate::canonical::Canonical::Dir) && syms.resolve(c.sym()) == segment)
+            .find(|c| c.is(dir_kind) && syms.resolve(c.sym()) == segment)
         else {
             return Vals::new();
         };
