@@ -1522,3 +1522,55 @@ html.page-landing {
   opacity: 1;
   transform: none;
 }
+
+@media (max-width: 47.99rem) {
+  .sidebar {
+    position: sticky;
+    top: calc(env(safe-area-inset-top) + 3.5625rem);
+    z-index: 5;
+    border-bottom: 1px solid var(--gl-border-color-subtle, var(--gl-border-color-default));
+    background: var(--color-page);
+  }
+
+  .sidebar:not([data-open="true"]) .section-nav {
+    display: none;
+  }
+
+  .site-shell:has(.sidebar) :is(.gitlab-markdown :is(h1, h2, h3, h4, h5, h6), .linked-heading) {
+    scroll-margin-top: calc(var(--header-h) + 3rem + 1rem);
+  }
+
+  .sidebar .section-nav .docs-nav {
+    max-height: 60vh;
+    padding-top: 0;
+  }
+
+  /* site-kit's glow reaches 10rem past each side, which would scroll the page sideways on a phone. */
+  .page-glow::before,
+  .page-glow::after {
+    inset-inline: -1.5rem;
+  }
+
+  .sidebar-toggle {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    color: var(--gl-text-color-default);
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-align: left;
+  }
+
+  .sidebar-toggle-section {
+    color: var(--gl-text-color-subtle);
+    font-weight: 400;
+  }
+
+  .sidebar-toggle-section::after {
+    content: "/";
+    margin-left: 0.5rem;
+    color: var(--gl-text-color-subtle);
+  }
+}

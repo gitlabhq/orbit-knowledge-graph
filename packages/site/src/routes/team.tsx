@@ -45,7 +45,7 @@ function TeamPage() {
   return (
     <PageFrame
       path="team"
-      nav={<Sidebar />}
+      nav={<Sidebar title="Team" />}
       title="Meet the team"
       description={mission}
       footer={page && <PageFooter page={page} />}
