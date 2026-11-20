@@ -776,6 +776,25 @@ impl<'t, S: Store> Run<'t, S> {
                     }
                 }
             }
+            Op::Minus => {
+                for &v in &args[0] {
+                    if !args[1].contains(&v) {
+                        push(&mut out, v);
+                    }
+                }
+            }
+            Op::Unique => {
+                if let [v] = args[0].as_slice() {
+                    push(&mut out, *v);
+                }
+            }
+            Op::Instances => {
+                for &v in &args[0] {
+                    if matches!(v, Val::Type(_)) {
+                        push(&mut out, v);
+                    }
+                }
+            }
             Op::Project => {
                 if let Some(project) = self.project {
                     push(

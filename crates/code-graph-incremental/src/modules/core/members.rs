@@ -16,7 +16,7 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
                 Some(Ref::Def(n) | Ref::Type(n)) => {
                     of(self.members(self.jump(n), name, role, roles))
                 }
-                Some(Ref::Import(_)) => one(v),
+                Some(Ref::Import) => one(v),
                 _ => continue,
             };
             for hit in hits {

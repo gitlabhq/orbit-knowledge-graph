@@ -1,4 +1,22 @@
 define:
+  plain(ROOT): 'minus($ROOT, instances($ROOT))'
+  named_value(ROOT):
+    '(__def)': 'plain($ROOT)'
+    '(__name)': 'plain($ROOT)'
+  is_def(ROOT):
+    '(__def)': 'plain($ROOT)'
+  is_class(ROOT):
+    '(__def $K:__class|__struct|__impl|__interface|__trait|__enum)': 'plain($ROOT)'
+  is_contract(ROOT):
+    '(__def $K:__trait|__interface)': 'plain($ROOT)'
+  imported(ROOT):
+    '(__name)': 'plain($ROOT)'
+  produced(ROOT):
+    '(__def)': none
+    '(__name)': none
+    '(_)': 'plain($ROOT)'
+  callable_import(ROOT, tag):
+    '$I:(_ $ROOT:__name) when $I | tag(tag)': 'plain($ROOT)'
   type(ROOT):
     '(_ (__call (__property) $K:__callee)) when $K | type | is_class': '$K | walk'
     '(_ $C:__call)': '$C'
@@ -22,8 +40,8 @@ define:
     '(__name)': 'none'
     '_': '$ROOT | type_node | type | member($M)'
   reference(ROOT):
-    '$P:(_ $ROOT)': '$ROOT | type | sole($P)'
-    '_': '$ROOT | type | sole($ROOT)'
+    '$P:(_ $ROOT)': 'minus(unique($ROOT | type), $P) | named_value'
+    '_': 'minus(unique($ROOT | type), $ROOT) | named_value'
   source(ROOT):
     '_': '$ROOT | tail | record'
   record(ROOT):

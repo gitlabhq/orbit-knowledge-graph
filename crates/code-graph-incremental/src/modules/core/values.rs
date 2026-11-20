@@ -56,7 +56,7 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
             let found = self.read(rhs);
             found
                 .iter()
-                .any(|v| matches!(self.view(*v), Some(Ref::Import(_))))
+                .any(|v| matches!(self.view(*v), Some(Ref::Import)))
         });
         let untracked = tail.is_some_and(|t| t.is(C::Member) && self.read(t).is_empty());
         if c.has(C::SsaTyped) || reads_import || untracked {
@@ -101,7 +101,7 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         let named: Vals = bound
             .into_iter()
             .filter(|v| *v != Val::Opaque)
-            .filter(|v| !implicit || matches!(self.view(*v), Some(Ref::Def(_) | Ref::Import(_))))
+            .filter(|v| !implicit || matches!(self.view(*v), Some(Ref::Def(_) | Ref::Import)))
             .collect();
         let bound: Vals = named
             .into_iter()

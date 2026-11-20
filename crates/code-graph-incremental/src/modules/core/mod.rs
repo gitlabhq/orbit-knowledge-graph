@@ -48,7 +48,7 @@ impl Roles {
 #[derive(Clone, Copy)]
 enum Ref {
     Def(Loc),
-    Import(Loc),
+    Import,
     Type(Loc),
     Call(Loc),
 }
@@ -121,7 +121,7 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
             Val::Type(loc) => Some(Ref::Type(loc)),
             Val::Node(loc) => Some(match self.jump(loc) {
                 n if n.is(C::Def) => Ref::Def(loc),
-                n if n.is(C::Name) => Ref::Import(loc),
+                n if n.is(C::Name) => Ref::Import,
                 _ => Ref::Call(loc),
             }),
             _ => None,
@@ -349,15 +349,6 @@ static FUNCTIONS: &[Function<Core>] = &[
             false => Vals::new(),
         }
     }),
-    function!(Pure, "sole", [set, one], |cx, a| {
-        let exclude = Loc::from(node(cx, a, 1));
-        match a[0].as_slice() {
-            [v] if matches!(cx.view(*v), Some(Ref::Def(t) | Ref::Import(t)) if t != exclude) => {
-                a[0].clone()
-            }
-            _ => Vals::new(),
-        }
-    }),
     function!(Pure, "type_node", [one], |cx, a| match cx.view(a[0][0]) {
         Some(Ref::Call(n)) => of(values::declared_type(cx.jump(n))),
         _ => Vals::new(),
@@ -365,20 +356,6 @@ static FUNCTIONS: &[Function<Core>] = &[
     function!(Pure, "tail", [one], |cx, a| of(
         arg(cx, a, 0).map(Cursor::tail_expr)
     )),
-    function!(Pure, "imported", [one], |cx, a| cx
-        .keep(a[0][0], |r, _| matches!(r, Ref::Import(_)))),
-    function!(Pure, "produced", [one], |cx, a| cx
-        .keep(a[0][0], |r, _| matches!(r, Ref::Call(_)))),
-    function!(Pure, "is_def", [one], |cx, a| cx
-        .keep(a[0][0], |r, _| matches!(r, Ref::Def(_)))),
-    function!(Pure, "is_class", [one], |cx, a| cx
-        .keep(a[0][0], |r, cx| {
-            matches!(r, Ref::Def(n) if cx.jump(n).is_class())
-        })),
-    function!(Pure, "is_contract", [one], |cx, a| cx
-        .keep(a[0][0], |r, cx| {
-            matches!(r, Ref::Def(n) if cx.jump(n).is_dispatch_contract())
-        })),
     function!(Pure, "initialized", [one], |cx, a| {
         cx.keep(a[0][0], |r, cx| {
         matches!(r, Ref::Def(n) if cx.jump(n).initializer().and_then(Cursor::rhs_callee).is_some())
@@ -388,14 +365,6 @@ static FUNCTIONS: &[Function<Core>] = &[
         .keep(a[0][0], |r, cx| {
             matches!(r, Ref::Call(n) if values::declared_type(cx.jump(n)).is_some())
         })),
-    function!(Pure, "callable_import", [one, set], |cx, a| {
-        let Some(callable) = a[1].first().and_then(|&v| cx.text(v)) else {
-            return Vals::new();
-        };
-        cx.keep(a[0][0], |r, cx| {
-            matches!(r, Ref::Import(n) if cx.jump(n).parent().is_some_and(|i| i.has_tag(callable)))
-        })
-    }),
     function!(Flow, "value_of", [one], @uses ["core"."read", "core"."ivar"], |cx, a| {
         cx.value_of(node(cx, a, 0))
     }),

@@ -21,6 +21,8 @@ pub enum Expr {
     Call(FnId, Box<[Expr]>),
     Or(Box<Expr>, Box<Expr>),
     First(Box<Expr>, u16, Box<Expr>),
+    /// The values every element's body yields.
+    Every(Box<Expr>, u16, Box<Expr>),
     Op(Op, Box<[Expr]>),
 }
 
@@ -40,6 +42,12 @@ pub enum Op {
     File,
     /// The project tree's root.
     Project,
+    /// The first set without the values of the second.
+    Minus,
+    /// The set if it holds exactly one value.
+    Unique,
+    /// The values that stand for an instance of a type, not the type itself.
+    Instances,
 }
 
 /// A `select` pattern and its key, shared by every phase so trees can keep
@@ -89,7 +97,7 @@ impl Expr {
                 each(args, f);
             }
             Expr::Union(parts) | Expr::Op(_, parts) => each(parts, f),
-            Expr::Or(a, b) | Expr::First(a, _, b) => {
+            Expr::Or(a, b) | Expr::First(a, _, b) | Expr::Every(a, _, b) => {
                 a.calls(f);
                 b.calls(f);
             }
@@ -121,6 +129,19 @@ impl Expr {
                     }
                 }
                 Vals::new()
+            }
+            Expr::Every(list, slot, body) => {
+                let mut local = caps.to_vec();
+                let mut common: Option<Vals> = None;
+                for v in list.eval(cx, caps) {
+                    local[usize::from(*slot)] = SmallVec::from_elem(v, 1);
+                    let found = body.eval(cx, &local);
+                    common = Some(match common {
+                        None => found,
+                        Some(c) => c.into_iter().filter(|x| found.contains(x)).collect(),
+                    });
+                }
+                common.unwrap_or_default()
             }
             Expr::Def(def, args) => {
                 let mut args: SmallVec<[Vals; 3]> = args.iter().map(|a| a.eval(cx, caps)).collect();
@@ -338,7 +359,19 @@ impl<'s> Parser<'s, '_> {
                     false => Err(self.error(&format!("super takes {arity} arguments"))),
                 };
             }
-            "first" => return self.first(piped),
+            "first" | "every" => return self.each(word, piped),
+            "minus" | "unique" | "instances" => {
+                let args = self.args(piped)?;
+                let (op, arity) = match word {
+                    "minus" => (Op::Minus, 2),
+                    "unique" => (Op::Unique, 1),
+                    _ => (Op::Instances, 1),
+                };
+                if args.len() != arity {
+                    return Err(self.error(&format!("{word} takes {arity} arguments")));
+                }
+                return Ok(Expr::Op(op, args.into()));
+            }
             "select" | "select_all" => return self.select(word, piped),
             "project" => {
                 if !(self.eat("(") && self.eat(")")) {
@@ -439,17 +472,18 @@ impl<'s> Parser<'s, '_> {
         Ok(Expr::Call(id, args.into()))
     }
 
-    /// `first(list, x => body)`: the first element whose body is not empty.
-    fn first(&mut self, piped: Option<Expr>) -> Result<Expr, LoadError> {
+    /// `first(list, x => body)`: the first element's body that is not empty.
+    /// `every(list, x => body)`: the values every element's body yields.
+    fn each(&mut self, word: &str, piped: Option<Expr>) -> Result<Expr, LoadError> {
         if !self.eat("(") {
-            return Err(self.error("first(list, x => body)"));
+            return Err(self.error(&format!("{word}(list, x => body)")));
         }
         let list = match piped {
             Some(list) => list,
             None => {
                 let list = self.expr()?;
                 if !self.eat(",") {
-                    return Err(self.error("first(list, x => body)"));
+                    return Err(self.error(&format!("{word}(list, x => body)")));
                 }
                 list
             }
@@ -464,7 +498,10 @@ impl<'s> Parser<'s, '_> {
         if !self.eat(")") {
             return Err(self.error("expected )"));
         }
-        Ok(Expr::First(Box::new(list), slot, Box::new(body)))
+        Ok(match word {
+            "every" => Expr::Every(Box::new(list), slot, Box::new(body)),
+            _ => Expr::First(Box::new(list), slot, Box::new(body)),
+        })
     }
 
     /// `select(scope, 'pattern' [by key], key)` and `select_all(region | project, …)`.
