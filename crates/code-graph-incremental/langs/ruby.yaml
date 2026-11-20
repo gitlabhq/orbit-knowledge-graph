@@ -331,6 +331,8 @@ stages:
       # Remaining bare constants: references
       - match: '(constant)'
         replace: '(__call (__callee @$ROOT))'
+      - match: '(instance_variable)'
+        replace: '(__ivar @$ROOT|strip=@)'
       - match: '(scope_resolution)'
         replace: '(__call (__callee (__member @$ROOT|split_last("::") (__object @$ROOT|strip=::|regex_replace("::[^:]+$", "")))))'
 
