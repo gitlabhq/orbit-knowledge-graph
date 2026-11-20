@@ -22,11 +22,10 @@ Service Ping never sends the raw events, which stay in your ClickHouse database.
 
 - GitLab 19.6 or later.
 - GitLab Orbit 1.3.0 or later.
-- The Service Ping exporter uses the same Service Ping secret as your GitLab instance.
+- The Data Insights Platform and the Service Ping exporter, installed as described in [Set up Service Ping for GitLab Orbit](service-ping.md).
 
-<!-- TODO: Add the Helm chart version that installs DIP (orbit-helm-charts!197),
-and link to the admin steps for the Service Ping secret once gitlab!268510
-merges. -->
+<!-- TODO: Add the Helm chart version that has `analytics.local_collector`
+once orbit-helm-charts!209 is released. -->
 
 ## How GitLab Orbit usage data flows
 
@@ -62,10 +61,7 @@ flowchart LR
 | DIP | Receives the events and stores them in the ClickHouse database that GitLab Orbit uses. |
 | Service Ping exporter | Every week, reads your Service Ping settings from GitLab, counts the stored events, and sends the counts to GitLab. |
 
-<!-- TODO: What gets installed (DIP and the exporter, one chart or two), the
-footprint, the chart values, and the exporter command (the exporter chart
-defaults to `dry-run`, which sends nothing). Depends on internal#994 and
-internal#985. -->
+To install DIP and the exporter, see [Set up Service Ping for GitLab Orbit](service-ping.md).
 
 ## What GitLab Orbit sends to GitLab
 
@@ -85,16 +81,15 @@ For the full list of metrics, see the [GitLab Orbit metric definitions](https://
 Every GitLab Orbit metric is optional data.
 If **Include optional data in Service Ping** is off, the exporter sends nothing.
 
-<!-- TODO: The exporter chart defaults to `dry-run`, which sends nothing.
-If that default stays, say here that nothing leaves your cluster until an
-administrator switches the exporter to `run`. Depends on internal#994. -->
+The exporter starts in `dry-run` mode, which sends nothing.
+Nothing leaves your cluster until an administrator switches it to `run`, as described in [Install the Service Ping exporter](service-ping.md#install-the-service-ping-exporter).
 
 <!-- TODO: Link to the GitLab Orbit metrics on metrics.gitlab.com once
 internal#989 lands. -->
 
 ## What stays in your cluster
 
-By default, chart 8.0 and later installs DIP and configures GitLab Orbit to send every event to it.
+When `analytics.local_collector.enabled` is `true`, GitLab Orbit sends every event to the DIP instance installed next to it.
 GitLab Orbit sends every event to DIP even when `analytics.enabled` is `false`, because `analytics.enabled` controls only [Snowplow analytics](#send-snowplow-analytics-events-to-gitlab).
 Only the weekly aggregated payload leaves your cluster through Service Ping.
 To stop sending events to DIP, see [Stop sending events to DIP](#stop-sending-events-to-dip).
@@ -118,6 +113,8 @@ ORDER BY component, window_end;
 ## Control what GitLab Orbit sends
 
 GitLab Orbit follows the Service Ping settings of your GitLab instance.
+These settings control only what the exporter sends.
+GitLab Orbit still sends its usage events to DIP, and ClickHouse stores them, until you [stop sending events to DIP](#stop-sending-events-to-dip).
 Before each weekly run, the exporter reads the settings from GitLab.
 If the exporter cannot read the settings, it sends nothing.
 If your GitLab instance has no UUID yet, the exporter builds and sends nothing until GitLab reports one.
@@ -144,6 +141,13 @@ The exporter makes these connections:
 | Your GitLab instance, through Workhorse | 443, or 8181 inside the GitLab cluster | Reads the Service Ping settings. |
 | ClickHouse | The ClickHouse port | Reads the events and stores each weekly payload. |
 
+DIP makes these connections to resolve event schemas:
+
+| Destination | Port | Purpose |
+|-------------|------|---------|
+| `iglucentral.com` | 80 | Resolves the Snowplow schemas, over HTTP, which the upstream Iglu client requires. |
+| `gitlab-org.gitlab.io` | 443 | Resolves the GitLab Orbit event schemas. |
+
 GitLab answers the Service Ping settings request only through Workhorse.
 If the exporter connects to Rails directly, GitLab returns `403 Forbidden` and the run stops.
 
@@ -169,11 +173,11 @@ analytics:
     enabled: false
 ```
 
-To leave DIP out of the installation, set `dataInsightsPlatform.enabled` to `false`.
+To remove DIP, see [Remove Service Ping for GitLab Orbit](service-ping.md#remove-service-ping-for-gitlab-orbit).
 
 Either way, only new events stop.
-Events already stored stay in `serviceping.events` for 63 days, and 28-day counts still include them.
-If the exporter still runs, it keeps sending a weekly payload, with zero counts after the stored events expire.
+Weekly payloads keep counting the events already stored: the 7-day counts reach zero in the first payload that ends more than 7 days after the last event, and the 28-day counts in the first payload that ends more than 28 days after it.
+If the exporter still runs, it keeps sending those payloads, and stored events are deleted from `serviceping.events` after 63 days.
 
 To stop what GitLab Orbit sends to GitLab, use the Service Ping settings in [Control what GitLab Orbit sends](#control-what-gitlab-orbit-sends).
 
@@ -191,5 +195,6 @@ To turn them off, see [Settings, storage, and telemetry](../cli.md#settings-stor
 
 ## Related topics
 
+- [Set up Service Ping for GitLab Orbit](service-ping.md)
 - [Usage statistics](https://docs.gitlab.com/administration/settings/usage_statistics/)
 - [Customer product usage information](https://handbook.gitlab.com/handbook/legal/privacy/customer-product-usage-information/)
