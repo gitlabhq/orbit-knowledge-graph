@@ -182,7 +182,7 @@ Each config switches one fix off, or adds one fault, and must break a rule:
 
 `ENGINE_SPEC_CLUSTER=two_tasks mise run spec:engine:code` checks one cluster. The mise tasks download a pinned `tla2tools.jar` into `target/` and install the Java version that they pin.
 
-In CI, the jobs live in `.gitlab/ci/indexing-engine-spec.yml`. The model check, the liveness check and the counterexamples run when the spec changes. The code check runs one job for each cluster, in parallel, when the spec, the protocol code or the simulator changes. The slowest job takes about 6 min.
+In CI, the jobs live in `.gitlab/ci/indexing-engine-spec.yml`. The model check, the liveness check and the counterexamples run when the spec changes. The code check runs one job for each cluster, in parallel, when the spec, the protocol code or the simulator changes. The `unit-test` job runs the tests of the crate on every pipeline, the protocol and simulator tests included.
 
 ## When you change something
 

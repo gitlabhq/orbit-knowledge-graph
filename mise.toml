@@ -478,21 +478,29 @@ done
 """
 
 [tasks."spec:engine:counterexample"]
-description = "Check that TLC still finds each counterexample against the rules as ADR 023 writes them"
+description = "Check that TLC still finds each counterexample, and that it breaks the rule that its config names"
 tools = { java = "temurin-21.0.13+9.0.LTS" }
 depends = ["spec:engine:tools"]
 shell = "bash -c"
 run = """
 set -uo pipefail
-for config in specs/indexing-engine-next/counterexamples/*.cfg; do
-  java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states -config "$config" specs/indexing-engine-next/LeaseDedupe.tla > /dev/null
-  [ $? -eq 12 ] || { echo "$config: expected an invariant violation (TLC exit 12)"; exit 1; }
-  echo "$config: violation found, as expected"
+spec=specs/indexing-engine-next
+tlc() { java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states "$@" 2>&1; }
+for config in "$spec"/counterexamples/*.cfg; do
+  rule=$(awk '/^INVARIANTS/ { print $NF }' "$config")
+  out=$(tlc -config "$config" "$spec/LeaseDedupe.tla"); status=$?
+  if [ "$status" -ne 12 ] || ! grep -q "Invariant $rule is violated" <<< "$out"; then
+    tail -40 <<< "$out"; echo "$config: expected $rule to be violated, TLC exit $status"; exit 1
+  fi
+  echo "$config: $rule violated, as expected"
 done
-for config in specs/indexing-engine-next/liveness/counterexamples/*.cfg; do
-  java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states -config "$config" specs/indexing-engine-next/LeaseDedupeLiveness.tla > /dev/null
-  [ $? -eq 13 ] || { echo "$config: expected a liveness violation (TLC exit 13)"; exit 1; }
-  echo "$config: liveness violation found, as expected"
+for config in "$spec"/liveness/counterexamples/*.cfg; do
+  rule=$(awk '/^PROPERTIES/ { print $NF }' "$config")
+  out=$(tlc -config "$config" "$spec/LeaseDedupeLiveness.tla"); status=$?
+  if [ "$status" -ne 13 ] || ! grep -q "Temporal properties were violated" <<< "$out"; then
+    tail -40 <<< "$out"; echo "$config: expected $rule to be violated, TLC exit $status"; exit 1
+  fi
+  echo "$config: $rule violated, as expected"
 done
 """
 
