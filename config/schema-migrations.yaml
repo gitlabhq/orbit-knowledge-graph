@@ -18,7 +18,7 @@
 migrations:
 - version: 124
   scope: none
-  note: rises_with_id query hint on created_at; no table change
+  note: rises_with_id query hint on Job.created_at; no table change
 - version: 123
   scope: "*"
   note: >-
