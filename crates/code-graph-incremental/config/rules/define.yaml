@@ -57,9 +57,12 @@ define:
     '_': 'opaque'
 
   visible(name, at): >-
+    declared_in(name, at)
+    or select_all(file(at), '(__import $ROOT:__name)' by default($ROOT | child_sym("__alias"), default($ROOT | child_sym("__ssa_hint"), $ROOT)), name) | imported_as
+    or select_all(file(at), '(__import $ROOT:__name)' by $ROOT | written, "*") | follow(imports) | exported(name)
+  declared_in(name, at): >-
     first(enclose(at), s => select(s, '(__def $N:__defname)', name))
-    or select_all(file(at), '(__import $ROOT:__name)' by default($ROOT | child_sym("__alias"), default($ROOT | child_sym("__ssa_hint"), $ROOT)), name) | follow(imports)
-    or select_all(file(at), '(__import $ROOT:__name)' by $ROOT, "*") | follow(imports) | exported(name)
+  imported_as(ROOT): 'declared_in(@ROOT, ROOT) or $ROOT | follow(imports)'
   resolved(ROOT): 'visible(@ROOT, ROOT)'
   supertypes(ROOT):
     '(__def $$$S:__supertype)': '$S | type | is_def'
