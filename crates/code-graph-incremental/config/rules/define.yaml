@@ -1,4 +1,28 @@
 define:
+  declared(owner, name, role): >-
+    first(member_defs(owner, name) | fills(role), d => single_role(d))
+    or first(member_defs(owner, name) | fills(role), d => d)
+  member_defs(owner, name): "select_all(owner, '(__def $N:__defname)', name) | belongs(owner)"
+  belongs(ROOT, owner):
+    '_ when reaches(boundary($ROOT), owner)': '$ROOT'
+    '(__def (__binding (__ivar))) when hop(boundary($ROOT), owner)': '$ROOT'
+  reaches(ROOT, owner):
+    '_ when same($ROOT, owner)': '$ROOT'
+    '(__def (__impl))': 'reaches(boundary($ROOT), owner)'
+  hop(ROOT, owner):
+    '(__def)': 'reaches(boundary($ROOT), owner)'
+  boundary(ROOT): 'first(ancestors($ROOT), a => def_or_scope(a))'
+  def_or_scope(ROOT):
+    '(__def)': '$ROOT'
+    '(__scope)': '$ROOT'
+  same(a, b): 'minus(a, minus(a, b))'
+  fills(ROOT, role):
+    '(__def (%callable_kinds)) when eq(role, "callable")': '$ROOT'
+    '(__def (%value_kinds)) when eq(role, "value")': '$ROOT'
+    '(__def (%type_kinds)) when eq(role, "type")': '$ROOT'
+  single_role(ROOT):
+    '(__def (%value_kinds)) when $ROOT | fills("callable")': none
+    '_': '$ROOT'
   plain(ROOT): 'minus($ROOT, instances($ROOT))'
   named_value(ROOT):
     '(__def)': 'plain($ROOT)'

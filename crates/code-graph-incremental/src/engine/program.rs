@@ -934,24 +934,31 @@ impl Loader<'_> {
                 let mut compiled = Vec::new();
                 let mut slots = d.params.len().max(1);
                 for (pattern, when, value) in cases {
-                    let (m, slots_of) = match pattern.as_str() {
-                        "_" => (None, Slots::params(&d.params)),
-                        pattern => {
-                            let m = self.matcher(pattern, None, lang, &d.params).map_err(at)?;
-                            let slots = m.slots.clone();
-                            (Some(m), slots)
-                        }
+                    let owners: Vec<Option<u8>> = match (lang, pattern.contains('%')) {
+                        (None, true) => (0..self.lang_data.len()).map(|l| Some(l as u8)).collect(),
+                        (lang, _) => vec![lang],
                     };
-                    let cell = RefCell::new(slots_of);
-                    let when = when
-                        .as_deref()
-                        .map(|src| Expr::parse(src, &self.scope(&cell, false, shared)))
-                        .transpose()
-                        .map_err(at)?;
-                    let value =
-                        Expr::parse(value, &self.scope(&cell, false, shared)).map_err(at)?;
-                    slots = slots.max(cell.borrow().len());
-                    compiled.push((m, when, value));
+                    for owner in owners {
+                        let (m, slots_of) = match pattern.as_str() {
+                            "_" => (None, Slots::params(&d.params)),
+                            pattern => {
+                                let m =
+                                    self.matcher(pattern, None, owner, &d.params).map_err(at)?;
+                                let slots = m.slots.clone();
+                                (Some(m), slots)
+                            }
+                        };
+                        let cell = RefCell::new(slots_of);
+                        let when = when
+                            .as_deref()
+                            .map(|src| Expr::parse(src, &self.scope(&cell, false, shared)))
+                            .transpose()
+                            .map_err(at)?;
+                        let value =
+                            Expr::parse(value, &self.scope(&cell, false, shared)).map_err(at)?;
+                        slots = slots.max(cell.borrow().len());
+                        compiled.push((m, when, value));
+                    }
                 }
                 Ok(Def {
                     name: def_name(d, lang),

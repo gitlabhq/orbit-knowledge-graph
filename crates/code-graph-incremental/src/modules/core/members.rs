@@ -70,7 +70,7 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         let args = [
             one(Val::Node(owner.into())),
             one(Val::Sym(name)),
-            one(Val::Sym(role_code(role))),
+            one(Val::Sym(role_code(self.lang(), role))),
         ];
         let found = self.call(crate::fn_id!("core", "declared"), &args);
         found

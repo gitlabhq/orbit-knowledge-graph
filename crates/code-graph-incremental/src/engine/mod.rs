@@ -746,6 +746,13 @@ impl<'t, S: Store> Run<'t, S> {
                     }
                 }
             }
+            Op::Ancestors => {
+                for at in nodes(&args[0]) {
+                    for a in Cursor::new(self.trees, at.fi, at.node).ancestors() {
+                        push(&mut out, Val::Node(a.into()));
+                    }
+                }
+            }
             Op::Follow(kind) => {
                 let Some(graph) = self.graph else {
                     return out;

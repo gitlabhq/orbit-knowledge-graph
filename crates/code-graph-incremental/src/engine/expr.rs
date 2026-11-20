@@ -36,6 +36,8 @@ pub enum Op {
     /// Matches of a declared index in every file.
     SelectProject(u32),
     Enclose,
+    /// Every ancestor of a node, innermost first.
+    Ancestors,
     Follow(EdgeKind),
     /// The targets of edges of a kind made at a node.
     Site(EdgeKind),
@@ -380,15 +382,15 @@ impl<'s> Parser<'s, '_> {
                 }
                 return Ok(Expr::Op(Op::Project, Box::new([])));
             }
-            "enclose" | "file" => {
+            "enclose" | "ancestors" | "file" => {
                 let args = self.args(piped)?;
                 if args.len() != 1 {
                     return Err(self.error(&format!("{word} takes 1 argument")));
                 }
-                let op = if word == "enclose" {
-                    Op::Enclose
-                } else {
-                    Op::File
+                let op = match word {
+                    "enclose" => Op::Enclose,
+                    "ancestors" => Op::Ancestors,
+                    _ => Op::File,
                 };
                 return Ok(Expr::Op(op, args.into()));
             }

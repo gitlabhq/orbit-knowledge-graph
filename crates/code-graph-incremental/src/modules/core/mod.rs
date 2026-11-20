@@ -71,20 +71,12 @@ fn defs_by_name(
     Box::new(defs)
 }
 
-fn role_code(role: Role) -> u32 {
-    match role {
-        Role::Value => 0,
-        Role::Callable => 1,
-        Role::Type => 2,
-    }
-}
-
-fn role_of(code: u32) -> Role {
-    match code {
-        1 => Role::Callable,
-        2 => Role::Type,
-        _ => Role::Value,
-    }
+fn role_code(lang: &crate::intern::Lang, role: Role) -> u32 {
+    lang.syms.intern(match role {
+        Role::Value => "value",
+        Role::Callable => "callable",
+        Role::Type => "type",
+    })
 }
 
 fn site_role<S: Store>(site: Cursor<'_, S>) -> Role {
@@ -291,21 +283,7 @@ static FUNCTIONS: &[Function<Core>] = &[
         let roles = std::rc::Rc::clone(&cx.state().roles);
         cx.callable(a[0][0], &roles)
     }),
-    function!(Flow, "declared", [one, one, one], |cx, a| {
-        let (owner, Some(&Val::Sym(name)), Some(&Val::Sym(role))) =
-            (node(cx, a, 0), a[1].first(), a[2].first())
-        else {
-            return Vals::new();
-        };
-        let defs = crate::tree::members_named(owner)
-            .filter(|&(n, _)| n == name)
-            .map(|(_, def)| owner.jump(owner.fi(), def));
-        let roles = std::rc::Rc::clone(&cx.state().roles);
-        let role = role_of(role);
-        let found =
-            crate::tree::find_member_in(owner, defs, |d| roles.has(d, role), |d| roles.both(d));
-        of(found.map(|node| Loc::new(owner.fi() as usize, node)))
-    }),
+    function!(required Flow, "declared", [one, one, one]),
     function!(Flow, "supers", [one], |cx, a| {
         let def = Loc::from(node(cx, a, 0));
         of(cx.supers(def))
@@ -320,7 +298,7 @@ static FUNCTIONS: &[Function<Core>] = &[
         }
     ),
     function!(Pure, "role", [one], |cx, a| {
-        let role = role_code(site_role(node(cx, a, 0)));
+        let role = role_code(cx.lang(), site_role(node(cx, a, 0)));
         one(Val::Sym(role))
     }),
     function!(Pure, "known", [set], |_, a| match a[0].is_empty() {
