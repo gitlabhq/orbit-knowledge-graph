@@ -177,6 +177,14 @@ impl ArrowClickHouseClient {
         self
     }
 
+    /// Mark the client as read-only so ClickHouse cancels its queries when the
+    /// caller drops them. Never use it on a client that inserts or runs DDL.
+    /// Mode 2 rather than 1 because every query sends settings, which mode 1 forbids.
+    pub fn read_only(mut self) -> Self {
+        self.client = self.client.with_setting("readonly", "2");
+        self
+    }
+
     pub fn with_database(&self, database: &str, service: &'static str) -> Self {
         let mut client = self.clone();
         client.client = client.client.with_database(database);
