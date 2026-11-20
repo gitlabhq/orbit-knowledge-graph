@@ -7,22 +7,44 @@ cases:
   - name: The full schema call returns the compact overview
     call: "CALL db.schema()"
     scope: all
-    expect: overview
+    expect:
+      schema:
+        domains: [{ name: agents }, { name: ci }, { name: code_review }, { name: container_registry }, { name: core }, { name: packages }, { name: plan }, { name: security }, { name: source_code }]
 
   - name: The local full schema call returns the local compact overview
     call: "CALL db.schema()"
     scope: local
-    expect: overview
+    expect:
+      schema:
+        domains: [{ name: source_code, nodes: [Definition, Directory, File, ImportedSymbol] }]
+        edges:
+          - (Definition)-[:CALLS]->(Definition|ImportedSymbol)
+          - (Definition)-[:DEFINES]->(Definition)
+          - (Definition)-[:EXTENDS]->(Definition)
+          - (Definition)-[:IMPORTS]->(Definition|File)
+          - (Directory)-[:CONTAINS]->(Directory|File)
+          - (File)-[:CALLS]->(Definition|ImportedSymbol)
+          - (File)-[:DEFINES]->(Definition)
+          - (File)-[:IMPORTS]->(Definition|File|ImportedSymbol)
+          - (ImportedSymbol)-[:IMPORTS]->(Definition)
 
   - name: A node schema call returns only that node and its properties
     call: "CALL db.schema('MergeRequest')"
     scope: all
-    expect: { node: MergeRequest }
+    expect:
+      schema:
+        domains: [{ name: code_review, nodes: [{ name: MergeRequest }] }]
+        edges: []
 
   - name: A local node schema call returns only that node and its properties
     call: "CALL db.schema('File')"
     scope: local
-    expect: { node: File }
+    expect:
+      schema:
+        domains:
+          - name: source_code
+            nodes: [{ name: File, props: ["id:int", "traversal_path:string", "project_id:int", "branch:string", "commit_sha:string", "path:string", "name:string", "extension:string", "language:string", "size_bytes:int", "reason:string"] }]
+        edges: []
 
   - name: An unknown node is rejected
     call: "CALL db.schema('Missing')"

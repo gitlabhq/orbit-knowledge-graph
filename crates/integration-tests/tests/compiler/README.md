@@ -231,9 +231,11 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
 `schema/` holds the checks for `CALL db.schema()`, which `gql::prepare` answers
 with a schema response instead of compiling a query. Each case names the
 `call`, the introspection `scope` (`all` or `local`), and one of `expect` or
-`rejected`. `expect` takes `query` for a statement that prepares as a query,
-`overview` for the compact overview of the scope, or `{node: Name}` for one
-domain with that node, its properties, and no edges. `rejected` takes
+`rejected`. `expect` is matched against the JSON of the prepared statement like a state
+field: `query` for a statement that prepares as a query, or `{schema: {...}}`
+for the schema response, with `domains` and `edges` as in the response. An
+empty map is rejected, and `edges: []` asserts that the response has no edges.
+`rejected` takes
 `contains`, and every rejection must be safe to show a client.
 
 ```yaml

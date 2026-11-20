@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use ontology::introspection::{IntrospectionScope, SchemaNode, build_compact_schema_response};
+use ontology::introspection::IntrospectionScope;
 use query_engine::compiler::gql::{PreparedStatement, prepare};
 use serde::Deserialize;
 
@@ -12,7 +12,7 @@ struct SchemaCase {
     name: String,
     call: String,
     scope: Scope,
-    expect: Option<SchemaExpect>,
+    expect: Option<serde_json::Value>,
     rejected: Option<SchemaRejection>,
 }
 
@@ -30,14 +30,6 @@ impl From<Scope> for IntrospectionScope {
             Scope::Local => Self::Local,
         }
     }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum SchemaExpect {
-    Query,
-    Overview,
-    Node(String),
 }
 
 #[derive(Deserialize)]
@@ -73,7 +65,7 @@ fn check(case: &SchemaCase, ontology: &ontology::Ontology) -> Result<(), String>
     let scope = case.scope.into();
     let prepared = prepare(&case.call, ontology, &security, scope);
     match (&case.expect, &case.rejected, prepared) {
-        (Some(expect), None, Ok(prepared)) => check_prepared(expect, prepared, ontology, scope),
+        (Some(expect), None, Ok(prepared)) => check_prepared(expect, prepared, "expect"),
         (None, Some(rejection), Err(error)) => {
             let message = error.to_string();
             if !error.is_client_safe() {
@@ -103,49 +95,19 @@ fn check(case: &SchemaCase, ontology: &ontology::Ontology) -> Result<(), String>
 }
 
 fn check_prepared(
-    expect: &SchemaExpect,
+    expect: &serde_json::Value,
     prepared: PreparedStatement,
-    ontology: &ontology::Ontology,
-    scope: IntrospectionScope,
+    label: &str,
 ) -> Result<(), String> {
-    match (expect, prepared) {
-        (SchemaExpect::Query, PreparedStatement::Query(_)) => Ok(()),
-        (SchemaExpect::Query, PreparedStatement::Schema(_)) => {
-            Err("prepared a schema response, expected a query".into())
-        }
-        (_, PreparedStatement::Query(_)) => {
-            Err("prepared a query, expected a schema response".into())
-        }
-        (SchemaExpect::Overview, PreparedStatement::Schema(response)) => {
-            let expected = build_compact_schema_response(ontology, scope, None);
-            if to_json(&response) == to_json(&expected) {
-                Ok(())
-            } else {
-                Err("response differs from the compact schema overview".into())
-            }
-        }
-        (SchemaExpect::Node(name), PreparedStatement::Schema(response)) => {
-            let nodes: Vec<_> = response
-                .domains
-                .iter()
-                .flat_map(|domain| &domain.nodes)
-                .collect();
-            let expanded = matches!(
-                nodes.as_slice(),
-                [SchemaNode::Expanded { name: found, props, .. }] if found == name && !props.is_empty()
-            );
-            if expanded && response.domains.len() == 1 && response.edges.is_empty() {
-                Ok(())
-            } else {
-                Err(format!(
-                    "expected one domain with only {name} and its properties, and no edges: {}",
-                    to_json(&response)
-                ))
-            }
-        }
+    let actual = match prepared {
+        PreparedStatement::Query(_) => serde_json::json!("query"),
+        PreparedStatement::Schema(response) => serde_json::json!({"schema": response}),
+    };
+    if let Some(path) = super::empty_map_path(expect, label) {
+        return Err(format!("{path} is an empty map, which matches anything"));
     }
-}
-
-fn to_json(value: &impl serde::Serialize) -> serde_json::Value {
-    serde_json::to_value(value).unwrap()
+    match crate::scenario::subset_mismatch(label, expect, &actual) {
+        Some(mismatch) => Err(mismatch),
+        None => Ok(()),
+    }
 }
