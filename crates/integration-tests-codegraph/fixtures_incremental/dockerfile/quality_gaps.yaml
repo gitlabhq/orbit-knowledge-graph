@@ -1,0 +1,50 @@
+name: "Dockerfile: stage names, variable bases and own-stage copies"
+
+fixtures:
+  - path: Dockerfile
+    content: |
+      ARG BASE=alpine:3.19
+      FROM ${BASE} AS base
+      FROM base AS build
+      COPY --from=build /a /b
+      FROM build AS app
+      COPY --from=base /c /d
+      FROM alpine:3.19 AS tools
+
+tests:
+  - name: "FROM <stage> is a call to the stage and not an image import"
+    query: |
+      MATCH (i:ImportedSymbol)
+      RETURN i.import_path AS image
+    assert:
+      - { row_count: 1 }
+      - { row: { image: "alpine" } }
+
+  - name: "stages call the stages they build on"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.definition_type = 'Class' AND b.definition_type = 'Class'
+      RETURN a.name AS from_stage, b.name AS to_stage
+      ORDER BY from_stage, to_stage
+    assert:
+      - { row_count: 3 }
+      - { row: { from_stage: "app", to_stage: "base" } }
+      - { row: { from_stage: "app", to_stage: "build" } }
+      - { row: { from_stage: "build", to_stage: "base" } }
+
+  - name: "FROM ${VAR} is one call to the variable and no image"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(v:Definition)
+      WHERE v.definition_type = 'Variable'
+      RETURN a.name AS user, v.name AS variable
+    assert:
+      - { row_count: 1 }
+      - { row: { user: "base", variable: "BASE" } }
+
+  - name: "COPY --from naming its own stage is not a call"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.fqn = b.fqn AND a.file_path = b.file_path
+      RETURN a.fqn AS fqn
+    assert:
+      - { empty: true }

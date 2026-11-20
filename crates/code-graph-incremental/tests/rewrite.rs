@@ -213,3 +213,53 @@ fn a_repeat_stage_runs_until_no_node_is_replaced() {
     assert_eq!(groups_after_grouping(false), 1);
     assert_eq!(groups_after_grouping(true), 3);
 }
+
+#[test]
+fn a_repeat_stage_that_never_settles_is_stopped() {
+    let env = python_env(Limits::UNLIMITED);
+    let run = code_graph_incremental::Sentinel::new("test", "main.py", u64::MAX);
+    let (mut tree, _) = code_graph_incremental::treesitter::parse_with_sentinel(
+        "x = 1\n",
+        SupportLang::Python,
+        &env.lang,
+        "main.py",
+        &run,
+        usize::MAX,
+    )
+    .unwrap();
+    let yaml = "
+stages:
+  - repeat: true
+    rules:
+      - match: '(module $$$BODY)'
+        replace: '(module @$ROOT $$$BODY)'
+";
+    let stages = code_graph_incremental::rules::load_rules(yaml, &env.lang).unwrap();
+
+    let killed =
+        code_graph_incremental::pattern::apply_stage(&mut tree, &env.lang, &stages[0], &[])
+            .expect_err("a stage that always replaces must hit the pass cap");
+
+    assert_eq!(killed.label, "repeat passes");
+    assert_eq!(killed.path, tree.label);
+}
+
+#[test]
+fn a_repeat_display_stage_is_rejected_at_load_time() {
+    let lang = code_graph_incremental::intern::Lang::new();
+    let yaml = "
+stages: []
+display:
+  - name: once
+    repeat: true
+    rules:
+      - match: '(__def)'
+        tag: { entity: Definition }
+";
+
+    let err = code_graph_incremental::rules::load_lang(yaml, &lang)
+        .err()
+        .expect("display stages run once");
+
+    assert!(err.to_string().contains("display stage"), "{err}");
+}

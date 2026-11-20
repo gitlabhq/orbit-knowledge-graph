@@ -65,6 +65,19 @@ stages:
       - match: '(from_instruction (image_spec name: $N) as: $A)'
         where: '$N == $A'
         replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)))'
+      # `FROM <stage>` names an earlier stage, so it is a call to that stage
+      # and not an image. A later stage is not matched: Docker reads it as an
+      # image.
+      - match: '(from_instruction (image_spec name: $N !(image_tag) !(image_digest)) as: $A <</(from_instruction as: (image_alias @$N)))'
+        replace: '(__from (__defname @$A) (__class) (__call (__callee @$N $N)))'
+      - match: '(from_instruction (image_spec name: $N !(image_tag) !(image_digest)) <</(from_instruction as: (image_alias @$N)))'
+        replace: '(__from (__defname @$ROOT|concat("#", "child_sym:image_spec", "sibling_index")|regex_replace("(:[^/:#@]*)?(@[^#]*)?#", "#")|prepend("stage:")) (__class) (__call (__callee @$N $N)))'
+      # A name with an expansion (`FROM ${BASE}`) is not an image name. The
+      # stage keeps the calls to the variables and no import.
+      - match: '(from_instruction (image_spec name: (image_name $$$B $E:expansion $$$C) tag:? (image_tag $$$T)) as: $A)'
+        replace: '(__from (__defname @$A) (__class) $E $$$C $$$T)'
+      - match: '(from_instruction (image_spec name: (image_name $$$B $E:expansion $$$C) tag:? (image_tag $$$T)))'
+        replace: '(__from (__defname @$ROOT|concat("#", "child_sym:image_spec", "sibling_index")|regex_replace("(:[^/:#@]*)?(@[^#]*)?#", "#")|prepend("stage:")) (__class) $E $$$C $$$T)'
       - match: '(from_instruction (image_spec name: $N tag: (image_tag $$$T)) as: $A)'
         replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)) $$$T)'
       - match: '(from_instruction (image_spec name: $N) as: $A)'
@@ -82,7 +95,7 @@ stages:
   - name: copy-from
     rules:
       - match: '(copy_instruction $P:(param "^--from="))'
-        replace: '(__call (__callee @$P|strip_prefix("--from=") $P))'
+        replace: '(__stage_call (__callee @$P|strip_prefix("--from=") $P))'
 
   # The grammar has no stage node. Each pass nests the first ungrouped stage
   # under its FROM, so the stage repeats until none is left.
@@ -101,6 +114,24 @@ stages:
     rules:
       - match: '(__from $$$H)'
         replace: '(__def $$$H)'
+
+  # `COPY --from=<own stage>` is invalid Docker. Each pass settles the first
+  # stage call of every stage: it is dropped when it names its own stage and
+  # becomes a call otherwise.
+  - name: drop-self-copies
+    repeat: true
+    rules:
+      - match: '(__def $N:__defname $$$MID (__stage_call $K:__callee) $$$POST)'
+        where: '$N == $K'
+        replace: '(__def $N $$$MID $$$POST)'
+      - match: '(__def $N:__defname $$$MID (__stage_call $K:__callee) $$$POST)'
+        where: '$N != $K'
+        replace: '(__def $N $$$MID (__call $K) $$$POST)'
+
+  - name: copy-from-calls
+    rules:
+      - match: '(__stage_call $$$X)'
+        replace: '(__call $$$X)'
 
   - name: tag-defs
     rules:

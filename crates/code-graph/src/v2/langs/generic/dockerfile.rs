@@ -165,18 +165,30 @@ impl<'a> DockerfileParser<'a> {
         };
         let range = canonical_range(&node_to_range(instruction));
         let fqn = Fqn::from_segments(&[self.stem, &name], ".");
-        self.imports.push(CanonicalImport {
-            import_type: "AliasedImport",
-            binding_kind: ImportBindingKind::Named,
-            mode: ImportMode::Declarative,
-            path: image.clone(),
-            name: Some(image.clone()),
-            alias: Some(format!("image:{image}")),
-            scope_fqn: Some(fqn.clone()),
-            range: canonical_range(&node_to_range(&spec)),
-            is_type_only: false,
-            wildcard: false,
-        });
+        let base_stage =
+            if image != name && spec.field("tag").is_none() && spec.field("digest").is_none() {
+                self.stage_definitions.get(&image).copied()
+            } else {
+                None
+            };
+        let names_image = base_stage.is_none()
+            && spec
+                .field("name")
+                .is_some_and(|n| n.dfs().all(|n| n.kind() != "variable"));
+        if names_image {
+            self.imports.push(CanonicalImport {
+                import_type: "AliasedImport",
+                binding_kind: ImportBindingKind::Named,
+                mode: ImportMode::Declarative,
+                path: image.clone(),
+                name: Some(image.clone()),
+                alias: Some(format!("image:{image}")),
+                scope_fqn: Some(fqn.clone()),
+                range: canonical_range(&node_to_range(&spec)),
+                is_type_only: false,
+                wildcard: false,
+            });
+        }
         let stage_definition = self.definitions.len() as u32;
         self.stage = Some(Stage {
             name: name.clone(),
@@ -196,14 +208,14 @@ impl<'a> DockerfileParser<'a> {
         self.stage_count += 1;
 
         let enclosing = Some(stage_definition);
-        self.push_ref(
-            format!("image:{image}"),
-            RefTarget::Import(self.imports.len() as u32 - 1),
-            enclosing,
-        );
-        if image != name
-            && let Some(&base_stage) = self.stage_definitions.get(&image)
-        {
+        if names_image {
+            self.push_ref(
+                format!("image:{image}"),
+                RefTarget::Import(self.imports.len() as u32 - 1),
+                enclosing,
+            );
+        }
+        if let Some(base_stage) = base_stage {
             self.push_ref(image, RefTarget::Definition(base_stage), enclosing);
         }
         self.add_variable_refs(instruction, enclosing, None);
@@ -558,7 +570,7 @@ mod tests {
     }
 
     #[test]
-    fn stages_call_their_base_image_and_the_stages_they_build_on() {
+    fn stages_call_their_base_image_or_the_earlier_stage_they_build_on() {
         let result = parse(
             "FROM golang AS builder\nFROM alpine AS runtime\nCOPY --from=builder /a /b\nCOPY --from=nginx:latest /c /d\nFROM runtime AS debug\nFROM runtime\n",
         );
@@ -567,13 +579,7 @@ mod tests {
             [
                 edge("Dockerfile.builder", "image:golang", "import:golang"),
                 edge("Dockerfile.runtime", "image:alpine", "import:alpine"),
-                edge("Dockerfile.debug", "image:runtime", "import:runtime"),
                 edge("Dockerfile.debug", "runtime", "Dockerfile.runtime"),
-                edge(
-                    "Dockerfile.stage:runtime#5",
-                    "image:runtime",
-                    "import:runtime"
-                ),
                 edge(
                     "Dockerfile.stage:runtime#5",
                     "runtime",

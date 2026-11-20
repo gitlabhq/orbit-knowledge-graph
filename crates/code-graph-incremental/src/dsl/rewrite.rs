@@ -207,7 +207,7 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
                 materialize(t, fill, kid, copy, pl);
             }
         }
-        Pat::Not(_) | Pat::Desc(_) => {}
+        Pat::Not(_) | Pat::Desc(_) | Pat::Preceding(_) => {}
     }
 }
 
@@ -232,7 +232,9 @@ pub fn apply_rewrites(
 }
 
 /// Applies a stage once, or until a pass replaces no node when it is
-/// `repeat`. The sentinels bound a stage that never settles.
+/// `repeat`. A repeat stage makes one step for each item it rewrites, so it
+/// gets as many passes as the tree has nodes; past that it is not settling.
+/// The sentinels bound the time.
 pub fn apply_stage(
     t: &mut Tree,
     lang: &Lang,
@@ -242,7 +244,8 @@ pub fn apply_stage(
     if !stage.repeat {
         return apply_rewrites(t, lang, &stage.rules, sentinels);
     }
-    loop {
+    let max_passes = t.root().size() as usize;
+    for pass in 1.. {
         let replaced = std::cell::Cell::new(false);
         apply_rewrites_inner(
             t,
@@ -262,8 +265,12 @@ pub fn apply_stage(
         if !replaced.get() {
             return Ok(());
         }
+        if pass >= max_passes {
+            return Err(Killed::limit("repeat passes", &t.label, pass, max_passes));
+        }
         sentinels.iter().try_for_each(|s| s.check())?;
     }
+    unreachable!("the pass counter is unbounded")
 }
 
 pub fn apply_rewrites_with_edges(

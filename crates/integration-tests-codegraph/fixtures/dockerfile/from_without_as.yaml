@@ -54,7 +54,7 @@ tests:
       - { row: { stage: "stage:alpine#1", variable: "BASE_TAG" } }
       - { row: { stage: "stage:golang#5", variable: "GO_VERSION" } }
 
-  - name: "an unnamed stage calls its base image"
+  - name: "an unnamed stage calls its base image, and not an earlier stage as an image"
     query: |
       MATCH (s:Definition)-[:CALLS]->(i:ImportedSymbol)
       WHERE s.name STARTS WITH 'stage:' AND s.file_path <> 'same_image/Dockerfile'
@@ -62,9 +62,8 @@ tests:
       RETURN s.name AS stage, i.import_path AS image
       ORDER BY stage
     assert:
-      - { row_count: 3 }
+      - { row_count: 2 }
       - { row: { stage: "stage:alpine#1", image: "alpine" } }
-      - { row: { stage: "stage:build#3", image: "build" } }
       - { row: { stage: "stage:golang#5", image: "golang" } }
 
   - name: "the named stage keeps its own ARG call"
