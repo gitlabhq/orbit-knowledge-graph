@@ -16,8 +16,9 @@ and the job fails at the end.
 
 `milestone-assignee` (`milestone-assignee.sh`, rules in `milestone-assignee.jq`):
 
-- An MR with no milestone gets the milestone of the issue it closes, if that
-  milestone has not ended. Otherwise it gets the current release milestone.
+- An MR with no milestone gets the milestone of the first issue it closes
+  whose milestone has not ended and is an active milestone of this project or
+  one of its parent groups. Otherwise it gets the current release milestone.
 - A ready MR whose milestone has ended moves to the current release milestone.
   Draft MRs keep theirs.
 - A ready MR with no assignee is assigned to its author.
@@ -41,7 +42,8 @@ Both tasks skip MRs with the `HOUSEKEEPING_EXCLUDE_LABEL` label
 To rehearse without changes, add `DRY_RUN=true` to the schedule and run it.
 The job log lists every decision. Remove the variable to go live. In a dry
 run, `stale` does not remove its label from MRs with new activity, so
-`milestone-assignee` still skips them.
+`milestone-assignee` still skips them. It also does not add the label to idle
+MRs, so `milestone-assignee` plans changes for MRs that a live run skips.
 
 ## Variables
 
@@ -56,5 +58,8 @@ run, `stale` does not remove its label from MRs with new activity, so
 
 ## Tests
 
-`mise run test:scripts` runs `milestone-assignee_test.sh`, which covers the
-milestone and assignee rules without API calls.
+`mise run test:scripts` runs the tests in this directory without API calls:
+
+- `milestone-assignee_test.sh` covers the milestone and assignee rules.
+- `run_test.sh` runs `milestone-assignee` against a stubbed `glab` and checks
+  which writes it makes.

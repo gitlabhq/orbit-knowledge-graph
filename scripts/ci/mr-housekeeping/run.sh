@@ -32,14 +32,16 @@ fi
 
 FAILED_TASKS=()
 for task in $TASKS; do
-  script="$HERE/$task.sh"
-  if [ ! -f "$script" ]; then
-    log "Unknown task \"$task\": no $script"
-    FAILED_TASKS+=("$task")
-    continue
-  fi
+  case "$task" in
+    stale | milestone-assignee) ;;
+    *)
+      log "Unknown task \"$task\""
+      FAILED_TASKS+=("$task")
+      continue
+      ;;
+  esac
   log "--- $task ---"
-  bash "$script" || FAILED_TASKS+=("$task")
+  bash "$HERE/$task.sh" || FAILED_TASKS+=("$task")
 done
 
 if [ "${#FAILED_TASKS[@]}" -gt 0 ]; then
