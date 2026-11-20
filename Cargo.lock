@@ -3620,6 +3620,8 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tonic-prost",
+ "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 

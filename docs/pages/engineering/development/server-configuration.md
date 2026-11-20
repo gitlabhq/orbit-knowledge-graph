@@ -1,7 +1,7 @@
 # Server configuration
 
 `gkg-server` reads the same configuration in all modes. The default values are in
-[`config/default.yaml`](../../../../config/default.yaml). The types and allowed values are in [`config/schemas/config.schema.json`](../../../../config/schemas/config.schema.json).
+[`config/default.yaml`](../../../../config/default.yaml). The types and allowed values are in [`config.proto`](../../../../crates/orbit-server-config/proto/orbit/config/v1/config.proto).
 
 ## Load order
 
@@ -41,7 +41,7 @@ Select the mode with `--mode`. The default is `webserver`.
 `gkg-server check-config --config <path>` loads the file over the embedded defaults as startup does,
 then exits without starting a server. It rejects an unknown key in any section and reads no secret
 files. A valid file exits 0 with no output. An invalid one prints the errors and exits 1. The check
-skips the rules a single mode applies at startup, such as the `grpc` ranges and quota credentials.
+skips the rules a single mode applies at startup, such as the billing collector URL and quota credentials.
 
 ## NATS
 

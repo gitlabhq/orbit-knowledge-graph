@@ -561,29 +561,6 @@ impl EngineConfiguration {
     pub fn is_module_enabled(&self, module: IndexerModule) -> bool {
         self.modules.contains(&module)
     }
-
-    /// Validates engine-level invariants that cannot be expressed in the type system.
-    pub fn validate(&self) -> Result<(), EngineConfigError> {
-        if self.modules.is_empty() {
-            return Err(EngineConfigError::NoModulesEnabled);
-        }
-        let entity_handler = &self.handlers.entity_handler;
-        if entity_handler.system_notes_resolve_lookup_batch_size == 0 {
-            return Err(EngineConfigError::ZeroSystemNotesResolveLookupBatchSize);
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum EngineConfigError {
-    #[error("engine.modules must list at least one module")]
-    NoModulesEnabled,
-
-    #[error(
-        "engine.handlers.entity_handler.system_notes_resolve_lookup_batch_size must be at least 1"
-    )]
-    ZeroSystemNotesResolveLookupBatchSize,
 }
 
 /// Top-level schedule configuration.
@@ -716,31 +693,24 @@ mod tests {
         assert!(cfg.is_module_enabled(IndexerModule::Sdlc));
         assert!(cfg.is_module_enabled(IndexerModule::Code));
         assert!(cfg.is_module_enabled(IndexerModule::NamespaceDeletion));
-        assert!(cfg.validate().is_ok());
     }
 
     #[test]
     fn empty_modules_fails_validation() {
-        let cfg = EngineConfiguration {
-            modules: vec![],
-            ..AppConfig::embedded_defaults().engine
-        };
-        assert!(matches!(
-            cfg.validate(),
-            Err(EngineConfigError::NoModulesEnabled)
-        ));
+        let error = AppConfig::with_overlay("engine:\n  modules: []\n")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("- engine.modules: "), "{error}");
     }
 
     #[test]
     fn module_subset_only_enables_listed() {
-        let cfg = EngineConfiguration {
-            modules: vec![IndexerModule::Code],
-            ..AppConfig::embedded_defaults().engine
-        };
+        let cfg = AppConfig::with_overlay("engine:\n  modules: [code]\n")
+            .unwrap()
+            .engine;
         assert!(cfg.is_module_enabled(IndexerModule::Code));
         assert!(!cfg.is_module_enabled(IndexerModule::Sdlc));
         assert!(!cfg.is_module_enabled(IndexerModule::NamespaceDeletion));
-        assert!(cfg.validate().is_ok());
     }
 
     #[test]
@@ -763,14 +733,14 @@ mod tests {
 
     #[test]
     fn zero_system_notes_resolve_lookup_batch_size_fails_validation() {
-        let mut cfg = AppConfig::embedded_defaults().engine;
-        cfg.handlers
-            .entity_handler
-            .system_notes_resolve_lookup_batch_size = 0;
-        assert!(matches!(
-            cfg.validate(),
-            Err(EngineConfigError::ZeroSystemNotesResolveLookupBatchSize)
-        ));
+        let yaml = "engine:\n  handlers:\n    entity-handler:\n      system_notes_resolve_lookup_batch_size: 0\n";
+        let error = AppConfig::with_overlay(yaml).unwrap_err().to_string();
+        assert!(
+            error.contains(
+                "- engine.handlers.entity_handler.system_notes_resolve_lookup_batch_size: "
+            ),
+            "{error}"
+        );
     }
 
     #[test]

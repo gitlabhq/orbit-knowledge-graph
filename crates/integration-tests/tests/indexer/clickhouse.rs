@@ -222,6 +222,9 @@ async fn connection_failure_returns_error() {
         url: "http://127.0.0.1:19000".to_string(),
         username: "default".to_string(),
         password: None,
+        compatibility: orbit_server_config::AppConfig::embedded_defaults()
+            .graph
+            .compatibility,
         session_settings: std::collections::HashMap::new(),
         replicated: false,
         insert_settings: std::collections::HashMap::new(),
@@ -243,4 +246,52 @@ async fn connection_failure_returns_error() {
         )
         .await;
     assert!(result.is_err(), "should fail to write to invalid address");
+}
+
+#[tokio::test]
+async fn datalake_watermark_reads_use_the_skip_index_on_tables_with_a_projection() {
+    let clickhouse = integration_testkit::TestContext::new(&[]).await;
+    let datalake = ClickHouseConfiguration {
+        url: clickhouse.config.url.clone(),
+        database: clickhouse.config.database.clone(),
+        username: clickhouse.config.username.clone(),
+        password: clickhouse.config.password.clone(),
+        ..orbit_server_config::AppConfig::embedded_defaults().datalake
+    }
+    .build_client("datalake");
+
+    // Large rows clustered in the sort key give the merged base part more marks than its
+    // projection, so ClickHouse 26.6 to 26.10 prefer the projection, which has no skip index.
+    for statement in [
+        "CREATE TABLE watermark_reads (k UInt32, id UInt64, payload String, watermark DateTime, \
+         INDEX idx_watermark watermark TYPE minmax GRANULARITY 1, \
+         PROJECTION by_id (SELECT * ORDER BY id)) \
+         ENGINE = MergeTree ORDER BY (k, id) \
+         SETTINGS index_granularity = 2048, index_granularity_bytes = 1048576, auto_statistics_types = ''",
+        "INSERT INTO watermark_reads SELECT number % 500, number, \
+         repeat('x', if(number % 500 < 10, 4000, 20)), toDateTime('2026-01-01') + number % 86400 \
+         FROM numbers(100000)",
+        "INSERT INTO watermark_reads SELECT number % 500, 100000 + number, \
+         repeat('x', if(number % 500 < 10, 4000, 20)), toDateTime('2026-01-02') + number % 86400 \
+         FROM numbers(100000)",
+        "OPTIMIZE TABLE watermark_reads FINAL",
+        "SYSTEM STOP MERGES watermark_reads",
+        "INSERT INTO watermark_reads SELECT number % 500, 200000 + number, 'recent', \
+         toDateTime('2026-06-01') + number % 3600 FROM numbers(10000)",
+    ] {
+        clickhouse.execute(statement).await;
+    }
+
+    let (_, summary) = datalake
+        .query("SELECT k, watermark FROM watermark_reads WHERE watermark >= '2026-06-01 00:00:00'")
+        .fetch_arrow_with_summary()
+        .await
+        .expect("watermark query runs");
+
+    let read_rows = summary.and_then(|summary| summary.read_rows());
+    assert_eq!(
+        read_rows,
+        Some(10_000),
+        "only the recent part should be read"
+    );
 }
