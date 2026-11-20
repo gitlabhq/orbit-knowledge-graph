@@ -57,7 +57,7 @@ cases:
       expect: ["(Input traversal (...))"]
     physical:
       clickhouse:
-        params: [{ value: "DEBUG", data_type: String }, { value: false, data_type: Bool }, { value: 1, data_type: Int64 }, { value: 67650, data_type: Int64 }, { value: " [truncated]", data_type: String }, { value: "", data_type: String }, { value: "User", data_type: String }]
+        params: [{ value: DEBUG, data_type: String }]
         parameterized_sql: { not_contains: [DEBUG] }
 
   - name: An escaped quote cannot end a literal and turn on DEBUG
@@ -70,7 +70,7 @@ cases:
       expect: ["(Input traversal (...))"]
     physical:
       clickhouse:
-        params: [{ value: "x' RETURN u DEBUG //", data_type: String }, { value: false, data_type: Bool }, { value: 1, data_type: Int64 }, { value: 67650, data_type: Int64 }, { value: " [truncated]", data_type: String }, { value: "", data_type: String }, { value: "User", data_type: String }]
+        params: [{ value: "x' RETURN u DEBUG //", data_type: String }]
         parameterized_sql: { not_contains: [DEBUG] }
 
   - name: A unicode-escaped quote cannot end a literal and turn on DEBUG
@@ -83,7 +83,7 @@ cases:
       expect: ["(Input traversal (...))"]
     physical:
       clickhouse:
-        params: [{ value: "' RETURN u DEBUG //", data_type: String }, { value: false, data_type: Bool }, { value: 1, data_type: Int64 }, { value: 67650, data_type: Int64 }, { value: " [truncated]", data_type: String }, { value: "", data_type: String }, { value: "User", data_type: String }]
+        params: [{ value: "' RETURN u DEBUG //", data_type: String }]
         parameterized_sql: { not_contains: [DEBUG] }
 
   - name: SQL inside a double-quoted literal stays a bound value
@@ -96,7 +96,7 @@ cases:
       expect: ["(Input traversal (...))"]
     physical:
       clickhouse:
-        params: [{ value: "'; DROP TABLE gl_user; --", data_type: String }, { value: false, data_type: Bool }, { value: 1, data_type: Int64 }, { value: 67650, data_type: Int64 }, { value: " [truncated]", data_type: String }, { value: "", data_type: String }, { value: "User", data_type: String }]
+        params: [{ value: "'; DROP TABLE gl_user; --", data_type: String }]
         parameterized_sql: { not_contains: [DROP TABLE] }
 
   - name: DEBUG inside a string literal followed by DEBUG in a block comment leaves debug SQL off
@@ -109,7 +109,7 @@ cases:
       expect: ["(Input traversal (...))"]
     physical:
       clickhouse:
-        params: [{ value: "DEBUG", data_type: String }, { value: false, data_type: Bool }, { value: 1, data_type: Int64 }, { value: 67650, data_type: Int64 }, { value: " [truncated]", data_type: String }, { value: "", data_type: String }, { value: "User", data_type: String }]
+        params: [{ value: DEBUG, data_type: String }]
         parameterized_sql: { not_contains: [DEBUG] }
 
   - name: DEBUG inside a string literal followed by DEBUG in a line comment leaves debug SQL off
@@ -122,7 +122,7 @@ cases:
       expect: ["(Input traversal (...))"]
     physical:
       clickhouse:
-        params: [{ value: "DEBUG", data_type: String }, { value: false, data_type: Bool }, { value: 1, data_type: Int64 }, { value: 67650, data_type: Int64 }, { value: " [truncated]", data_type: String }, { value: "", data_type: String }, { value: "User", data_type: String }]
+        params: [{ value: DEBUG, data_type: String }]
         parameterized_sql: { not_contains: [DEBUG] }
 
   - name: An escaped quote in a literal followed by DEBUG in a block comment leaves debug SQL off
@@ -135,7 +135,7 @@ cases:
       expect: ["(Input traversal (...))"]
     physical:
       clickhouse:
-        params: [{ value: "x' RETURN u DEBUG //", data_type: String }, { value: false, data_type: Bool }, { value: 1, data_type: Int64 }, { value: 67650, data_type: Int64 }, { value: " [truncated]", data_type: String }, { value: "", data_type: String }, { value: "User", data_type: String }]
+        params: [{ value: "x' RETURN u DEBUG //", data_type: String }]
         parameterized_sql: { not_contains: [DEBUG] }
 
   - name: An escaped quote in a literal followed by DEBUG in a line comment leaves debug SQL off
@@ -148,7 +148,7 @@ cases:
       expect: ["(Input traversal (...))"]
     physical:
       clickhouse:
-        params: [{ value: "x' RETURN u DEBUG //", data_type: String }, { value: false, data_type: Bool }, { value: 1, data_type: Int64 }, { value: 67650, data_type: Int64 }, { value: " [truncated]", data_type: String }, { value: "", data_type: String }, { value: "User", data_type: String }]
+        params: [{ value: "x' RETURN u DEBUG //", data_type: String }]
         parameterized_sql: { not_contains: [DEBUG] }
 
   - name: A unicode-escaped quote in a literal followed by DEBUG in a block comment leaves debug SQL off
@@ -161,7 +161,7 @@ cases:
       expect: ["(Input traversal (...))"]
     physical:
       clickhouse:
-        params: [{ value: "' RETURN u DEBUG //", data_type: String }, { value: false, data_type: Bool }, { value: 1, data_type: Int64 }, { value: 67650, data_type: Int64 }, { value: " [truncated]", data_type: String }, { value: "", data_type: String }, { value: "User", data_type: String }]
+        params: [{ value: "' RETURN u DEBUG //", data_type: String }]
         parameterized_sql: { not_contains: [DEBUG] }
 
   - name: A unicode-escaped quote in a literal followed by DEBUG in a line comment leaves debug SQL off
@@ -174,7 +174,7 @@ cases:
       expect: ["(Input traversal (...))"]
     physical:
       clickhouse:
-        params: [{ value: "' RETURN u DEBUG //", data_type: String }, { value: false, data_type: Bool }, { value: 1, data_type: Int64 }, { value: 67650, data_type: Int64 }, { value: " [truncated]", data_type: String }, { value: "", data_type: String }, { value: "User", data_type: String }]
+        params: [{ value: "' RETURN u DEBUG //", data_type: String }]
         parameterized_sql: { not_contains: [DEBUG] }
 
   - name: SQL in a double-quoted literal followed by DEBUG in a block comment leaves debug SQL off
@@ -187,7 +187,7 @@ cases:
       expect: ["(Input traversal (...))"]
     physical:
       clickhouse:
-        params: [{ value: "'; DROP TABLE gl_user; --", data_type: String }, { value: false, data_type: Bool }, { value: 1, data_type: Int64 }, { value: 67650, data_type: Int64 }, { value: " [truncated]", data_type: String }, { value: "", data_type: String }, { value: "User", data_type: String }]
+        params: [{ value: "'; DROP TABLE gl_user; --", data_type: String }]
         parameterized_sql: { not_contains: [DROP TABLE] }
 
   - name: SQL in a double-quoted literal followed by DEBUG in a line comment leaves debug SQL off
@@ -200,5 +200,5 @@ cases:
       expect: ["(Input traversal (...))"]
     physical:
       clickhouse:
-        params: [{ value: "'; DROP TABLE gl_user; --", data_type: String }, { value: false, data_type: Bool }, { value: 1, data_type: Int64 }, { value: 67650, data_type: Int64 }, { value: " [truncated]", data_type: String }, { value: "", data_type: String }, { value: "User", data_type: String }]
+        params: [{ value: "'; DROP TABLE gl_user; --", data_type: String }]
         parameterized_sql: { not_contains: [DROP TABLE] }

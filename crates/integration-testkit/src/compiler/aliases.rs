@@ -21,6 +21,7 @@ const ALIASES: &[(&str, &str, &str, &str)] = &[
     ("sql",          "clickhouse",           "codegen",         "output.sql"),
     ("parameterized_sql", "clickhouse",      "codegen",         "output.parameterized_sql"),
     ("params",       "clickhouse",           "codegen",         "output.params"),
+    ("param_count",  "clickhouse",           "codegen",         "output.param_count"),
     ("indexes",      "clickhouse",           "codegen",         "output.indexes"),
 ];
 

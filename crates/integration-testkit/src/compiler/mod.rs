@@ -317,8 +317,23 @@ struct SettingsAssertions {
 struct OutputAssertions {
     sql: Option<SqlAssertions>,
     parameterized_sql: Option<SqlAssertions>,
-    params: Option<serde_json::Value>,
+    params: Vec<serde_json::Value>,
+    param_count: Option<usize>,
     indexes: Vec<IndexAssertion>,
+}
+
+fn empty_map_path(expected: &serde_json::Value, path: &str) -> Option<String> {
+    match expected {
+        serde_json::Value::Object(map) if map.is_empty() => Some(path.to_string()),
+        serde_json::Value::Object(map) => map
+            .iter()
+            .find_map(|(key, value)| empty_map_path(value, &format!("{path}.{key}"))),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .find_map(|(index, value)| empty_map_path(value, &format!("{path}[{index}]"))),
+        _ => None,
+    }
 }
 
 fn state_mismatch(
@@ -326,6 +341,9 @@ fn state_mismatch(
     state: &impl serde::Serialize,
     label: &str,
 ) -> Result<(), String> {
+    if let Some(path) = empty_map_path(expected, label) {
+        return Err(format!("{path} is an empty map, which matches anything"));
+    }
     let actual = serde_json::to_value(state).map_err(|error| format!("{label}: {error}"))?;
     match crate::scenario::subset_mismatch(label, expected, &actual) {
         Some(mismatch) => Err(mismatch),
@@ -1027,7 +1045,8 @@ impl Expectations<'_> {
     ) -> Result<(), String> {
         if assertions.sql.is_none()
             && assertions.parameterized_sql.is_none()
-            && assertions.params.is_none()
+            && assertions.params.is_empty()
+            && assertions.param_count.is_none()
             && assertions.indexes.is_empty()
         {
             return Err(format!(
@@ -1048,11 +1067,35 @@ impl Expectations<'_> {
                 failures.extend(checks.check(&sql, &format!("{label}.{field}")));
             }
         }
-        if let Some(expected) = &assertions.params {
-            let mut params: Vec<_> = output.base.params.iter().collect();
-            params.sort_by_key(|(name, _)| (name.len(), name.as_str()));
-            let params: Vec<_> = params.into_iter().map(|(_, param)| param).collect();
-            failures.extend(state_mismatch(expected, &params, &format!("{label}.params")).err());
+        let params: Vec<_> = output
+            .base
+            .params
+            .values()
+            .filter_map(|param| serde_json::to_value(param).ok())
+            .collect();
+        for (index, expected) in assertions.params.iter().enumerate() {
+            let label = format!("{label}.params[{index}]");
+            if let Some(mismatch) = empty_map_path(expected, &label) {
+                failures.push(format!(
+                    "{mismatch} is an empty map, which matches anything"
+                ));
+            } else if !params
+                .iter()
+                .any(|param| crate::scenario::subset_mismatch(&label, expected, param).is_none())
+            {
+                failures.push(format!(
+                    "{label}: no bound parameter matches {expected}\nparams: {}",
+                    serde_json::Value::Array(params.clone())
+                ));
+            }
+        }
+        if let Some(count) = assertions.param_count
+            && params.len() != count
+        {
+            failures.push(format!(
+                "{label}.param_count: {} bound parameters, expected {count}",
+                params.len()
+            ));
         }
         for index in &assertions.indexes {
             if !(self.index_exists)(&index.table, &index.name) {
@@ -1569,19 +1612,20 @@ fn state_assertions_match_serialized_state_by_json_path() {
     };
     assert_eq!(
         run(
-            "{params: [{value: '1/', data_type: String}, {value: alice, data_type: String}, {value: 1, data_type: Int64}, {value: false, data_type: Bool}, {value: 67650, data_type: Int64}, {value: ' [truncated]', data_type: String}, {value: '', data_type: String}, {value: User, data_type: String}], parameterized_sql: {contains: ['{p'], not_contains: [alice]}, result_context: {query_type: traversal, nodes: {u: {entity_type: User, id_column: _orbit_u_id}}, neighbors_center: null, labels: {}}, hydration: none}"
+            "{params: [{value: alice, data_type: String}, {value: 1, data_type: Int64}], param_count: 8, parameterized_sql: {contains: ['{p'], not_contains: [alice]}, result_context: {query_type: traversal, nodes: {u: {entity_type: User, id_column: _orbit_u_id}}, neighbors_center: null}, hydration: none}"
         ),
         ""
     );
     for (physical, expected) in [
         (
             "{params: [{value: alice, data_type: Int64}]}",
-            "output.params has",
+            "output.params[0]: no bound parameter matches",
         ),
         (
-            "{params: {1: {value: alice, data_type: Int64}}}",
-            "output.params[1].data_type is \"String\", expected \"Int64\"",
+            "{param_count: 2}",
+            "output.param_count: 8 bound parameters, expected 2",
         ),
+        ("{params: [{}]}", "output.params[0] is an empty map"),
         (
             "{result_context: {query_type: neighbors}}",
             "result_ctx.query_type is \"traversal\", expected \"neighbors\"",
@@ -1594,7 +1638,14 @@ fn state_assertions_match_serialized_state_by_json_path() {
             "{result_context: {labels: {User: username}}}",
             "result_ctx.labels.User is missing",
         ),
-        ("{hydration: {static: {}}}", "hydration_plan is \"none\""),
+        (
+            "{hydration: {static: {u: {node_alias: u}}}}",
+            "hydration_plan is \"none\"",
+        ),
+        (
+            "{result_context: {nodes: {}}}",
+            "result_ctx.nodes is an empty map",
+        ),
     ] {
         let failures = run(physical);
         assert!(failures.contains(expected), "{physical}: {failures}");

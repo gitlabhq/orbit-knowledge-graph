@@ -15,10 +15,40 @@ use crate::types::SecurityContext;
 pub enum HydrationPlan {
     None,
     /// One template per input node, with IDs to be filled at runtime.
-    Static(Vec<HydrationTemplate>),
+    Static(#[serde(serialize_with = "by_node_alias")] Vec<HydrationTemplate>),
     /// Column specs are pre-resolved for every ontology entity type so
     /// the server just looks up the matching spec — no ontology queries.
-    Dynamic(Vec<DynamicEntityColumns>),
+    Dynamic(#[serde(serialize_with = "by_entity_type")] Vec<DynamicEntityColumns>),
+}
+
+fn by_node_alias<S: serde::Serializer>(
+    templates: &[HydrationTemplate],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(
+        templates
+            .iter()
+            .map(|template| (&template.node_alias, template)),
+    )
+}
+
+fn by_entity_type<S: serde::Serializer>(
+    entities: &[DynamicEntityColumns],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(entities.iter().map(|entity| (&entity.entity_type, entity)))
+}
+
+fn by_property<S: serde::Serializer>(
+    filters: &[(String, crate::input::InputFilter)],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(filters.iter().map(|(property, filter)| {
+        (
+            property,
+            serde_json::json!({"op": filter.op.map(|op| op.as_ref().to_string()), "value": filter.value}),
+        )
+    }))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
@@ -59,6 +89,7 @@ pub struct HydrationTemplate {
     pub has_traversal_path: bool,
     /// Filters on virtual columns to apply in-memory after hydration resolves
     /// their values.
+    #[serde(serialize_with = "by_property")]
     pub virtual_filters: Vec<(String, crate::input::InputFilter)>,
     /// Virtual columns resolved only because they are filtered, not selected.
     /// Stripped from result rows after the in-memory filter pass.

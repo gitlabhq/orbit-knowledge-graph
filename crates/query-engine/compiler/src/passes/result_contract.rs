@@ -33,6 +33,17 @@ pub struct EdgeMeta {
     pub relationship: usize,
 }
 
+fn entity_and_id<S: serde::Serializer>(
+    center: &Option<(String, i64)>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    use serde::Serialize;
+    center
+        .as_ref()
+        .map(|(entity, id)| serde_json::json!({"entity": entity, "id": id}))
+        .serialize(serializer)
+}
+
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct ResultContext {
     pub query_type: Option<QueryType>,
@@ -40,6 +51,7 @@ pub struct ResultContext {
     #[serde(skip)]
     entity_auth: HashMap<String, EntityAuthConfig>,
     edges: Vec<EdgeMeta>,
+    #[serde(serialize_with = "entity_and_id")]
     neighbors_center: Option<(String, i64)>,
     labels: HashMap<String, String>,
 }
