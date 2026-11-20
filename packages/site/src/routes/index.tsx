@@ -499,7 +499,7 @@ function HomePage() {
         </div>
       </Section>
 
-      <Section id="questions" eyebrow="Questions" title={<>Common <span className="orbit-fade">questions</span></>}>
+      <Section id="common-questions" eyebrow="Questions" title={<>Common <span className="orbit-fade">questions</span></>}>
         <FeatureGrid columns={3}>
           {QUESTIONS.map(({ question, answer, link }) => (
             <Feature key={question} title={question}>
