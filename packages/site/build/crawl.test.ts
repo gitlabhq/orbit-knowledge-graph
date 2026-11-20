@@ -25,7 +25,7 @@ describe("crawl text", () => {
 
   test("example references sit in code spans, so GitLab does not link them", () => {
     for (const markdown of [home, next]) {
-      expect(markdown.replace(/```[\s\S]*?```/g, "").replace(/`[^`]*`/g, "")).not.toMatch(/(?:^|[\s(])[\w.-]*[!#&]\d+\b/m);
+      expect(markdown.replace(/```[\s\S]*?```/g, "").replace(/`[^`]*`/g, "")).not.toMatch(/(?<![\w&])(?:[\w.-]+(?:\/[\w.-]+)*)?[!#&]\d+\b/m);
     }
   });
 });
