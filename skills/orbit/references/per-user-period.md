@@ -21,6 +21,8 @@ Swap `AUTHORED` for `MERGED`, `REVIEWER` or `APPROVED` to rank mergers,
 reviewers or approvers. `AUTHORED` means the user wrote the MR and `MERGED`
 means the user merged it. `REVIEWER` means the user was assigned as a reviewer;
 the edge carries no review state. `APPROVED` means the user approved the MR.
+Leave out `mr.state = 'merged'` on `REVIEWER` and `APPROVED`: the `merged_at`
+window already implies a merged MR, and the edge can hold a stale MR state.
 
 ```gql orbit-query
 MATCH (u:User)-[:MERGED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 77960826})
@@ -32,7 +34,7 @@ LIMIT 100
 
 ```gql orbit-query
 MATCH (u:User)-[:REVIEWER]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 77960826})
-WHERE mr.state = 'merged' AND mr.merged_at >= '2026-07-01' AND mr.merged_at < '2026-10-01'
+WHERE mr.merged_at >= '2026-07-01' AND mr.merged_at < '2026-10-01'
 RETURN u.username, u.user_type, count(mr) AS reviewed_mrs
 ORDER BY reviewed_mrs DESC
 LIMIT 100
@@ -40,7 +42,7 @@ LIMIT 100
 
 ```gql orbit-query
 MATCH (u:User)-[:APPROVED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 77960826})
-WHERE mr.state = 'merged' AND mr.merged_at >= '2026-07-01' AND mr.merged_at < '2026-10-01'
+WHERE mr.merged_at >= '2026-07-01' AND mr.merged_at < '2026-10-01'
 RETURN u.username, u.user_type, count(mr) AS approved_mrs
 ORDER BY approved_mrs DESC
 LIMIT 100
@@ -49,7 +51,7 @@ LIMIT 100
 ## Bots
 
 Do not filter on any `User` property other than `u.username` in `WHERE` for
-`REVIEWER` or `APPROVED` yet, such as `u.user_type`, `u.state` or `u.is_admin`.
+`REVIEWER` or `APPROVED` yet, such as `u.user_type` or `u.state`.
 Those properties are copied onto the edge, and the filter gives wrong counts,
 positive or negated: `= 'human'` drops most rows and `NOT ... IN` lets bots
 through. `AUTHORED` and `MERGED` come from the MR's own author and merge-user
