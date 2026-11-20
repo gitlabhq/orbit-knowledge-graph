@@ -304,10 +304,26 @@ async fn reconcile_tombstones_old_path_after_move() {
     assert_active_id_count(&context, TRANSFERRED_PROJECT_ID, 1).await;
     assert_active_id_count(&context, CONTROL_PROJECT_ID, 1).await;
 
+    let rows_after_first_run = stored_row_counts(&context).await;
+
     reconcile_root(&context, &ontology, ROOT_PATH).await;
 
     assert_active_id_count(&context, TRANSFERRED_PROJECT_ID, 1).await;
     assert_active_id_count(&context, CONTROL_PROJECT_ID, 1).await;
+    assert_eq!(
+        stored_row_counts(&context).await,
+        rows_after_first_run,
+        "a second reconcile must not write tombstones for rows that are already deleted"
+    );
+}
+
+async fn stored_row_counts(context: &TestContext) -> Vec<usize> {
+    let mut counts = Vec::new();
+    for table in [t("gl_project"), t("gl_edge")] {
+        let result = context.query(&format!("SELECT 1 FROM {table}")).await;
+        counts.push(result.iter().map(|batch| batch.num_rows()).sum());
+    }
+    counts
 }
 
 const LARGE_ROOT_PATH: &str = "1/400/";
