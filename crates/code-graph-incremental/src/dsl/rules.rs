@@ -515,9 +515,6 @@ fn compile_rule(rule: &Rule, lang: &Lang) -> Result<Rewrite, LoadError> {
     Ok(rw)
 }
 
-/// A `@$X` text in a match pattern compares against the text `X` captured
-/// earlier in the same pattern, so `X` must be bound by then and the text
-/// cannot be piped.
 fn check_text_refs(
     pat: &Pat,
     bound: &mut HashSet<u16>,

@@ -55,15 +55,10 @@ stages:
       - match: '(from_instruction (image_spec name: $N) as: $A)'
         where: '$N == $A'
         replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)))'
-      # `FROM <stage>` names an earlier stage, so it is a call to that stage
-      # and not an image. A later stage is not matched: Docker reads it as an
-      # image.
       - match: '(from_instruction (image_spec name: $N !(image_tag) !(image_digest)) as: $A <</(from_instruction as: (image_alias @$N)))'
         replace: '(__from (__defname @$A) (__class) (__call (__callee @$N $N)))'
       - match: '(from_instruction (image_spec name: $N !(image_tag) !(image_digest)) <</(from_instruction as: (image_alias @$N)))'
         replace: '(__from (__defname @$ROOT|concat("#", "child_sym:image_spec", "sibling_index")|regex_replace("(:[^/:#@]*)?(@[^#]*)?#", "#")|prepend("stage:")) (__class) (__call (__callee @$N $N)))'
-      # A name with an expansion (`FROM ${BASE}`) is not an image name. The
-      # stage keeps the calls to the variables and no import.
       - match: '(from_instruction (image_spec name: (image_name $$$B $E:expansion $$$C) tag:? (image_tag $$$T)) as: $A)'
         replace: '(__from (__defname @$A) (__class) $E $$$C $$$T)'
       - match: '(from_instruction (image_spec name: (image_name $$$B $E:expansion $$$C) tag:? (image_tag $$$T)))'
@@ -102,8 +97,6 @@ stages:
       - match: '(__from $$$H)'
         replace: '(__def $$$H)'
 
-  # `COPY --from=<own stage>` is invalid Docker, so only a stage call that
-  # names another stage becomes a call.
   - name: copy-from-calls
     rules:
       - match: '(__stage_call $K:__callee ^/(__def $D:__defname))'

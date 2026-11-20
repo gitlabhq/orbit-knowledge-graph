@@ -29,7 +29,6 @@ tests:
       - { row: { image: "later" } }
       - { row: { image: "x" } }
 
-  # A later stage is called only by the incremental engine, so `early` is left out.
   - name: "stages call the earlier stages they build on"
     query: |
       MATCH (a:Definition)-[:CALLS]->(b:Definition)

@@ -1,5 +1,8 @@
 # yaml-language-server: $schema=schemas/schema-migrations.schema.json
 migrations:
+- version: 130
+  scope: code
+  note: "Dockerfile incremental engine: FROM <stage> and FROM ${VAR} no longer emit an image ImportedSymbol, the base variable is called once, and COPY --from the stage's own name is no longer a self call; the v2 engine drops the same image imports."
 - version: 129
   scope: none
   note: Ontology YAML comments removed; DDL and reindex output byte-identical.
