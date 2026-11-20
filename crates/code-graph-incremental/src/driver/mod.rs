@@ -64,7 +64,7 @@ pub fn index(
     state.configs = configs;
     insert(env, &mut state, &files, run, &mut report)?;
     unparsed(env, repository, &mut state, &report);
-    finish(env, &mut state, run)?;
+    finish(env, &mut state, run, &mut report)?;
     Ok((state, report))
 }
 
@@ -88,14 +88,14 @@ pub fn reindex(
     state.retain(|label| !gone.contains(label));
     state.configs.extend(configs);
     insert(env, &mut state, &files, run, &mut report)?;
-    finish(env, &mut state, run)?;
+    finish(env, &mut state, run, &mut report)?;
     Ok((state, report))
 }
 
-/// The phases before the first that needs more than its own tree, and the rest.
 /// A bound on reruns of a family phase; each round replaces the last one's edges.
 const MAX_FAMILY_ROUNDS: usize = 32;
 
+/// The phases before the first that needs more than its own tree, and the rest.
 fn split(env: &Env) -> (&[Phase], &[Phase]) {
     let phases = env.pipeline.phases.as_slice();
     let at = phases
@@ -222,7 +222,7 @@ fn canonical(env: &Env, mut tree: Tree<Mutable>) -> Tree<Compact> {
 
 /// Runs the phases after the per-file ones: project phases on the project
 /// tree, then tree phases over every tree with the whole graph.
-fn finish(env: &Env, state: &mut State, run: &Sentinel) -> Result<(), Error> {
+fn finish(env: &Env, state: &mut State, run: &Sentinel, report: &mut Report) -> Result<(), Error> {
     let (_, rest) = split(env);
     for phase in rest {
         run.check()?;
@@ -250,7 +250,15 @@ fn finish(env: &Env, state: &mut State, run: &Sentinel) -> Result<(), Error> {
                     let known: std::collections::HashSet<Edge> =
                         state.edges[..base].iter().copied().collect();
                     let mut seen = std::collections::HashSet::new();
-                    let found: Vec<Edge> = found?
+                    let found = match found {
+                        Ok(found) => found,
+                        Err(killed) if !killed.cancelled => {
+                            report.skipped.push(killed);
+                            break;
+                        }
+                        Err(killed) => return Err(killed.into()),
+                    };
+                    let found: Vec<Edge> = found
                         .into_iter()
                         .filter(|e| !known.contains(e) && seen.insert(*e))
                         .collect();

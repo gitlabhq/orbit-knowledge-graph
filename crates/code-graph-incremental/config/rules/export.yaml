@@ -4,6 +4,9 @@ data:
   imports: [__import, __import_type]
 
 define:
+  dangling(ROOT):
+    '_ when $ROOT | follow(imports)': none
+    '_': '$ROOT'
   measured(ROOT):
     '(__def #definition_span)': '$ROOT'
     '(__def $N:__defname)': '$N'
@@ -44,7 +47,7 @@ export:
         - {"table": "gl_edge", "expect": {"target_id": "gl_definition"}, "columns": {"source_id": "$ROOT", "source_kind": "\"Definition\"", "relationship_kind": "\"CALLS\"", "target_id": "$ROOT | out(\"Calls\")", "target_kind": "\"Definition\"", "traversal_path": "\"\""}}
         - {"table": "gl_edge", "expect": {"target_id": "gl_definition"}, "columns": {"source_id": "$ROOT", "source_kind": "\"Definition\"", "relationship_kind": "\"DEFINES\"", "target_id": "$ROOT | out(\"Defines\")", "target_kind": "\"Definition\"", "traversal_path": "\"\""}}
         - {"table": "gl_edge", "expect": {"target_id": "gl_definition"}, "columns": {"source_id": "$ROOT", "source_kind": "\"Definition\"", "relationship_kind": "\"EXTENDS\"", "target_id": "$ROOT | out(\"Extends\")", "target_kind": "\"Definition\"", "traversal_path": "\"\""}}
-        - {"table": "gl_edge", "expect": {"target_id": "gl_imported_symbol"}, "columns": {"source_id": "$ROOT", "source_kind": "\"Definition\"", "relationship_kind": "\"CALLS\"", "target_id": "$ROOT | out_unresolved(\"Imports\")", "target_kind": "\"ImportedSymbol\"", "traversal_path": "\"\""}}
+        - {"table": "gl_edge", "expect": {"target_id": "gl_imported_symbol"}, "columns": {"source_id": "$ROOT", "source_kind": "\"Definition\"", "relationship_kind": "\"CALLS\"", "target_id": "$ROOT | out_unresolved(\"Imports\") | dangling", "target_kind": "\"ImportedSymbol\"", "traversal_path": "\"\""}}
     - '(__source_file)':
         - {"table": "gl_edge", "expect": {"target_id": "gl_definition"}, "columns": {"source_id": "$ROOT", "source_kind": "\"File\"", "relationship_kind": "\"CALLS\"", "target_id": "$ROOT | out(\"Calls\")", "target_kind": "\"Definition\"", "traversal_path": "\"\""}}
         - {"table": "gl_edge", "expect": {"target_id": "gl_file"}, "columns": {"source_id": "$ROOT", "source_kind": "\"File\"", "relationship_kind": "\"IMPORTS\"", "target_id": "$ROOT | out(\"Links\")", "target_kind": "\"File\"", "traversal_path": "\"\""}}

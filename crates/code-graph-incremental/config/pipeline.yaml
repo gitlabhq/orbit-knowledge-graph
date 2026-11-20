@@ -13,6 +13,7 @@ phases:
     over: family
     does: edges
     until: stable
+    budget: { scope: cross_file_resolve_ms }
     bind: { core.read: resolved, core.supertypes: supertypes, core.callable_kinds: callable_kinds, core.value_kinds: value_kinds, core.type_kinds: type_kinds }
   - { name: display, over: tree, does: tags }
   - { name: export, over: graph, does: rows }
