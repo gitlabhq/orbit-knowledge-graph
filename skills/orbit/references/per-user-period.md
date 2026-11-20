@@ -37,7 +37,7 @@ MATCH (u:User)-[:REVIEWER]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 779
 WHERE mr.merged_at >= '2026-07-01' AND mr.merged_at < '2026-10-01'
 RETURN u.username, u.user_type, count(mr) AS reviewed_mrs
 ORDER BY reviewed_mrs DESC
-LIMIT 100
+LIMIT 1000
 ```
 
 ```gql orbit-query
@@ -45,7 +45,7 @@ MATCH (u:User)-[:APPROVED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 779
 WHERE mr.merged_at >= '2026-07-01' AND mr.merged_at < '2026-10-01'
 RETURN u.username, u.user_type, count(mr) AS approved_mrs
 ORDER BY approved_mrs DESC
-LIMIT 100
+LIMIT 1000
 ```
 
 ## Bots
@@ -59,8 +59,6 @@ columns, so a `WHERE u.user_type = 'human'` filter is exact there.
 
 For `REVIEWER` and `APPROVED`, return `u.user_type` and drop bots (any value
 other than `human`, such as `project_bot` or `duo_code_review_bot`) after the
-query. Bot rows use up `LIMIT` slots, so ask for more rows than the answer
-needs, then rank after dropping bots. If fewer humans remain than you need and
-`has_more` is true, raise `LIMIT` (max 1000). Once
-gitlab-org/orbit/knowledge-graph#1559 is fixed, switch to
-`WHERE u.user_type = 'human'`.
+query. Bot rows use up `LIMIT` slots, so the queries ask for the maximum, 1000 rows,
+and you rank after dropping bots. Once gitlab-org/orbit/knowledge-graph#1559 is
+fixed, switch to `WHERE u.user_type = 'human'`.
