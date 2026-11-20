@@ -263,7 +263,7 @@ impl Tables {
                 table.specs = schema.clone();
             }
         }
-        let phase = env.pipeline.phase("export");
+        let phase = env.pipeline.phase_over("graph");
         let index = |name: &str| {
             tables
                 .iter()
@@ -339,7 +339,7 @@ pub fn export(
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
     envelope.check(tables)?;
     run.check()?;
-    let phase = env.pipeline.phase("export");
+    let phase = env.pipeline.phase_over("graph");
     let project = state.trees.len() as u32;
     state.trees.push(state.project_compact(env));
     let rows = crate::engine::run_graph(phase, &state.trees, project, &state.edges, env, run);

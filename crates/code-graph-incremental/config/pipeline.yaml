@@ -1,13 +1,13 @@
 scopes: [__def]
 
 phases:
-  - { name: canonicalize, over: tree, does: rewrite, budget: { label: rewrite, tree: file_rewrite_ms } }
-  - { name: normalize, over: tree, does: rewrite, budget: { label: rewrite, tree: file_rewrite_ms } }
+  - { name: canonicalize, over: tree, does: rewrite, budget: { label: rewrite, tree: file_rewrite_ms, skip: skip_timeout_walk } }
+  - { name: normalize, over: tree, does: rewrite, budget: { label: rewrite, tree: file_rewrite_ms, skip: skip_timeout_walk } }
   - name: link
     over: tree
     does: edges
     bind: { core.read: ssa.flow, core.supertypes: supertypes, core.callable_kinds: callable_kinds, core.value_kinds: value_kinds, core.type_kinds: type_kinds, ssa.value_of: core.value_of, ssa.valued: core.valued, ssa.source: source }
-    budget: { tree: file_link_ms }
+    budget: { tree: file_link_ms, skip: skip_timeout_ssa }
   - { name: project, over: project, does: rewrite }
   - name: resolve
     over: family

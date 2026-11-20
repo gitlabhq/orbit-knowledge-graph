@@ -43,6 +43,8 @@ pub struct BudgetSpec {
     pub label: Option<String>,
     pub tree: Option<String>,
     pub scope: Option<String>,
+    /// The reason a file this phase stops is reported with.
+    pub skip: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -319,11 +321,20 @@ impl Pipeline {
         self.settings.get(rules)?.get(name)
     }
 
-    pub fn phase(&self, name: &str) -> &Phase {
+    /// The phase that runs over `scope`: the project tree, or the graph.
+    pub fn phase_over(&self, scope: &str) -> &Phase {
         self.phases
             .iter()
-            .find(|p| p.name == name)
-            .unwrap_or_else(|| panic!("no phase {name} in pipeline.yaml"))
+            .find(|p| p.scope == scope)
+            .unwrap_or_else(|| panic!("no phase over {scope} in pipeline.yaml"))
+    }
+
+    /// The skip reason a file gets when the phase with this budget label stops it.
+    pub fn skip_reason(&self, label: &str) -> Option<&str> {
+        self.phases
+            .iter()
+            .find(|p| p.label == label)
+            .and_then(|p| p.budget.skip.as_deref())
     }
 }
 

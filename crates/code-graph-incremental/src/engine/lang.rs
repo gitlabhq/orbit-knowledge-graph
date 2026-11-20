@@ -8,31 +8,7 @@ use serde_json::{Map, Value};
 
 use crate::error::LoadError;
 
-const LIBS: &[(&str, &str)] = &[
-    ("c_family", include_str!("../../config/lib/c_family.yaml")),
-    ("canonical", include_str!("../../config/lib/canonical.yaml")),
-    ("display", include_str!("../../config/lib/display.yaml")),
-    ("roots", include_str!("../../config/lib/roots.yaml")),
-    ("shapes", include_str!("../../config/lib/shapes.yaml")),
-    (
-        "statements",
-        include_str!("../../config/lib/statements.yaml"),
-    ),
-];
-
-const RULES: &[(&str, &str)] = &[
-    ("data", include_str!("../../config/rules/data.yaml")),
-    ("define", include_str!("../../config/rules/define.yaml")),
-    (
-        "normalize",
-        include_str!("../../config/rules/normalize.yaml"),
-    ),
-    ("link", include_str!("../../config/rules/link.yaml")),
-    ("project", include_str!("../../config/rules/project.yaml")),
-    ("resolve", include_str!("../../config/rules/resolve.yaml")),
-    ("display", include_str!("../../config/rules/display.yaml")),
-    ("export", include_str!("../../config/rules/export.yaml")),
-];
+include!(concat!(env!("OUT_DIR"), "/rule_files.rs"));
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DataSpec {

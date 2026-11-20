@@ -368,10 +368,12 @@ fn unparsed(env: &Env, repository: &orbit_utils::vfs::Vfs<()>, state: &mut State
             _ => match skipped.get(path) {
                 Some(&"tree-sitter") => "skip_timeout_parse".into(),
                 Some(&"stack") => "skip_stack_limit".into(),
-                Some(&"rewrite") => "skip_timeout_walk".into(),
-                Some(&"link") => "skip_timeout_ssa".into(),
                 Some(&"edges") => "skip_too_many_edges".into(),
-                Some(_) => "skip_timeout_sentinel".into(),
+                Some(label) => env
+                    .pipeline
+                    .skip_reason(label)
+                    .unwrap_or("skip_timeout_sentinel")
+                    .into(),
                 None if report.unread_files.iter().any(|p| p == path) => "fault_file_read".into(),
                 None => String::new(),
             },

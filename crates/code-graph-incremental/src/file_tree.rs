@@ -65,7 +65,7 @@ impl<'a> ProjectTree<'a> {
         files: Option<&'a [SourceFile]>,
     ) -> WalkResult {
         let mut pt = Self::new(&env.lang, Some(env), &env.project, paths, files);
-        let phase = env.pipeline.phase("project");
+        let phase = env.pipeline.phase_over("project");
         let tag_keys = env
             .project
             .rules
@@ -167,7 +167,7 @@ impl<'a> ProjectTree<'a> {
         let Some(env) = self.env else {
             return;
         };
-        let phase = env.pipeline.phase("project");
+        let phase = env.pipeline.phase_over("project");
         let run = crate::sentinel::Sentinel::disabled();
         for &rules in &env.project.rules {
             let _ = crate::engine::rewrite_tree_with(phase, &mut self.tree, env, rules, &run);
