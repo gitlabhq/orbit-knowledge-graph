@@ -6,12 +6,12 @@
 
 Pattern  =  { SOI ~ SP? ~ Element ~ SP? ~ EOI }
 Pipeline =  { SOI ~ TfChain ~ EOI }
-Element  = _{ Node | Variadic | CapRef | Spread | Capture | Negation | Descendant | Preceding }
+Element  = _{ Node | Variadic | CapRef | Spread | Capture | Negation | Descendant | Preceding | Enclosing }
 
 // ── S-expression node ──────────────────────────────────────────────
 
 Node     =  { "(" ~ SP? ~ (Ident | Quoted) ~ Opt? ~ (SP? ~ Content)* ~ SP? ~ ")" }
-Content  = _{ Quoted | TextField | FieldChild | Negation | Descendant | Preceding | Element }
+Content  = _{ Quoted | TextField | FieldChild | Negation | Descendant | Preceding | Enclosing | Element }
 
 FieldChild = { Ident ~ ":" ~ Opt? ~ SP? ~ Element }
 
@@ -31,6 +31,7 @@ Spread     = { "$" ~ Name ~ SP? ~ "{" ~ (SP? ~ Content)* ~ SP? ~ "}" }
 Negation   = { "!" ~ Element }
 Descendant = { "**/" ~ Element }
 Preceding  = { "<</" ~ Element }
+Enclosing  = { "^/" ~ Element }
 Opt        = { "?" }
 
 Arrow     = @{ "=>" | "->" }

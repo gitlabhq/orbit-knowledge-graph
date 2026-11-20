@@ -207,7 +207,7 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
                 materialize(t, fill, kid, copy, pl);
             }
         }
-        Pat::Not(_) | Pat::Desc(_) | Pat::Preceding(_) => {}
+        Pat::Not(_) | Pat::Desc(_) | Pat::Preceding(_) | Pat::Enclosing(_) => {}
     }
 }
 
@@ -245,7 +245,9 @@ pub fn apply_stage(
         return apply_rewrites(t, lang, &stage.rules, sentinels);
     }
     let max_passes = t.root().size() as usize;
-    for pass in 1.. {
+    let mut pass = 0;
+    loop {
+        pass += 1;
         let replaced = std::cell::Cell::new(false);
         apply_rewrites_inner(
             t,
@@ -270,7 +272,6 @@ pub fn apply_stage(
         }
         sentinels.iter().try_for_each(|s| s.check())?;
     }
-    unreachable!("the pass counter is unbounded")
 }
 
 pub fn apply_rewrites_with_edges(

@@ -79,18 +79,22 @@ stages:
       - match: '(from_instruction (image_spec name: (image_name $$$B $E:expansion $$$C) tag:? (image_tag $$$T)))'
         replace: '(__from (__defname @$ROOT|concat("#", "child_sym:image_spec", "sibling_index")|regex_replace("(:[^/:#@]*)?(@[^#]*)?#", "#")|prepend("stage:")) (__class) $E $$$C $$$T)'
       - match: '(from_instruction (image_spec name: $N tag: (image_tag $$$T)) as: $A)'
-        replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)) $$$T)'
-      - match: '(from_instruction (image_spec name: $N) as: $A)'
+        replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) $$$T)'
+      - match: '(from_instruction (image_spec name: $N !(image_digest)) as: $A)'
         replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)))'
+      - match: '(from_instruction (image_spec name: $N) as: $A)'
+        replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)))'
       # An unnamed stage is `stage:<image>#<index>`, e.g. `stage:node#2`. The
       # regex strips the tag and digest from the image. The index is the FROM's
       # position among the file's top-level nodes, so comments and parser
       # directives count and it is not Docker's stage number. It keeps two
       # stages from one image apart.
       - match: '(from_instruction (image_spec name: $N tag: (image_tag $$$T)))'
-        replace: '(__from (__defname @$ROOT|concat("#", "child_sym:image_spec", "sibling_index")|regex_replace("(:[^/:#@]*)?(@[^#]*)?#", "#")|prepend("stage:")) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)) $$$T)'
-      - match: '(from_instruction (image_spec name: $N))'
+        replace: '(__from (__defname @$ROOT|concat("#", "child_sym:image_spec", "sibling_index")|regex_replace("(:[^/:#@]*)?(@[^#]*)?#", "#")|prepend("stage:")) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) $$$T)'
+      - match: '(from_instruction (image_spec name: $N !(image_digest)))'
         replace: '(__from (__defname @$ROOT|concat("#", "child_sym:image_spec", "sibling_index")|regex_replace("(:[^/:#@]*)?(@[^#]*)?#", "#")|prepend("stage:")) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)))'
+      - match: '(from_instruction (image_spec name: $N))'
+        replace: '(__from (__defname @$ROOT|concat("#", "child_sym:image_spec", "sibling_index")|regex_replace("(:[^/:#@]*)?(@[^#]*)?#", "#")|prepend("stage:")) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)))'
 
   - name: copy-from
     rules:
@@ -115,23 +119,13 @@ stages:
       - match: '(__from $$$H)'
         replace: '(__def $$$H)'
 
-  # `COPY --from=<own stage>` is invalid Docker. Each pass settles the first
-  # stage call of every stage: it is dropped when it names its own stage and
-  # becomes a call otherwise.
-  - name: drop-self-copies
-    repeat: true
-    rules:
-      - match: '(__def $N:__defname $$$MID (__stage_call $K:__callee) $$$POST)'
-        where: '$N == $K'
-        replace: '(__def $N $$$MID $$$POST)'
-      - match: '(__def $N:__defname $$$MID (__stage_call $K:__callee) $$$POST)'
-        where: '$N != $K'
-        replace: '(__def $N $$$MID (__call $K) $$$POST)'
-
+  # `COPY --from=<own stage>` is invalid Docker. A stage call that names the
+  # stage around it is left unconverted and dropped with the other `__` nodes.
   - name: copy-from-calls
     rules:
-      - match: '(__stage_call $$$X)'
-        replace: '(__call $$$X)'
+      - match: '(__stage_call $K:__callee ^/(__def $D:__defname))'
+        where: '$K != $D'
+        replace: '(__call $K)'
 
   - name: tag-defs
     rules:
