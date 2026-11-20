@@ -182,6 +182,7 @@ fn check(
     skipped: &[SkippedFile],
     limited: &[SkippedFile],
 ) -> (State, Vec<Failure>) {
+    let graph = graph.then(Display).expect("display rules compile");
     let report = &graph.context().report;
     assert_files("skipped", &report.skipped, skipped);
     assert_files("limited", &report.limited, limited);
@@ -192,8 +193,6 @@ fn check(
     ]);
     let db = create_test_db().expect("in-memory DuckDB");
     let displayed = graph
-        .then(Display)
-        .expect("display rules compile")
         .then(Export { ontology, envelope })
         .expect("export")
         .then(Emit(|table: &str, batch| db.insert_batch(table, &batch)))
