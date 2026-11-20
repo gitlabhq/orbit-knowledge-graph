@@ -50,45 +50,65 @@ Prerequisites:
 
 To list the images for the GitLab Orbit chart:
 
-1. Pull the chart for the version that you plan to install:
+1. Pull the chart for the version that you plan to install.
+   Replace `<orbit_chart_version>` with the GitLab Orbit chart version that you install:
 
    ```shell
-   helm pull oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit --version <chart_version>
+   helm pull oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit --version <orbit_chart_version>
    ```
 
 1. Render the chart with your values and print the `image` lines:
 
    ```shell
-   helm template orbit orbit-<chart_version>.tgz -f orbit-values.yaml | grep -E '^\s+image:'
+   helm template orbit orbit-<orbit_chart_version>.tgz -f orbit-values.yaml | grep -E '^\s+image:'
    ```
 
    Add the same `--set` flags that you use to install.
    The chart renders extra images only when you turn on the features that use them.
    For example, `dashboards.enabled: true` adds the image from `dashboards.applyImage`.
 
-1. Repeat the render for the Siphon chart, with its own values file and the `global.gitlabVersion` that you plan to use:
+1. Pull and render the Siphon chart, with its own values file and the `global.gitlabVersion` that you plan to use.
+   The Siphon chart is published to an HTTP Helm repository, not as an OCI chart.
+   Replace `<siphon_chart_version>` with the Siphon chart version that you install:
 
    ```shell
-   helm template siphon siphon-<chart_version>.tgz -f siphon-values.yaml | grep -E '^\s+(image|reference):'
+   helm repo add siphon https://gitlab.com/api/v4/projects/76780115/packages/helm/stable
+   helm repo update
+   helm pull siphon/siphon --version <siphon_chart_version>
+   helm template siphon siphon-<siphon_chart_version>.tgz -f siphon-values.yaml | grep -E '^\s+(image|reference):'
    ```
 
    `reference:` lines are the `gitlab-siphon-tables` image, which Siphon mounts as an image volume.
    Its tag derives from `global.gitlabVersion`.
+   With `splitTables.volumeMode: initCopy`, the tables image is a bare argument of the `crane` init container, so the `grep` does not list it.
+   Build its reference from `splitTables.image.registry`, `splitTables.image.repository`, and `splitTables.image.tag`, or take a deployment's `split.tablesImage` if you set it.
+   An empty `splitTables.image.tag` resolves to `v` followed by `global.gitlabVersion`, for example `v19.5.0`.
 
 1. Render the NATS chart, and the chart of any object storage service that you deploy, the same way.
 
-Replace `<chart_version>` with the chart version that you install.
-To add the Siphon chart repository, see [Set up data replication](data-replication.md).
+For the Siphon chart values, see [Set up data replication](data-replication.md).
 
 ### Mirror the images and charts
 
 Copy every image and chart from the lists to your registry.
-To copy a chart together with its signature, copy it with every referenced artifact and keep its digest:
+Replace `<mirror>` with the host and port of your registry.
+To copy a chart together with its signature, copy it with every referenced artifact and keep its digest.
+Get `<chart_digest>` on the connected host.
+`skopeo inspect --format` refuses a Helm chart, so hash the manifest instead.
+The output has no `sha256:` prefix:
+
+```shell
+skopeo inspect --raw \
+  docker://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit:<orbit_chart_version> \
+  | sha256sum | cut -d' ' -f1
+```
+
+Then copy the chart and its signature:
 
 ```shell
 skopeo copy --all --preserve-digests \
-  docker://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit:<chart_version> \
-  docker://<mirror>/gitlab-org/orbit/orbit-helm-charts/orbit:<chart_version>
+  docker://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit:<orbit_chart_version> \
+  docker://<mirror>/gitlab-org/orbit/orbit-helm-charts/orbit:<orbit_chart_version>
 
 skopeo copy --all --preserve-digests \
   docker://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit:sha256-<chart_digest> \
@@ -96,7 +116,6 @@ skopeo copy --all --preserve-digests \
 ```
 
 The GitLab container registry has no OCI referrers API, so the registry keeps the cosign signature of a chart with digest `D` under the tag `sha256-<D>`.
-Use the digest without the `sha256:` prefix.
 A mirror that skips that tag cannot verify the chart.
 
 Then point the charts at the mirror:
@@ -105,6 +124,11 @@ Then point the charts at the mirror:
   If you turn on dashboards, set `dashboards.applyImage` too.
 - In `siphon-values.yaml`, set `image.repository` for the Siphon image.
   Set `splitTables.image.registry` and `splitTables.image.repository` for the `gitlab-siphon-tables` image.
+  Set `waitForMigrations.image.repository` for the `registry.gitlab.com/gitlab-org/build/cng/kubectl` image.
+  The `waitForMigrations` check is on by default in split mode.
+  If you turn on dashboards with `dashboards.source: image`, set `dashboards.image.repository` for the same `kubectl` image.
+  The default `bundled` source runs no `kubectl` job.
+  The two settings default to different tags, so mirror each tag that the render lists.
 
 With `splitTables.volumeMode: initCopy`, two init containers fetch the tables image, and their own images also need a mirror:
 
@@ -114,17 +138,29 @@ With `splitTables.volumeMode: initCopy`, two init containers fetch the tables im
   For credentials, set `splitTables.initCopy.fetch.dockerConfigSecretName`.
 - The `crane` container cannot trust a private certificate authority.
   If your mirror uses a certificate from a private certificate authority, use the default image volume mode instead.
+  If the cluster has no ImageVolume support, set `splitTables.volumeMode: toolbox`.
+  An init container then copies the tables out of the `gitlab-rails-ee` image, and the node pulls that image, so `imagePullSecrets` and node registry mirrors apply.
+  Mirror `registry.gitlab.com/gitlab-org/build/cng/gitlab-rails-ee` in place of the tables image.
+  Its tag derives from `global.gitlabVersion`.
+  To point at the mirror, set `splitTables.toolbox.image.repository`.
 
 ### Pull the chart from the mirror
 
 Pull the chart over OCI from the mirror:
 
 ```shell
-helm pull oci://<mirror>/gitlab-org/orbit/orbit-helm-charts/orbit --version <chart_version>
+helm pull oci://<mirror>/gitlab-org/orbit/orbit-helm-charts/orbit --version <orbit_chart_version>
 ```
 
 Add `--plain-http` when the mirror serves HTTP.
 The pulled chart has the same digest as the chart in the origin registry.
+
+The Siphon chart is not an OCI chart, so it has no registry copy.
+Carry the `siphon-<siphon_chart_version>.tgz` file that you pulled on the connected host into the offline network, then install from the file:
+
+```shell
+helm upgrade --install siphon ./siphon-<siphon_chart_version>.tgz --namespace siphon --values siphon-values.yaml
+```
 
 ### Verify the chart signature without internet access
 
@@ -151,10 +187,10 @@ To verify the chart:
 
    ```shell
    cosign verify \
-     --certificate-identity "https://gitlab.com/gitlab-org/orbit/orbit-helm-charts//.gitlab-ci.yml@refs/tags/v<chart_version>" \
+     --certificate-identity "https://gitlab.com/gitlab-org/orbit/orbit-helm-charts//.gitlab-ci.yml@refs/tags/v<orbit_chart_version>" \
      --certificate-oidc-issuer https://gitlab.com \
      --trusted-root trusted_root.json \
-     <mirror>/gitlab-org/orbit/orbit-helm-charts/orbit:<chart_version>
+     <mirror>/gitlab-org/orbit/orbit-helm-charts/orbit:<orbit_chart_version>
    ```
 
 The command exits with `0` when the signature is valid.
@@ -196,7 +232,7 @@ It does not include hosts that GitLab itself connects to, or the registries of t
 
 | Host | Used for | Setting | Offline behavior |
 |------|----------|---------|------------------|
-| `registry.gitlab.com` | Images and charts, at install time | `image.repository`, `dashboards.applyImage`, `splitTables.image.registry` | Use a mirror. |
+| `registry.gitlab.com` | Images and charts, at install time | `image.repository`, `dashboards.applyImage`, `splitTables.image.registry`, `waitForMigrations.image.repository`, `dashboards.image.repository` (with `dashboards.source: image`) | Use a mirror. |
 | `gcr.io`, `docker.io` | The `crane` and `busybox` images, only with `splitTables.volumeMode: initCopy` | `splitTables.initCopy.fetch.image.repository`, `splitTables.initCopy.extract.image.repository` | Use a mirror. |
 | `tuf-repo-cdn.sigstore.dev` | `cosign verify`, at install time | `--trusted-root` | Use a local trust file. |
 | `customers.gitlab.com` | Credits check on each query, from the webserver | `billing.quota.enabled`, `billing.quota.customers_dot_url` | Called only with an online cloud license. If the call fails, queries return `402`. |
@@ -231,7 +267,7 @@ To run the local graph offline:
    Each `orbit` command otherwise tries to reach `events.gitlab.net`.
    `GLAB_SEND_TELEMETRY=false` does not stop it.
 
-The `index`, `list`, `workspace sql`, and `grep` commands then run with no download and no telemetry connections.
+The `workspace index`, `workspace list`, `workspace sql`, and `grep` commands then run with no download and no telemetry connections.
 For the persisted setting, see [Settings, storage, and telemetry](../cli.md#settings-storage-and-telemetry).
 
 ## Related topics
