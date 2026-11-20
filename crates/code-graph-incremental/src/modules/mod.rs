@@ -14,17 +14,6 @@ fn node<'t, M: Module, S: Store>(cx: &Cx<'_, 't, M, S>, args: &[Vals], at: usize
     cx.jump(args[at][0].loc().expect("this argument is a node"))
 }
 
-fn arg<'t, M: Module, S: Store>(
-    cx: &Cx<'_, 't, M, S>,
-    args: &[Vals],
-    at: usize,
-) -> Option<Cursor<'t, S>> {
-    args[at]
-        .first()
-        .and_then(|v| v.loc())
-        .map(|loc| cx.jump(loc))
-}
-
 fn top_level<S: Store>(root: Cursor<'_, S>) -> impl Iterator<Item = Cursor<'_, S>> {
     std::iter::once(root).chain(
         root.children()

@@ -10,13 +10,6 @@ pub(super) fn producer<S: Store>(binding: Cursor<'_, S>) -> u32 {
     member_call.map_or(binding.index(), |c| c.index())
 }
 
-pub(super) fn declared_type<S: Store>(v: Cursor<'_, S>) -> Option<Cursor<'_, S>> {
-    match v.is(C::Binding) {
-        true => v.typed(),
-        false => v.child(C::Callee).filter(|_| v.is(C::Call)),
-    }
-}
-
 impl<'t, S: Store> Cx<'_, 't, Core, S> {
     fn value(&mut self, t: Cursor<'t, S>) -> Vals {
         if C::try_from_u16(t.kind()).is_some_and(C::is_opaque_value) {
@@ -76,7 +69,7 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
             return Vals::new();
         };
         let mut found = self.read(receiver);
-        found.retain(|v| matches!(self.view(*v), Some(Ref::Call(_))));
+        found.retain(|v| matches!(self.view(*v), Some(Ref::Call)));
         found
     }
 }

@@ -7,8 +7,8 @@ use crate::canonical::Canonical as C;
 use crate::engine::{
     Cursor, Cx, Derive, Function, IndexDecl, KeyPart, Loc, Module, Store, Val, Vals, of, one,
 };
-use crate::modules::{arg, function, node};
-use crate::tree::{Compact, Mutable, Role, Tree};
+use crate::modules::{function, node};
+use crate::tree::{Compact, Mutable, Tree};
 
 pub struct Core;
 
@@ -24,7 +24,7 @@ enum Ref {
     Def(Loc),
     Import,
     Type(Loc),
-    Call(Loc),
+    Call,
 }
 
 fn defs_by_name(
@@ -43,24 +43,6 @@ fn defs_by_name(
         }
     }
     Box::new(defs)
-}
-
-fn role_code(lang: &crate::intern::Lang, role: Role) -> u32 {
-    lang.syms.intern(match role {
-        Role::Value => "value",
-        Role::Callable => "callable",
-        Role::Type => "type",
-    })
-}
-
-fn site_role<S: Store>(site: Cursor<'_, S>) -> Role {
-    match site.is(C::Callee) || site.is(C::Call) {
-        true => site.role(),
-        false => site
-            .parent()
-            .filter(|p| p.is(C::Callee))
-            .map_or(Role::Value, Cursor::role),
-    }
 }
 
 fn sym<S: Store>(c: Cursor<'_, S>) -> u32 {
@@ -88,7 +70,7 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
             Val::Node(loc) => Some(match self.jump(loc) {
                 n if n.is(C::Def) => Ref::Def(loc),
                 n if n.is(C::Name) => Ref::Import,
-                _ => Ref::Call(loc),
+                _ => Ref::Call,
             }),
             _ => None,
         }
@@ -104,13 +86,6 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
 
     fn ivar(&mut self, c: Cursor<'_, S>) -> Vals {
         self.call1(crate::fn_id!("core", "ivar"), Val::Node(c.into()))
-    }
-
-    fn keep(&self, val: Val, pred: impl FnOnce(Ref, &Self) -> bool) -> Vals {
-        match self.view(val) {
-            Some(r) if pred(r, self) => one(val),
-            _ => Vals::new(),
-        }
     }
 
     fn enclosing_class(&mut self) -> Option<Cursor<'t, S>> {
@@ -156,7 +131,7 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
             return false;
         }
         let found = self.read(root);
-        let named = |v: &Val| !matches!(self.view(*v), Some(Ref::Call(_)) | None);
+        let named = |v: &Val| !matches!(self.view(*v), Some(Ref::Call) | None);
         !found.iter().all(named)
     }
 
@@ -198,9 +173,6 @@ static FUNCTIONS: &[Function<Core>] = &[
         let def = cx.enclosing_def();
         def.map_or_else(Vals::new, |d| one(cx.node(d)))
     }),
-    function!(Pure, "class", [one], |cx, a| of(
-        arg(cx, a, 0).and_then(class_of)
-    )),
     function!(Flow, "name", [one], @uses ["core"."read"], |cx, a| {
         let mut found = cx.read(node(cx, a, 0));
         found.retain(|v| *v != Val::Opaque);
@@ -223,14 +195,6 @@ static FUNCTIONS: &[Function<Core>] = &[
             None => Vals::new(),
         }
     ),
-    function!(Pure, "role", [one], |cx, a| {
-        let role = role_code(cx.lang(), site_role(node(cx, a, 0)));
-        one(Val::Sym(role))
-    }),
-    function!(Pure, "known", [set], |_, a| match a[0].is_empty() {
-        true => one(Val::Opaque),
-        false => a[0].clone(),
-    }),
     function!(Flow, "lub", [set], @uses ["core"."supertypes"], |cx, a| {
         match a[0].contains(&Val::Opaque) {
             true => Vals::new(),
@@ -243,29 +207,6 @@ static FUNCTIONS: &[Function<Core>] = &[
             None => Vals::new(),
         }
     }),
-    function!(Pure, "sourced", [one, set, one], |cx, a| {
-        let source = arg(cx, a, 0)
-            .and_then(|name| name.parent())
-            .and_then(|import| import.child_sym(C::SourcePath));
-        let listed = source.is_some_and(|s| a[1].iter().any(|&v| cx.text(v) == Some(s)));
-        match listed == crate::engine::truthy(&a[2]) {
-            true => a[0].clone(),
-            false => Vals::new(),
-        }
-    }),
-    function!(Pure, "type_node", [one], |cx, a| match cx.view(a[0][0]) {
-        Some(Ref::Call(n)) => of(values::declared_type(cx.jump(n))),
-        _ => Vals::new(),
-    }),
-    function!(Pure, "initialized", [one], |cx, a| {
-        cx.keep(a[0][0], |r, cx| {
-        matches!(r, Ref::Def(n) if cx.jump(n).initializer().and_then(Cursor::rhs_callee).is_some())
-    })
-    }),
-    function!(Pure, "typed_calls", [one], |cx, a| cx
-        .keep(a[0][0], |r, cx| {
-            matches!(r, Ref::Call(n) if values::declared_type(cx.jump(n)).is_some())
-        })),
     function!(Flow, "value_of", [one], @uses ["core"."read", "core"."ivar"], |cx, a| {
         cx.value_of(node(cx, a, 0))
     }),

@@ -1,4 +1,29 @@
 define:
+  class(ROOT): 'is_class($ROOT) or first(ancestors($ROOT), a => is_class(a))'
+  type_node(ROOT):
+    '_ when instances($ROOT)': none
+    '(__def)': none
+    '(__name)': none
+    '(__binding)': 'typed($ROOT)'
+    '(__call $K:__callee)': '$K'
+  typed_calls(ROOT):
+    '_ when type_node($ROOT)': 'plain($ROOT)'
+  initialized(ROOT):
+    '(__def $B:(__binding "/^$/")) when rhs_callee($B)': 'plain($ROOT)'
+  rhs_callee(ROOT):
+    '(_ $R:__rhs)': 'value_call($R) | named_callee'
+  named_callee(ROOT):
+    '(__call $K:(__callee "/./"))': '$K'
+  sourced(ROOT, list, listed):
+    '$I:(_ $ROOT) when listed': 'listed_import($ROOT, $I, list)'
+    '$I:(_ $ROOT)': 'unlisted_import($ROOT, $I, list)'
+    '_ when listed': none
+    '_': '$ROOT'
+  listed_import(ROOT, import, list):
+    '_ when in(import | child_sym("__source_path"), list)': '$ROOT'
+  unlisted_import(ROOT, import, list):
+    '_ when in(import | child_sym("__source_path"), list)': none
+    '_': '$ROOT'
   meaning(ROOT, site): 'member_for($ROOT, site) | stored_value'
   stored_value(ROOT):
     '_ when instances($ROOT)': '$ROOT'
@@ -221,9 +246,9 @@ define:
     '(_ $$$A:__ssa_arm)': 'lub($A | tail | arm_type)'
   arm_type(ROOT):
     '(__ssa_return)': 'none'
-    '(__ssa_branch $$$A:__ssa_arm) when $A': 'known($ROOT | branch_type)'
+    '(__ssa_branch $$$A:__ssa_arm) when $A': '$ROOT | branch_type or opaque'
     '(__ssa_branch)': 'none'
-    '(_ $K:__callee)': 'known($K | type)'
+    '(_ $K:__callee)': '$K | type or opaque'
     '_': 'opaque'
 
   visible(name, at): 'declared_in(name, at) or imported_name(name, at)'
