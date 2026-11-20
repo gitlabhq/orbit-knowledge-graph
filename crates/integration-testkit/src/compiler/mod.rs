@@ -1,4 +1,5 @@
 mod aliases;
+mod backend;
 mod clickhouse;
 mod explain;
 mod operator;
@@ -11,13 +12,14 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use compiler::config::{self, CompilerCtx};
+use compiler::config::CompilerCtx;
 use compiler::passes::{frontend, normalize, plan};
 use duckdb_client::{DuckDbClient, OpenMode};
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
 use serde::Deserialize;
 
 use crate::query_scenario::{SecurityOverride, rejection_reason, shown_private_detail};
+use backend::Backend;
 
 #[derive(Deserialize)]
 #[serde(try_from = "RawScenario")]
@@ -28,8 +30,8 @@ struct Scenario {
     query: BTreeMap<String, String>,
     missing_frontends: BTreeMap<String, String>,
     language_differs: BTreeMap<String, String>,
-    physical: BTreeMap<String, BTreeMap<String, StateAssertions>>,
-    rejected: BTreeMap<String, Rejection>,
+    physical: BTreeMap<Backend, BTreeMap<String, StateAssertions>>,
+    rejected: BTreeMap<Backend, Rejection>,
     hydration: Option<HydrationSetup>,
     security: Option<SecurityOverride>,
 }
@@ -140,7 +142,7 @@ struct RawScenario {
     #[serde(default)]
     language_differs: BTreeMap<String, String>,
     logical: Option<serde_json::Value>,
-    physical: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+    physical: BTreeMap<Backend, BTreeMap<String, serde_json::Value>>,
     hydration: Option<HydrationSetup>,
     security: Option<SecurityOverride>,
 }
@@ -166,9 +168,9 @@ impl TryFrom<RawScenario> for Scenario {
                         "{backend}.rejected needs a nonempty contains for {language}"
                     ));
                 }
-                rejected.insert(backend.clone(), rejection);
+                rejected.insert(backend, rejection);
             }
-            let phases = aliases::resolve(&backend, hydration, raw.logical.as_ref(), entries)?
+            let phases = aliases::resolve(backend, hydration, raw.logical.as_ref(), entries)?
                 .into_iter()
                 .map(|(phase, state)| {
                     serde_json::from_value(state)
@@ -606,7 +608,7 @@ fn check(scenario: &Scenario, models: &Models, path: &Path) -> Vec<String> {
                 continue;
             }
             let (pipeline_failures, output) =
-                check_pipeline(scenario, models, backend, language, raw, phases, &label);
+                check_pipeline(scenario, models, *backend, language, raw, phases, &label);
             failures.extend(pipeline_failures);
             compiled.extend(output.map(|output| (language.as_str(), output)));
         }
@@ -718,77 +720,21 @@ fn output_difference(
 fn check_pipeline(
     scenario: &Scenario,
     models: &Models,
-    backend: &str,
+    backend: Backend,
     language: &str,
     raw: &str,
     phases: &BTreeMap<String, StateAssertions>,
     label: &str,
 ) -> Compiled {
-    let security = || crate::query_scenario::build_security(&scenario.security);
-    let remote = &models.remote;
-    let index_exists = |table: &str, index: &str| {
-        remote
-            .layout()
-            .schema()
-            .table(table)
-            .is_some_and(|table| table.options.indexes.iter().any(|item| item.name == index))
-    };
     let observe = Expectations {
         phases,
-        rejection: scenario.rejected.get(backend),
+        rejection: scenario.rejected.get(&backend),
         frontend: language,
-        index_exists: &index_exists,
-        local_database: (backend == "duckdb").then_some(&models.local_database),
-        reads_other_cte: &models.reads_other_cte,
+        backend,
+        models,
         label,
     };
-    match (backend, language, scenario.hydration.as_ref()) {
-        ("clickhouse", _, Some(setup)) => {
-            match hydration_input(setup, language, raw, remote.as_ref()) {
-                Ok((input, options)) => {
-                    let mut ctx = config::ChHydrationCtx::new(security(), Arc::clone(remote));
-                    ctx.set_input(input);
-                    ctx.set_hydration_options(options);
-                    observe.run(ctx, config::ChHydrationCtx::PHASES, |ctx, f| {
-                        config::run_ch_hydration_observed(ctx, f)
-                    })
-                }
-                Err(error) => (vec![format!("{label}: {error}")], None),
-            }
-        }
-        ("clickhouse", "json", None) => {
-            let mut ctx = config::ClickhouseJsonDslCtx::new(security(), Arc::clone(remote));
-            ctx.set_raw(raw.to_string());
-            observe.run(ctx, config::ClickhouseJsonDslCtx::PHASES, |ctx, f| {
-                config::run_clickhouse_json_dsl_observed(ctx, f)
-            })
-        }
-        ("clickhouse", "gql", None) => {
-            let mut ctx = config::ClickhouseGqlCtx::new(security(), Arc::clone(remote));
-            ctx.set_raw(raw.to_string());
-            observe.run(ctx, config::ClickhouseGqlCtx::PHASES, |ctx, f| {
-                config::run_clickhouse_gql_observed(ctx, f)
-            })
-        }
-        ("duckdb", "json", None) => {
-            let mut ctx = config::DuckdbJsonDslCtx::new(Arc::clone(&models.local));
-            ctx.set_raw(raw.to_string());
-            observe.run(ctx, config::DuckdbJsonDslCtx::PHASES, |ctx, f| {
-                config::run_duckdb_json_dsl_observed(ctx, f)
-            })
-        }
-        ("duckdb", "gql", None) => {
-            let mut ctx = config::DuckdbGqlCtx::new(Arc::clone(&models.local));
-            ctx.set_raw(raw.to_string());
-            observe.run(ctx, config::DuckdbGqlCtx::PHASES, |ctx, f| {
-                config::run_duckdb_gql_observed(ctx, f)
-            })
-        }
-        _ => (
-            vec![format!("{label}: no {backend} pipeline for this fixture")],
-            None,
-        ),
-    }
+    backend.compile(scenario, models, language, raw, &observe)
 }
 
 fn hydration_input(
@@ -839,9 +785,8 @@ struct Expectations<'a> {
     phases: &'a BTreeMap<String, StateAssertions>,
     rejection: Option<&'a Rejection>,
     frontend: &'a str,
-    index_exists: &'a dyn Fn(&str, &str) -> bool,
-    local_database: Option<&'a DuckDbClient>,
-    reads_other_cte: &'a std::cell::Cell<bool>,
+    backend: Backend,
+    models: &'a Models,
     label: &'a str,
 }
 
@@ -874,33 +819,8 @@ impl Expectations<'_> {
             )),
             (Err(error), None) => failures.push(format!("{}: {error}", self.label)),
             (Ok(()), None) => {
-                match (self.local_database, ctx.output()) {
-                    (Some(database), Some(output)) => {
-                        let sql = output.base.render();
-                        if let Err(error) = database.query_arrow(&sql) {
-                            failures.push(format!(
-                                "{}: DuckDB rejects the SQL: {error}\n{sql}",
-                                self.label
-                            ));
-                        }
-                    }
-                    (None, Some(output)) => {
-                        match clickhouse::check_cte_reads(&output.ast, &output.base.render()) {
-                            Ok(reads) => {
-                                if reads.reads_other {
-                                    self.reads_other_cte.set(true);
-                                }
-                                failures.extend(
-                                    reads
-                                        .failures
-                                        .into_iter()
-                                        .map(|read| format!("{}: {read}", self.label)),
-                                );
-                            }
-                            Err(error) => failures.push(format!("{}: {error}", self.label)),
-                        }
-                    }
-                    _ => {}
+                if let Some(output) = ctx.output() {
+                    failures.extend(self.backend.check_output(self.models, output, self.label));
                 }
                 return (failures, ctx.take_output());
             }
@@ -1098,7 +1018,10 @@ impl Expectations<'_> {
             ));
         }
         for index in &assertions.indexes {
-            if !(self.index_exists)(&index.table, &index.name) {
+            if !self
+                .backend
+                .index_exists(self.models, &index.table, &index.name)
+            {
                 failures.push(format!(
                     "{label}: table {} has no index {}",
                     index.table, index.name
@@ -1163,7 +1086,7 @@ pub(crate) fn record_duckdb_fixtures(
 ) {
     let base = Arc::new(ontology::Ontology::load_embedded().unwrap());
     for (_, scenario) in read_fixtures(directory) {
-        if !scenario.physical.contains_key("duckdb") {
+        if !scenario.physical.contains_key(&Backend::DuckDb) {
             continue;
         }
         let ontology = scenario.ontology_overlay.as_deref().map_or_else(
@@ -1485,13 +1408,17 @@ fn aliases_resolve_to_state_fields_and_reject_double_targets() {
         ))
     };
     let scenario = parse("{clickhouse: {planned: {expect: ['(_)']}, point_lookup: true, sql: {contains: [x]}, indexes: [{table: t, name: i}]}, duckdb: {emitted: {expect: ['(_)']}}}").unwrap();
-    let clickhouse = &scenario.physical["clickhouse"];
+    let clickhouse = &scenario.physical[&Backend::ClickHouse];
     assert!(clickhouse["normalize"].input.is_some());
     let plan = clickhouse["plan_clickhouse"].query_plan.as_ref().unwrap();
     assert_eq!(plan.point_lookup, Some(true));
     let output = clickhouse["codegen"].output.as_ref().unwrap();
     assert!(output.sql.is_some() && output.indexes.len() == 1);
-    assert!(scenario.physical["duckdb"]["paginate"].node.is_some());
+    assert!(
+        scenario.physical[&Backend::DuckDb]["paginate"]
+            .node
+            .is_some()
+    );
     assert!(
         parse(
             "{clickhouse: {emitted: {expect: ['(_)']}, response_policy: {node: {expect: ['(_)']}}}}"
@@ -1499,6 +1426,20 @@ fn aliases_resolve_to_state_fields_and_reject_double_targets() {
         .is_err()
     );
     assert!(parse("{duckdb: {final_ast: {expect: ['(_)']}}}").is_err());
+}
+
+#[test]
+fn unknown_backends_name_the_valid_ones() {
+    let error = orbit_utils::yaml::from_str::<Scenario>(
+        "name: backend\nquery: {json: q, gql: q}\nphysical: {postgres: {sql: {contains: [x]}}}",
+    )
+    .err()
+    .map(|error| error.to_string())
+    .unwrap_or_default();
+    assert!(
+        error.contains("unknown variant `postgres`, expected one of clickhouse, duckdb"),
+        "{error}"
+    );
 }
 
 #[test]

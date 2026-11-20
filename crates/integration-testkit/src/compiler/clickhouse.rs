@@ -66,7 +66,7 @@ pub async fn run_index_explains(ctx: &TestContext, directory: &Path) {
 fn indexes(scenario: &Scenario) -> Vec<&IndexAssertion> {
     scenario
         .physical
-        .get("clickhouse")
+        .get(&super::Backend::ClickHouse)
         .into_iter()
         .flat_map(|phases| phases.values())
         .filter_map(|fields| fields.output.as_ref())

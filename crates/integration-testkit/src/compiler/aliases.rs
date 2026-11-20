@@ -2,44 +2,51 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 
-/// (alias, pipeline, phase, state field path): `alias` under `physical.<pipeline>` means `<phase>.<path>`.
+use super::Backend;
+
+/// (alias, backend, phase, state field path): `alias` under `physical.<pipeline>` means `<phase>.<path>`.
 #[rustfmt::skip]
-const ALIASES: &[(&str, &str, &str, &str)] = &[
-    ("logical",      "clickhouse",           "normalize",       "input"),
-    ("logical",      "clickhouse_hydration", "plan_clickhouse", "input"),
-    ("logical",      "duckdb",               "normalize",       "input"),
-    ("planned",      "clickhouse",           "plan_clickhouse", "query_plan"),
-    ("planned",      "duckdb",               "plan_duckdb",     "query_plan"),
-    ("point_lookup", "clickhouse",           "plan_clickhouse", "query_plan.point_lookup"),
-    ("point_lookup", "duckdb",               "plan_duckdb",     "query_plan.point_lookup"),
-    ("emitted",      "clickhouse",           "response_policy", "node"),
-    ("emitted",      "duckdb",               "paginate",        "node"),
-    ("final_ast",    "clickhouse",           "security",        "node"),
-    ("hydration",    "clickhouse",           "hydrate_plan",    "hydration_plan"),
-    ("settings",     "clickhouse",           "settings",        "query_config"),
-    ("result_context", "clickhouse",         "result_contract", "result_ctx"),
-    ("sql",          "clickhouse",           "codegen",         "output.sql"),
-    ("parameterized_sql", "clickhouse",      "codegen",         "output.parameterized_sql"),
-    ("params",       "clickhouse",           "codegen",         "output.params"),
-    ("param_count",  "clickhouse",           "codegen",         "output.param_count"),
-    ("indexes",      "clickhouse",           "codegen",         "output.indexes"),
+const ALIASES: &[(&str, Backend, &str, &str)] = &[
+    ("logical",      Backend::ClickHouse, "normalize",       "input"),
+    ("logical",      Backend::DuckDb, "normalize",       "input"),
+    ("planned",      Backend::ClickHouse, "plan_clickhouse", "query_plan"),
+    ("planned",      Backend::DuckDb, "plan_duckdb",     "query_plan"),
+    ("point_lookup", Backend::ClickHouse, "plan_clickhouse", "query_plan.point_lookup"),
+    ("point_lookup", Backend::DuckDb, "plan_duckdb",     "query_plan.point_lookup"),
+    ("emitted",      Backend::ClickHouse, "response_policy", "node"),
+    ("emitted",      Backend::DuckDb, "paginate",        "node"),
+    ("final_ast",    Backend::ClickHouse, "security",        "node"),
+    ("hydration",    Backend::ClickHouse, "hydrate_plan",    "hydration_plan"),
+    ("settings",     Backend::ClickHouse, "settings",        "query_config"),
+    ("result_context", Backend::ClickHouse, "result_contract", "result_ctx"),
+    ("sql",          Backend::ClickHouse, "codegen",         "output.sql"),
+    ("parameterized_sql", Backend::ClickHouse, "codegen",         "output.parameterized_sql"),
+    ("params",       Backend::ClickHouse, "codegen",         "output.params"),
+    ("param_count",  Backend::ClickHouse, "codegen",         "output.param_count"),
+    ("indexes",      Backend::ClickHouse, "codegen",         "output.indexes"),
 ];
 
-fn find(name: &str, backend: &str, hydration: bool) -> Option<(&'static str, &'static str)> {
-    let target = |pipeline: &str| {
-        ALIASES
-            .iter()
-            .find(|(alias, on, _, _)| *alias == name && *on == pipeline)
-            .map(|(_, _, phase, path)| (*phase, *path))
-    };
+const HYDRATION_ALIASES: &[(&str, &str, &str)] = &[("logical", "plan_clickhouse", "input")];
+
+fn find(name: &str, backend: Backend, hydration: bool) -> Option<(&'static str, &'static str)> {
     hydration
-        .then(|| target("clickhouse_hydration"))
+        .then(|| {
+            HYDRATION_ALIASES
+                .iter()
+                .find(|(alias, _, _)| *alias == name)
+                .map(|(_, phase, path)| (*phase, *path))
+        })
         .flatten()
-        .or_else(|| target(backend))
+        .or_else(|| {
+            ALIASES
+                .iter()
+                .find(|(alias, on, _, _)| *alias == name && *on == backend)
+                .map(|(_, _, phase, path)| (*phase, *path))
+        })
 }
 
 pub(super) fn resolve(
-    backend: &str,
+    backend: Backend,
     hydration: bool,
     logical: Option<&Value>,
     entries: BTreeMap<String, Value>,
