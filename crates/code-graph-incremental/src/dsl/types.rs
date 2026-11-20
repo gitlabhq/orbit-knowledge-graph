@@ -152,6 +152,8 @@ pub enum Pat {
     },
     Not(Box<Pat>),
     Desc(Box<Pat>),
+    /// Some earlier sibling of the matched node matches.
+    Preceding(Box<Pat>),
     Spread {
         slot: u16,
         inject: Vec<Pat>,

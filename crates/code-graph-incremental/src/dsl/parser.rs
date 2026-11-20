@@ -53,6 +53,10 @@ fn visit_element(c: &mut Ctx<'_>, node: PNode<'_>, field: u16) -> R<Pat> {
             let inner = next(&mut node.into_children(), "negated element")?;
             Ok(Pat::Not(Box::new(visit_element(c, inner, field)?)))
         }
+        Rule::Preceding => {
+            let inner = next(&mut node.into_children(), "preceding element")?;
+            Ok(Pat::Preceding(Box::new(visit_element(c, inner, 0)?)))
+        }
         Rule::Descendant => {
             let inner = next(&mut node.into_children(), "descendant element")?;
             Ok(Pat::Desc(Box::new(visit_element(c, inner, 0)?)))

@@ -380,7 +380,14 @@ pub fn load_lang(yaml: &str, lang: &Lang) -> Result<LangConfig, LoadError> {
         Some(section) => compile_resolve(section, lang)?,
         None => vec![],
     };
-    let display_rules = compile_stages(file.display.as_deref().unwrap_or_default(), lang)?
+    let display = file.display.as_deref().unwrap_or_default();
+    if let Some(stage) = display.iter().find(|stage| stage.repeat) {
+        return Err(LoadError(format!(
+            "display stage {:?} cannot be repeat: display rules run once",
+            stage.name
+        )));
+    }
+    let display_rules = compile_stages(display, lang)?
         .into_iter()
         .flat_map(|stage| stage.rules)
         .collect();

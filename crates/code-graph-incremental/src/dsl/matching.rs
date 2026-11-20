@@ -3,7 +3,7 @@ use smallvec::{SmallVec, smallvec};
 use crate::intern::Lang;
 use crate::tree::{Node, Storage, Tree};
 
-use super::types::{Cap, Pat, Text};
+use super::types::{Cap, Pat, Text, Tf};
 
 pub(crate) fn matches<S: Storage<Node = Node>>(
     t: &Tree<S>,
@@ -17,7 +17,7 @@ pub(crate) fn matches<S: Storage<Node = Node>>(
     let field_ok = |f: u16| f == 0 || f == n.field;
     match p {
         Pat::Var { .. } | Pat::Spread { .. } => false,
-        Pat::Not(_) | Pat::Desc(_) => false,
+        Pat::Not(_) | Pat::Desc(_) | Pat::Preceding(_) => false,
         Pat::Cap {
             slot,
             field,
@@ -61,6 +61,13 @@ pub(crate) fn matches<S: Storage<Node = Node>>(
                     return false;
                 }
                 Text::Regex(re) if !re.is_match(t.text_at(raw, lang)) => return false,
+                Text::From(slot, Tf::Id)
+                    if caps[*slot as usize].first().is_some_and(|&bound| {
+                        t.sym_at(S::index(bound), lang) != t.sym_at(raw, lang)
+                    }) =>
+                {
+                    return false;
+                }
                 _ => {}
             }
             let children: Vec<_> = t
@@ -95,6 +102,19 @@ pub(crate) fn matches<S: Storage<Node = Node>>(
                             if matches(t, lang, child, inner, caps) {
                                 return false;
                             }
+                        }
+                    }
+                    Pat::Preceding(inner) => {
+                        let found = t.cursor(raw).parent().is_some_and(|parent| {
+                            parent
+                                .children()
+                                .take_while(|sibling| sibling.index() != raw)
+                                .any(|sibling| {
+                                    matches(t, lang, t.storage.id(sibling.index()), inner, caps)
+                                })
+                        });
+                        if !found {
+                            return false;
                         }
                     }
                     Pat::Desc(inner) => {
