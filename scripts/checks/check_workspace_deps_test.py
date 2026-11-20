@@ -8,14 +8,14 @@ from pathlib import Path
 SCRIPT = Path(__file__).with_name("check_workspace_deps.py")
 
 
-def run_check(member_manifest, *flags):
+def run_check(member_manifest):
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / "Cargo.toml").write_text('[workspace]\nmembers = ["crates/a"]\n')
         (root / "crates/a").mkdir(parents=True)
         (root / "crates/a/Cargo.toml").write_text(member_manifest)
         return subprocess.run(
-            [sys.executable, str(SCRIPT), *flags, str(root)], capture_output=True, text=True
+            [sys.executable, str(SCRIPT), str(root)], capture_output=True, text=True
         )
 
 
