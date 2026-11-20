@@ -16,6 +16,9 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 126
+  scope: code
+  note: "Dockerfile incremental engine: FROM <stage> and FROM ${VAR} no longer emit an image ImportedSymbol, the base variable is called once, and COPY --from the stage's own name is no longer a self call; the v2 engine drops the same image imports."
 - version: 125
   scope: "*"
   note: >-
