@@ -1,0 +1,141 @@
+name: "Ruby: locals assigned from instance variables"
+
+fixtures:
+  - path: lib/client.rb
+    content: |
+      class Client
+        def get; end
+      end
+
+  - path: lib/other.rb
+    content: |
+      class Other
+        def get; end
+      end
+
+  - path: across_methods.rb
+    content: |
+      class AcrossMethods
+        def initialize
+          @client = Client.new
+        end
+
+        def run
+          c = @client
+          c.get
+        end
+      end
+
+  - path: same_method.rb
+    content: |
+      class SameMethod
+        def run
+          @client = Client.new
+          c = @client
+          c.get
+        end
+      end
+
+  - path: per_class.rb
+    content: |
+      class UsesOther
+        def initialize
+          @client = Other.new
+        end
+
+        def run
+          c = @client
+          c.get
+        end
+      end
+
+      class UsesClient
+        def initialize
+          @client = Client.new
+        end
+
+        def run
+          c = @client
+          c.get
+        end
+      end
+
+  - path: wrapped.rb
+    content: |
+      class Wrapped
+        def initialize
+          @client = Client.new
+        end
+
+        def parenthesized
+          c = (@client)
+          c.get
+        end
+
+        def in_begin
+          c = begin
+            @client
+          end
+          c.get
+        end
+
+        def in_if(flag)
+          c = if flag then @client else @client end
+          c.get
+        end
+
+        def in_ternary(flag)
+          c = flag ? @client : nil
+          c.get
+        end
+      end
+
+  - path: unknown.rb
+    content: |
+      class Unknown
+        def run
+          c = @missing
+          c.get
+        end
+      end
+
+tests:
+  - name: "A local assigned from an instance variable takes its type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN ['across_methods.rb', 'same_method.rb'] AND callee.name = 'get'
+      RETURN caller.file_path AS file, callee.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { file: across_methods.rb, target: Client::get } }
+      - { row: { file: same_method.rb, target: Client::get } }
+
+  - name: "Each class reads its own instance variable"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'per_class.rb' AND caller.name = 'run' AND callee.name = 'get'
+      RETURN caller.fqn AS caller, callee.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: UsesOther::run, target: Other::get } }
+      - { row: { caller: UsesClient::run, target: Client::get } }
+
+  - name: "Wrapped reads of an instance variable type the local too"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'wrapped.rb' AND callee.name = 'get'
+      RETURN caller.name AS caller, callee.fqn AS target
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: parenthesized, target: Client::get } }
+      - { row: { caller: in_begin, target: Client::get } }
+      - { row: { caller: in_if, target: Client::get } }
+      - { row: { caller: in_ternary, target: Client::get } }
+
+  - name: "Control: an unassigned instance variable leaves the local untyped"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'unknown.rb' AND callee.name = 'get'
+      RETURN callee.fqn AS target
+    assert:
+      - { row_count: 0 }

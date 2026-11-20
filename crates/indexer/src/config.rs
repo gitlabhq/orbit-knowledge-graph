@@ -1,5 +1,5 @@
 use orbit_server_config::{
-    AnalyticsConfig, AppConfig, ClickHouseConfiguration, EngineConfigError, EngineConfiguration,
+    AnalyticsConfig, AppConfig, ClickHouseConfiguration, EngineConfiguration,
     GitlabClientConfiguration, NatsConfiguration, ScheduleConfig, SchemaConfig,
 };
 use thiserror::Error;
@@ -54,12 +54,6 @@ pub enum IndexerError {
 
     #[error("Schema readiness wait failed: {0}")]
     SchemaWait(#[from] crate::schema::version::SchemaWaitError),
-
-    #[error("Invalid configuration: {0}")]
-    InvalidConfig(#[from] orbit_server_config::SchemaConfigError),
-
-    #[error("Invalid engine configuration: {0}")]
-    InvalidEngineConfig(#[from] EngineConfigError),
 
     #[error("Invalid graph ClickHouse configuration: {0}")]
     InvalidGraphConfig(#[from] orbit_server_config::ConfigurationError),

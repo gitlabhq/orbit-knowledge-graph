@@ -381,8 +381,10 @@ impl TestContext {
 }
 
 fn test_settings() -> HashMap<String, String> {
-    let mut settings = AppConfig::embedded_defaults().graph.session_settings;
+    let graph = AppConfig::embedded_defaults().graph;
+    let mut settings = graph.session_settings;
     settings.extend([
+        ("compatibility".to_string(), graph.compatibility),
         ("async_insert".to_string(), "0".to_string()),
         ("fsync_metadata".to_string(), "0".to_string()),
         (
@@ -432,6 +434,7 @@ fn test_configuration(url: &str, database: &str) -> ClickHouseConfiguration {
         url: url.to_string(),
         username: TEST_USERNAME.to_string(),
         password: Some(TEST_PASSWORD.to_string()),
+        compatibility: AppConfig::embedded_defaults().graph.compatibility,
         session_settings: test_settings(),
         replicated: false,
         insert_settings: HashMap::new(),

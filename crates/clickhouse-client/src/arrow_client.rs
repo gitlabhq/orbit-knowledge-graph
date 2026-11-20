@@ -17,10 +17,8 @@ use orbit_observability::resilience::MetricsObserver;
 use orbit_utils::query_types::{ScalarType, SqlType};
 use serde::Serialize;
 use serde_json::Value;
-use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_util::io::SyncIoBridge;
 use tracing::Instrument;
 
 pub use clickhouse::QuerySummary;
@@ -113,9 +111,7 @@ impl ArrowClickHouseClient {
             .with_user(username)
             .with_setting("output_format_arrow_string_as_string", "1")
             .with_setting("output_format_arrow_fixed_string_as_fixed_byte_array", "1")
-            .with_setting("use_query_condition_cache", "true")
             .with_setting("join_use_nulls", "0")
-            .with_setting("query_plan_join_swap_table", "auto")
             .with_setting("optimize_aggregation_in_order", "1")
             .with_setting("use_statistics", "0")
             .with_setting("use_text_index_like_evaluation_by_dictionary_scan", "0")
@@ -174,6 +170,14 @@ impl ArrowClickHouseClient {
 
     pub fn without_query_cache(mut self) -> Self {
         self.client = self.client.with_setting("use_query_cache", "0");
+        self
+    }
+
+    /// Mark the client as read-only so ClickHouse cancels its queries when the
+    /// caller drops them. Never use it on a client that inserts or runs DDL.
+    /// Mode 2 rather than 1 because every query sends settings, which mode 1 forbids.
+    pub fn read_only(mut self) -> Self {
+        self.client = self.client.with_setting("readonly", "2");
         self
     }
 
@@ -610,34 +614,10 @@ impl ArrowQuery {
         self,
         max_block_size: Option<u64>,
     ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
-        let (cursor, first) = self.open_cursor(max_block_size).await?;
-
-        let handle = tokio::runtime::Handle::current();
-        let (tx, rx) = mpsc::channel::<Result<RecordBatch, ClickHouseError>>(2);
-
-        let span = tracing::Span::current();
-        tokio::task::spawn_blocking(move || {
-            let _entered = span.enter();
-            let body = Cursor::new(first.unwrap_or_default()).chain(cursor);
-            let bridge = SyncIoBridge::new_with_handle(body, handle);
-            let reader = match StreamReader::try_new(bridge, None) {
-                Ok(reader) => reader,
-                Err(err) => {
-                    let _ = tx.blocking_send(Err(ClickHouseError::ArrowDecode(err)));
-                    return;
-                }
-            };
-
-            for batch_result in reader {
-                let mapped: Result<RecordBatch, ClickHouseError> =
-                    batch_result.map_err(ClickHouseError::ArrowDecode);
-                if tx.blocking_send(mapped).is_err() {
-                    break;
-                }
-            }
-        });
-
-        Ok(ReceiverStream::new(rx).boxed())
+        let (batches, _summary) = self
+            .fetch_arrow_streamed_with_summary(max_block_size)
+            .await?;
+        Ok(batches)
     }
 
     pub async fn fetch_arrow_streamed_with_summary(
@@ -687,10 +667,18 @@ impl ArrowQuery {
                         return;
                     }
                 }
-                next = cursor.next().await;
+                // Take whole chunks: the cursor's AsyncRead loses bytes when the next chunk is late.
+                next = tokio::select! {
+                    biased;
+                    _ = tx.closed() => return,
+                    next = cursor.next() => next,
+                };
             }
             if let Some(summary_tx) = summary_tx.take() {
                 let _ = summary_tx.send(cursor.summary().cloned());
+            }
+            if let Err(err) = decoder.finish() {
+                let _ = tx.send(Err(ClickHouseError::ArrowDecode(err))).await;
             }
         };
         tokio::spawn(task.in_current_span());

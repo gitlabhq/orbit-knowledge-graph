@@ -112,7 +112,7 @@ impl DuckDbClient {
             })
             .unwrap_or_default();
         conn.execute_batch(&format!(
-            "{allowed} SET enable_external_access = false; SET lock_configuration = true;"
+            "{allowed} SET TimeZone = 'UTC'; SET enable_external_access = false; SET lock_configuration = true;"
         ))
         .map_err(|e| DuckDbError::Schema(e.to_string()))?;
         Ok(Self { conn })
@@ -495,5 +495,24 @@ CREATE TABLE IF NOT EXISTS gl_edge (
             .query_arrow(r#"SELECT count(*) AS cnt FROM "source data; DROP TABLE x""#)
             .unwrap();
         assert_eq!(crate::helpers::scalar_i64(&result), 2);
+    }
+
+    #[test]
+    fn sessions_render_timestamps_in_utc() {
+        let render = "SELECT CAST(TIMESTAMPTZ '2026-10-04 00:00:00+00' AS VARCHAR) AS t, current_setting('TimeZone') AS zone";
+        let shifted = duckdb::Connection::open_in_memory().unwrap();
+        shifted
+            .execute_batch("SET TimeZone = 'America/Los_Angeles'")
+            .unwrap();
+        let local: String = shifted.query_row(render, [], |row| row.get(0)).unwrap();
+        assert_eq!(local, "2026-10-03 17:00:00-07");
+
+        let client = DuckDbClient::open(OpenMode::InMemory).unwrap();
+        let batches = client.query_arrow(render).unwrap();
+        assert_eq!(
+            crate::string_column(&batches, "t"),
+            ["2026-10-04 00:00:00+00"]
+        );
+        assert_eq!(crate::string_column(&batches, "zone"), ["UTC"]);
     }
 }

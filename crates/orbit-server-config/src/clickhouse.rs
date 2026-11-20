@@ -12,6 +12,7 @@ pub struct ClickHouseConfiguration {
     pub url: String,
     pub username: String,
     pub password: Option<String>,
+    pub compatibility: String,
     #[serde(default)]
     pub session_settings: HashMap<String, String>,
     pub replicated: bool,
@@ -37,18 +38,6 @@ pub struct ProfilingConfig {
 
 impl ClickHouseConfiguration {
     pub fn validate(&self) -> Result<(), ConfigurationError> {
-        if self.database.is_empty() {
-            return Err(ConfigurationError::EmptyDatabase);
-        }
-
-        if self.url.is_empty() {
-            return Err(ConfigurationError::EmptyUrl);
-        }
-
-        if self.username.is_empty() {
-            return Err(ConfigurationError::EmptyUsername);
-        }
-
         if self.replicated
             && self
                 .session_settings
@@ -64,15 +53,26 @@ impl ClickHouseConfiguration {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigurationError {
-    #[error("database cannot be empty")]
-    EmptyDatabase,
-
-    #[error("url cannot be empty")]
-    EmptyUrl,
-
-    #[error("username cannot be empty")]
-    EmptyUsername,
-
     #[error("replicated is enabled but insert_quorum is set to 0")]
     ReplicatedWithoutQuorum,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::AppConfig;
+
+    #[test]
+    fn an_empty_connection_setting_is_rejected_on_both_connections() {
+        for connection in ["datalake", "graph"] {
+            for key in ["url", "database", "username"] {
+                let error = AppConfig::with_overlay(&format!("{connection}:\n  {key}: \"\"\n"))
+                    .unwrap_err()
+                    .to_string();
+                assert!(
+                    error.contains(&format!("- {connection}.{key}: ")),
+                    "{error}"
+                );
+            }
+        }
+    }
 }

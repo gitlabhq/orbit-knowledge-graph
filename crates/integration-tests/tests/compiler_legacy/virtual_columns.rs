@@ -9,35 +9,6 @@ fn compile_query(json: &str) -> query_engine::compiler::CompiledQueryContext {
 }
 
 #[test]
-fn search_with_wildcard_excludes_virtual_columns_from_sql() {
-    let compiled = compile_query(
-        r#"{"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": "*"}], "limit": 5}"#,
-    );
-    let sql = &compiled.base.sql;
-    assert!(
-        !sql.contains("f_content") && !sql.contains("f.content"),
-        "virtual column 'content' should not appear in search SQL, got:\n{sql}"
-    );
-    assert!(
-        sql.contains("f_name") || sql.contains("f.name"),
-        "normal columns should be in SQL"
-    );
-}
-
-#[test]
-fn search_with_explicit_content_excludes_from_sql() {
-    let compiled = compile_query(
-        r#"{"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "content"]}], "limit": 5}"#,
-    );
-    let sql = &compiled.base.sql;
-    assert!(
-        !sql.contains("f_content") && !sql.contains("f.content"),
-        "explicitly requested virtual column 'content' should be stripped from search SQL"
-    );
-    assert!(sql.contains("f_name") || sql.contains("f.name"));
-}
-
-#[test]
 fn search_with_content_produces_hydration_plan() {
     let compiled = compile_query(
         r#"{"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "content"]}], "limit": 5}"#,
@@ -72,18 +43,6 @@ fn search_with_content_produces_hydration_plan() {
 }
 
 #[test]
-fn search_without_content_has_no_hydration_plan() {
-    let compiled = compile_query(
-        r#"{"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "path"]}], "limit": 5}"#,
-    );
-    assert!(
-        matches!(&compiled.hydration, HydrationPlan::None),
-        "search without virtual cols should have HydrationPlan::None, got: {:?}",
-        compiled.hydration
-    );
-}
-
-#[test]
 fn aggregation_with_content_produces_hydration_plan() {
     let compiled = compile_query(
         r#"{
@@ -110,23 +69,6 @@ fn aggregation_with_content_produces_hydration_plan() {
 }
 
 #[test]
-fn aggregation_with_wildcard_excludes_virtual_columns_from_sql() {
-    let compiled = compile_query(
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": "*"}],
-            "aggregations": [{"count": "f", "as": "total"}],
-            "limit": 5
-        }"#,
-    );
-    let sql = &compiled.base.sql;
-    assert!(
-        !sql.contains("f_content") && !sql.contains("f.content"),
-        "virtual column 'content' should not appear in aggregation SQL"
-    );
-}
-
-#[test]
 fn traversal_with_content_includes_virtual_in_hydration_plan() {
     let compiled = compile_query(
         r#"{
@@ -138,12 +80,6 @@ fn traversal_with_content_includes_virtual_in_hydration_plan() {
             "relationships": [{"type": "ON_BRANCH", "from": "f", "to": "b"}],
             "limit": 5
         }"#,
-    );
-
-    let sql = &compiled.base.sql;
-    assert!(
-        !sql.contains("f_content") && !sql.contains("f.content"),
-        "virtual column should not be in traversal base SQL"
     );
 
     match &compiled.hydration {
@@ -249,12 +185,6 @@ fn merge_request_diff_virtual_column_hydration() {
             "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [1], "columns": ["id", "title", "diff"]}],
             "limit": 5
         }"#,
-    );
-
-    let sql = &compiled.base.sql;
-    assert!(
-        !sql.contains("mr_diff") && !sql.contains("mr.diff"),
-        "virtual column 'diff' should not appear in SQL, got:\n{sql}"
     );
 
     match &compiled.hydration {

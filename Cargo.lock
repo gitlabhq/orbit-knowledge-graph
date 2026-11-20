@@ -1377,7 +1377,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
- "tokio-util",
  "tracing",
 ]
 
@@ -3619,6 +3618,8 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tonic-prost",
+ "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 

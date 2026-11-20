@@ -174,7 +174,11 @@ stages:
         replace: '(rb_super (__supertype @$S|strip=::|split_last("::") $S) (__import (__source @$S|regex_replace("(::)?[^:]+$", "")) (__source_path @$S|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$S|strip=::|split_last("::"))))'
         tag: { import_type: Autoload }
         tag_on: __import
-      # Parameters
+      # Parameters: a default value types the parameter
+      - match: '(optional_parameter name: $N:identifier value: $V)'
+        replace: '(__binding @$N (__rhs $V))'
+      - match: '(keyword_parameter name: $N:identifier value: $V)'
+        replace: '(__binding @$N (__rhs $V))'
       - match: '(optional_parameter name: $N:identifier)'
         replace: '(__binding @$N)'
       - match: '(splat_parameter name: $N:identifier)'
@@ -186,7 +190,7 @@ stages:
       - match: '(block_parameter name: $N:identifier)'
         replace: '(__binding @$N)'
       - match: '(method_parameters $$$P)'
-        replace: '(method_parameters $$$P=>__binding)'
+        replace: '(method_parameters $$$P:_*_named->__binding)'
       - match: '(block_parameters $$$P)'
         replace: '(block_parameters $$$P=>block_local)'
       - match: '(lambda_parameters $$$P)'
@@ -331,6 +335,8 @@ stages:
       # Remaining bare constants: references
       - match: '(constant)'
         replace: '(__call (__callee @$ROOT))'
+      - match: '(instance_variable)'
+        replace: '(__ivar @$ROOT|strip=@)'
       - match: '(scope_resolution)'
         replace: '(__call (__callee (__member @$ROOT|split_last("::") (__object @$ROOT|strip=::|regex_replace("::[^:]+$", "")))))'
 
