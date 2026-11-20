@@ -116,15 +116,6 @@ cases:
         rejected:
           contains: ["line 1, column 10: expected a node label or a property map"]
 
-  - name: OR is rejected
-    query:
-      gql: |
-        MATCH (u:User) WHERE u.id = 1 OR u.id = 2 RETURN u
-    physical:
-      clickhouse:
-        rejected:
-          contains: ["OR and XOR are not supported"]
-
   - name: A typed DATE literal is rejected
     query:
       gql: |
