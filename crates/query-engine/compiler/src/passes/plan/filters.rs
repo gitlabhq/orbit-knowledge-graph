@@ -33,17 +33,32 @@ pub struct BoundFilter {
     pub null_as_epoch: NullAsEpoch,
 }
 
+/// How far a filter narrows its node, weakest first.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Narrowing {
+    None,
+    Range,
+    Point,
+}
+
 impl BoundFilter {
     pub fn is_selective(&self) -> bool {
+        self.narrowing() != Narrowing::None
+    }
+
+    pub fn narrowing(&self) -> Narrowing {
         if self.namespace_anchor || self.filter.rhs_column.is_some() {
-            return false;
+            return Narrowing::None;
         }
         let high = self.selectivity == ontology::FieldSelectivity::High;
         match self.filter.op {
-            Some(op) if op.is_text() => self.text_indexed,
-            Some(FilterOp::Ne | FilterOp::IsNotNull) => false,
-            None | Some(FilterOp::Eq | FilterOp::In) => high || self.text_indexed,
-            Some(_) => high,
+            Some(op) if op.is_text() && self.text_indexed => Narrowing::Point,
+            None | Some(FilterOp::Eq | FilterOp::In) if high || self.text_indexed => {
+                Narrowing::Point
+            }
+            Some(FilterOp::IsNull) if high => Narrowing::Point,
+            Some(op) if op.is_ordering() && high => Narrowing::Range,
+            _ => Narrowing::None,
         }
     }
 

@@ -7,7 +7,9 @@ use query_data_model::{DenormalizedDirection, DenormalizedProperty, OrbitQueryMo
 
 use super::{EdgeRelation, NodePlan, Pattern};
 use crate::passes::normalize::is_wildcard;
-use crate::passes::plan::filters::{BoundFilter, FilterOwner, bind_filter, lowerable_denorm};
+use crate::passes::plan::filters::{
+    BoundFilter, FilterOwner, Narrowing, bind_filter, lowerable_denorm,
+};
 use crate::passes::plan::predicates::{Predicate, property_filter, tag_filter};
 
 impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
@@ -97,13 +99,38 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
     }
 
     pub fn has_selective_uncovered_filter(&self, node: &str) -> bool {
-        self.nodes[node].filters.iter().any(|(property, filter)| {
-            filter.is_selective() && !self.covered_by_edge(node, property, filter)
-        })
+        self.uncovered_narrowing(node) != Narrowing::None
+    }
+
+    pub fn uncovered_narrowing(&self, node: &str) -> Narrowing {
+        self.nodes[node]
+            .filters
+            .iter()
+            .filter(|(property, filter)| !self.covered_by_edge(node, property, filter))
+            .map(|(_, filter)| filter.narrowing())
+            .max()
+            .unwrap_or(Narrowing::None)
+    }
+
+    /// Whether a foreign key hop reads the far endpoint first and seeds the holder with its ids.
+    /// A range on the far endpoint yields to a selective holder, since most ranges match most rows.
+    pub fn far_endpoint_seeds_fk(&self, far: &str, holder: &str) -> bool {
+        match self.uncovered_narrowing(far) {
+            Narrowing::Point => true,
+            Narrowing::Range => {
+                let holder = &self.nodes[holder];
+                !holder.is_pinned() && holder.narrowing() == Narrowing::None
+            }
+            Narrowing::None => false,
+        }
     }
 
     pub fn endpoint_is_selective(&self, node: &str) -> bool {
         self.nodes[node].is_pinned() || self.has_selective_uncovered_filter(node)
+    }
+
+    pub fn endpoint_has_point_filter(&self, node: &str) -> bool {
+        self.nodes[node].is_pinned() || self.uncovered_narrowing(node) == Narrowing::Point
     }
 
     pub fn uncovered_node(&self, node: &str) -> NodePlan {

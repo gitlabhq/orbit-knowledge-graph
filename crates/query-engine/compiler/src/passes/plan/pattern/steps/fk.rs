@@ -26,7 +26,8 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         let key_column = Column::new(alias, &key.column);
         let mut predicates = pattern.nodes[endpoint].id_predicates(key_column.clone());
         if self.binding(endpoint).is_none() {
-            let selective = pattern.endpoint_is_selective(endpoint);
+            let selective = pattern.nodes[endpoint].is_pinned()
+                || pattern.far_endpoint_seeds_fk(endpoint, &key.node);
             let unfiltered = !selective && !pattern.has_uncovered_filter(&pattern.nodes[endpoint]);
             let mut reached = if selective {
                 None
@@ -88,7 +89,7 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             .extend(pattern.nodes[endpoint].id_predicates(key_column.clone()));
         if self.binding(endpoint).is_none()
             && self.ids(endpoint).is_none()
-            && pattern.has_selective_uncovered_filter(endpoint)
+            && pattern.far_endpoint_seeds_fk(endpoint, &key.node)
         {
             let mut far = pattern.nodes[endpoint].clone();
             far.columns = Some(ColumnSelection::List(vec![]));

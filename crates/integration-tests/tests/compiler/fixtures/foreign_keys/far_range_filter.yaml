@@ -1,0 +1,54 @@
+security: { access_level: 30 }
+
+cases:
+  - name: A range on the far FK endpoint yields to a selective holder
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "s", "entity": "SecurityScan", "filters": {"scan_type": "sast", "latest": true, "status": "succeeded", "created_at": {"gte": "2026-11-12T00:00:00Z"}}},
+            {"id": "j", "entity": "Job", "filters": {"duration": {"gte": 0}}}
+          ],
+          "relationships": [{"type": "RAN_BY", "from": "s", "to": "j"}],
+          "aggregations": [{"avg": "j.duration", "as": "avg_secs"}, {"count": "j", "as": "n"}],
+          "limit": 1
+        }
+      gql: |
+        MATCH (s:SecurityScan)-[:RAN_BY]->(j:Job)
+        WHERE s.scan_type = 'sast' AND s.latest = true AND s.status = 'succeeded'
+          AND s.created_at >= '2026-11-12T00:00:00Z' AND j.duration >= 0
+        RETURN avg(j.duration) AS avg_secs, count(j) AS n LIMIT 1
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Project _orbit_id_source.build_id AS id (Bind _orbit_id_source (_)))
+            - (Filter j.id IN ?.id, ... (Scan Table(gl_job) AS j))
+          reject:
+            - (Deduplicate Final (Scan Table(gl_job) AS j))
+            - (Filter s.build_id IN ?.id, ... (Scan Table(gl_security_scan) AS s))
+
+  - name: An equality on the far FK endpoint still seeds the holder
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "s", "entity": "SecurityScan", "filters": {"created_at": {"gte": "2026-11-12T00:00:00Z"}}},
+            {"id": "j", "entity": "Job", "filters": {"name": "semgrep-sast"}}
+          ],
+          "relationships": [{"type": "RAN_BY", "from": "s", "to": "j"}],
+          "aggregations": [{"count": "s", "as": "n"}]
+        }
+      gql: |
+        MATCH (s:SecurityScan)-[:RAN_BY]->(j:Job)
+        WHERE s.created_at >= '2026-11-12T00:00:00Z' AND j.name = 'semgrep-sast'
+        RETURN count(s) AS n
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter s.build_id IN ?.id, ... (_))
+          reject:
+            - (Filter j.id IN ?.id, ... (Scan Table(gl_job) AS j))

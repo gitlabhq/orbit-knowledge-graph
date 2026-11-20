@@ -113,9 +113,9 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         self.nodes.get(node)?.ids.as_ref()
     }
 
-    /// Ids a non-selective node received from the edges around it; a selective node reads its own.
+    /// Ids a node received from the edges around it; a pinned node or a point filter reads its own.
     fn reached_ids(&self, node: &str) -> Option<IdSet> {
-        if self.pattern.endpoint_is_selective(node) {
+        if self.pattern.endpoint_has_point_filter(node) {
             return None;
         }
         self.ids(node).cloned()
