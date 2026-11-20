@@ -19,8 +19,8 @@ LIMIT 100
 
 Swap `AUTHORED` for `MERGED`, `REVIEWER` or `APPROVED` to rank mergers,
 reviewers or approvers. `AUTHORED` means the user wrote the MR and `MERGED`
-means the user merged it. `REVIEWER` means the user was assigned as a reviewer; the edge carries no review
-state. `APPROVED` means the user approved the MR.
+means the user merged it. `REVIEWER` means the user was assigned as a reviewer;
+the edge carries no review state. `APPROVED` means the user approved the MR.
 
 ```gql orbit-query
 MATCH (u:User)-[:MERGED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 77960826})
