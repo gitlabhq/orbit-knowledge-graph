@@ -37,7 +37,7 @@ impl Process {
         let ctx = TaskContext::new(Arc::clone(&self.pools), Some(hold.fence()));
         let outcome = tokio::select! {
             biased;
-            () = self.renew_lease_until_lost(&mut hold, &key, &delivery) => return,
+            () = self.extend_running_lease(&mut hold, &key, &delivery) => return,
             outcome = worker.run(&ctx, &message.input) => outcome,
         };
         match outcome {
@@ -69,7 +69,7 @@ impl Process {
         let claim = Claim::new(self.holder.clone(), task);
         loop {
             let now = self.ports.clock.now().await;
-            match self.try_take_lease(&claim, key, now).await {
+            match self.take_lease_if_free(&claim, key, now).await {
                 Ok(Some(hold)) => return hold,
                 Ok(None) => {}
                 Err(error) => orbit_log_fields::warn!(
@@ -85,7 +85,7 @@ impl Process {
         }
     }
 
-    async fn try_take_lease(
+    async fn take_lease_if_free(
         &self,
         claim: &Claim,
         key: &WorkerKey,
@@ -136,11 +136,11 @@ impl Process {
         Ok(())
     }
 
-    async fn renew_lease_until_lost(&self, hold: &mut Hold, key: &WorkerKey, delivery: &Delivery) {
+    async fn extend_running_lease(&self, hold: &mut Hold, key: &WorkerKey, delivery: &Delivery) {
         loop {
             self.ports.clock.sleep_until(hold.renew_at()).await;
             let now = self.ports.clock.now().await;
-            match self.try_renew_lease(hold, key, now).await {
+            match self.extend_lease_if_ours(hold, key, now).await {
                 Ok(true) => {
                     if let Err(error) = delivery.handle.acknowledge_progress().await {
                         orbit_log_fields::warn!(
@@ -174,7 +174,7 @@ impl Process {
         }
     }
 
-    async fn try_renew_lease(
+    async fn extend_lease_if_ours(
         &self,
         hold: &mut Hold,
         key: &WorkerKey,
