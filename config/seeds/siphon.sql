@@ -1009,6 +1009,7 @@ CREATE TABLE IF NOT EXISTS siphon_merge_requests_closing_issues
     `created_at` DateTime64(6, 'UTC'),
     `updated_at` DateTime64(6, 'UTC'),
     `from_mr_description` Bool DEFAULT true,
+    `link_type` Int8 DEFAULT 0,
     `project_id` Int64,
     `traversal_path` String DEFAULT '0/',
     `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC'),
