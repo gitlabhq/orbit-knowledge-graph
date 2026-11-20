@@ -32,9 +32,10 @@ define:
     select_all(module, '(__def $N:__defname)', name) | is_class
     or select_all(module, '(__def $N:__defname)', name)
     or select(module, '(__def $N:__default_export)', name)
+    or select(module, '(__module_export (__default_export))' by $ROOT | child_sym("__default_export"), name) | target_of
     or select_all(module, '(__def #exports)' by $ROOT | tag("exports"), name)
-    or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, name) | reexported(name) | is_def
-    or select(module, '(%import_kinds $ROOT:__name)' by $ROOT, "*") | reexported(name) | is_def
+    or select(module, '(%import_kinds $ROOT:__name)' by local_name($ROOT), name) | reexported(name) | is_def
+    or select(module, '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def
   offered(module, name): 'exported(module, name) or module'
   written(ROOT):
     '(_ (__ssa_hint "*"))': '"*"'
@@ -44,6 +45,7 @@ define:
     '$I:(%import_kinds $ROOT:__name)': '$I | modules | offered($ROOT)'
   producing(ROOT):
     '(__call)': '$ROOT | sited(calls) | returned'
+    '(__binding $R:__rhs)': '$R | tail | producing'
     '_': '$ROOT | type'
   returned(ROOT):
     '_ when $ROOT | returns | is_class': '$ROOT | returns'
