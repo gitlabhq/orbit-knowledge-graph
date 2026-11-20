@@ -8,7 +8,7 @@ title: GitLab Orbit dashboard
 
 {{< details >}}
 
-- Tier: [Premium, Ultimate](trial.md)
+- Tier: Premium, Ultimate
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}

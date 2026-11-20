@@ -116,7 +116,7 @@ For all flags, run `glab orbit <command> --help`.
 
 {{< details >}}
 
-- Tier: [Premium, Ultimate](trial.md)
+- Tier: Premium, Ultimate
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}

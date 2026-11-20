@@ -8,7 +8,7 @@ title: Troubleshooting GitLab Orbit on GitLab Self-Managed
 
 {{< details >}}
 
-- Tier: [Premium, Ultimate](../trial.md)
+- Tier: Premium, Ultimate
 - Offering: GitLab Self-Managed
 
 {{< /details >}}

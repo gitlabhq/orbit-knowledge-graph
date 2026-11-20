@@ -8,7 +8,7 @@ title: ClickHouse for GitLab Orbit
 
 {{< details >}}
 
-- Tier: [Premium, Ultimate](../trial.md)
+- Tier: Premium, Ultimate
 - Offering: GitLab Self-Managed
 
 {{< /details >}}
