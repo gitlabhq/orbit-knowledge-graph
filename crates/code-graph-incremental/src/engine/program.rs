@@ -179,6 +179,7 @@ enum Body {
 /// A named expression; with cases, tried on its first argument in order,
 /// the first match with a non-empty value wins.
 pub struct Def {
+    pub(super) name: Box<str>,
     params: usize,
     body: DefImpl,
     pub(super) deps: u8,
@@ -888,6 +889,7 @@ impl Loader<'_> {
                 let expr = Expr::parse(src, &self.scope(&cell, false, shared)).map_err(at)?;
                 let slots = cell.borrow().len();
                 Ok(Def {
+                    name: def_name(d, lang),
                     params: d.params.len(),
                     body: DefImpl::Expr(expr),
                     deps: 0,
@@ -918,6 +920,7 @@ impl Loader<'_> {
                     compiled.push((m, when, value));
                 }
                 Ok(Def {
+                    name: def_name(d, lang),
                     params: d.params.len(),
                     body: DefImpl::Cases(compiled),
                     deps: 0,
@@ -1869,4 +1872,11 @@ fn taken(
                     && tree.cursor(Tree::to_raw(c)).child_sym_of_kind(*kind) == key
             })
     })
+}
+
+fn def_name(d: &super::lang::DefSpec, lang: Option<u8>) -> Box<str> {
+    match lang {
+        Some(_) => format!("{} ({})", d.name, d.origin).into(),
+        None => d.name.clone().into(),
+    }
 }

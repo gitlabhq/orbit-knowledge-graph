@@ -69,6 +69,9 @@ pub struct State {
     late: FxHashMap<u32, Vals>,
     /// The wildcard imports in force at each call.
     wild_at: FxHashMap<u32, Rc<Vec<u32>>>,
+    /// The binding each member-chain object stands for; valid only until
+    /// the walk takes a step that is not a chain node.
+    chains: FxHashMap<u32, u32>,
 }
 
 impl Module for Ssa {

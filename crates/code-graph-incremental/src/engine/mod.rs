@@ -1,6 +1,7 @@
 mod expr;
 pub mod lang;
 pub mod pattern;
+pub mod profile;
 mod program;
 
 use std::any::Any;
@@ -563,6 +564,9 @@ pub struct Run<'t, S: Store = Compact> {
     reads: FxHashSet<Key>,
     /// Bumped each time a cycle head reruns, retiring results of the last round.
     round: u64,
+    profile: Option<Box<profile::Profile>>,
+    /// Each node's nearest ancestor that is a scope or the root, filled on use.
+    scopes: FxHashMap<Loc, Option<Loc>>,
 }
 
 impl<'t, S: Store> Run<'t, S> {
@@ -624,6 +628,8 @@ impl<'t, S: Store> Run<'t, S> {
             memo: Table::default(),
             reads: FxHashSet::default(),
             round: 0,
+            profile: profile::ON.then(Box::default),
+            scopes: FxHashMap::default(),
         }
     }
 
@@ -732,13 +738,11 @@ impl<'t, S: Store> Run<'t, S> {
                 }
             }
             Op::Enclose => {
-                let kinds = self.enclosing_kinds;
                 for at in nodes(&args[0]) {
-                    let c = Cursor::new(self.trees, at.fi, at.node);
-                    for a in c.ancestors() {
-                        if kinds.contains(&a.kind()) || a.parent().is_none() {
-                            push(&mut out, Val::Node(a.into()));
-                        }
+                    let mut next = self.scope_above(at);
+                    while let Some(scope) = next {
+                        push(&mut out, Val::Node(scope));
+                        next = self.scope_above(scope);
                     }
                 }
             }
@@ -899,6 +903,9 @@ impl<'t, S: Store> Run<'t, S> {
         match self.memo.entries.get(&key) {
             Some(Memo::Busy(partial)) => {
                 let partial = partial.clone();
+                if let Some(p) = &mut self.profile {
+                    p.hit(key.0, true);
+                }
                 self.reads.insert(key);
                 return partial;
             }
@@ -913,6 +920,9 @@ impl<'t, S: Store> Run<'t, S> {
                     .is_none_or(|(round, _)| *round == self.round) =>
             {
                 let vals = vals.clone();
+                if let Some(p) = &mut self.profile {
+                    p.hit(key.0, false);
+                }
                 if let Some((_, read)) = within {
                     let read = read.clone();
                     self.reads.extend(read);
@@ -926,6 +936,7 @@ impl<'t, S: Store> Run<'t, S> {
             .entries
             .insert(key.clone(), Memo::Busy(Vals::new()));
         let epochs = self.epochs;
+        let started = self.profile.as_mut().map(|p| p.enter(key.0));
         let outer = std::mem::take(&mut self.reads);
         let mut found;
         let mut rounds = 0;
@@ -952,6 +963,9 @@ impl<'t, S: Store> Run<'t, S> {
             self.round += 1;
             rounds += 1;
         }
+        if let (Some(p), Some(start)) = (&mut self.profile, started) {
+            p.leave(key.0, start, rounds);
+        }
         let read: Vec<Key> = self.reads.iter().cloned().collect();
         self.reads.extend(outer);
         if epochs != self.epochs {
@@ -977,7 +991,40 @@ impl<'t, S: Store> Run<'t, S> {
         let mut seen = FxHashSet::default();
         self.edges
             .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.call_resolution)));
-        self.edges
+        std::mem::take(&mut self.edges)
+    }
+
+    fn scope_above(&mut self, at: Loc) -> Option<Loc> {
+        let kinds = self.enclosing_kinds;
+        let mut path = Vec::new();
+        let mut c = Cursor::new(self.trees, at.fi, at.node);
+        let found = loop {
+            if let Some(&known) = self.scopes.get(&Loc::from(c)) {
+                break known;
+            }
+            path.push(Loc::from(c));
+            match c.parent() {
+                None => break None,
+                Some(p) if kinds.contains(&p.kind()) || p.parent().is_none() => {
+                    break Some(Loc::from(p));
+                }
+                Some(p) => c = p,
+            }
+        };
+        for node in path {
+            self.scopes.insert(node, found);
+        }
+        found
+    }
+
+    fn fn_name(&self, id: FnId) -> String {
+        match TABLE.get(usize::from(id.0)) {
+            Some(f) => format!("{}.{}", modules::ALL[usize::from(f.slot)].name, f.name),
+            None => self.fns.get(usize::from(u16::MAX - id.0)).map_or_else(
+                || format!("def #{}", u16::MAX - id.0),
+                |d| d.name.to_string(),
+            ),
+        }
     }
 }
 
@@ -1147,7 +1194,7 @@ pub fn run_graph(
             phase.flow(&mut run, root, true);
             match run.killed.take() {
                 Some(killed) => Err(killed),
-                None => Ok(run.rows),
+                None => Ok(std::mem::take(&mut run.rows)),
             }
         })
         .collect();
@@ -1401,5 +1448,21 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
 
     pub fn kill(&mut self, killed: Killed) {
         self.run.killed.get_or_insert(killed);
+    }
+}
+
+impl<S: Store> Drop for Run<'_, S> {
+    fn drop(&mut self) {
+        let Some(mut p) = self.profile.take() else {
+            return;
+        };
+        for ((id, _), memo) in &self.memo.entries {
+            let s = p.stats.entry(*id).or_default();
+            s.entries += 1;
+            if let Memo::Done { vals, .. } = memo {
+                s.values += vals.len() as u64;
+            }
+        }
+        p.merge(|id| self.fn_name(id));
     }
 }

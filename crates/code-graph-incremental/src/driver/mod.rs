@@ -145,21 +145,29 @@ fn one_file(
     phases: &[Phase],
     run: &Sentinel,
 ) -> Result<(Tree<Compact>, Vec<Edge>, Option<Killed>), Killed> {
+    let started = std::time::Instant::now();
     let (tree, cut) = crate::frontend::parse(env, &file.path, &file.content, run)?;
+    if *engine::profile::ON {
+        engine::profile::phase("parse", started);
+    }
     let mut edges = Vec::new();
     let mut at = Stage::Mutable(tree);
     for phase in phases {
+        let started = std::time::Instant::now();
         if phase.walk == Walk::Fixpoint {
             let Stage::Mutable(tree) = &mut at else {
                 return Err(Killed::limit(phase.label, &file.path, 0, 0));
             };
             engine::rewrite_tree(phase, tree, env, run)?;
-            continue;
+        } else {
+            let tree = at.compact(env);
+            match phase.walk {
+                Walk::Flow => edges.extend(engine::run_tree(phase, tree, env, run)?),
+                _ => engine::tag_tree(phase, tree, 0, env, &EdgeIndex::new(&edges), run)?,
+            }
         }
-        let tree = at.compact(env);
-        match phase.walk {
-            Walk::Flow => edges.extend(engine::run_tree(phase, tree, env, run)?),
-            _ => engine::tag_tree(phase, tree, 0, env, &EdgeIndex::new(&edges), run)?,
+        if *engine::profile::ON {
+            engine::profile::phase(&phase.name, started);
         }
     }
     Ok((at.into_compact(env), edges, cut))
@@ -215,6 +223,7 @@ fn finish(env: &Env, state: &mut State, run: &Sentinel) -> Result<(), Error> {
     let (_, rest) = split(env);
     for phase in rest {
         run.check()?;
+        let started = std::time::Instant::now();
         match phase.scope.as_str() {
             "project" => state.project(env),
             "graph" => {}
@@ -262,6 +271,9 @@ fn finish(env: &Env, state: &mut State, run: &Sentinel) -> Result<(), Error> {
                     }
                 }
             }
+        }
+        if *engine::profile::ON {
+            engine::profile::phase(&phase.name, started);
         }
     }
     Ok(())

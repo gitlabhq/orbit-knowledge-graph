@@ -31,23 +31,43 @@ fn tail_sym<S: Store>(node: Cursor<'_, S>) -> u32 {
 impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     fn member_binding(&mut self, node: Cursor<'_, S>) -> Option<(u32, u32)> {
         let member = member_of(node)?;
-        let mut object = object_of(member)?;
-        let mut path = SmallVec::<[u32; 4]>::new();
-        while object.sym() == 0 {
-            let inner = member_of(object)?;
-            path.push(inner.sym());
-            object = object_of(inner)?;
-        }
-        let mut root = self.binding(object.sym());
-        for field in path.into_iter().rev() {
-            let s = self.state();
-            if root == 0 || s.statics.contains_key(&root) {
-                return None;
-            }
-            root = *s.fields.get(&root)?.get(&field)?;
-        }
+        let root = self.object_binding(object_of(member)?);
         let tracked = root != 0 && !self.state().statics.contains_key(&root);
         tracked.then_some((root, member.sym()))
+    }
+
+    /// The binding a chain object stands for, or 0: its name's binding, or
+    /// the field its inner member reads off the object below it.
+    fn object_binding(&mut self, object: Cursor<'_, S>) -> u32 {
+        let mut path = SmallVec::<[(u32, u32); 4]>::new();
+        let mut at = object;
+        let mut root = loop {
+            if at.sym() != 0 {
+                break self.binding(at.sym());
+            }
+            if let Some(&known) = self.state().chains.get(&at.index()) {
+                break known;
+            }
+            let Some((inner, below)) = member_of(at).and_then(|m| Some((m, object_of(m)?))) else {
+                break 0;
+            };
+            path.push((at.index(), inner.sym()));
+            at = below;
+        };
+        while let Some((node, field)) = path.pop() {
+            let s = self.state();
+            root = match root == 0 || s.statics.contains_key(&root) {
+                true => 0,
+                false => s
+                    .fields
+                    .get(&root)
+                    .and_then(|f| f.get(&field))
+                    .copied()
+                    .unwrap_or(0),
+            };
+            s.chains.insert(node, root);
+        }
+        root
     }
 
     pub(super) fn field_slot(&mut self, node: Cursor<'_, S>) -> Option<u32> {

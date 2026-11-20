@@ -70,6 +70,13 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
             .map(|c| Step::Visit(c.index()))
             .collect();
         while let Some(step) = stack.pop() {
+            let chain = matches!(step, Step::Visit(n) if {
+                let c = self.at(n);
+                c.is(C::Member) || c.is(C::Object)
+            });
+            if !chain && !self.state().chains.is_empty() {
+                self.state().chains.clear();
+            }
             match step {
                 Step::Visit(node) => self.visit(&words, self.at(node), &mut stack),
                 Step::Do(act) => self.act(act),
@@ -84,6 +91,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
             self.write().late.insert(call, found);
         }
         let s = self.write();
+        s.chains.clear();
         s.walking = false;
         s.walked = true;
     }
