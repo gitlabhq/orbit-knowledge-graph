@@ -1,6 +1,7 @@
 import { orbitSite } from "@gitlab-org/orbit-site/vite";
 import { defineConfig, mergeConfig, type Plugin } from "vite";
 import { siteMeta, siteRoot, sourcePaths, syncContent } from "./build/content";
+import { CRAWL } from "./build/crawl";
 import { HOME, LLMS_NOTES, NEXT_PAGE } from "./src/sections";
 
 function syncSources(): Plugin {
@@ -30,6 +31,7 @@ export default defineConfig(() => {
       avatars: (route) => !route.startsWith("content/blog/"),
       image: { url: "https://gitlaborbit.dev/og.png", width: 1200, height: 630, alt: "GitLab Orbit: The context layer for all your agents." },
       llms: LLMS_NOTES,
+      crawl: CRAWL,
     }),
     { plugins: [syncSources()] },
   );
