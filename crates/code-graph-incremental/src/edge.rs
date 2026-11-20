@@ -1,32 +1,8 @@
-#[repr(u16)]
+/// An edge kind: its name's id in `Lang::edges`, declared in pipeline.yaml.
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    strum::Display,
-    strum::EnumString,
-    strum::IntoStaticStr,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
+    Clone, Copy, Debug, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
-pub enum EdgeKind {
-    Calls = 1,
-    Defines = 2,
-    Imports = 3,
-    Extends = 4,
-    TypeFlow = 5,
-    Links = 6,
-}
-
-impl EdgeKind {
-    pub fn name(self) -> &'static str {
-        self.into()
-    }
-}
+pub struct EdgeKind(pub u16);
 
 #[repr(u8)]
 #[derive(

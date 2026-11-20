@@ -75,16 +75,16 @@ fn linking_a_file_yields_its_local_edges() {
 
     assert!(state.edges.iter().all(|e| e.from_fi() == e.to_fi()));
     assert_eq!(
-        edges(&env, &state, EdgeKind::Defines),
+        edges(&env, &state, env.lang.edge_kind("defines").unwrap()),
         [pair("Greeter", "greet")]
     );
     assert_eq!(
-        edges(&env, &state, EdgeKind::Calls),
+        edges(&env, &state, env.lang.edge_kind("calls").unwrap()),
         [pair("run", "Greeter"), pair("run", "greet")],
         "g = Greeter(); g.greet() resolves through the local type"
     );
     assert_eq!(
-        edges(&env, &state, EdgeKind::Imports),
+        edges(&env, &state, env.lang.edge_kind("imports").unwrap()),
         [pair("greet", "helper"), pair("run", "os")],
         "each use of an imported name points at the import"
     );

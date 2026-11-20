@@ -1,4 +1,5 @@
 scopes: [__def]
+edges: [calls, defines, imports, extends, type_flow, links]
 
 phases:
   - { name: canonicalize, over: tree, does: rewrite, budget: { label: rewrite, tree: file_rewrite_ms, skip: skip_timeout_walk } }

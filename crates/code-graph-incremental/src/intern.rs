@@ -77,6 +77,7 @@ pub struct Lang {
     pub kinds: Interner,
     pub fields: Interner,
     pub syms: Interner,
+    pub edges: Interner,
 }
 
 impl Lang {
@@ -123,5 +124,17 @@ impl Lang {
 
     pub fn field_name(&self, f: u16) -> &str {
         self.fields.resolve(f as u32)
+    }
+
+    /// A declared edge kind by name.
+    pub fn edge_kind(&self, name: &str) -> Option<crate::edge::EdgeKind> {
+        match self.edges.lookup(name) {
+            0 => None,
+            id => Some(crate::edge::EdgeKind(id as u16)),
+        }
+    }
+
+    pub fn edge_name(&self, kind: crate::edge::EdgeKind) -> &str {
+        self.edges.resolve(u32::from(kind.0))
     }
 }

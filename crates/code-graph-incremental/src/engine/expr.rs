@@ -372,8 +372,9 @@ impl<'s> Parser<'s, '_> {
                 }
                 self.space();
                 let kind = self.ident();
-                let kind = edge_kind(kind)
-                    .ok_or_else(|| self.error(&format!("unknown edge kind {kind}")))?;
+                let kind = self.scope.lang.edge_kind(kind).ok_or_else(|| {
+                    self.error(&format!("edge kind {kind} is not in pipeline.yaml edges"))
+                })?;
                 if !self.eat(")") {
                     return Err(self.error("expected )"));
                 }
@@ -546,16 +547,4 @@ impl<'s> Parser<'s, '_> {
         };
         Ok(Expr::Op(op, args.into()))
     }
-}
-
-pub fn edge_kind(name: &str) -> Option<EdgeKind> {
-    Some(match name {
-        "calls" => EdgeKind::Calls,
-        "defines" => EdgeKind::Defines,
-        "imports" => EdgeKind::Imports,
-        "extends" => EdgeKind::Extends,
-        "type_flow" => EdgeKind::TypeFlow,
-        "links" => EdgeKind::Links,
-        _ => return None,
-    })
 }

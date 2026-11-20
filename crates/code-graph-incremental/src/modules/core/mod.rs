@@ -8,7 +8,7 @@ use crate::engine::{
     Cursor, Cx, Derive, Function, IndexDecl, KeyPart, Loc, Module, Store, Val, Vals, of, one,
 };
 use crate::modules::{arg, function, node};
-use crate::tree::{Compact, EdgeKind, Mutable, Role, Tree};
+use crate::tree::{Compact, Mutable, Role, Tree};
 
 pub struct Core;
 
@@ -161,7 +161,8 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
                 _ => None,
             })
             .collect();
-        for &s in self.targets(EdgeKind::Extends, def) {
+        let extends = self.lang().edge_kind("extends");
+        for &s in extends.map_or(&[][..], |kind| self.targets(kind, def)) {
             if !supers.contains(&s) {
                 supers.push(s);
             }

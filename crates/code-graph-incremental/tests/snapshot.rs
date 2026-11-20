@@ -253,11 +253,11 @@ fn reindex_and_stage(
     (env, state)
 }
 
-fn links(state: &State) -> HashSet<(String, String)> {
+fn links(env: &Env, state: &State) -> HashSet<(String, String)> {
     state
         .edges
         .iter()
-        .filter(|edge| edge.kind == code_graph_incremental::edge::EdgeKind::Links)
+        .filter(|edge| Some(edge.kind) == env.lang.edge_kind("links"))
         .map(|edge| {
             (
                 state.trees[edge.from_tree as usize].label.clone(),
@@ -298,11 +298,11 @@ fn link_targets_removed_or_added_in_another_block_update_the_source_block() {
 
     let (_, state) = reindex_and_stage(&snapshot, repo.path(), Vec::new(), &[&removed]);
     let (_, reloaded) = State::load(&snapshot, SupportLang::Markdown).unwrap();
-    assert_eq!(links(&reloaded), links(&state));
+    assert_eq!(links(&env, &reloaded), links(&env, &state));
 
     let changed = write(repo.path(), &[(&added, "# New\n")]);
     let (_, state) = reindex_and_stage(&snapshot, repo.path(), changed, &[]);
     let (_, reloaded) = State::load(&snapshot, SupportLang::Markdown).unwrap();
-    assert!(links(&state).contains(&("index.md".to_string(), added.clone())));
-    assert_eq!(links(&reloaded), links(&state));
+    assert!(links(&env, &state).contains(&("index.md".to_string(), added.clone())));
+    assert_eq!(links(&env, &reloaded), links(&env, &state));
 }

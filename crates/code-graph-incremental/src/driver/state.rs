@@ -156,6 +156,7 @@ pub struct LangSnapshot {
     pub kinds: InternerSnapshot,
     pub fields: InternerSnapshot,
     pub syms: InternerSnapshot,
+    pub edges: InternerSnapshot,
 }
 
 impl From<&Lang> for LangSnapshot {
@@ -164,6 +165,7 @@ impl From<&Lang> for LangSnapshot {
             kinds: InternerSnapshot::from(&l.kinds),
             fields: InternerSnapshot::from(&l.fields),
             syms: InternerSnapshot::from(&l.syms),
+            edges: InternerSnapshot::from(&l.edges),
         }
     }
 }
@@ -174,6 +176,7 @@ impl From<LangSnapshot> for Lang {
             kinds: Interner::from(s.kinds),
             fields: Interner::from(s.fields),
             syms: Interner::from(s.syms),
+            edges: Interner::from(s.edges),
         }
     }
 }

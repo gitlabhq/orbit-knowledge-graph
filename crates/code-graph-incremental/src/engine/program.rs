@@ -51,6 +51,7 @@ pub struct BudgetSpec {
 #[serde(deny_unknown_fields)]
 struct PipelineSpec {
     scopes: Vec<String>,
+    edges: Vec<String>,
     phases: Vec<PhaseSpec>,
 }
 
@@ -276,6 +277,9 @@ impl Pipeline {
     pub fn load(lang: &Lang, languages: &[Option<&'static str>]) -> Result<Self, LoadError> {
         let spec: PipelineSpec =
             orbit_utils::yaml::from_str(include_str!("../../config/pipeline.yaml"))?;
+        for edge in &spec.edges {
+            lang.edges.intern(edge);
+        }
         let files = super::lang::load(languages)?;
         let names: HashMap<String, u16> = files
             .shared
@@ -1149,8 +1153,9 @@ impl Loader<'_> {
         };
         let mut out = Vec::new();
         for (kind, spec) in map {
-            let kind = super::expr::edge_kind(kind)
-                .ok_or_else(|| LoadError(format!("unknown edge kind {kind}")))?;
+            let kind = self.lang.edge_kind(kind).ok_or_else(|| {
+                LoadError(format!("edge kind {kind} is not in pipeline.yaml edges"))
+            })?;
             match spec {
                 Value::Array(items) => {
                     for item in items {

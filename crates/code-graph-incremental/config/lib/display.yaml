@@ -22,14 +22,14 @@ stages:
     - stage: imports
       rewrite:
         - '(__import)': '#entity=ImportedSymbol #file_path=$ROOT | ancestor_tag("file_path") #source_path=$ROOT | child_sym("__source")'
-        - '(__name "*")': '#import_type=WildcardImport #resolved=$ROOT | has_incoming("Imports")'
-        - '(__name (__alias))': '#import_type=AliasedImport #resolved=$ROOT | has_incoming("Imports")'
-        - '(__name)': '#resolved=$ROOT | has_incoming("Imports")'
+        - '(__name "*")': '#import_type=WildcardImport #resolved=$ROOT | has_incoming("imports")'
+        - '(__name (__alias))': '#import_type=AliasedImport #resolved=$ROOT | has_incoming("imports")'
+        - '(__name)': '#resolved=$ROOT | has_incoming("imports")'
   display_imports:
     - stage: imports
       rewrite:
         - '(__import)': '#entity=ImportedSymbol #file_path=$ROOT | ancestor_tag("file_path") #source_path=$ROOT | child_sym("__source")'
-        - '(__name)': '#resolved=$ROOT | has_incoming("Imports")'
+        - '(__name)': '#resolved=$ROOT | has_incoming("imports")'
   def_fqn_dotted_except_impl:
     - '(__def !(__impl))': '#entity=Definition #fqn=$ROOT | ancestor_tag("fqn") | concat(".", $ROOT | child_sym("__defname")) | keep_last(".", 64, 4096) #file_path=$ROOT | ancestor_tag("file_path")'
     - '(__def (__impl))': '#entity=Definition #file_path=$ROOT | ancestor_tag("file_path")'
@@ -50,7 +50,7 @@ stages:
   import_entity:
     - '(__import)': '#entity=ImportedSymbol #file_path=$ROOT | ancestor_tag("file_path") #source_path=$ROOT | child_sym("__source")'
   aliased_import_type:
-    - '(__name (__alias))': '#import_type=AliasedImport #resolved=$ROOT | has_incoming("Imports")'
+    - '(__name (__alias))': '#import_type=AliasedImport #resolved=$ROOT | has_incoming("imports")'
   def_fqn_colons_except_impl:
     - '(__def !(__impl))': '#entity=Definition #fqn=$ROOT | ancestor_tag("fqn") | concat("::", $ROOT | child_sym("__defname")) | keep_last("::", 64, 4096) #file_path=$ROOT | ancestor_tag("file_path")'
     - '(__def (__impl))': '#entity=Definition #file_path=$ROOT | ancestor_tag("file_path")'

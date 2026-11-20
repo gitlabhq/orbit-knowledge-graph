@@ -8,7 +8,7 @@ use smallvec::SmallVec;
 use crate::engine::{Cursor, Cx, Function, Module, Store, Val, Vals, one, yes};
 use crate::intern::Lang;
 use crate::modules::function;
-use crate::tree::{EdgeKind, Node, Storage};
+use crate::tree::{Node, Storage};
 
 pub struct Text;
 
@@ -240,7 +240,10 @@ fn text<'t, S: Store>(cx: &Cx<'_, 't, Text, S>, v: Val) -> Option<&'t str> {
 }
 
 fn targets<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals], unresolved: bool) -> Vals {
-    let (Some(loc), Ok(kind)) = (a[0][0].loc(), opts(cx, a).lit(1).parse::<EdgeKind>()) else {
+    let (Some(loc), Ok(kind)) = (
+        a[0][0].loc(),
+        cx.lang().edge_kind(opts(cx, a).lit(1)).ok_or(()),
+    ) else {
         return Vals::new();
     };
     let found = match unresolved {
@@ -271,7 +274,10 @@ fn file_dir<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals]) -> Vals {
 }
 
 fn has_edge<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals], incoming: bool) -> Vals {
-    let (Some(loc), Ok(kind)) = (a[0][0].loc(), opts(cx, a).lit(1).parse::<EdgeKind>()) else {
+    let (Some(loc), Ok(kind)) = (
+        a[0][0].loc(),
+        cx.lang().edge_kind(opts(cx, a).lit(1)).ok_or(()),
+    ) else {
         return Vals::new();
     };
     yes(cx.has_edge(kind, incoming, loc.node))
