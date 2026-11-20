@@ -1,4 +1,39 @@
 define:
+  name(ROOT): 'minus(read($ROOT), opaque)'
+  ivar(ROOT): "first(select_all(enclosing | class, '(__binding $I:__ivar)', $ROOT), b => typed_field(b)) | producer"
+  typed_field(ROOT):
+    '_ when typed($ROOT)': '$ROOT'
+  resolution(ROOT, site):
+    '(__call) when shadowed($ROOT)': '"non_callable"'
+  shadowed(ROOT):
+    '(__call (__callee (__ivar)))': none
+    '(__call (__callee (__member $O:__object)))': 'shadowed_root(chain_root($O))'
+    '(__call $K:__callee)': 'shadowed_root($K)'
+  shadowed_root(ROOT):
+    '(__call)': none
+    '_ when value_call($ROOT)': none
+    '_': 'minus(read($ROOT), union(read($ROOT) | named_value, instances(read($ROOT))))'
+  lub(ROOT, types):
+    '_ when minus(types, minus(types, opaque))': none
+    '_ when minus(types, types | class_value)': none
+    '_': 'least($ROOT, every(types, t => lineage(nodes(t))))'
+  least(ROOT, common): 'unique(minus(common, common | strictly_above))'
+  class_value(ROOT):
+    '_ when is_class(nodes($ROOT))': '$ROOT'
+  lineage(ROOT): 'union($ROOT, union($ROOT, other_parts($ROOT)) | supers | lineage)'
+  strictly_above(ROOT): 'minus(lineage($ROOT), $ROOT)'
+  inferred_return(ROOT):
+    '(__def $T:__ssa_return_type)': '$T'
+    '(__def **!__def|__lambda/$R:__ssa_return)': 'return_name($R, $ROOT)'
+  return_name(ROOT, def):
+    '(_ $$$K)': 'first($K | stands_under($ROOT) | return_value, k => return_ref(k, def))'
+  return_value(ROOT):
+    '(__call)': '$ROOT'
+    '(_ "/./")': '$ROOT'
+  return_ref(ROOT, def):
+    '(__call $C:(__callee "/./"))': '$C'
+    '(__call)': none
+    '_': "last(select_all(def, '(__binding)' by $ROOT, $ROOT) | rhs_callee) or $ROOT"
   value(ROOT):
     '(%opaque_nodes)': 'opaque'
     '(__call)': '$ROOT'
@@ -268,7 +303,7 @@ define:
     '(__def **!__def|__lambda/(__ssa_return $B:__ssa_branch))': '$B | branch_type or $ROOT | inferred_return'
     '_': '$ROOT | inferred_return'
   branch_type(ROOT):
-    '(_ $$$A:__ssa_arm)': 'lub($A | tail | arm_type)'
+    '(_ $$$A:__ssa_arm)': 'lub($ROOT, $A | tail | arm_type)'
   arm_type(ROOT):
     '(__ssa_return)': 'none'
     '(__ssa_branch $$$A:__ssa_arm) when $A': '$ROOT | branch_type or opaque'

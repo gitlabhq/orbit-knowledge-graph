@@ -7,7 +7,7 @@ phases:
   - name: link
     over: tree
     does: edges
-    bind: { core.read: ssa.flow, core.supertypes: supertypes, ssa.value_of: value_of, ssa.valued: valued, ssa.source: source }
+    bind: { core.read: ssa.flow, ssa.value_of: value_of, ssa.valued: valued, ssa.source: source }
     budget: { tree: file_link_ms, skip: skip_timeout_ssa }
   - { name: project, over: project, does: rewrite }
   - name: resolve
@@ -15,6 +15,6 @@ phases:
     does: edges
     until: stable
     budget: { scope: cross_file_resolve_ms }
-    bind: { core.read: resolved, core.supertypes: supertypes }
+    bind: { core.read: resolved }
   - { name: display, over: tree, does: tags }
   - { name: export, over: graph, does: rows }
