@@ -120,7 +120,7 @@ To install DIP:
 1. Download the chart to get the values file:
 
    ```shell
-   helm pull data-insights-platform --version 2.10.0 --untar \
+   helm pull data-insights-platform --version 2.10.1 --untar \
      --repo https://gitlab.com/api/v4/projects/70800837/packages/helm/stable
    ```
 
@@ -129,7 +129,7 @@ To install DIP:
    ```shell
    helm upgrade --install dip data-insights-platform \
      --repo https://gitlab.com/api/v4/projects/70800837/packages/helm/stable \
-     --version 2.10.0 \
+     --version 2.10.1 \
      --namespace dip \
      --values data-insights-platform/values-orbit.yaml \
      --set single.pipeline.nats.addr=nats://nats.nats.svc.cluster.local:4222
@@ -150,9 +150,10 @@ Adjust the values for your environment:
   DIP mounts the Secret at `/etc/ssl/certs/custom`, so the paths are, for example, `/etc/ssl/certs/custom/ca.crt`, `tls.crt`, and `tls.key`.
 - A NATS server that requires a username and password is not supported. See [issue 225](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/work_items/225).
 - For ClickHouse over TLS, such as ClickHouse Cloud, use the secure native port, 9440 by default, and add `?secure=true` to the DSN in the `dip-clickhouse-dsn` Secret, for example `clickhouse://<dip_user>:<dip_password>@<clickhouse_host>:9440?secure=true`.
-- DIP runs in single mode and creates its tables on one ClickHouse node.
-  On a replicated ClickHouse cluster, point the DIP DSN and the exporter's `clickhouse.host` at the same node, not at a load balancer, because `single.pipeline.clickhouse.selfManaged: true` does not replicate the DIP tables yet.
-  <!-- TODO: once core MR 271 is released and the DIP chart picks it up, replace this bullet with the selfManaged: true instructions and the DIP chart version that has it -->
+- On a replicated ClickHouse cluster, set `single.pipeline.clickhouse.selfManaged: true`.
+  The DIP migrations then create the databases, tables, and users `ON CLUSTER '{cluster}'` with replicated table engines.
+  Every ClickHouse server needs ClickHouse Keeper and the `{cluster}`, `{shard}`, and `{replica}` macros.
+  Set it before the first install. If DIP already created its tables on a single node, the migrations stop and name the tables to drop first.
 
 For every value, see the [DIP chart README](https://gitlab.com/gitlab-org/analytics-section/platform-insights/data-insights-platform-helm-charts#rendering-the-pipeline-config-from-values).
 
