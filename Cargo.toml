@@ -8,9 +8,11 @@ members = [
   "crates/code-graph",
   "crates/code-graph/treesitter-visit",
   "crates/code-graph-incremental",
+  "crates/gitalisk-core",
   "crates/clickhouse-client",
   "crates/indexer",
   "crates/indexer/duckdb",
+  "crates/indexing-engine-next",
   "crates/query-engine",
   "crates/query-engine/compiler",
   "crates/query-engine/types",
@@ -121,7 +123,7 @@ clickhouse-client = { path = "crates/clickhouse-client" }
 nats-client = { path = "crates/nats-client" }
 duckdb = { version = "1.20000.0", features = ["vtab-arrow", "appender-arrow"] }
 libduckdb-sys = { version = "1.20000.0", default-features = false }
-gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag = "v0.9.0" }
+gitalisk-core = { path = "crates/gitalisk-core" }
 siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.git", tag = "0.0.103-beta" }
 thiserror = "2.0.18"
 tokio-stream = "0.1.18"

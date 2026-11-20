@@ -113,9 +113,7 @@ impl ArrowClickHouseClient {
             .with_user(username)
             .with_setting("output_format_arrow_string_as_string", "1")
             .with_setting("output_format_arrow_fixed_string_as_fixed_byte_array", "1")
-            .with_setting("use_query_condition_cache", "true")
             .with_setting("join_use_nulls", "0")
-            .with_setting("query_plan_join_swap_table", "auto")
             .with_setting("optimize_aggregation_in_order", "1")
             .with_setting("use_statistics", "0")
             .with_setting("use_text_index_like_evaluation_by_dictionary_scan", "0")
@@ -174,6 +172,14 @@ impl ArrowClickHouseClient {
 
     pub fn without_query_cache(mut self) -> Self {
         self.client = self.client.with_setting("use_query_cache", "0");
+        self
+    }
+
+    /// Mark the client as read-only so ClickHouse cancels its queries when the
+    /// caller drops them. Never use it on a client that inserts or runs DDL.
+    /// Mode 2 rather than 1 because every query sends settings, which mode 1 forbids.
+    pub fn read_only(mut self) -> Self {
+        self.client = self.client.with_setting("readonly", "2");
         self
     }
 

@@ -36,7 +36,7 @@ pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfi
 pub use clickhouse_setup::ClickHouseSetupConfig;
 pub use engine::{
     CodeBackfillSweepConfig, CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig,
-    CronSchedule, DatalakeRetryConfig, EngineConfigError, EngineConfiguration, EntityHandlerConfig,
+    CronSchedule, DatalakeRetryConfig, EngineConfiguration, EntityHandlerConfig,
     GlobalDispatcherConfig, GraphStatsConfig, HandlersConfiguration, IndexerModule,
     MigrationCompletionConfig, NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig,
     NamespaceFreshnessConfig, ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration,
@@ -51,5 +51,5 @@ pub use nats::NatsConfiguration;
 pub use object_storage::{ObjectStorageAuth, ObjectStorageConfig, ObjectStorageProvider};
 pub use probe_server::{DEFAULT_PROBE_SERVER_PORT, ProbeServerConfig};
 pub use resources::{ContainerResources, MIN_DATALAKE_BATCH_SIZE, derive_concurrency_groups};
-pub use schema::{SchemaConfig, SchemaConfigError};
+pub use schema::SchemaConfig;
 pub use tls::TlsConfig;

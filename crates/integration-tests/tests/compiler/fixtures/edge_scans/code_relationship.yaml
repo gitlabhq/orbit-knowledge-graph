@@ -23,8 +23,7 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Scan Table(gl_code_edge) AS _orbit_edge_0)
-        - (Filter _orbit_edge_0.source_id = 1, ... (_))
+        - (Filter _orbit_edge_0.relationship_kind = 'CALLS', _orbit_edge_0.source_id = 1, ... (_))
   duckdb:
     planned:
       expect:

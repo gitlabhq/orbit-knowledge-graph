@@ -92,7 +92,6 @@ async fn main() -> anyhow::Result<()> {
         match args.mode {
             Mode::ClickhouseSetup => orbit_server::clickhouse_setup::run(&config).await,
             Mode::DispatchIndexing => {
-                config.schema.validate()?;
                 let archive = ontology::archive::OntologyArchive::from_bytes(
                     *schema::version::SCHEMA_VERSION,
                     include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
@@ -123,8 +122,6 @@ async fn main() -> anyhow::Result<()> {
                 .map_err(Into::into)
             }
             Mode::Webserver => {
-                config.schema.validate()?;
-                config.grpc.validate()?;
                 run_webserver(&config, active_schema, serving, shutdown.clone()).await
             }
         }
@@ -175,7 +172,7 @@ async fn run_webserver(
             .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
     );
 
-    let graph = config.graph.build_client("graph");
+    let graph = config.graph.build_client("graph").read_only();
     let cluster_health = ClusterHealthChecker::new(
         config.health_check_url.clone(),
         Some(graph.clone()),

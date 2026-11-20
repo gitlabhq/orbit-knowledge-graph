@@ -1,0 +1,107 @@
+cases:
+  - name: A default-table relationship scans one edge table filtered by its kind
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","columns":["name"],"filters":{"visibility_level":"public"}},{"id":"u","entity":"User","columns":["username"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":25,"order_by":"-g.created_at"}
+      gql: |
+        MATCH (g:Group {visibility_level: 'public'})<-[:MEMBER_OF]-(u:User) RETURN g.name, u.username ORDER BY g.created_at DESC LIMIT 25
+    logical:
+      expect: ["(EdgeScan MEMBER_OF u->g AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter _orbit_edge_0.relationship_kind = 'MEMBER_OF', ... (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_0)))"]
+          reject: ["(Scan Table(gl_code_edge) ...)", "(Union ... (...))"]
+        emitted:
+          expect: ["(Limit 26 (Sort ... (_)))"]
+
+  - name: A code relationship scans only the code edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1]},{"id":"d","entity":"Definition"}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}],"limit":25}
+      gql: |
+        MATCH (f:File {id: 1})-[:DEFINES]->(d:Definition) RETURN f, d LIMIT 25
+    logical:
+      expect: ["(EdgeScan DEFINES f->d AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter _orbit_edge_0.relationship_kind = 'DEFINES', _orbit_edge_0.source_id = 1, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))"]
+          reject: ["(Scan Table(gl_edge) ...)", "(Union ... (...))"]
+
+  - name: Alternative code relationships stay on the code edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"}],"relationships":[{"type":["CALLS","EXTENDS","DEFINES"],"from":"a","to":"b"}],"limit":25}
+      gql: |
+        MATCH (a:Definition {id: 1})-[:CALLS|EXTENDS|DEFINES]->(b:Definition) RETURN a, b LIMIT 25
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter _orbit_edge_0.relationship_kind IN ['CALLS', 'EXTENDS', 'DEFINES'], _orbit_edge_0.source_id = 1, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))"]
+        final_ast:
+          expect: ["(Scan Table(gl_code_edge) AS _orbit_edge_0)"]
+          reject: ["(Scan Table(gl_edge) ...)"]
+
+  - name: A pinned file narrows the joined definitions to reached IDs
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":["12345"],"columns":["path"]},{"id":"d","entity":"Definition","columns":["name"]}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}],"limit":50}
+      gql: |
+        MATCH (f:File {id: 12345})-[:DEFINES]->(d:Definition) RETURN f.path, d.name LIMIT 50
+    physical:
+      clickhouse:
+        planned:
+          bind:
+            - (CTE $edge (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.relationship_kind = 'DEFINES', _orbit_edge_0.source_id = 12345, ... (Scan Table(gl_code_edge) AS _orbit_edge_0)))))
+            - (CTE $ids (Project _orbit_id_source.target_id AS id (_)))
+          expect:
+            - (Filter d._deleted = false (Deduplicate LimitBy ... (Filter d.id IN $ids.id (Scan Table(gl_definition) AS d))))
+          reject: ["(Deduplicate Final (Scan Table(gl_definition) AS d))"]
+
+  - name: A single-hop wildcard keeps one default-table scan
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"*","from":"u","to":"p"}],"limit":25}
+      gql: |
+        MATCH (u:User {id: 1})-->(p:Project) RETURN u, p LIMIT 25
+    logical:
+      expect: ["(EdgeScan CONTAINS|CREATOR|MEMBER_OF u->p AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Scan Table(gl_edge) AS _orbit_edge_0)"]
+          reject: ["(Union ... (...))"]
+
+  - name: A wildcard relationship reads only the kinds that connect its endpoint entities
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"*","from":"u","to":"mr"}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1})-[]->(mr:MergeRequest) RETURN u, mr LIMIT 10
+    logical:
+      expect: ["(EdgeScan APPROVED|ASSIGNED|AUTHORED|CLOSED|LAST_EDITED_BY|MERGED|REOPENED|REVIEWER|UPDATED_BY u->mr AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter _orbit_edge_0.relationship_kind IN ['APPROVED', 'ASSIGNED', 'AUTHORED', 'CLOSED', 'LAST_EDITED_BY', 'MERGED', 'REOPENED', 'REVIEWER', 'UPDATED_BY'], _orbit_edge_0.source_kind = 'User', _orbit_edge_0.target_kind = 'MergeRequest', ... (Scan Table(gl_edge) AS _orbit_edge_0))"]
+          reject: ["(Scan Table(gl_code_edge) ...)"]
+        emitted:
+          reject: ["(Scan Table(gl_code_edge) ...)"]
+          expect: ["(Scan Table(gl_edge) AS _orbit_edge_0)"]
+
+  - name: Relationship alternatives on two edge tables union one latest-row scan per table
+    ontology_overlay: variant_routes
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1]},{"id":"d","entity":"Definition"}],"relationships":[{"type":["CALLS","DEFINES"],"from":"f","to":"d"}],"limit":25}
+      gql: |
+        MATCH (f:File {id: 1})-[:CALLS|DEFINES]->(d:Definition) RETURN f, d LIMIT 25
+    logical:
+      expect: ["(EdgeScan CALLS|DEFINES f->d AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Union ALL AS _orbit_edge_0 (Project ... (Filter ... (Deduplicate LimitBy ... (Filter ... (Scan Table(gl_code_edge) AS _orbit_edge_0))))) (Project ... (Filter ... (Deduplicate LimitBy ... (Filter ... (Scan Table(gl_edge) AS _orbit_edge_0))))))
+          reject: ["(Deduplicate Final (_))"]

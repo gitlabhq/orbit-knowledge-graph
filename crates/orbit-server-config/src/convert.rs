@@ -144,6 +144,7 @@ fn clickhouse(value: proto::ClickHouse) -> ClickHouseConfiguration {
         url: present(value.url),
         username: present(value.username),
         password: value.password,
+        compatibility: present(value.compatibility),
         session_settings: value.session_settings,
         replicated: present(value.replicated),
         insert_settings: value.insert_settings,
