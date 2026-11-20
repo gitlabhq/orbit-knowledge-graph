@@ -1,0 +1,20 @@
+name: "Dockerfile: long and dotted commands keep the stage prefix and a capped name"
+
+fixtures:
+  - path: Dockerfile
+    content: |
+      FROM alpine AS a
+      CMD echo a0.b a1.b a2.b a3.b a4.b a5.b a6.b a7.b a8.b a9.b a10.b a11.b a12.b a13.b a14.b a15.b a16.b a17.b a18.b a19.b a20.b a21.b a22.b a23.b a24.b a25.b a26.b a27.b a28.b a29.b a30.b a31.b a32.b a33.b a34.b a35.b a36.b a37.b a38.b a39.b a40.b a41.b a42.b a43.b a44.b a45.b a46.b a47.b a48.b a49.b a50.b a51.b a52.b a53.b a54.b a55.b a56.b a57.b a58.b a59.b a60.b a61.b a62.b a63.b a64.b a65.b a66.b a67.b a68.b a69.b a70.b a71.b a72.b a73.b a74.b a75.b a76.b a77.b a78.b a79.b
+      ENTRYPOINT ["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"]
+
+tests:
+  - name: "the FQN stays short and the name is capped at 512 characters"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type IN ['Entrypoint', 'Command']
+      RETURN d.fqn AS fqn, d.name AS name
+      ORDER BY fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "Dockerfile.a.CMD", name: "echo a0.b a1.b a2.b a3.b a4.b a5.b a6.b a7.b a8.b a9.b a10.b a11.b a12.b a13.b a14.b a15.b a16.b a17.b a18.b a19.b a20.b a21.b a22.b a23.b a24.b a25.b a26.b a27.b a28.b a29.b a30.b a31.b a32.b a33.b a34.b a35.b a36.b a37.b a38.b a39.b a40.b a41.b a42.b a43.b a44.b a45.b a46.b a47.b a48.b a49.b a50.b a51.b a52.b a53.b a54.b a55.b a56.b a57.b a58.b a59.b a60.b a61.b a62.b a63.b a64.b a65.b a66.b a67.b a68.b a69.b a70.b a71.b a72.b a73.b a74.b a75.b a76.b a77.b a78.b a79.b" } }
+      - { row: { fqn: "Dockerfile.a.ENTRYPOINT", name: '["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' } }

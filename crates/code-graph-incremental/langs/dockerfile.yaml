@@ -9,6 +9,22 @@ config:
   stdlib: []
 
 stages:
+  # Only top-level instructions after a FROM count, so HEALTHCHECK CMD, ONBUILD
+  # and anything before the first FROM define nothing.
+  - name: instruction-defs
+    repeat: true
+    rules:
+      - match: '(source_file $$$PRE $F:from_instruction $$$A (expose_instruction $$$X $Q:(expose_port $$$E) $$$Y) $$$B)'
+        replace: '(source_file @$ROOT $$$PRE $F $$$A (expose_instruction $$$X (__ports (__def (__defname @$Q|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__port)) $$$E) $$$Y) $$$B)'
+      - match: '(source_file $$$PRE $F:from_instruction $$$A (entrypoint_instruction $C:json_string_array) $$$B)'
+        replace: '(source_file @$ROOT $$$PRE $F $$$A (__def (__defname @$C|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__entrypoint) (__fqn_segment @$C|regex_replace("(?s)^.*$", "ENTRYPOINT"))) $$$B)'
+      - match: '(source_file $$$PRE $F:from_instruction $$$A (entrypoint_instruction $C:shell_command) $$$B)'
+        replace: '(source_file @$ROOT $$$PRE $F $$$A (__def (__defname @$C|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__entrypoint) (__fqn_segment @$C|regex_replace("(?s)^.*$", "ENTRYPOINT"))) $$$B)'
+      - match: '(source_file $$$PRE $F:from_instruction $$$A (cmd_instruction $C:json_string_array) $$$B)'
+        replace: '(source_file @$ROOT $$$PRE $F $$$A (__def (__defname @$C|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__command) (__fqn_segment @$C|regex_replace("(?s)^.*$", "CMD"))) $$$B)'
+      - match: '(source_file $$$PRE $F:from_instruction $$$A (cmd_instruction $C:shell_command) $$$B)'
+        replace: '(source_file @$ROOT $$$PRE $F $$$A (__def (__defname @$C|regex_replace("(?s)^(.{0,512}).*$", "$1")) (__command) (__fqn_segment @$C|regex_replace("(?s)^.*$", "CMD"))) $$$B)'
+
   - name: normalize
     rules:
       - match: '(source_file $$$C)'
@@ -57,19 +73,6 @@ stages:
         replace: '(__def (__defname @$N) (__variable) $V)'
       - match: '(env_pair name: $N value:? $V)'
         replace: '(__def (__defname @$N) (__variable) $V)'
-
-  - name: instruction-defs
-    rules:
-      - match: '$P:expose_port'
-        replace: '(__def (__defname @$P) (__port))'
-      - match: '(entrypoint_instruction $C:json_string_array)'
-        replace: '(__def (__defname @$C) (__entrypoint))'
-      - match: '(entrypoint_instruction $C:shell_command)'
-        replace: '(__def (__defname @$C) (__entrypoint))'
-      - match: '(cmd_instruction $C:json_string_array)'
-        replace: '(__def (__defname @$C) (__command))'
-      - match: '(cmd_instruction $C:shell_command)'
-        replace: '(__def (__defname @$C) (__command))'
 
   - name: from-heads
     rules:
@@ -164,6 +167,12 @@ display:
           entity: Definition
           fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")|keep_last(".", "64", "4096")'
           file_path: '@$ROOT|ancestor_tag("file_path")'
+      - match: '(__def (__entrypoint))'
+        tag:
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__fqn_segment")'
+      - match: '(__def (__command))'
+        tag:
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__fqn_segment")'
       - match: '(__def (__impl))'
         tag:
           entity: Definition
