@@ -35,10 +35,10 @@ class CheckWorkspaceDepsTest(unittest.TestCase):
         for name in ("serde", "tempfile", "cc", "libc"):
             self.assertIn(f"`{name}`", result.stdout)
 
-    def test_path_dependency_is_ignored_only_in_registry_only_mode(self):
-        manifest = '[dependencies]\nsibling = { path = "../sibling" }\n'
-        self.assertEqual(run_check(manifest, "--registry-only").returncode, 0)
-        self.assertEqual(run_check(manifest).returncode, 1)
+    def test_path_dependency_without_workspace_fails(self):
+        result = run_check('[dependencies]\nsibling = { path = "../sibling" }\n')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("`sibling`", result.stdout)
 
     def test_allow_entry_with_reason_passes(self):
         result = run_check(
@@ -79,11 +79,10 @@ class CheckWorkspaceDepsTest(unittest.TestCase):
         result = run_check('[package]\nname = "a"\n\n[dependencies.zstd]\nversion = "0.14"\n')
         self.assertIn("Cargo.toml:4:", result.stdout)
 
-    def test_allow_entry_for_path_dependency_is_not_stale_in_registry_only_mode(self):
+    def test_allow_entry_for_path_dependency_is_not_stale(self):
         result = run_check(
             '[dependencies]\nsibling = { path = "../sibling" }\n'
             '[package.metadata.workspace-deps.allow]\nsibling = "pinned locally"\n',
-            "--registry-only",
         )
         self.assertEqual(result.returncode, 0, result.stdout)
 

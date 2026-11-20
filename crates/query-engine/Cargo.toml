@@ -8,11 +8,11 @@ default = []
 testutils = ["formatters/testutils"]
 
 [dependencies]
-compiler = { path = "compiler" }
-types = { path = "types" }
-pipeline = { path = "pipeline" }
-formatters = { path = "formatters" }
-shared = { path = "shared" }
+compiler = { workspace = true }
+types = { workspace = true }
+pipeline = { workspace = true }
+formatters = { workspace = true }
+shared = { workspace = true }
 
 [lints]
 workspace = true

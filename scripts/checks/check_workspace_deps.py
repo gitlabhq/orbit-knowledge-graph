@@ -6,8 +6,7 @@ Opt out per dependency in the member's Cargo.toml, with a reason:
     [package.metadata.workspace-deps.allow]
     some-crate = "why this crate must pin its own version"
 
-Usage: check_workspace_deps.py [--registry-only] [ROOT]
-    --registry-only  ignore path dependencies
+Usage: check_workspace_deps.py [ROOT]
 Exit 0 = clean, 1 = violations or stale/empty allow entries.
 """
 
@@ -47,7 +46,7 @@ def line_of(text, table, name):
     return 0
 
 
-def check_member(path, registry_only):
+def check_member(path):
     text = path.read_text()
     manifest = tomllib.loads(text)
     allow = manifest.get("package", {}).get("metadata", {}).get("workspace-deps", {}).get("allow", {})
@@ -59,8 +58,6 @@ def check_member(path, registry_only):
                 continue
             if name in allow:
                 used_allow.add(name)
-                continue
-            if registry_only and isinstance(spec, dict) and "path" in spec:
                 continue
             problems.append(f"{path}:{line_of(text, kind, name)}: [{kind}] `{name}` does not use `workspace = true`")
     for name, reason in allow.items():
@@ -74,13 +71,12 @@ def check_member(path, registry_only):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("root", nargs="?", default=".", type=Path)
-    parser.add_argument("--registry-only", action="store_true")
     args = parser.parse_args()
 
     members = tomllib.loads((args.root / "Cargo.toml").read_text())["workspace"]["members"]
     problems = []
     for member in members:
-        problems += check_member(args.root / member / "Cargo.toml", args.registry_only)
+        problems += check_member(args.root / member / "Cargo.toml")
 
     if not problems:
         return 0

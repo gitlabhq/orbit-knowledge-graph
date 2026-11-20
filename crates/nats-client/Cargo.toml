@@ -14,7 +14,7 @@ async-nats = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
-orbit-server-config = { path = "../orbit-server-config" }
+orbit-server-config = { workspace = true }
 parking_lot = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

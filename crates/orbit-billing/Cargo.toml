@@ -12,15 +12,15 @@ testkit = []
 
 [dependencies]
 circuit-breaker = { workspace = true }
-compiler = { path = "../query-engine/compiler" }
-gitlab-client = { path = "../gitlab-client" }
+compiler = { workspace = true }
+gitlab-client = { workspace = true }
 labkit = { workspace = true }
 labkit-events = { workspace = true }
 orbit-observability = { workspace = true }
-orbit-server-config = { path = "../orbit-server-config" }
-orbit-utils = { path = "../utils" }
+orbit-server-config = { workspace = true }
+orbit-utils = { workspace = true }
 parking_lot = { workspace = true }
-pipeline = { path = "../query-engine/pipeline" }
+pipeline = { workspace = true }
 moka = { workspace = true }
 opentelemetry = { workspace = true }
 rand = { workspace = true }

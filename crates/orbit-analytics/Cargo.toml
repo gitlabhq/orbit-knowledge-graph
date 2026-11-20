@@ -9,7 +9,7 @@ default = []
 testkit = []
 
 [dependencies]
-orbit-server-config = { path = "../orbit-server-config" }
+orbit-server-config = { workspace = true }
 gitlab-client = { workspace = true }
 labkit-events = { workspace = true }
 parking_lot = { workspace = true }
@@ -20,7 +20,7 @@ tokio = { workspace = true }
 orbit-log-fields = { workspace = true }
 
 [build-dependencies]
-orbit-versions = { path = "../orbit-versions" }
+orbit-versions = { workspace = true }
 prettyplease = { workspace = true }
 serde_json = { workspace = true }
 syn = { workspace = true }

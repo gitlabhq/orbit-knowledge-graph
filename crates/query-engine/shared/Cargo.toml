@@ -8,18 +8,18 @@ license = "MIT"
 arrow = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
-orbit-utils = { path = "../../utils" }
-orbit-arrow = { path = "../../utils/arrow" }
-ontology = { path = "../../ontology" }
-pipeline = { path = "../pipeline" }
+orbit-utils = { workspace = true }
+orbit-arrow = { workspace = true }
+ontology = { workspace = true }
+pipeline = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-types = { path = "../types" }
-compiler = { path = "../compiler" }
-query-data-model = { path = "../../query-data-model" }
+types = { workspace = true }
+compiler = { workspace = true }
+query-data-model = { workspace = true }
 
 [dev-dependencies]
-ontology = { path = "../../ontology" }
+ontology = { workspace = true }
 tokio = { workspace = true }
 
 [lints]

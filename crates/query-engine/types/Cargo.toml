@@ -6,11 +6,11 @@ license = "MIT"
 
 [dependencies]
 arrow = { workspace = true }
-orbit-arrow = { path = "../../utils/arrow" }
-compiler = { path = "../compiler" }
+orbit-arrow = { workspace = true }
+compiler = { workspace = true }
 
 [dev-dependencies]
-compiler = { path = "../compiler" }
+compiler = { workspace = true }
 
 [lints]
 workspace = true

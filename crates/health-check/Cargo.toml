@@ -9,7 +9,7 @@ async-nats = { workspace = true }
 axum = { workspace = true }
 clickhouse-client = { workspace = true }
 labkit = { workspace = true, features = ["tls"] }
-orbit-server-config = { path = "../orbit-server-config" }
+orbit-server-config = { workspace = true }
 k8s-openapi = { workspace = true }
 kube = { workspace = true }
 nats-client = { workspace = true }

@@ -5,11 +5,11 @@ edition = "2024"
 publish = false
 
 [dependencies]
-code-graph = { path = "../code-graph" }
-code-graph-incremental = { path = "../code-graph-incremental" }
-compiler = { path = "../query-engine/compiler" }
-duckdb-client = { path = "../duckdb-client" }
-ontology = { path = "../ontology" }
+code-graph = { workspace = true }
+code-graph-incremental = { workspace = true }
+compiler = { workspace = true }
+duckdb-client = { workspace = true }
+ontology = { workspace = true }
 
 arrow = { workspace = true }
 
@@ -19,9 +19,9 @@ globset = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-orbit-server-config = { path = "../orbit-server-config" }
-orbit-utils = { path = "../utils" }
-orbit-arrow = { path = "../utils/arrow" }
+orbit-server-config = { workspace = true }
+orbit-utils = { workspace = true }
+orbit-arrow = { workspace = true }
 tabled = { workspace = true }
 anyhow = { workspace = true }
 tempfile = { workspace = true }

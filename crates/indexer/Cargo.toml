@@ -17,26 +17,26 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 clickhouse = { workspace = true }
 clickhouse-client = { workspace = true }
-code-graph = { path = "../code-graph" }
-code-graph-incremental = { path = "../code-graph-incremental" }
-orbit-analytics = { path = "../orbit-analytics" }
+code-graph = { workspace = true }
+code-graph-incremental = { workspace = true }
+orbit-analytics = { workspace = true }
 orbit-log-fields = { workspace = true }
 orbit-observability = { workspace = true }
-orbit-server-config = { path = "../orbit-server-config" }
+orbit-server-config = { workspace = true }
 petgraph = { workspace = true }
-orbit-utils = { path = "../utils" }
-orbit-arrow = { path = "../utils/arrow" }
+orbit-utils = { workspace = true }
+orbit-arrow = { workspace = true }
 flate2 = { workspace = true }
 futures = { workspace = true }
-gitaly-protos = { path = "../gitaly-protos" }
+gitaly-protos = { workspace = true }
 gitlab-client = { workspace = true }
 indexmap = { workspace = true }
 labkit-events = { workspace = true }
 moka = { workspace = true }
 nats-client = { workspace = true }
-ontology = { path = "../ontology" }
-orbit-migrations = { path = "../orbit-migrations" }
-query-data-model = { path = "../query-data-model" }
+ontology = { workspace = true }
+orbit-migrations = { workspace = true }
+query-data-model = { workspace = true }
 opentelemetry = { workspace = true }
 parking_lot = { workspace = true }
 prost = { workspace = true }
@@ -58,7 +58,7 @@ uuid = { workspace = true }
 zstd = { workspace = true }
 
 [dev-dependencies]
-orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
+orbit-analytics = { workspace = true, features = ["testkit"] }
 jsonschema = { workspace = true }
 nats-client = { workspace = true, features = ["testkit"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }

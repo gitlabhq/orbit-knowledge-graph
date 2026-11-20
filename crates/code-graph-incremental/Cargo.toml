@@ -58,9 +58,9 @@ tree-sitter-typescript = { workspace = true }
 tree-sitter-zig = { workspace = true }
 tree-sitter-haskell = { workspace = true }
 tree-sitter-ocaml = { workspace = true }
-ontology = { path = "../ontology" }
-orbit-utils = { path = "../utils", features = ["markdown"] }
-orbit-arrow = { path = "../utils/arrow" }
+ontology = { workspace = true }
+orbit-utils = { workspace = true, features = ["markdown"] }
+orbit-arrow = { workspace = true }
 
 [dev-dependencies]
 arrow = { workspace = true, features = ["ipc"] }

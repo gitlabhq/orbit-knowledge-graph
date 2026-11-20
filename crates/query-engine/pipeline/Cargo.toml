@@ -5,9 +5,9 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
-orbit-utils = { path = "../../utils" }
-ontology = { path = "../../ontology" }
-compiler = { path = "../compiler" }
+orbit-utils = { workspace = true }
+ontology = { workspace = true }
+compiler = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
 

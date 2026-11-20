@@ -19,7 +19,7 @@ prost-reflect = { workspace = true }
 serde-saphyr = { workspace = true }
 
 [dev-dependencies]
-orbit-utils = { path = "../utils" }
+orbit-utils = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]
