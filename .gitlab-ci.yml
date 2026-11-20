@@ -836,10 +836,18 @@ pages:indexnow:
       changes: *engineering-site-changes
   script:
     - apk add --no-cache curl jq > /dev/null
+    - |
+      live() {
+        for file in index.html sitemap.xml llms-full.txt indexnow-key.txt; do
+          curl -fsS -o /tmp/live "https://gitlaborbit.dev/$file?pipeline=$CI_PIPELINE_ID" && cmp -s /tmp/live "public/$file" || return 1
+        done
+      }
+      for attempt in $(seq 1 60); do live && break; sleep 10; done
+      live || { echo "gitlaborbit.dev does not serve this build after 10 minutes"; exit 1; }
     - URLS=$(grep -o '<loc>[^<]*' public/sitemap.xml | cut -c6- | jq -R . | jq -s .)
     - |
       jq -n --rawfile key public/indexnow-key.txt --argjson urls "$URLS" \
-        '{host: "gitlaborbit.dev", key: $key, keyLocation: "https://gitlaborbit.dev/indexnow-key.txt", urlList: $urls}' |
+        '{host: "gitlaborbit.dev", key: ($key | rtrimstr("\n")), keyLocation: "https://gitlaborbit.dev/indexnow-key.txt", urlList: $urls}' |
         curl -sS --fail-with-body -H "Content-Type: application/json; charset=utf-8" --data @- https://api.indexnow.org/indexnow
 
 pages:preview:
