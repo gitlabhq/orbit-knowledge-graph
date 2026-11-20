@@ -15,6 +15,7 @@ link:
         imports: { from: $D, to: '$ROOT | type | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
 
   call:
+    - '(__def $K:__class|__struct|__impl|__interface|__trait|__enum (__binding "/^$/" (__rhs $ROOT:__call)))': none
     - '(__call $C:__callee (__property)) when $C | type | is_class': none
     - '(__call (__callee (__member $O?:__object $DI:(__dispatch !(__object)))))':
         imports:
@@ -81,3 +82,10 @@ link:
           - { to: '$O | type | unmatched($ROOT) | callable', resolution: reference }
         imports: { to: '$O | type | unmatched($ROOT) | imported', site: '$ROOT | binding_site', resolution: reference }
         type_flow: { to: '$O | type | unmatched($ROOT) | produced', resolution: reference }
+
+  bare:
+    - '(__binding $B:(__rhs !$ANY)) when $B | name | imported':
+        imports: { to: '$B | name | imported', site: $ROOT, resolution: reference }
+        type_flow: { to: $ROOT, site: $ROOT }
+    - '(__binding $B:(__rhs !$ANY))':
+        calls: { to: '$B | name | initialized', site: $ROOT }

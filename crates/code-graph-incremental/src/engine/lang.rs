@@ -191,11 +191,10 @@ impl Loader {
             let Value::Object(data) = data else {
                 return Err(err(format!("{name}: data is a mapping")));
             };
-            for (k, v) in data {
-                scope.data.insert(
-                    k.clone(),
-                    data_spec(&v).map_err(|e| err(format!("{name}: data {k}: {}", e.0)))?,
-                );
+            for k in data.keys() {
+                let spec = data_spec(&data[k], &data, &scope.data, 0)
+                    .map_err(|e| err(format!("{name}: data {k}: {}", e.0)))?;
+                scope.data.insert(k.clone(), spec);
             }
         }
         if let Some(shapes) = top.remove("shapes") {
@@ -543,7 +542,17 @@ fn substitute(body: &str, params: &[String], args: &[String]) -> String {
     out
 }
 
-fn data_spec(v: &Value) -> Result<DataSpec, LoadError> {
+/// A data value, with each `%name` item replaced by that data's value: the
+/// same file's first, then data the file uses. A list reference splices in.
+fn data_spec(
+    v: &Value,
+    raw: &serde_json::Map<String, Value>,
+    used: &std::collections::BTreeMap<String, DataSpec>,
+    depth: usize,
+) -> Result<DataSpec, LoadError> {
+    if depth > 16 {
+        return Err(err("data references are nested too deep"));
+    }
     Ok(match v {
         Value::Bool(b) => DataSpec::Bool(*b),
         Value::Number(n) => DataSpec::Num(
@@ -551,9 +560,28 @@ fn data_spec(v: &Value) -> Result<DataSpec, LoadError> {
                 .and_then(|n| u32::try_from(n).ok())
                 .ok_or_else(|| err("a number is a u32"))?,
         ),
-        Value::String(s) => DataSpec::Str(s.clone()),
+        Value::String(s) => match s.strip_prefix('%') {
+            Some(r) => match raw.get(r) {
+                Some(v) => data_spec(v, raw, used, depth + 1)?,
+                None => used
+                    .get(r)
+                    .cloned()
+                    .ok_or_else(|| err(format!("unknown data %{r}")))?,
+            },
+            None => DataSpec::Str(s.clone()),
+        },
         Value::Array(items) => {
-            DataSpec::List(items.iter().map(data_spec).collect::<Result<_, _>>()?)
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                match (
+                    item.as_str().is_some_and(|s| s.starts_with('%')),
+                    data_spec(item, raw, used, depth)?,
+                ) {
+                    (true, DataSpec::List(spliced)) => out.extend(spliced),
+                    (_, one) => out.push(one),
+                }
+            }
+            DataSpec::List(out)
         }
         _ => return Err(err("data is a bool, number, string or list")),
     })

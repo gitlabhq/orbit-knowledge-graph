@@ -128,7 +128,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     }
 
     fn record(&mut self, c: Cursor<'t, S>) {
-        if c.sym_opt().is_some() && !c.is(C::DefName) {
+        if c.sym_opt().is_some() {
             let found = self.read(c);
             self.write().seen.insert(c.index(), found);
         }
