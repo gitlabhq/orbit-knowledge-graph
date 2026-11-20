@@ -60,6 +60,9 @@ Allow outbound HTTPS on port 443 from the GitLab Orbit webserver to:
 
 If the webserver cannot reach `customers.gitlab.com`, queries fail with the error `Unable to verify GitLab credits`.
 
+The webserver calls these hosts only when the instance has an online cloud license.
+For the hosts that the GitLab Orbit charts and tools can connect to, see [Hosts that GitLab Orbit can connect to](offline.md#hosts-that-gitlab-orbit-can-connect-to).
+
 For more information about billing, see [Billing requirements](orbit-setup.md#billing-requirements).
 
 ## Trust the webserver certificate in GitLab

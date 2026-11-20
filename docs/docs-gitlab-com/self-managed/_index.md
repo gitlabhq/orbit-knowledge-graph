@@ -91,6 +91,7 @@ GitLab reaches the webserver over gRPC.
 | [Set up data replication](data-replication.md) | PostgreSQL logical replication and Siphon |
 | [Set up GitLab Orbit](orbit-setup.md) | The GitLab connection, the Secrets, the chart, indexing, verification, and upgrades |
 | [Networking](networking.md) | TLS, certificates, and the connections that GitLab Orbit uses |
+| [Run offline](offline.md) | Mirror images and charts, verify signatures, use an offline license, and list every host that GitLab Orbit can reach |
 | [Monitor GitLab Orbit](observability.md) | Prometheus metrics, Grafana dashboards, and alerts |
 | [Troubleshooting](troubleshooting.md) | Common errors and recovery after the loss of the graph database |
 
