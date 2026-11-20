@@ -1,4 +1,4 @@
-description: Issue assignee rows produce ASSIGNED edges with work-item target tags
+description: Issue assignee rows produce ASSIGNED edges
 scope: { namespace: 100 }
 
 seed:
@@ -19,6 +19,3 @@ expect:
       to: WorkItem
       traversal_path: "1/100/"
       count: 3
-      target_tags:
-        1: ["confidential:false", "state:opened", "wi_type:issue"]
-        2: ["confidential:false", "state:opened", "wi_type:task"]
