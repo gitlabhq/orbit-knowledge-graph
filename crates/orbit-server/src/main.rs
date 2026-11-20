@@ -175,7 +175,7 @@ async fn run_webserver(
             .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
     );
 
-    let graph = config.graph.build_client("graph");
+    let graph = config.graph.build_client("graph").read_only();
     let cluster_health = ClusterHealthChecker::new(
         config.health_check_url.clone(),
         Some(graph.clone()),
