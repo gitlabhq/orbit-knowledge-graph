@@ -8,16 +8,6 @@ fn compile(json: &str) -> compiler::passes::codegen::CompiledQueryContext {
 }
 
 #[test]
-fn cycles_are_rejected() {
-    let ontology = std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap());
-    let cycle_query = serde_json::json!({"query_type":"traversal", "nodes":[{"id":"a","entity":"Definition","node_ids":[1],"columns":["id"]},{"id":"b","entity":"Definition","columns":["id"]},{"id":"c","entity":"Definition","columns":["id"]}], "relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"},{"type":"CALLS","from":"c","to":"a"}]});
-    let error = compile_local(&cycle_query.to_string(), Frontend::JsonDsl, &ontology).unwrap_err();
-    assert!(error.to_string().contains("exactly n-1 relationships"));
-    let error = compile_local("MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)-[:CALLS]->(a) RETURN a.id, b.id, c.id", Frontend::Gql, &ontology).unwrap_err();
-    assert!(error.to_string().contains("cycles are unsupported"));
-}
-
-#[test]
 fn local_starts_with_folds_unicode_case() {
     let ontology = std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap());
     let directory = tempfile::tempdir().unwrap();
@@ -404,74 +394,4 @@ fn group_by_truncate_all_units_emit_duckdb_date_trunc() {
             "unit {unit}: expected `{expected}` in DuckDB SQL; got:\n{rendered}"
         );
     }
-}
-
-fn compile_gql(cypher: &str) -> Result<compiler::passes::codegen::CompiledQueryContext, String> {
-    compile_local(cypher, Frontend::Gql, &test_ontology()).map_err(|e| e.to_string())
-}
-
-#[test]
-fn gql_untyped_edge_pattern() {
-    let r = compile_gql("MATCH (u:User {id: 1})-[e]->(n:Note) RETURN n.confidential");
-    assert!(r.is_ok(), "{}", r.unwrap_err());
-}
-
-#[test]
-fn gql_both_nodes_projected() {
-    let r = compile_gql(
-        "MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) RETURN u.username, n.confidential",
-    );
-    assert!(r.is_ok(), "{}", r.unwrap_err());
-    let sql = r.unwrap().base.render();
-    assert!(sql.contains("u_username"), "missing u_username: {sql}");
-    assert!(
-        sql.contains("n_confidential"),
-        "missing n_confidential: {sql}"
-    );
-}
-
-#[test]
-fn gql_open_ended_scan() {
-    let r = compile_gql("MATCH (u:User) RETURN u.username");
-    assert!(r.is_ok(), "{}", r.unwrap_err());
-}
-
-#[test]
-fn gql_count_without_node_ids() {
-    let r = compile_gql("MATCH (u:User) RETURN count(u) AS n");
-    assert!(r.is_ok(), "{}", r.unwrap_err());
-}
-
-#[test]
-fn gql_typed_edge_traversal() {
-    let r = compile_gql("MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) RETURN n.confidential");
-    assert!(r.is_ok(), "{}", r.unwrap_err());
-    let sql = r.unwrap().base.render();
-    assert!(
-        sql.contains("relationship_kind"),
-        "edge type filter missing: {sql}"
-    );
-}
-
-#[test]
-fn gql_order_by_across_traversal() {
-    let r = compile_gql(
-        "MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) \
-         RETURN n.confidential ORDER BY n.confidential",
-    );
-    assert!(r.is_ok(), "{}", r.unwrap_err());
-}
-
-#[test]
-fn gql_property_to_property_comparison() {
-    let r = compile_gql(
-        "MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) \
-         WHERE u.username <> u.state RETURN u.username",
-    );
-    assert!(r.is_ok(), "{}", r.unwrap_err());
-    let sql = r.unwrap().base.render();
-    assert!(
-        sql.contains("u.username != u.state"),
-        "property-to-property comparison missing: {sql}"
-    );
 }

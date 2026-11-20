@@ -7,7 +7,7 @@ query:
     MATCH (u:User {id: 1})--(neighbor) RETURN u, neighbor
 
 logical:
-  expect: ["(Input neighbors (...))"]
+  expect: ["(Input neighbors (Project ... (Filter u.id IN [1] (NodeScan User AS u))))"]
 
 physical:
   clickhouse:

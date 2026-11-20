@@ -151,11 +151,19 @@ impl TryFrom<RawScenario> for Scenario {
         let mut rejected = BTreeMap::new();
         for (backend, mut entries) in raw.physical {
             if let Some(rejection) = entries.remove("rejected") {
-                rejected.insert(
-                    backend.clone(),
-                    serde_json::from_value(rejection)
-                        .map_err(|error| format!("{backend}.rejected: {error}"))?,
-                );
+                let rejection: Rejection = serde_json::from_value(rejection)
+                    .map_err(|error| format!("{backend}.rejected: {error}"))?;
+                if let Some(language) = raw.query.keys().find(|language| {
+                    !rejection
+                        .contains
+                        .get(language)
+                        .is_ok_and(|fragments| !fragments.is_empty())
+                }) {
+                    return Err(format!(
+                        "{backend}.rejected needs a nonempty contains for {language}"
+                    ));
+                }
+                rejected.insert(backend.clone(), rejection);
             }
             let phases = aliases::resolve(&backend, hydration, raw.logical.as_ref(), entries)?
                 .into_iter()
@@ -1323,17 +1331,17 @@ fn rejections_check_the_phase_reason_and_message() {
         case(
             "wrong phase",
             "CREATE (u:User)",
-            "        rejected: {phase: validate, reason: schema}\n",
+            "        rejected: {phase: validate, reason: schema, contains: [Orbit query syntax]}\n",
         ),
         case(
             "wrong reason",
             "CREATE (u:User)",
-            "        rejected: {phase: gql_parse, reason: parse}\n",
+            "        rejected: {phase: gql_parse, reason: parse, contains: [Orbit query syntax]}\n",
         ),
         case(
             "unknown reason",
             "CREATE (u:User)",
-            "        rejected: {phase: gql_parse, reason: syntax}\n",
+            "        rejected: {phase: gql_parse, reason: syntax, contains: [Orbit query syntax]}\n",
         ),
         case(
             "missing fragment",
@@ -1343,12 +1351,12 @@ fn rejections_check_the_phase_reason_and_message() {
         case(
             "compiles",
             "MATCH (u:User {id: 1}) RETURN u",
-            "        rejected: {phase: validate, reason: schema}\n",
+            "        rejected: {phase: validate, reason: schema, contains: [x]}\n",
         ),
         case(
             "after rejection",
             "CREATE (u:User)",
-            "        rejected: {phase: gql_parse, reason: schema}\n        emitted: {expect: ['(_)']}\n",
+            "        rejected: {phase: gql_parse, reason: schema, contains: [Orbit query syntax]}\n        emitted: {expect: ['(_)']}\n",
         ),
     ];
     std::fs::write(
@@ -1394,6 +1402,32 @@ fn rejections_check_the_phase_reason_and_message() {
         "after rejection",
         "does not run after the rejection"
     ));
+}
+
+#[test]
+fn rejections_need_contains_for_every_language() {
+    let parse = |contains: &str| {
+        orbit_utils::yaml::from_str::<Scenario>(&format!(
+            "name: r\nquery: {{json: q, gql: q}}\nphysical: {{clickhouse: {{rejected: {{phase: validate, reason: schema{contains}}}}}}}"
+        ))
+        .err()
+        .map(|error| error.to_string())
+    };
+    assert_eq!(parse(", contains: [x]"), None);
+    for (contains, language) in [
+        ("", "gql"),
+        (", contains: []", "gql"),
+        (", contains: {json: [x], gql: []}", "gql"),
+        (", contains: {gql: [x]}", "json"),
+    ] {
+        let error = parse(contains).expect(contains);
+        assert!(
+            error.contains(&format!(
+                "clickhouse.rejected needs a nonempty contains for {language}"
+            )),
+            "{error}"
+        );
+    }
 }
 
 #[test]
