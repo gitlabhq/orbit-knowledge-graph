@@ -250,7 +250,8 @@ docs-in-code-mr-check:
       fi
 
 docs-write-merge-order-check:
-  stage: lint
+  # Red until the feature MRs merge: the last stage, so it never holds back later jobs.
+  stage: .post
   image: python:3.12-alpine
   tags:
     - saas-linux-small-amd64
