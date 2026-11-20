@@ -184,3 +184,50 @@ impl PipelineObserver for OTelPipelineObserver {
         METRICS.redactions.record(redacted_count as u64, &qt);
     }
 }
+
+#[cfg(test)]
+pub(crate) mod testkit {
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+
+    pub(crate) struct Recorder {
+        provider: SdkMeterProvider,
+        exporter: InMemoryMetricExporter,
+    }
+
+    impl Recorder {
+        pub(crate) fn install() -> Self {
+            let exporter = InMemoryMetricExporter::default();
+            let provider = SdkMeterProvider::builder()
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .build();
+            opentelemetry::global::set_meter_provider(provider.clone());
+            Self { provider, exporter }
+        }
+
+        pub(crate) fn compiler_rejections(&self) -> Vec<String> {
+            self.provider.force_flush().unwrap();
+            let metrics = self.exporter.get_finished_metrics().unwrap();
+            let latest = metrics
+                .iter()
+                .rev()
+                .flat_map(|resource| resource.scope_metrics())
+                .flat_map(|scope| scope.metrics())
+                .find(|metric| metric.name() == "gkg.query.engine.compiler.rejected");
+            let Some(AggregatedMetrics::U64(MetricData::Sum(sum))) = latest.map(|m| m.data())
+            else {
+                return Vec::new();
+            };
+            sum.data_points()
+                .flat_map(|point| {
+                    let reason = point
+                        .attributes()
+                        .find(|kv| kv.key.as_str() == "failure_reason")
+                        .map(|kv| kv.value.to_string())
+                        .unwrap_or_default();
+                    std::iter::repeat_n(reason, point.value() as usize)
+                })
+                .collect()
+        }
+    }
+}

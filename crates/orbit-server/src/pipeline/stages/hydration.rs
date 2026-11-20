@@ -372,3 +372,58 @@ impl PipelineStage for HydrationStage {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use clickhouse_client::ClickHouseConfigurationExt;
+    use ontology::Ontology;
+    use query_engine::compiler::{Frontend, SecurityContext, compile};
+    use query_engine::pipeline::TypeMap;
+
+    use super::*;
+    use crate::pipeline::metrics::testkit::Recorder;
+
+    #[tokio::test]
+    async fn a_hydration_compile_rejection_is_counted() {
+        let recorder = Recorder::install();
+        let ontology = Arc::new(Ontology::load_embedded().unwrap());
+        let security = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let compiled = compile(
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}]}"#,
+            Frontend::JsonDsl,
+            &ontology,
+            &security,
+        )
+        .unwrap();
+        let mut server_extensions = TypeMap::default();
+        server_extensions.insert(Arc::new(
+            orbit_server_config::AppConfig::embedded_defaults()
+                .graph
+                .build_client("graph"),
+        ));
+        server_extensions
+            .insert(query_engine::compiler::data_model::clickhouse(Arc::clone(&ontology)).unwrap());
+        let ctx = QueryPipelineContext {
+            query_json: String::new(),
+            frontend: Frontend::JsonDsl,
+            compiled: Some(Arc::new(compiled)),
+            ontology,
+            security_context: Some(security),
+            server_extensions,
+            phases: TypeMap::default(),
+        };
+        let node = InputNode {
+            id: "x".into(),
+            entity: Some("NoSuchEntity".into()),
+            node_ids: vec![1],
+            ..InputNode::default()
+        };
+
+        let error = HydrationStage::execute_hydration(&ctx, vec![node], 1, "static")
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, PipelineError::Compile { .. }), "{error}");
+        assert_eq!(recorder.compiler_rejections(), ["lowering"]);
+    }
+}

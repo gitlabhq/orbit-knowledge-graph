@@ -241,19 +241,18 @@ impl SnapshotLoader {
 }
 
 fn fits_ontology(query: &NamedQuery, ontology: &Arc<Ontology>) -> Result<(), String> {
-    let json = query
-        .render_example_language(Language::Json)
-        .map_err(|error| error.to_string())?;
+    let render = |language| {
+        query
+            .render_example_language(language)
+            .map_err(|error| error.to_string())
+    };
+    let json = render(Language::Json)?;
+    let gql = render(Language::Gql)?;
     validate_normalize(&json, ontology)
+        .map(drop)
+        .and_then(|()| validate_normalize_gql(&gql, ontology).map(drop))
         .inspect_err(count_compiler_rejection)
-        .map_err(|error| error.to_string())?;
-    let gql = query
-        .render_example_language(Language::Gql)
-        .map_err(|error| error.to_string())?;
-    validate_normalize_gql(&gql, ontology)
-        .inspect_err(count_compiler_rejection)
-        .map_err(|error| error.to_string())?;
-    Ok(())
+        .map_err(|error| error.to_string())
 }
 
 fn register_state_gauge(active: &Arc<ActiveSchema>) {
@@ -271,4 +270,22 @@ fn register_state_gauge(active: &Arc<ActiveSchema>) {
             );
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pipeline::metrics::testkit::Recorder;
+
+    #[test]
+    fn a_named_query_that_misses_the_ontology_is_counted_as_a_compiler_rejection() {
+        let recorder = Recorder::install();
+        let ontology = Arc::new(Ontology::new().with_nodes(["User"]));
+        let queries = NamedQueries::load_embedded().unwrap();
+        let query = queries.iter().next().unwrap();
+
+        assert!(fits_ontology(query, &ontology).is_err());
+
+        assert_eq!(recorder.compiler_rejections(), ["ontology"]);
+    }
 }
