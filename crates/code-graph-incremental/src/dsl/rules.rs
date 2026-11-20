@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::error::LoadError;
 use crate::intern::Lang;
-use crate::pattern::{Out, Rewrite, TagEntry, Tf};
+use crate::pattern::{Out, Rewrite, TagEntry, Text, Tf};
 
 use super::parser::parse;
 use super::types::{Ctx, Pat};
@@ -511,7 +511,56 @@ fn compile_rule(rule: &Rule, lang: &Lang) -> Result<Rewrite, LoadError> {
     if let Some(ref wc) = rule.where_clause {
         rw.guards = parse_where_clause(wc, &rw.slots)?;
     }
+    check_text_refs(&rw.pat, &mut HashSet::new(), &rw.slots, pat)?;
     Ok(rw)
+}
+
+/// A `@$X` text in a match pattern compares against the text `X` captured
+/// earlier in the same pattern, so `X` must be bound by then and the text
+/// cannot be piped.
+fn check_text_refs(
+    pat: &Pat,
+    bound: &mut HashSet<u16>,
+    slots: &HashMap<Box<str>, u16>,
+    source: &str,
+) -> Result<(), LoadError> {
+    let name_of = |slot: u16| {
+        slots
+            .iter()
+            .find(|&(_, &s)| s == slot)
+            .map_or("?", |(name, _)| name)
+    };
+    match pat {
+        Pat::Node { text, kids, .. } => {
+            if let Text::From(slot, tf) = text {
+                if !matches!(tf, Tf::Id) {
+                    return Err(LoadError(format!(
+                        "pattern {source:?}: a text reference in a match cannot be piped"
+                    )));
+                }
+                if !bound.contains(slot) {
+                    return Err(LoadError(format!(
+                        "pattern {source:?}: @${} is used before it is captured",
+                        name_of(*slot)
+                    )));
+                }
+            }
+            kids.iter()
+                .try_for_each(|kid| check_text_refs(kid, bound, slots, source))
+        }
+        Pat::Cap { slot, guard, .. } | Pat::Var { slot, guard, .. } => {
+            if let Some(guard) = guard {
+                check_text_refs(guard, bound, slots, source)?;
+            }
+            bound.insert(*slot);
+            Ok(())
+        }
+        Pat::Not(inner) => check_text_refs(inner, &mut bound.clone(), slots, source),
+        Pat::Desc(inner) | Pat::Preceding(inner) | Pat::Enclosing(inner) => {
+            check_text_refs(inner, bound, slots, source)
+        }
+        Pat::Spread { .. } => Ok(()),
+    }
 }
 
 fn compile_tag_value(val: &str, ctx: &mut crate::pattern::Ctx) -> Result<(u16, Tf), LoadError> {
@@ -572,6 +621,24 @@ stages:
         let stages = load_rules(yaml, &lang).unwrap();
         assert_eq!(stages.len(), 1);
         assert_eq!(stages[0].rules.len(), 1);
+    }
+
+    #[test]
+    fn a_text_reference_in_a_match_needs_an_earlier_capture() {
+        let load = |pattern: &str| {
+            let yaml = format!(
+                "stages:\n  - rules:\n      - match: '{pattern}'\n        replace: '(__x)'\n"
+            );
+            load_rules(&yaml, &Lang::new()).err().map(|e| e.to_string())
+        };
+        assert!(load("(a name: $N (b @$N))").is_none());
+        assert!(load("(a $N (b @$N))").is_none());
+        let unbound = load("(a (b @$N) $N)").expect("captured after use");
+        assert!(unbound.contains("@$N is used before"), "{unbound}");
+        let typo = load("(a name: $N (b @$M))").expect("never captured");
+        assert!(typo.contains("@$M is used before"), "{typo}");
+        let piped = load("(a $N (b @$N|lowercase))").expect("piped");
+        assert!(piped.contains("cannot be piped"), "{piped}");
     }
 
     #[test]

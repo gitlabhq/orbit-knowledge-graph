@@ -9,21 +9,31 @@ fixtures:
       COPY --from=build /a /b
       FROM build AS app
       COPY --from=base /c /d
+      ONBUILD COPY --from=app /x /y
       FROM alpine:3.19 AS tools
+      FROM later AS early
+      FROM base:1 AS pinned
+      FROM x AS later
 
 tests:
-  - name: "FROM <stage> is a call to the stage and not an image import"
+  - name: "FROM <stage> is not an image import, but an unknown, later or tagged name is"
     query: |
       MATCH (i:ImportedSymbol)
       RETURN i.import_path AS image
+      ORDER BY image
     assert:
-      - { row_count: 1 }
+      - { row_count: 4 }
       - { row: { image: "alpine" } }
+      - { row: { image: "base" } }
+      - { row: { image: "later" } }
+      - { row: { image: "x" } }
 
-  - name: "stages call the stages they build on"
+  # A later stage is called only by the incremental engine, so `early` is left out.
+  - name: "stages call the earlier stages they build on"
     query: |
       MATCH (a:Definition)-[:CALLS]->(b:Definition)
       WHERE a.definition_type = 'Class' AND b.definition_type = 'Class'
+        AND a.name <> 'early'
       RETURN a.name AS from_stage, b.name AS to_stage
       ORDER BY from_stage, to_stage
     assert:
@@ -40,6 +50,14 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { user: "base", variable: "BASE" } }
+
+  - name: "a tagged name is an image and calls no stage"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.name = 'pinned'
+      RETURN b.name AS callee
+    assert:
+      - { empty: true }
 
   - name: "COPY --from naming its own stage is not a call"
     query: |

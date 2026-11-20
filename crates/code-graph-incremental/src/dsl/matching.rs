@@ -17,7 +17,7 @@ pub(crate) fn matches<S: Storage<Node = Node>>(
     let field_ok = |f: u16| f == 0 || f == n.field;
     match p {
         Pat::Var { .. } | Pat::Spread { .. } => false,
-        Pat::Not(_) | Pat::Desc(_) | Pat::Preceding(_) => false,
+        Pat::Not(_) | Pat::Desc(_) | Pat::Preceding(_) | Pat::Enclosing(_) => false,
         Pat::Cap {
             slot,
             field,
@@ -102,6 +102,15 @@ pub(crate) fn matches<S: Storage<Node = Node>>(
                             if matches(t, lang, child, inner, caps) {
                                 return false;
                             }
+                        }
+                    }
+                    Pat::Enclosing(inner) => {
+                        let found = std::iter::successors(t.cursor(raw).parent(), |c| c.parent())
+                            .any(|ancestor| {
+                                matches(t, lang, t.storage.id(ancestor.index()), inner, caps)
+                            });
+                        if !found {
+                            return false;
                         }
                     }
                     Pat::Preceding(inner) => {

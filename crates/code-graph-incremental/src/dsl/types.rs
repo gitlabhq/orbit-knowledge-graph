@@ -152,8 +152,12 @@ pub enum Pat {
     },
     Not(Box<Pat>),
     Desc(Box<Pat>),
-    /// Some earlier sibling of the matched node matches.
+    /// Some earlier sibling of the matched node matches. Rules visit a node
+    /// before its earlier siblings and ancestors, so they are still as parsed
+    /// when the pattern looks at them.
     Preceding(Box<Pat>),
+    /// Some ancestor of the matched node matches.
+    Enclosing(Box<Pat>),
     Spread {
         slot: u16,
         inject: Vec<Pat>,
