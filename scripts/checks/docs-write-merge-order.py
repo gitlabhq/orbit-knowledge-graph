@@ -31,8 +31,9 @@ def main():
     if found:
         sources.update(int(n) for n in re.findall(r"!(\d+)", found.group(1)))
     branch = BRANCH.match(os.environ.get("CI_MERGE_REQUEST_SOURCE_BRANCH_NAME", ""))
-    if branch:
-        sources.add(int(branch.group(1)))
+    host = int(branch.group(1)) if branch else None
+    if host:
+        sources.add(host)
     if not sources:
         print("No docs-write marker or branch: nothing to check.")
         return 0
@@ -40,7 +41,10 @@ def main():
     for iid in sorted(sources):
         state = get("merge_requests/{}".format(iid)).get("state")
         print("!{}: {}".format(iid, state))
-        if state != "merged":
+        if state == "closed" and iid == host:
+            print("Feature MR !{} was closed. Close this docs MR, or reopen the feature MR.".format(iid))
+            return 1
+        if state not in ("merged", "closed"):
             waiting.append("!{} ({})".format(iid, state))
     if waiting:
         print("Merge these feature MRs first, then retry this job: " + ", ".join(waiting))
