@@ -1,3 +1,33 @@
+## [1.8.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.7.0...v1.8.0) (2026-11-20)
+
+### Features
+
+* **clickhouse:** pin the compatibility version for every Orbit query ([f324fe5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f324fe5327b66badb131503842408f9b9d4e6be3)) by Bohdan Parkhomchuk
+* **config:** validate engine.modules and the SystemNote batch size in the schema ([5e2b01c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5e2b01cda0223e4131271cf4ac8df5fb369ca6ec)) by Luke Hollinda
+* **indexing-engine-next:** model the lease and dedupe rules in TLA+ and check the code against them ([2909f7b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2909f7bb9951ff641a0355b4744b5a243ab3b963)) by Jean-Gabriel Doyon
+* **query-engine:** accept OR in GQL WHERE by lowering it to a NOT tree ([1bd15c2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1bd15c2d077aa8015282af7a3a2219246a0a5e18)) by Jean-Gabriel Doyon
+* **site:** describe the home page and Orbit Next for crawlers and agents ([9214a67](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9214a678593bf569d0d84ad6bafc0a0761121859)) by Gabriel Engel
+* **skills:** add per-user period aggregation recipe to the orbit skill ([85b12d8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/85b12d849f5127098d142072fe0acfcea45b72ba)) by Dmitry Gruzd
+
+### Fixes
+
+* **clickhouse:** cancel abandoned queries on read-only server clients ([df58349](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/df583499a98c12643c7054b486339d60018566c1)) by Dmitry Gruzd
+* **code-graph-incremental:** type Ruby locals assigned from instance variables ([58b8b05](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/58b8b0598249817d2ce8a1e1da1ce3ad601745fb)) by ANBUCHELVAN GANESAN CSE
+* **code-graph-incremental:** type Ruby parameters from their default values ([693f874](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/693f874257155dedb03b7782212fa02fe5d328d6)) by ANBUCHELVAN GANESAN CSE
+* **code-graph:** drop template arguments from C++ explicit specialization names ([8374ccc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8374ccc97eced93a2484d51d8be233f51ade1ac4)) by Adam Mulvany
+* **gitalisk-core:** treat revisions as revisions, not git options ([76c3ca1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/76c3ca1803abe5d0f83ec539e02a5863074ee733)) by Dmitry Gruzd
+* **indexer:** only link_type closes rows become CLOSES edges ([4c90770](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4c90770b861b66605ec51c1e8d6e3bd5da5f65ee)) by Dmitry Gruzd
+* **ontology:** add MERGED edges for manual merges and drop stale AUTHORED edges ([c87abfb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c87abfb4f87130e2c9be57f7929295b25d0e4787)) by Bohdan Parkhomchuk
+* **server:** make the ClickHouse query_id unique per query ([c7e13f2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c7e13f2a0247b6f0e8820341a4ef64e4ba1a0fc3)) by Jean-Gabriel Doyon
+* **site:** wait for the live deploy before IndexNow, and keep example references unlinked ([d515c59](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d515c591e31664f31446c2226f61da67b110d309)) by Gabriel Engel
+
+### Other
+
+* ask for before and after rows when an MR changes Orbit data ([27efc1d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/27efc1d63a6b674139b37284cb2df34bde617353)) by Dmitry Gruzd
+* cancel failing merge train pipelines on the first job failure ([178c7dd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/178c7ddaba53690975e5bd4d26ffeb44f91f99de)) by Dmitry Gruzd
+* link the Orbit roadmap and architecture on gitlaborbit.dev ([6bffddb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6bffddb5cd314c1db2478c1944c1ec98d347746c)) by Gabriel Engel
+* **mr-housekeeping:** set milestones and assignees on open MRs ([a44103c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a44103c6e5f294d01186b7e3393808aaf5795978)) by Dmitry Gruzd
+
 ## [1.7.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.6.0...v1.7.0) (2026-11-19)
 
 ### Features
