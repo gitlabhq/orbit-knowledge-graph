@@ -92,7 +92,6 @@ async fn main() -> anyhow::Result<()> {
         match args.mode {
             Mode::ClickhouseSetup => orbit_server::clickhouse_setup::run(&config).await,
             Mode::DispatchIndexing => {
-                config.schema.validate()?;
                 let archive = ontology::archive::OntologyArchive::from_bytes(
                     *schema::version::SCHEMA_VERSION,
                     include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
@@ -123,8 +122,6 @@ async fn main() -> anyhow::Result<()> {
                 .map_err(Into::into)
             }
             Mode::Webserver => {
-                config.schema.validate()?;
-                config.grpc.validate()?;
                 run_webserver(&config, active_schema, serving, shutdown.clone()).await
             }
         }

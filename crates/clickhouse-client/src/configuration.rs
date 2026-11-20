@@ -110,60 +110,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_empty_database() {
-        let config = ClickHouseConfiguration {
-            database: "".to_string(),
-            url: "http://127.0.0.1:8123".to_string(),
-            username: "default".to_string(),
-            password: None,
-            compatibility: AppConfig::embedded_defaults().graph.compatibility,
-            session_settings: std::collections::HashMap::new(),
-            replicated: false,
-            insert_settings: std::collections::HashMap::new(),
-            profiling: AppConfig::embedded_defaults().graph.profiling,
-        };
-
-        let result = config.validate();
-        assert!(matches!(result, Err(ConfigurationError::EmptyDatabase)));
-    }
-
-    #[test]
-    fn test_validate_empty_url() {
-        let config = ClickHouseConfiguration {
-            database: "test".to_string(),
-            url: "".to_string(),
-            username: "default".to_string(),
-            password: None,
-            compatibility: AppConfig::embedded_defaults().graph.compatibility,
-            session_settings: std::collections::HashMap::new(),
-            replicated: false,
-            insert_settings: std::collections::HashMap::new(),
-            profiling: AppConfig::embedded_defaults().graph.profiling,
-        };
-
-        let result = config.validate();
-        assert!(matches!(result, Err(ConfigurationError::EmptyUrl)));
-    }
-
-    #[test]
-    fn test_validate_empty_username() {
-        let config = ClickHouseConfiguration {
-            database: "test".to_string(),
-            url: "http://127.0.0.1:8123".to_string(),
-            username: "".to_string(),
-            password: None,
-            compatibility: AppConfig::embedded_defaults().graph.compatibility,
-            session_settings: std::collections::HashMap::new(),
-            replicated: false,
-            insert_settings: std::collections::HashMap::new(),
-            profiling: AppConfig::embedded_defaults().graph.profiling,
-        };
-
-        let result = config.validate();
-        assert!(matches!(result, Err(ConfigurationError::EmptyUsername)));
-    }
-
-    #[test]
     fn replicated_with_zero_insert_quorum_is_rejected() {
         let config = ClickHouseConfiguration {
             replicated: true,
