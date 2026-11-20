@@ -1,7 +1,6 @@
 define:
   targets(ROOT, implicit):
-    '(__call $K:(__callee "/./"))': 'read($K) | read_target(implicit) | member_for($ROOT)'
-    '(__call $K:__callee) when read($K)': none
+    '(__call $K:(__callee "/./")) when read($K)': 'read($K) | read_target(implicit) | member_for($ROOT)'
     '(__call $K:(__callee "/./")) when implicit': 'members(enclosing | class, $K, cursor_role($ROOT))'
   read_target(ROOT, implicit):
     '_ when implicit': 'named_value($ROOT)'
@@ -118,22 +117,24 @@ define:
   callable_import(ROOT, tag):
     '$I:(_ $ROOT:__name) when $I | tag(tag)': 'plain($ROOT)'
   type(ROOT):
-    '(_ (__call (__property) $K:__callee)) when $K | type | is_class': '$K | walk'
+    '(_ $C:(__call (__property) $K:__callee)) when $K | type | is_class': '$K | walk or $C'
     '(_ $C:__call)': '$C'
     '_': '$ROOT | walk'
   walk(ROOT):
-    '(_ (__object))': '$ROOT | on_object($ROOT)'
-    '(_ $M:__member)': '$M | on_object($ROOT)'
+    '(_ (__object))': '$ROOT | on_object($ROOT) or $ROOT | named'
+    '(_ $M:__member)': '$M | on_object($ROOT) or $ROOT | named'
     '_': '$ROOT | named'
   on_object(ROOT, SITE):
-    '(_ (__object !(__call) !(__object) !(__qualifier) !(__member) !(__ivar)))': 'on_named($ROOT, $SITE)'
+    '(_ $O:(__object !(__call) !(__object) !(__qualifier) !(__member) !(__ivar)))': 'on_named($ROOT, $SITE) or lookup($ROOT, $SITE, union($O | type, $O | type | type_node | type))'
     '(_ $O:__object)': 'lookup($ROOT, $SITE, union($O | type, $O | type | type_node | type))'
   on_named(ROOT, SITE):
     '(_ $O:__object)': 'lookup($ROOT, $SITE, union($O | type, $O | type | type_node | type))'
   named(ROOT):
-    '(_ (__qualifier))': '$ROOT | name'
-    '(_ $I:__ivar)': '$I | ivar | meaning($ROOT)'
-    '_ when $ROOT | read': '$ROOT | name | meaning($ROOT)'
+    '(_ (__qualifier))': '$ROOT | name or named_value_of($ROOT)'
+    '(_ $I:__ivar)': '$I | ivar | meaning($ROOT) or named_value_of($ROOT)'
+    '_': 'named_value_of($ROOT)'
+  named_value_of(ROOT):
+    '_ when $ROOT | read': '$ROOT | name | meaning($ROOT) or $ROOT | ivar | meaning($ROOT)'
     '_': '$ROOT | ivar | meaning($ROOT)'
   member(ROOT, M):
     '(__def)': 'lookup($M, $M, $ROOT)'
@@ -162,8 +163,10 @@ define:
     '$P:(_ $ROOT)': '$P | site'
   returns(ROOT):
     '(__def $K:__class|__struct|__impl|__interface|__trait|__enum)': '$ROOT'
-    '(__def $T:__ssa_return_type)': '$T | type'
-    '(__def **!__def|__lambda/(__ssa_return $B:__ssa_branch))': '$B | branch_type'
+    '(__def $T:__ssa_return_type)': '$T | type or returns_tail($ROOT)'
+    '_': 'returns_tail($ROOT)'
+  returns_tail(ROOT):
+    '(__def **!__def|__lambda/(__ssa_return $B:__ssa_branch))': '$B | branch_type or $ROOT | inferred_return'
     '_': '$ROOT | inferred_return'
   branch_type(ROOT):
     '(_ $$$A:__ssa_arm)': 'lub($A | tail | arm_type)'
@@ -183,7 +186,7 @@ define:
     first(enclose(at), s => select(s, '(__def $N:__defname)', name))
   target_of(ROOT): 'declared_in(@ROOT, ROOT) or $ROOT | follow(imports)'
   resolved(ROOT):
-    '(__call (__type) $ROOT)': 'declared_in(@ROOT, ROOT) | is_class or imported_name(@ROOT, ROOT)'
+    '(__call (__type) $ROOT)': 'declared_in(@ROOT, ROOT) | is_class or imported_name(@ROOT, ROOT) or visible(@ROOT, ROOT)'
     '_': 'visible(@ROOT, ROOT)'
   supertypes(ROOT):
     '(__def $$$S:__supertype)': '$S | type | is_def'

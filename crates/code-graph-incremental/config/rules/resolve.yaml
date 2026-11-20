@@ -41,11 +41,11 @@ define:
     '(_ (__ssa_hint "*"))': '"*"'
     '_': '$ROOT'
   reexported(ROOT, N):
-    '$I:(%import_kinds $ROOT:(__name "*"))': '$I | modules | offered($N)'
+    '$I:(%import_kinds $ROOT:(__name "*"))': '$I | modules | offered($N) or $I | modules | offered($ROOT)'
     '$I:(%import_kinds $ROOT:__name)': '$I | modules | offered($ROOT)'
   producing(ROOT):
-    '(__call)': '$ROOT | sited(calls) | returned'
-    '(__binding $R:__rhs)': '$R | tail | producing'
+    '(__call)': '$ROOT | sited(calls) | returned or $ROOT | type'
+    '(__binding $R:__rhs)': '$R | tail | producing or $ROOT | type'
     '_': '$ROOT | type'
   linked_file(ROOT): "select_all(project, '(__source_file)' by $ROOT, @ROOT)"
   linked_section(ROOT, anchor): "select_all(linked_file($ROOT), '(__def $N:__anchor)', @anchor)"

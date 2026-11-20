@@ -181,7 +181,7 @@ enum Body {
 }
 
 /// A named expression; with cases, tried in order on each value of its first
-/// argument, the first match with a non-empty value winning for that value.
+/// argument, the first case whose pattern and guard match giving the value.
 pub struct Def {
     pub(super) name: Box<str>,
     params: usize,
@@ -246,13 +246,7 @@ impl Def {
                     {
                         continue;
                     }
-                    if matches!(value, Expr::Empty) {
-                        return Vals::new();
-                    }
-                    let found = value.eval(run, &w.vals);
-                    if !found.is_empty() {
-                        return found;
-                    }
+                    return value.eval(run, &w.vals);
                 }
                 Vals::new()
             }
