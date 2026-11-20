@@ -13,6 +13,10 @@ title: GitLab Orbit quickstart
 
 {{< /details >}}
 
+> [!note]
+> GitLab Orbit is available to Premium and Ultimate customers as a separate purchase.
+> Eligible customers can [start a trial](trial.md) before purchasing.
+
 Turn on GitLab Orbit for your group, then set up your agent and ask your first question
 about your GitLab data.
 
