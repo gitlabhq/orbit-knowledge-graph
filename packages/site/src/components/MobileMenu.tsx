@@ -47,10 +47,7 @@ export function MobileMenu({ className, sheetClassName }: { className?: string; 
           <button
             type="button"
             className="mobile-menu-search"
-            onClick={() => {
-              close();
-              openSearch();
-            }}
+            onClick={openSearch}
           >
             <Icon name="search" size={16} />
             Search GitLab Orbit
@@ -78,6 +75,11 @@ export function MobileMenu({ className, sheetClassName }: { className?: string; 
             </div>
           ) : (
             <ul key="top" className="mobile-menu-list mobile-menu-level">
+              <li>
+                <Link to="/" activeOptions={{ exact: true }} onClick={close} className="mobile-menu-row">
+                  Home
+                </Link>
+              </li>
               {TABS.map((tab, index) => (
                 <li key={tab.route}>
                   {tab.menu ? (

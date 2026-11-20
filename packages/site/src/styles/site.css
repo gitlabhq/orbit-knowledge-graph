@@ -1391,7 +1391,7 @@ html.mobile-menu-open .site-shell > header {
   }
 
   .use-case {
-    min-height: 0;
+    min-height: calc(100svh - 6rem - env(safe-area-inset-top));
     gap: 1rem;
     padding: 1.25rem;
   }
@@ -1572,5 +1572,56 @@ html.page-landing {
     content: "/";
     margin-left: 0.5rem;
     color: var(--gl-text-color-subtle);
+  }
+}
+
+@media (max-width: 47.99rem) {
+  dialog[aria-label="Search"][open] {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    margin: 0;
+    padding: calc(env(safe-area-inset-top) + 0.75rem) 1.25rem 0;
+    grid-template: "input cancel" auto "list list" auto "status status" 1fr / 1fr auto;
+    align-content: start;
+    column-gap: 0.75rem;
+    border: 0;
+    border-radius: 0;
+    background: var(--color-page);
+    box-shadow: none;
+  }
+
+  dialog[aria-label="Search"] input {
+    grid-area: input;
+    padding: 0.625rem 1rem;
+    border: 1px solid var(--gl-border-color-default);
+    border-radius: 999px;
+    background: var(--gl-background-color-subtle, transparent);
+  }
+
+  /* site-kit closes the dialog on any click whose target is the dialog itself, which includes this pseudo-element. */
+  dialog[aria-label="Search"]::before {
+    content: "Cancel";
+    grid-area: cancel;
+    align-self: center;
+    color: var(--gl-text-color-link, var(--gl-text-color-default));
+    font-size: 1rem;
+    cursor: pointer;
+  }
+
+  dialog[aria-label="Search"] #search-results {
+    grid-area: list;
+    max-height: none;
+    margin-top: 0.75rem;
+    padding: 0;
+  }
+
+  dialog[aria-label="Search"] [role="status"] {
+    grid-area: status;
+    padding-inline: 0.75rem;
   }
 }
