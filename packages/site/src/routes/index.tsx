@@ -1,4 +1,4 @@
-import { type ComponentProps, useState } from "react";
+import { type ComponentProps, useEffect, useState } from "react";
 import { AgentLogos, AgentPrompt, cn, Contrasts, CopyButton, CostCalculator, DotWave, Feature, FeatureGrid, FieldBand, Flow, GravityGlobe, Icon, OrbitHalo, OrbitHero, PageFrame, pageHead, type PromptExample, Reveal, RippleField, RippleLog, Section, segment, site, SiteLink, type Slide, Slideshow, Terminal, Testimonial, type UseCase, UseCases } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
 import { QUESTIONS } from "../questions";
@@ -41,6 +41,32 @@ const ZERO_DAY = {
     { at: 0.86, tone: "ok" as const, text: "mobile-bff!31 deployed to production" },
   ],
 };
+
+// On a phone, the ripple runs top to bottom, so the labels fit: the package, then its files, then the projects.
+const ZERO_DAY_NARROW = {
+  source: { ...ZERO_DAY.source, x: 0.5, y: 0.06 },
+  nodes: [
+    { label: "app/actions.ts", x: 0.18, y: 0.44, quiet: true },
+    { label: "ui-kit/server.tsx", x: 0.5, y: 0.36, quiet: true },
+    { label: "lib/rsc.ts", x: 0.84, y: 0.44, quiet: true },
+    { label: "web-app", x: 0.2, y: 0.72 },
+    { label: "admin-console", x: 0.74, y: 0.72, staging: true },
+    { label: "checkout-api", x: 0.26, y: 0.96 },
+    { label: "mobile-bff", x: 0.78, y: 0.96 },
+  ],
+};
+
+function useNarrow() {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 47.99rem)");
+    const update = () => setNarrow(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return narrow;
+}
 
 const CHAT: PromptExample[] = [
   {
@@ -405,6 +431,8 @@ function Clip({ src, poster, width, height, label, caption }: { src: string; pos
 }
 
 function HomePage() {
+  const narrow = useNarrow();
+  const ripple = narrow ? ZERO_DAY_NARROW : ZERO_DAY;
   return (
     <PageFrame path="" title={site.name} options={{ hideHeader: true, landing: true }}>
       <Hero />
@@ -453,7 +481,7 @@ function HomePage() {
       <Section
         id="graph" dark pin hold
         className="page-section-head page-section-tail"
-        backdrop={<RippleField source={ZERO_DAY.source} nodes={ZERO_DAY.nodes} anchor="#graph .ripple-nodes" />}
+        backdrop={<RippleField source={ripple.source} nodes={ripple.nodes} anchor="#graph .ripple-nodes" />}
         backdropFade="full"
         eyebrow="Zero-day response"
         title={<>From a zero-day to a <span className="orbit-fade">fix in production</span></>}
@@ -499,7 +527,7 @@ function HomePage() {
         </div>
       </Section>
 
-      <Section id="common-questions" eyebrow="Questions" title={<>Common <span className="orbit-fade">questions</span></>}>
+      <Section id="common-questions" dark glow="left" dots eyebrow="Questions" title={<>Common <span className="orbit-fade">questions</span></>}>
         <FeatureGrid columns={3}>
           {QUESTIONS.map(({ question, answer, link }) => (
             <Feature key={question} title={question}>
@@ -523,7 +551,13 @@ function HomePage() {
             <QuickstartLink />
           </div>
         </div>
-        <GravityGlobe globe={false} />
+        {narrow ? (
+          <div className="gravity-globe" aria-hidden="true">
+            <DotWave className="gravity-globe-field" drift={2} speed={0.9} reach={1.12} />
+          </div>
+        ) : (
+          <GravityGlobe globe={false} />
+        )}
       </Section>
     </PageFrame>
   );
