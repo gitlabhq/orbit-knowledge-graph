@@ -2,8 +2,6 @@ mod cursor;
 mod node;
 #[cfg(feature = "pretty-print")]
 mod print;
-mod semantic;
-pub use semantic::CLASS_LIKE;
 mod storage;
 
 use indextree::Arena;
@@ -15,10 +13,6 @@ pub use cursor::{Cursor, Step, Walk};
 pub use node::{Node, Tag};
 #[cfg(feature = "pretty-print")]
 pub use print::pretty_print;
-pub use semantic::{
-    Role, find_member_in, infer_return_type, is_name_text, members_by_level, members_named,
-    reachable,
-};
 pub(crate) use storage::Entry as CompactNode;
 pub use storage::{Compact, Mutable, Storage};
 

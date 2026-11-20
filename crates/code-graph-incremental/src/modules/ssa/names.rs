@@ -166,7 +166,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
             return;
         }
         let module = self.inline_module(import);
-        for name in import.names() {
+        for name in import.children_of(C::Name) {
             let local = name
                 .child_sym(C::Alias)
                 .or(name.child_sym(C::SsaHint))

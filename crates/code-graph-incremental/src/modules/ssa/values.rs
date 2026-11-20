@@ -21,7 +21,7 @@ fn object_of<S: Store>(member: Cursor<'_, S>) -> Option<Cursor<'_, S>> {
 }
 
 fn tail_sym<S: Store>(node: Cursor<'_, S>) -> u32 {
-    match node.last_named().filter(|c| node.stands_for(*c)) {
+    match super::tail_child(node) {
         Some(c) if c.size() > 1 => tail_sym(c),
         Some(c) => c.sym(),
         None => node.sym(),
@@ -120,7 +120,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
         let binding = self.binding(sym);
         match self.state().graph.read_variable_internal(binding, block) {
             Value::Undefined => Value::Opaque,
-            Value::LocalDef(def) if self.at(def).is_class() => Value::Type(def),
+            Value::LocalDef(def) if super::is_class(self.at(def)) => Value::Type(def),
             value => value,
         }
     }

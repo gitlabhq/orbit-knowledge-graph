@@ -1,6 +1,7 @@
 use std::ops::ControlFlow;
 
-use super::{Mutable, Storage, Tree};
+use super::{Edge, Mutable, Node, Storage, Tree};
+use crate::canonical::Canonical as C;
 
 pub enum Step<R> {
     Into,
@@ -202,5 +203,71 @@ impl<S: Storage> Tree<S> {
     }
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
+    pub fn kind(self) -> u16 {
+        self.node().kind
+    }
+    pub fn sym(self) -> u32 {
+        self.node().sym
+    }
+    pub fn sym_opt(self) -> Option<u32> {
+        Some(self.sym()).filter(|&sym| sym != 0)
+    }
+    pub fn is(self, kind: C) -> bool {
+        self.kind() == kind
+    }
+    pub fn named(self) -> bool {
+        self.node().named
+    }
+    pub fn lifted(self) -> bool {
+        self.node().lifted
+    }
+    pub fn labelled(self) -> bool {
+        self.node().labelled
+    }
+    pub fn field(self) -> u16 {
+        self.node().field
+    }
+    pub fn start(self) -> u32 {
+        self.node().start
+    }
+    pub fn end(self) -> u32 {
+        self.node().end
+    }
+    pub fn start_row(self) -> u32 {
+        self.node().start_row
+    }
+    pub fn start_col(self) -> u32 {
+        self.node().start_col
+    }
+    pub fn end_row(self) -> u32 {
+        self.node().end_row
+    }
+    pub fn end_col(self) -> u32 {
+        self.node().end_col
+    }
+    pub fn child_sym_of_kind(self, kind: u16) -> Option<u32> {
+        self.children()
+            .find(|node| node.kind() == kind)
+            .and_then(|node| node.sym_opt())
+    }
+    pub fn children_of(self, kind: C) -> impl Iterator<Item = Self> + 'a {
+        self.children()
+            .filter(move |node| node.is(kind) && node.sym_opt().is_some())
+    }
+    pub fn follow(self, edge: &Edge) -> Self {
+        self.jump(edge.to_tree, edge.to_node)
+    }
+    pub fn child(self, kind: C) -> Option<Self> {
+        self.children().find(|node| node.is(kind))
+    }
+    pub fn child_sym(self, kind: C) -> Option<u32> {
+        self.child(kind).and_then(|node| node.sym_opt())
+    }
+    pub fn has(self, kind: C) -> bool {
+        self.child(kind).is_some()
     }
 }

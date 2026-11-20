@@ -39,7 +39,7 @@ struct Words {
     weak: u32,
 }
 
-const CLASS_LIKE: [C; 6] = [
+pub(super) const CLASS_LIKE: [C; 6] = [
     C::Class,
     C::Struct,
     C::ImplBlock,

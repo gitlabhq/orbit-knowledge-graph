@@ -258,7 +258,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
             let named = callee.sym_opt().is_some()
                 && !callee.has(C::Member)
                 && !callee.has(C::Ivar)
-                && crate::tree::is_name_text(self.lang().syms.resolve(callee.sym()));
+                && is_name_text(self.lang().syms.resolve(callee.sym()));
             let fallback = named.then(|| Rc::clone(&self.state().wildcards));
             let s = self.write();
             s.pending
@@ -334,4 +334,24 @@ fn loop_spans<S: Store>(root: Cursor<'_, S>) -> (FxHashMap<u32, u32>, FxHashMap<
         stack.extend(node.children_rev().map(|child| (child, false)));
     }
     (ends, assigned)
+}
+
+fn is_name_text(text: &str) -> bool {
+    !text.is_empty()
+        && !text
+            .chars()
+            .any(|c| c.is_whitespace() || "()[]{}<>*&,;'\"=+/%^|~".contains(c))
+}
+
+fn is_class<S: Store>(c: Cursor<'_, S>) -> bool {
+    c.children()
+        .any(|k| walk::CLASS_LIKE.iter().any(|&kind| k.is(kind)))
+}
+
+/// The last named child that is not a side effect and stands for its parent.
+fn tail_child<S: Store>(node: Cursor<'_, S>) -> Option<Cursor<'_, S>> {
+    node.children()
+        .filter(|c| c.named() && !c.is(C::SideEffect))
+        .last()
+        .filter(|c| !(node.labelled() && c.lifted()))
 }
