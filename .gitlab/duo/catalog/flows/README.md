@@ -168,8 +168,11 @@ Leave **Instructions** empty. GraphQL: `aiFlowTriggerCreate` with
 `eventTypes: [0]` (mention) and `aiCatalogItemConsumerId` set to the
 project's item configuration.
 
-A second trigger keeps docs current. Add **Pipeline** events (`eventTypes: [3]`)
-with this filter:
+A second trigger keeps docs current. Add it only after this file is on `main`
+and `SKILLS_REF` points at a `team/skills` commit on `main` that reads pipeline
+goals: older skills fail on every pipeline. Then add **Pipeline** events
+(`eventTypes: [3]`) with this filter, and change the trigger row in the
+settings table to say **Mention** and **Pipeline**:
 
 ```json
 {"pipeline_hooks": {"rules": [
