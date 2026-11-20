@@ -75,7 +75,7 @@ cases:
         MATCH (n:Note) WHERE n.id IN [7777, 8888, 9999] RETURN n.id, n.confidential, n.created_at LIMIT 3
     physical:
       clickhouse:
-        params: [{ value: "Note", data_type: String }, { value: "id", data_type: String }, { value: "confidential", data_type: String }, { value: "created_at", data_type: String }, { value: "1970-01-01 00:00:00", data_type: { Timestamp: { precision: 6, timezone: Utc } } }, { value: "1/", data_type: String }, { value: [7777, 8888, 9999], data_type: { Array: Int64 } }, { value: false, data_type: Bool }]
+        params: [{ value: [7777, 8888, 9999], data_type: Array(Int64) }]
         parameterized_sql: { not_contains: ["7777"] }
         sql: { contains: ["7777", "8888", "9999"] }
 

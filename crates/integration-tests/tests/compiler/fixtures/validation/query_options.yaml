@@ -50,7 +50,7 @@ cases:
       clickhouse:
         hydration:
           dynamic:
-            23: { entity_type: Project, columns: [id, full_path, name, visibility_level] }
+            Project: { entity_type: Project, columns: [id, full_path, name, visibility_level] }
 
   - name: The JSON dynamic columns option matches GQL neighbor properties
     query:
@@ -64,7 +64,7 @@ cases:
       clickhouse:
         hydration:
           dynamic:
-            23:
+            Project:
               entity_type: Project
               columns: [id, full_path, name, description, created_at, updated_at, visibility_level, archived, star_count, last_activity_at]
 

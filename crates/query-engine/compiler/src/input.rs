@@ -297,7 +297,7 @@ where
         .collect()
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct InputFilter {
     pub op: Option<FilterOp>,
     pub value: Option<Value>,
@@ -313,9 +313,7 @@ impl InputFilter {
     }
 }
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, strum::AsRefStr, strum::VariantNames,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr, strum::VariantNames)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum FilterOp {

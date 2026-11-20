@@ -25,4 +25,4 @@ cases:
             - AS g_visibility_level
           not_contains:
             - AS u_username
-        hydration: { static: {} }
+        hydration: { static: { u: { node_alias: u } } }

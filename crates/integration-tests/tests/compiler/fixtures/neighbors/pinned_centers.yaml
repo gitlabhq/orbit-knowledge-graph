@@ -62,7 +62,7 @@ cases:
     physical:
       clickhouse:
         result_context:
-          neighbors_center: [User, 1]
+          neighbors_center: { entity: User, id: 1 }
           labels: { User: username }
 
   - name: A multi-id center records no center and no label
@@ -75,4 +75,3 @@ cases:
       clickhouse:
         result_context:
           neighbors_center: null
-          labels: {}

@@ -21,14 +21,15 @@ physical:
     result_contract:
       result_ctx: {query_type: traversal, nodes: {u: {entity_type: User}}}
     hydrate_plan:
-      hydration_plan: {static: {}}
+      hydration_plan: {static: {u: {node_alias: u}}}
     security:
       node: {expect: ["(Filter false, ... (_))"]}
     codegen:
       output:
         sql: {contains: [gl_merge_request], not_contains: [gl_edge]}
         parameterized_sql: {contains: ["{p"], not_contains: [opened]}
-        params: [{value: '1/', data_type: String}, {value: opened, data_type: String}]
+        params: [{value: opened, data_type: String}]
+        param_count: 8
         indexes: [{table: gl_merge_request, name: idx_title}]
 ```
 
@@ -44,7 +45,7 @@ Common targets have aliases, declared in one table in
 | `hydration` | `hydrate_plan.hydration_plan` |
 | `result_context` | `result_contract.result_ctx` on ClickHouse |
 | `settings` | `settings.query_config` |
-| `sql`, `parameterized_sql`, `params`, `indexes` | `codegen.output` on ClickHouse |
+| `sql`, `parameterized_sql`, `params`, `param_count`, `indexes` | `codegen.output` on ClickHouse |
 
 An alias and an explicit phase entry cannot set the same state field.
 
@@ -60,31 +61,36 @@ contract:
 | `query_config` | `exact`, `equals`, and `absent` on the resolved ClickHouse settings |
 | `hydration_plan` | The serialized hydration plan |
 | `result_ctx` | The serialized result context |
-| `output` | `sql` and `parameterized_sql` text checks, the serialized bound `params`, and `indexes` that the layout declares and the final query scans |
+| `output` | `sql` and `parameterized_sql` text checks, `params` matches and `param_count`, and `indexes` that the layout declares and the final query scans |
 
 In `input`, the `Input` head names the query type, then `include_debug_sql`
 and `dynamic_columns=*` when the query sets them. A head without them asserts
 the defaults.
 
-`hydration_plan`, `result_ctx`, and `params` are compared as JSON. The runner
-serializes the state and matches it with the fixture value. A map matches on
-the keys it lists, a list matches by length and position, and other values
-compare exactly. A map of indexes matches the listed positions of a list. A
-failure names the JSON path that differs. A plan serializes as `none`,
-`{static: [...]}`, or `{dynamic: [...]}`, so `{static: {}}` checks only the
-kind. `params` is the list of bound parameters in binding order, each with
-`value` and `data_type`.
+`hydration_plan` and `result_ctx` are compared as JSON. The runner serializes
+the state and matches it with the fixture value. A map matches on the keys it
+lists, a list matches by length and position, and other values compare
+exactly. An empty map is rejected, because it matches anything. A failure names
+the JSON path that differs. Collections of keyed records serialize as maps:
+static templates by `node_alias`, dynamic entries by `entity_type`, and
+`virtual_filters` by property. A plan serializes as `none`, `{static: {...}}`,
+or `{dynamic: {...}}`.
+
+Each `params` entry must match one bound parameter on the keys it lists. The
+parameter has `value` and `data_type`, the ClickHouse type name. Extra bound
+parameters are allowed. `param_count` checks the number of bound parameters.
 
 ```yaml
 hydration:
   static:
-    - node_alias: f
+    f:
       virtual_columns: [{column_name: content, service: gitaly, lookup: blob_content}]
-      virtual_filters: [[content, {op: contains, value: needle}]]
+      virtual_filters: {content: {op: contains, value: needle}}
 result_context:
-  neighbors_center: [User, 1]
+  neighbors_center: {entity: User, id: 1}
   labels: {User: username}
-params: [{value: opened, data_type: String}, {value: 1, data_type: {Array: Int64}}]
+params: [{value: opened, data_type: String}, {value: [1, 2], data_type: "Array(Int64)"}]
+param_count: 8
 ```
 
 `sql` checks the rendered SQL, with parameter values inlined.

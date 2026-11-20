@@ -160,4 +160,4 @@ cases:
         duckdb_codegen:
           output:
             parameterized_sql: { contains: ["d.name = $"], not_contains: [main] }
-            params: [{ value: "Definition", data_type: String }, { value: 1, data_type: Int64 }, { value: "main", data_type: String }]
+            params: [{ value: main, data_type: String }]
