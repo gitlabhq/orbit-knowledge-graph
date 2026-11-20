@@ -93,7 +93,7 @@ impl Hold {
     }
 
     pub fn renew(&self, rules: &LeaseRules, entry: &LeaseEntry, local_now: SystemTime) -> Renewal {
-        if entry.is_held_by(&self.holder, self.seen) {
+        if entry.is_held_by(&self.holder, self.fence.generation, self.seen) {
             Renewal::Extend(rules.lease_for(&self.holder, local_now))
         } else {
             Renewal::Lost
@@ -114,7 +114,7 @@ impl Hold {
 
     pub fn release(&self, entry: &LeaseEntry) -> Option<Revision> {
         entry
-            .is_held_by(&self.holder, self.seen)
+            .is_held_by(&self.holder, self.fence.generation, self.seen)
             .then_some(entry.revision)
     }
 }

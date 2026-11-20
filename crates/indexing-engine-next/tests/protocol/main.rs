@@ -170,6 +170,13 @@ fn a_renewal_is_lost_once_the_same_holder_took_the_lease_again_for_another_run()
         Renewal::Lost
     );
     assert_eq!(hold.release(&held_by("p1", 200, 6)), None);
+
+    let after_wipe = LeaseEntry {
+        generation: Some(Generation(2)),
+        ..held_by("p1", 200, 4)
+    };
+    assert_eq!(hold.renew(&RULES, &after_wipe, at(90)), Renewal::Lost);
+    assert_eq!(hold.release(&after_wipe), None);
 }
 
 #[test]

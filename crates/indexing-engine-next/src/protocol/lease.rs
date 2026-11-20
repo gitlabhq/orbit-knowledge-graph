@@ -39,8 +39,14 @@ pub struct LeaseEntry {
 }
 
 impl LeaseEntry {
-    pub(super) fn is_held_by(&self, holder: &HolderId, revision: Revision) -> bool {
-        self.revision == revision
+    pub(super) fn is_held_by(
+        &self,
+        holder: &HolderId,
+        generation: Generation,
+        revision: Revision,
+    ) -> bool {
+        self.generation == Some(generation)
+            && self.revision == revision
             && self
                 .lease
                 .as_ref()
