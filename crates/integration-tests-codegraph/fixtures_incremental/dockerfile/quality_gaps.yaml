@@ -13,16 +13,17 @@ fixtures:
       FROM alpine:3.19 AS tools
       FROM later AS early
       FROM base:1 AS pinned
+      FROM base@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef AS digested
       FROM x AS later
 
 tests:
-  - name: "FROM <stage> is not an image import, but an unknown, later or tagged name is"
+  - name: "FROM <stage> is not an image import, but an unknown, later, tagged or digested name is"
     query: |
       MATCH (i:ImportedSymbol)
       RETURN i.import_path AS image
       ORDER BY image
     assert:
-      - { row_count: 4 }
+      - { row_count: 5 }
       - { row: { image: "alpine" } }
       - { row: { image: "base" } }
       - { row: { image: "later" } }
@@ -51,10 +52,10 @@ tests:
       - { row_count: 1 }
       - { row: { user: "base", variable: "BASE" } }
 
-  - name: "a tagged name is an image and calls no stage"
+  - name: "a tagged or digested name is an image and calls no stage"
     query: |
       MATCH (a:Definition)-[:CALLS]->(b:Definition)
-      WHERE a.name = 'pinned'
+      WHERE a.name IN ['pinned', 'digested']
       RETURN b.name AS callee
     assert:
       - { empty: true }

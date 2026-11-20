@@ -102,8 +102,8 @@ stages:
       - match: '(__from $$$H)'
         replace: '(__def $$$H)'
 
-  # `COPY --from=<own stage>` is invalid Docker. A stage call that names the
-  # stage around it is left unconverted and dropped with the other `__` nodes.
+  # `COPY --from=<own stage>` is invalid Docker, so only a stage call that
+  # names another stage becomes a call.
   - name: copy-from-calls
     rules:
       - match: '(__stage_call $K:__callee ^/(__def $D:__defname))'
