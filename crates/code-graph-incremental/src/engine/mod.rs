@@ -949,17 +949,12 @@ impl<'t, S: Store> Run<'t, S> {
             let Some(Memo::Busy(partial)) = self.memo.entries.get(&key) else {
                 break;
             };
-            let mut grown = partial.clone();
-            for v in &found {
-                if !grown.contains(v) {
-                    grown.push(*v);
-                }
-            }
-            if grown.len() == partial.len() {
-                found = grown;
+            if found.len() == partial.len() && found.iter().all(|v| partial.contains(v)) {
                 break;
             }
-            self.memo.entries.insert(key.clone(), Memo::Busy(grown));
+            self.memo
+                .entries
+                .insert(key.clone(), Memo::Busy(found.clone()));
             self.round += 1;
             rounds += 1;
         }

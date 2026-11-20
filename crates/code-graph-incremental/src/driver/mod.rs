@@ -93,6 +93,9 @@ pub fn reindex(
 }
 
 /// The phases before the first that needs more than its own tree, and the rest.
+/// A bound on reruns of a family phase; each round replaces the last one's edges.
+const MAX_FAMILY_ROUNDS: usize = 32;
+
 fn split(env: &Env) -> (&[Phase], &[Phase]) {
     let phases = env.pipeline.phases.as_slice();
     let at = phases
@@ -227,30 +230,39 @@ fn finish(env: &Env, state: &mut State, run: &Sentinel) -> Result<(), Error> {
         match phase.scope.as_str() {
             "project" => state.project(env),
             "graph" => {}
-            "family" => loop {
-                let graph = EdgeIndex::new(&state.edges);
-                let known: std::collections::HashSet<Edge> = state.edges.iter().copied().collect();
-                let project = state.trees.len() as u32;
-                state.trees.push(state.project_compact(env));
-                let found = engine::run_family(
-                    phase,
-                    &state.trees,
-                    Some(project),
-                    &state.edges,
-                    &graph,
-                    env,
-                    run,
-                );
-                state.trees.pop();
-                let found = found?;
-                let before = state.edges.len();
-                state
-                    .edges
-                    .extend(found.into_iter().filter(|e| !known.contains(e)));
-                if phase.walk != Walk::Fixpoint || state.edges.len() == before {
-                    break;
+            "family" => {
+                let base = state.edges.len();
+                let mut last: std::collections::HashSet<Edge> = Default::default();
+                for _ in 0..MAX_FAMILY_ROUNDS {
+                    let graph = EdgeIndex::new(&state.edges);
+                    let project = state.trees.len() as u32;
+                    state.trees.push(state.project_compact(env));
+                    let found = engine::run_family(
+                        phase,
+                        &state.trees,
+                        Some(project),
+                        &state.edges,
+                        &graph,
+                        env,
+                        run,
+                    );
+                    state.trees.pop();
+                    let known: std::collections::HashSet<Edge> =
+                        state.edges[..base].iter().copied().collect();
+                    let mut seen = std::collections::HashSet::new();
+                    let found: Vec<Edge> = found?
+                        .into_iter()
+                        .filter(|e| !known.contains(e) && seen.insert(*e))
+                        .collect();
+                    let stable = seen == last;
+                    state.edges.truncate(base);
+                    state.edges.extend(found);
+                    last = seen;
+                    if phase.walk != Walk::Fixpoint || stable {
+                        break;
+                    }
                 }
-            },
+            }
             _ => {
                 let graph = EdgeIndex::new(&state.edges);
                 for (fi, tree) in state.trees.iter_mut().enumerate() {
