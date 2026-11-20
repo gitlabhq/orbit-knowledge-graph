@@ -99,6 +99,7 @@ include:
   - local: .gitlab/ci/release-deploy-mr.yml
   - local: .gitlab/ci/linting.yml
   - local: .gitlab/ci/rails-contract.yml
+  - local: .gitlab/ci/indexing-engine-spec.yml
   # Uses `secrets`, which dev.gitlab.org rejects and fork MR pipelines can't use.
   - local: .gitlab/ci/review-docs.yml
     rules:
