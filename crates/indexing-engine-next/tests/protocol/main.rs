@@ -35,6 +35,13 @@ fn task(n: u128) -> TaskId {
     TaskId::new(Uuid::from_u128(n))
 }
 
+fn fence(revision: u64) -> Fence {
+    Fence {
+        generation: FIRST_GENERATION,
+        revision: Revision(revision),
+    }
+}
+
 fn holder(name: &str) -> HolderId {
     HolderId::new(name)
 }
@@ -122,7 +129,7 @@ fn the_fence_is_the_lease_revision_when_the_holder_took_it() {
     let lease = claim
         .lease_if_free(&RULES, &held_by("p0", 0, 3), at(10))
         .unwrap();
-    let mut hold = claim.into_hold(&RULES, &lease, Revision(4), FIRST_GENERATION, at(10));
+    let mut hold = claim.into_hold(&RULES, &lease, fence(4), at(10));
 
     let renewal = hold.build_renewal(&RULES, &held_by("p1", 70, 4), at(30));
     let Renewal::Extend(renewed) = renewal else {
@@ -146,7 +153,7 @@ fn a_renewal_is_lost_once_another_holder_took_the_lease() {
     let lease = claim
         .lease_if_free(&RULES, &held_by("p0", 0, 3), at(10))
         .unwrap();
-    let hold = claim.into_hold(&RULES, &lease, Revision(4), FIRST_GENERATION, at(10));
+    let hold = claim.into_hold(&RULES, &lease, fence(4), at(10));
 
     assert_eq!(
         hold.build_renewal(&RULES, &held_by("p2", 200, 5), at(90)),
@@ -165,7 +172,7 @@ fn a_renewal_is_lost_once_the_same_holder_took_the_lease_again_for_another_run()
     let lease = claim
         .lease_if_free(&RULES, &held_by("p0", 0, 3), at(10))
         .unwrap();
-    let hold = claim.into_hold(&RULES, &lease, Revision(4), FIRST_GENERATION, at(10));
+    let hold = claim.into_hold(&RULES, &lease, fence(4), at(10));
 
     assert_eq!(
         hold.build_renewal(&RULES, &held_by("p1", 200, 6), at(90)),

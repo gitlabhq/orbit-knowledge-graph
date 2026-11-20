@@ -4,7 +4,7 @@ use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::time::{Duration, SystemTime};
 
 use indexing_engine_next::protocol::{
-    Claim, Generation, Hold, HolderId, Lease, LeaseRules, Renewal, TaskId,
+    Claim, Fence, Generation, Hold, HolderId, Lease, LeaseRules, Renewal, TaskId,
 };
 use indexing_engine_next::testkit::simulation::{
     DatabaseWrite, FaultBudget, MessageState, SimulatedBroker, SimulatedDatabase,
@@ -474,8 +474,11 @@ impl Cluster {
         let Ok(written) = self.lease.put(entry.revision, Some(lease.clone())) else {
             return;
         };
-        self.holders[h].step =
-            Step::Leased(claim.into_hold(&self.rules, &lease, written, generation, local_now));
+        let fence = Fence {
+            generation,
+            revision: written,
+        };
+        self.holders[h].step = Step::Leased(claim.into_hold(&self.rules, &lease, fence, local_now));
     }
 
     fn start_task(&mut self, h: usize) {

@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::lane::Lane;
 use crate::payload::{Key, TaskInput, Tenant};
-use crate::protocol::{Generation, Lease, LeaseEntry, ProtocolEvent, Revision, TaskId};
+use crate::protocol::{Fence, Lease, LeaseEntry, ProtocolEvent, Revision, TaskId};
 
 #[derive(Clone)]
 pub(crate) struct Ports {
@@ -38,10 +38,7 @@ pub(crate) struct Delivery {
 }
 
 pub(crate) enum LeaseWrite {
-    Written {
-        revision: Revision,
-        generation: Generation,
-    },
+    Written(Fence),
     Conflict,
 }
 

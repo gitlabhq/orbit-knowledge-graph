@@ -9,7 +9,7 @@ use crate::port::{
     Clock, Delivery, InFlight, LeaseStore, LeaseWrite, MarkerEntry, MarkerStore, MarkerWrite,
     Ports, ProtocolLog, TaskMessage, TaskStream, WorkerKey,
 };
-use crate::protocol::{Lease, LeaseEntry, ProtocolEvent, Revision};
+use crate::protocol::{Fence, Lease, LeaseEntry, ProtocolEvent, Revision};
 
 use super::world::{Actor, SharedWorld, StepKind};
 
@@ -148,10 +148,10 @@ impl LeaseStore for SimulatedPorts {
             return Ok(LeaseWrite::Conflict);
         };
         match world.lease.put(expected, lease) {
-            Ok(revision) => Ok(LeaseWrite::Written {
-                revision,
+            Ok(revision) => Ok(LeaseWrite::Written(Fence {
                 generation,
-            }),
+                revision,
+            })),
             Err(_) => {
                 world.count("LeaseConflict");
                 Ok(LeaseWrite::Conflict)

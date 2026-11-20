@@ -1,6 +1,6 @@
 use std::time::SystemTime;
 
-use super::lease::{Fence, Generation, HolderId, Lease, LeaseEntry, LeaseRules, Revision};
+use super::lease::{Fence, HolderId, Lease, LeaseEntry, LeaseRules, Revision};
 use super::marker::TaskId;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,18 +32,14 @@ impl Claim {
         self,
         rules: &LeaseRules,
         lease: &Lease,
-        written: Revision,
-        generation: Generation,
+        written: Fence,
         local_now: SystemTime,
     ) -> Hold {
         Hold {
             holder: self.holder,
             task: self.task,
-            fence: Fence {
-                generation,
-                revision: written,
-            },
-            seen: written,
+            fence: written,
+            seen: written.revision,
             expires_at: lease.expires_at,
             renew_at: local_now + rules.renew_every,
         }
