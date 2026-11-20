@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """Fail a docs-write docs MR while a feature MR it documents is not merged.
 
-The docs MR description carries `<!-- docs-write: source=!12,!13 -->`. This
-project requires a green pipeline to merge, so this job keeps the docs from
-merging before the code. Retry the job after the feature MR merges.
+The feature MRs are the one in the branch name (`docs-write/mr-<iid>`), which
+nobody can edit, plus the `<!-- docs-write: source=!12,!13 -->` marker in the
+description. This project requires a green pipeline to merge, so this job keeps
+the docs from merging before the code. Retry the job after the feature MRs merge.
 """
 
 import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.request
 
 MARKER = re.compile(r"<!--\s*docs-write:\s*source=([^>]*?)\s*-->")
+BRANCH = re.compile(r"^docs-write/mr-(\d+)$")
 
 
 def get(path):
@@ -23,13 +26,18 @@ def get(path):
 
 def main():
     docs = get("merge_requests/{}".format(os.environ["CI_MERGE_REQUEST_IID"]))
+    sources = set()
     found = MARKER.search(docs.get("description") or "")
-    if not found:
-        print("No docs-write marker: nothing to check.")
+    if found:
+        sources.update(int(n) for n in re.findall(r"!(\d+)", found.group(1)))
+    branch = BRANCH.match(os.environ.get("CI_MERGE_REQUEST_SOURCE_BRANCH_NAME", ""))
+    if branch:
+        sources.add(int(branch.group(1)))
+    if not sources:
+        print("No docs-write marker or branch: nothing to check.")
         return 0
-    sources = sorted({int(n) for n in re.findall(r"!(\d+)", found.group(1))})
     waiting = []
-    for iid in sources:
+    for iid in sorted(sources):
         state = get("merge_requests/{}".format(iid)).get("state")
         print("!{}: {}".format(iid, state))
         if state != "merged":
@@ -42,4 +50,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except urllib.error.URLError as err:
+        sys.exit("Could not read the merge requests ({}). Retry this job.".format(err))

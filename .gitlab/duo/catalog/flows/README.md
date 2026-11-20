@@ -15,7 +15,7 @@ this table.
 
 | Setting | Value |
 |---|---|
-| `SKILLS_REF` in `docs-write.yml` | `fb09aa52de458d8f9295e644c9c05f700ea58914`, the head of `team/skills` MR 38 (unmerged). Re-pin to its squash commit once it merges. |
+| `SKILLS_REF` in `docs-write.yml` | `f2758cf34eae8b780b9a28325d211438b525c175`, the head of `team/skills` MR 39 (unmerged, stacked on MR 38). Re-pin to its squash commit once it merges. |
 | `MODE` in `docs-write.yml` | `full` |
 | `FLOW_USER` in `docs-write.yml` | `44621578`, the user ID of `ai-docs-write-gitlab-org_510eee`, the service account that authors the flow's notes. Under composite identity `GET /user` returns the person who triggered the run, so the skills need it. An ID survives a rename. |
 | `DOCS_REVIEWERS` in `docs-write.yml` | `fneill,z_painter`: technical writers who approve and merge the docs MRs |
@@ -210,7 +210,8 @@ MRs with `~documentation` or `~"docs-factory::skip"`. Each run still spends abou
   pipeline (`docs-write/mr-*` branches). It fails while any feature MR in the
   docs MR marker is not merged. This project requires a green pipeline to
   merge, so docs never merge before the code. The new pipeline that the flow
-  starts at merge, or a retry of the job, turns it green.
+  starts at merge, or a retry of the job, turns it green. The flow itself counts
+  this one failure as expected, so it still reviews and hands off the docs MR.
 
 ## Shadow mode
 
