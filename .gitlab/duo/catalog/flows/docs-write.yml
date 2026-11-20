@@ -13,10 +13,10 @@ components:
     inputs:
       - from: >-
           SKILLS_REPO=gitlab-org/orbit/team/skills;
-          SKILLS_REF=7ff82867e8bb0b036dd0292af3db469141fa411b;
+          SKILLS_REF=fb09aa52de458d8f9295e644c9c05f700ea58914;
           MODE=full;
           DOCS_REVIEWERS=fneill,z_painter;
-          FLOW_USER=ai-docs-write-gitlab-org_510eee;
+          FLOW_USER=44621578;
           D=.docs-write; rm -rf $D; mkdir -p $D/route; U="${GITLAB_BASE_URL:-https://gitlab.com}";
           printf '#!/bin/sh\nexport LEFTHOOK=0 DOCS_WRITE_FLOW_USER=%s\nexec uv run -q --no-project --python 3.12 python
           .docs-write/skills/docs-write/scripts/flow_step.py "$@"\n' "$FLOW_USER" > $D/step;
