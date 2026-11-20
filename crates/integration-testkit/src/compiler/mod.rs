@@ -325,9 +325,12 @@ struct OutputAssertions {
 fn empty_map_path(expected: &serde_json::Value, path: &str) -> Option<String> {
     match expected {
         serde_json::Value::Object(map) if map.is_empty() => Some(path.to_string()),
-        serde_json::Value::Object(map) => map
-            .iter()
-            .find_map(|(key, value)| empty_map_path(value, &format!("{path}.{key}"))),
+        serde_json::Value::Object(map) => map.iter().find_map(|(key, value)| match value {
+            serde_json::Value::Object(listed) if key == crate::scenario::EXACT_KEYS => listed
+                .iter()
+                .find_map(|(key, value)| empty_map_path(value, &format!("{path}.{key}"))),
+            _ => empty_map_path(value, &format!("{path}.{key}")),
+        }),
         serde_json::Value::Array(items) => items
             .iter()
             .enumerate()
@@ -1612,7 +1615,7 @@ fn state_assertions_match_serialized_state_by_json_path() {
     };
     assert_eq!(
         run(
-            "{params: [{value: alice, data_type: String}, {value: 1, data_type: Int64}], param_count: 8, parameterized_sql: {contains: ['{p'], not_contains: [alice]}, result_context: {query_type: traversal, nodes: {u: {entity_type: User, id_column: _orbit_u_id}}, neighbors_center: null}, hydration: none}"
+            "{params: [{value: alice, data_type: String}, {value: 1, data_type: Int64}], param_count: 8, parameterized_sql: {contains: ['{p'], not_contains: [alice]}, result_context: {query_type: traversal, nodes: {$exact: {u: {entity_type: User, id_column: _orbit_u_id}}}, neighbors_center: null}, hydration: none}"
         ),
         ""
     );
@@ -1645,6 +1648,10 @@ fn state_assertions_match_serialized_state_by_json_path() {
         (
             "{result_context: {nodes: {}}}",
             "result_ctx.nodes is an empty map",
+        ),
+        (
+            "{result_context: {nodes: {$exact: {}}}}",
+            "result_ctx.nodes.u is not listed in $exact",
         ),
     ] {
         let failures = run(physical);
