@@ -231,7 +231,12 @@ mod tests {
                         remote.sql
                     );
                     let Some(local) = local else {
-                        assert!(local_query.is_err());
+                        assert!(
+                            local_query
+                                .unwrap_err()
+                                .to_string()
+                                .contains("collect is not supported by the DuckDB backend")
+                        );
                         continue;
                     };
                     let aggregate = format!(
