@@ -20,6 +20,7 @@ use crate::v2::types::{
 
 const MAX_STAGES_PER_FILE: usize = 1_000;
 const MAX_VARIABLES_PER_FILE: usize = 10_000;
+const MAX_RUNTIME_DEFINITIONS_PER_FILE: usize = 10_000;
 const MAX_REFERENCES_PER_FILE: usize = 20_000;
 const MAX_NAME_BYTES: usize = 512;
 const MAX_INSTRUCTION_NAME_CHARS: usize = 512;
@@ -96,6 +97,7 @@ struct DockerfileParser<'a> {
     stage_variables: HashMap<String, u32>,
     stage_count: usize,
     variable_count: usize,
+    runtime_definition_count: usize,
     stage: Option<Stage>,
 }
 
@@ -124,6 +126,7 @@ impl<'a> DockerfileParser<'a> {
             stage_variables: HashMap::new(),
             stage_count: 0,
             variable_count: 0,
+            runtime_definition_count: 0,
             stage: None,
         }
     }
@@ -244,7 +247,7 @@ impl<'a> DockerfileParser<'a> {
                 "expose_port" | "json_string_array" | "shell_command"
             )
         }) {
-            if self.variable_count >= MAX_VARIABLES_PER_FILE {
+            if self.runtime_definition_count >= MAX_RUNTIME_DEFINITIONS_PER_FILE {
                 return;
             }
             let name: String = part
@@ -266,7 +269,7 @@ impl<'a> DockerfileParser<'a> {
                 is_top_level: false,
                 metadata: None,
             });
-            self.variable_count += 1;
+            self.runtime_definition_count += 1;
         }
     }
 
@@ -562,6 +565,19 @@ mod tests {
         let result = parse(&format!("FROM img AS s\nENV{pairs}\n"));
         assert_eq!(names(&result, "Variable").len(), MAX_VARIABLES_PER_FILE);
         assert_eq!(names(&result, "Class"), ["Dockerfile.s"]);
+    }
+
+    #[test]
+    fn runtime_instructions_survive_a_full_variable_budget() {
+        let pairs: String = (0..MAX_VARIABLES_PER_FILE)
+            .map(|i| format!(" V{i}=1"))
+            .collect();
+        let result = parse(&format!(
+            "FROM img AS s\nENV{pairs}\nEXPOSE 8080\nENTRYPOINT [\"a\"]\nCMD [\"b\"]\n"
+        ));
+        assert_eq!(names(&result, "Port"), ["Dockerfile.s.8080"]);
+        assert_eq!(names(&result, "Entrypoint"), ["Dockerfile.s.ENTRYPOINT"]);
+        assert_eq!(names(&result, "Command"), ["Dockerfile.s.CMD"]);
     }
 
     #[test]
