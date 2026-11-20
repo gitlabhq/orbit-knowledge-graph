@@ -50,7 +50,7 @@ async fn parallel_queries_sharing_a_correlation_id_all_execute() {
     assert!(
         query_ids
             .iter()
-            .all(|id| id.starts_with(&format!("{SHARED_CORRELATION_ID}-"))),
+            .all(|id| id.starts_with(&format!("{SHARED_CORRELATION_ID}-base-"))),
         "{query_ids:#?}"
     );
     query_ids.sort_unstable();

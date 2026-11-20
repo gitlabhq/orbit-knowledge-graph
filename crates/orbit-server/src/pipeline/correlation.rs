@@ -1,5 +1,5 @@
 //! Tags each ClickHouse query with the request correlation ID. Sub-queries carry
-//! a per-query `query_id` (`<correlation_id>-<ulid>-<stage>`, unique even when
+//! a per-query `query_id` (`<correlation_id>-<stage>-<ulid>`, unique even when
 //! parallel requests share one correlation ID) and a lightweight `gkg;<kind>;correlation_id=<id>`
 //! comment; the base query additionally carries an attribution payload
 //! (`gkg;<base64(json)>`) so retention can recover who ran which query, in which
@@ -34,7 +34,7 @@ pub(crate) fn query_id(stage: &str) -> String {
         .and_then(|id| sanitize(&id))
         .unwrap_or_else(labkit::correlation::generate_id);
     let unique = labkit::correlation::generate_id();
-    format!("{prefix}-{unique}-{stage}")
+    format!("{prefix}-{stage}-{unique}")
 }
 
 pub(crate) fn log_comment(suffix: Option<&str>) -> String {
@@ -111,10 +111,11 @@ mod tests {
     }
 
     fn split_query_id<'a>(id: &'a str, stage: &str) -> (&'a str, &'a str) {
-        let rest = id
+        let (rest, unique) = id.rsplit_once('-').expect("unique suffix present");
+        let prefix = rest
             .strip_suffix(&format!("-{stage}"))
-            .expect("stage suffix present");
-        rest.rsplit_once('-').expect("unique part present")
+            .expect("stage before the unique suffix");
+        (prefix, unique)
     }
 
     fn is_ulid(s: &str) -> bool {
@@ -151,8 +152,8 @@ mod tests {
         let (first, second) =
             with_correlation("req-abc-123", || (query_id("base"), query_id("base")));
         assert_ne!(first, second);
-        assert!(first.starts_with("req-abc-123-"));
-        assert!(second.starts_with("req-abc-123-"));
+        assert!(first.starts_with("req-abc-123-base-"));
+        assert!(second.starts_with("req-abc-123-base-"));
     }
 
     #[test]
