@@ -70,7 +70,9 @@ the defaults.
 `hydration_plan` and `result_ctx` are compared as JSON. The runner serializes
 the state and matches it with the fixture value. A map matches on the keys it
 lists, a list matches by length and position, and other values compare
-exactly. An empty map is rejected, because it matches anything. A failure names
+exactly. An empty map is rejected, because it matches anything. To assert the exact
+keys of a map, wrap it as `{$exact: {...}}`. The map then fails on any key it
+does not list, and `{$exact: {}}` asserts an empty map. A failure names
 the JSON path that differs. Collections of keyed records serialize as maps:
 static templates by `node_alias`, dynamic entries by `entity_type`, and
 `virtual_filters` by property. A plan serializes as `none`, `{static: {...}}`,
