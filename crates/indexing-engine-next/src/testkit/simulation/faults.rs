@@ -123,7 +123,7 @@ impl World {
             match self.processes[p].stall {
                 Stall::Stalled { until } if every || until <= now => {
                     self.processes[p].stall = Stall::Awake;
-                    self.record_step(format!("Resume(p{})", p + 1));
+                    self.record_step("Resume", format!("(p{})", p + 1));
                     resumed = true;
                 }
                 Stall::Armed { .. } if every => self.processes[p].stall = Stall::Awake,
@@ -139,7 +139,7 @@ impl World {
             return;
         }
         self.nats_generation = Some(self.database.start_next_generation());
-        self.record_step("RecoverNats".to_owned());
+        self.record_step("RecoverNats", String::new());
     }
 
     pub(super) fn stall_if_armed(&mut self, process: usize, step: StepKind) -> bool {
@@ -155,7 +155,7 @@ impl World {
                 self.faults_left.stalls -= 1;
                 let until = self.now_tick() + ticks;
                 self.processes[process].stall = Stall::Stalled { until };
-                self.record_step(format!("Stall(p{}) for {ticks} ticks", process + 1));
+                self.record_step("Stall", format!("(p{}) for {ticks} ticks", process + 1));
                 true
             }
         }
@@ -189,7 +189,7 @@ impl World {
 
     pub(super) fn record_planner_crash(&mut self) {
         self.publishing = None;
-        self.record_step("PlannerCrash".to_owned());
+        self.record_step("PlannerCrash", String::new());
     }
 
     fn crash(&mut self, process: usize) -> bool {
@@ -204,7 +204,7 @@ impl World {
         state.incarnation += 1;
         state.stall = Stall::Awake;
         state.renewal_fails = false;
-        self.record_step(format!("Crash(p{})", process + 1));
+        self.record_step("Crash", format!("(p{})", process + 1));
         true
     }
 
@@ -225,7 +225,7 @@ impl World {
             .filter(|task| !self.broker.is_done(*task))
             .collect();
         self.lost_in_wipe.extend(not_done);
-        self.record_step("NatsWipe".to_owned());
+        self.record_step("NatsWipe", String::new());
     }
 
     fn duplicate_message(&mut self, message: usize) {
@@ -235,6 +235,6 @@ impl World {
         }
         self.faults_left.duplicates -= 1;
         self.broker.duplicate(message);
-        self.record_step(format!("DuplicateCopy({})", message + 1));
+        self.record_step("DuplicateCopy", format!("({})", message + 1));
     }
 }

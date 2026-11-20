@@ -318,19 +318,19 @@ impl World {
                 }
                 self.publishing = Some(task);
                 let id = self.find_spec_id(task);
-                self.record_step(format!("Submit, task {id}"));
+                self.record_step("Submit", format!(", task {id}"));
             }
             (Actor::Planner, ProtocolEvent::Published(task)) => {
                 self.publishing = None;
                 self.covers.push(task);
                 let id = self.find_spec_id(task);
-                self.record_step(format!("Publish, task {id}"));
+                self.record_step("Publish", format!(", task {id}"));
             }
             (Actor::Process { index, .. }, ProtocolEvent::Delivered(task)) => {
                 self.processes[index].phase = Phase::Leasing;
                 let copy = self.processes[index].held.map_or(0, |copy| copy + 1);
                 let id = self.find_spec_id(task);
-                self.record_step(format!("Deliver(p{}, {copy}), task {id}", index + 1));
+                self.record_step("Deliver", format!("(p{}, {copy}), task {id}", index + 1));
             }
             (Actor::Process { index, .. }, ProtocolEvent::LeaseAcquired(hold)) => {
                 let process = &mut self.processes[index];
@@ -339,35 +339,35 @@ impl World {
                 process.seen = hold.seen_revision();
                 process.expiry = ticks_at(hold.expires_at());
                 process.renew_at = ticks_at(hold.renew_at());
-                self.record_step(format!("AcquireLease(p{})", index + 1));
+                self.record_step("AcquireLease", format!("(p{})", index + 1));
             }
             (Actor::Process { index, .. }, ProtocolEvent::Started { task, .. }) => {
                 self.started.insert(task);
                 self.processes[index].phase = Phase::Running;
-                self.record_step(format!("StartTask(p{})", index + 1));
+                self.record_step("StartTask", format!("(p{})", index + 1));
             }
             (Actor::Process { index, .. }, ProtocolEvent::Renewed(hold)) => {
                 let process = &mut self.processes[index];
                 process.seen = hold.seen_revision();
                 process.expiry = ticks_at(hold.expires_at());
                 process.renew_at = ticks_at(hold.renew_at());
-                self.record_step(format!("Renew(p{})", index + 1));
+                self.record_step("Renew", format!("(p{})", index + 1));
             }
             (Actor::Process { index, .. }, ProtocolEvent::RenewalLost(_)) => {
                 self.drop_run(index);
-                self.record_step(format!("Renew(p{}), lost", index + 1));
+                self.record_step("Renew", format!("(p{}), lost", index + 1));
             }
             (Actor::Process { index, .. }, ProtocolEvent::RenewalFailed(_)) => {
                 self.drop_run(index);
-                self.record_step(format!("RenewFails(p{})", index + 1));
+                self.record_step("RenewFails", format!("(p{})", index + 1));
             }
             (Actor::Process { index, .. }, ProtocolEvent::Finished { .. }) => {
                 self.drop_run(index);
-                self.record_step(format!("Finish(p{})", index + 1));
+                self.record_step("Finish", format!("(p{})", index + 1));
             }
             (Actor::Process { index, .. }, ProtocolEvent::Abandoned(_)) => {
                 self.drop_run(index);
-                self.record_step(format!("Abandon(p{})", index + 1));
+                self.record_step("Abandon", format!("(p{})", index + 1));
             }
             (actor, event) => {
                 self.break_rule(format!(
@@ -379,7 +379,7 @@ impl World {
 
     pub(super) fn begin_write(&mut self, process: usize) {
         self.processes[process].phase = Phase::Writing;
-        self.record_step(format!("BeginWrite(p{})", process + 1));
+        self.record_step("BeginWrite", format!("(p{})", process + 1));
     }
 
     pub(super) fn commit_write(&mut self, process: usize, fence: Fence) -> bool {
@@ -398,7 +398,7 @@ impl World {
             self.rejected_current |= holds_current;
             self.drop_run(process);
         }
-        self.record_step(format!("CommitWrite(p{}), kept {kept}", process + 1));
+        self.record_step("CommitWrite", format!("(p{}), kept {kept}", process + 1));
         kept
     }
 
@@ -407,7 +407,7 @@ impl World {
         let expired: Vec<usize> = self.broker.expired_messages(now).collect();
         for message in &expired {
             self.broker.redeliver(*message);
-            self.record_step(format!("Redeliver({})", message + 1));
+            self.record_step("Redeliver", format!("({})", message + 1));
         }
         !expired.is_empty()
     }
@@ -438,11 +438,11 @@ impl World {
         self.processes[process].held = None;
     }
 
-    pub(super) fn record_step(&mut self, step: String) {
-        let name = step.split(['(', ',', ' ']).next().unwrap_or_default();
+    pub(super) fn record_step(&mut self, name: &str, detail: String) {
         self.count(name);
-        if step != "Tick" {
-            self.timeline.push(format!("t{} {step}", self.seen_tick));
+        if name != "Tick" {
+            self.timeline
+                .push(format!("t{} {name}{detail}", self.seen_tick));
         }
         if self.step_order == StepOrder::Atomic {
             let state = self.format_spec_state();
@@ -495,7 +495,7 @@ impl World {
         while self.seen_tick < self.now_tick() {
             self.seen_tick += 1;
             self.calls_this_tick = 0;
-            self.record_step("Tick".to_owned());
+            self.record_step("Tick", String::new());
         }
     }
 

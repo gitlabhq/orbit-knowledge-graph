@@ -13,12 +13,7 @@ use crate::protocol::{Lease, LeaseEntry, ProtocolEvent, Revision};
 
 use super::world::{Actor, SharedWorld, StepKind};
 
-pub(super) struct SimulatedClock {
-    world: SharedWorld,
-    actor: Actor,
-}
-
-struct SimulatedStream {
+struct SimulatedPorts {
     world: SharedWorld,
     actor: Actor,
 }
@@ -30,54 +25,22 @@ struct SimulatedInFlight {
     consumer: usize,
 }
 
-struct SimulatedLeases {
-    world: SharedWorld,
-    actor: Actor,
-}
-
-struct SimulatedMarkers {
-    world: SharedWorld,
-    actor: Actor,
-}
-
-struct SimulatedLog {
-    world: SharedWorld,
-    actor: Actor,
-}
-
 pub(super) fn build_ports(world: &SharedWorld, actor: Actor) -> Ports {
+    let ports = Arc::new(SimulatedPorts {
+        world: world.clone(),
+        actor,
+    });
     Ports {
-        clock: Arc::new(SimulatedClock::new(world, actor)),
-        tasks: Arc::new(SimulatedStream {
-            world: world.clone(),
-            actor,
-        }),
-        leases: Arc::new(SimulatedLeases {
-            world: world.clone(),
-            actor,
-        }),
-        markers: Arc::new(SimulatedMarkers {
-            world: world.clone(),
-            actor,
-        }),
-        log: Arc::new(SimulatedLog {
-            world: world.clone(),
-            actor,
-        }),
-    }
-}
-
-impl SimulatedClock {
-    pub(super) fn new(world: &SharedWorld, actor: Actor) -> Self {
-        Self {
-            world: world.clone(),
-            actor,
-        }
+        clock: ports.clone(),
+        tasks: ports.clone(),
+        leases: ports.clone(),
+        markers: ports.clone(),
+        log: ports,
     }
 }
 
 #[async_trait]
-impl Clock for SimulatedClock {
+impl Clock for SimulatedPorts {
     async fn now(&self) -> SystemTime {
         self.world.begin_step(self.actor, StepKind::Any).await
     }
@@ -90,7 +53,7 @@ impl Clock for SimulatedClock {
 }
 
 #[async_trait]
-impl TaskStream for SimulatedStream {
+impl TaskStream for SimulatedPorts {
     async fn publish(&self, message: TaskMessage) -> anyhow::Result<()> {
         self.world.stop_unless_allowed(self.actor).await;
         {
@@ -160,7 +123,7 @@ impl InFlight for SimulatedInFlight {
 }
 
 #[async_trait]
-impl LeaseStore for SimulatedLeases {
+impl LeaseStore for SimulatedPorts {
     async fn read(&self, _key: &WorkerKey) -> anyhow::Result<LeaseEntry> {
         self.world.interleave_inside_step(self.actor).await;
         let world = self.world.lock();
@@ -198,7 +161,7 @@ impl LeaseStore for SimulatedLeases {
 }
 
 #[async_trait]
-impl MarkerStore for SimulatedMarkers {
+impl MarkerStore for SimulatedPorts {
     async fn read(&self, _key: &WorkerKey) -> anyhow::Result<MarkerEntry> {
         self.world.interleave_inside_step(self.actor).await;
         let world = self.world.lock();
@@ -226,7 +189,7 @@ impl MarkerStore for SimulatedMarkers {
     }
 }
 
-impl ProtocolLog for SimulatedLog {
+impl ProtocolLog for SimulatedPorts {
     fn record(&self, at: SystemTime, event: ProtocolEvent) {
         let mut world = self.world.lock();
         if world.allow_port_call(self.actor) {
