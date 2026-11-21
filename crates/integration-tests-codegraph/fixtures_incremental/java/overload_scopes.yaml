@@ -1,0 +1,97 @@
+name: "Java: a name that may not be the field keeps every overload"
+
+fixtures:
+  - path: p/Scopes.java
+    content: |
+      package p;
+
+      import java.io.StringReader;
+      import java.util.function.IntConsumer;
+
+      class Base {
+        int s = 0;
+      }
+
+      class Scopes {
+        String lam = "";
+        String i = "";
+        String fld = "";
+        String s = "";
+        String res = "";
+        String own = "";
+
+        void k(int a) {}
+        void k(String a) {}
+        void g(String a) {}
+        void g(Object a) {}
+
+        void lambdaParameter() { IntConsumer c = lam -> k(lam); }
+        void forInit() { for (int i = 0; i < 3; i++) k(i); }
+        void switchPattern(Object o) {
+          switch (o) {
+            case Integer s -> k(s);
+            default -> {}
+          }
+        }
+        void resource() throws Exception { try (StringReader res = new StringReader("")) { g(res); } }
+        void secondDeclarator() { int a = 1, fld = 2; k(fld); }
+        void innerClass() {
+          class Inner extends Base { void run() { k(s); } }
+        }
+        void anonymousClass() { new Base() { void run() { k(s); } }; }
+        void sameNameLocal() { int own = 1; k(own); }
+        void plainField() { k(own); }
+        void parameterShadowsField(int fld) { k(fld); }
+      }
+
+tests:
+  - name: a lambda parameter, loop variable, pattern, resource or later declarator is not the field
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn STARTS WITH 'p.Scopes.'
+        AND c.name IN ['lambdaParameter', 'forInit', 'switchPattern', 'secondDeclarator']
+        AND t.name = 'k'
+      RETURN c.name AS caller, t.signature AS signature
+    assert:
+      - { row_count: 8 }
+      - { row: { caller: "lambdaParameter", signature: "(int)" } }
+      - { row: { caller: "lambdaParameter", signature: "(String)" } }
+      - { row: { caller: "forInit", signature: "(int)" } }
+      - { row: { caller: "forInit", signature: "(String)" } }
+      - { row: { caller: "switchPattern", signature: "(int)" } }
+      - { row: { caller: "switchPattern", signature: "(String)" } }
+      - { row: { caller: "secondDeclarator", signature: "(int)" } }
+      - { row: { caller: "secondDeclarator", signature: "(String)" } }
+
+  - name: a resource keeps both overloads
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'resource' AND t.name = 'g'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 2 }
+      - { row: { signature: "(String)" } }
+      - { row: { signature: "(Object)" } }
+
+  - name: a field of an outer class is not read through an inner or anonymous class
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'run' AND t.name = 'k'
+      RETURN c.fqn AS caller, t.signature AS signature
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: "p.Scopes.innerClass.Inner.run", signature: "(int)" } }
+      - { row: { caller: "p.Scopes.innerClass.Inner.run", signature: "(String)" } }
+      - { row: { caller: "p.Scopes.anonymousClass.run", signature: "(int)" } }
+      - { row: { caller: "p.Scopes.anonymousClass.run", signature: "(String)" } }
+
+  - name: a local, a parameter and a field of the same class still resolve
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name IN ['sameNameLocal', 'plainField', 'parameterShadowsField'] AND t.name = 'k'
+      RETURN c.name AS caller, t.signature AS signature
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: "sameNameLocal", signature: "(int)" } }
+      - { row: { caller: "plainField", signature: "(String)" } }
+      - { row: { caller: "parameterShadowsField", signature: "(int)" } }

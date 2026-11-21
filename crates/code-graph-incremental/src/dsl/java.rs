@@ -92,6 +92,11 @@ impl<'a, S: Storage<Node = Node>> Reader<'a, S> {
                 .map(|c| self.erased_type(c))
                 .collect::<Vec<_>>()
                 .join("."),
+            "annotated_type" => node
+                .children()
+                .find(|c| c.named() && !self.is_annotation(*c))
+                .map(|c| self.erased_type(c))
+                .unwrap_or_default(),
             _ => self.text(node).to_string(),
         }
     }
@@ -166,7 +171,18 @@ impl<'a, S: Storage<Node = Node>> Reader<'a, S> {
             "string_literal" => "String".into(),
             "true" | "false" => "boolean".into(),
             "null_literal" => "null".into(),
-            "identifier" => format!("~{}", self.text(arg)),
+            "identifier" => {
+                let name = self.text(arg);
+                if self.in_anonymous_body(arg) {
+                    return unknown();
+                }
+                let sigil = if self.declared_in_members(arg, name) {
+                    '~'
+                } else {
+                    '^'
+                };
+                format!("{sigil}{name}")
+            }
             "this" => "this".into(),
             "object_creation_expression" => self
                 .field(arg, "type")
@@ -184,6 +200,57 @@ impl<'a, S: Storage<Node = Node>> Reader<'a, S> {
                 .unwrap_or_else(unknown),
             "unary_expression" => self.unary_token(arg).unwrap_or_else(unknown),
             _ => unknown(),
+        }
+    }
+
+    fn in_anonymous_body(&self, node: Cursor<'a, S>) -> bool {
+        node.ancestors()
+            .find(|up| self.kind(*up) == "class_body")
+            .and_then(|body| body.parent())
+            .is_some_and(|owner| {
+                matches!(
+                    self.kind(owner),
+                    "object_creation_expression" | "enum_constant"
+                )
+            })
+    }
+
+    fn declared_in_members(&self, node: Cursor<'a, S>, name: &str) -> bool {
+        node.ancestors()
+            .filter(|member| {
+                member.parent().is_some_and(|parent| {
+                    matches!(
+                        self.kind(parent),
+                        "class_body"
+                            | "interface_body"
+                            | "enum_body_declarations"
+                            | "annotation_type_body"
+                    )
+                })
+            })
+            .any(|member| {
+                std::iter::once(member)
+                    .chain(member.descendants())
+                    .any(|id| self.declares(id, name))
+            })
+    }
+
+    fn declares(&self, id: Cursor<'a, S>, name: &str) -> bool {
+        if self.kind(id) != "identifier" || self.text(id) != name {
+            return false;
+        }
+        let Some(parent) = id.parent() else {
+            return false;
+        };
+        match self.kind(parent) {
+            "inferred_parameters" | "type_pattern" | "record_pattern_component" => true,
+            "variable_declarator"
+            | "formal_parameter"
+            | "catch_formal_parameter"
+            | "resource"
+            | "enhanced_for_statement" => self.lang.field_name(id.field()) == "name",
+            "lambda_expression" => self.lang.field_name(id.field()) == "parameters",
+            _ => false,
         }
     }
 

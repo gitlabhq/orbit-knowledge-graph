@@ -1,5 +1,8 @@
 mod java;
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical as C;
@@ -15,11 +18,17 @@ type NodeRef = (u32, u32);
 
 type Site = (u32, u32, u32);
 
+type Pool = Rc<[NodeRef]>;
+type MemberIndex = FxHashMap<u32, Vec<NodeRef>>;
+
 pub fn narrow_calls(trees: &[Tree], edges: &[Edge], lang: &Lang) -> Option<Vec<Edge>> {
     let narrower = Narrower {
         trees,
         lang,
         tags: ReservedTags::new(lang),
+        pools: RefCell::default(),
+        members: RefCell::default(),
+        fields: RefCell::default(),
     };
     let mut sites: FxHashMap<Site, Vec<usize>> = FxHashMap::default();
     for (index, edge) in edges.iter().enumerate() {
@@ -87,6 +96,9 @@ struct Narrower<'a> {
     trees: &'a [Tree],
     lang: &'a Lang,
     tags: ReservedTags,
+    pools: RefCell<FxHashMap<(NodeRef, u32), Pool>>,
+    members: RefCell<FxHashMap<NodeRef, Rc<MemberIndex>>>,
+    fields: RefCell<FxHashMap<NodeRef, Rc<FxHashMap<u32, NodeRef>>>>,
 }
 
 impl<'a> Narrower<'a> {
@@ -126,38 +138,48 @@ impl<'a> Narrower<'a> {
         (!chosen.is_empty()).then_some(chosen)
     }
 
-    fn overloads(
-        &self,
-        method: Cursor<'a>,
-        extends: &FxHashMap<NodeRef, Vec<NodeRef>>,
-    ) -> Vec<NodeRef> {
+    fn overloads(&self, method: Cursor<'a>, extends: &FxHashMap<NodeRef, Vec<NodeRef>>) -> Pool {
+        let own = || Rc::from(vec![(method.fi(), method.index())]);
         let Some(name) = method.child_sym(C::DefName) else {
-            return vec![(method.fi(), method.index())];
+            return own();
         };
         let Some(owner) = method.enclosing_def(CLASS_LIKE) else {
-            return vec![(method.fi(), method.index())];
+            return own();
         };
+        let key = ((owner.fi(), owner.index()), name);
+        if let Some(pool) = self.pools.borrow().get(&key) {
+            return Rc::clone(pool);
+        }
+        let pool = self.build_pool(key.0, name, extends);
+        self.pools.borrow_mut().insert(key, Rc::clone(&pool));
+        pool
+    }
+
+    fn build_pool(
+        &self,
+        owner: NodeRef,
+        name: u32,
+        extends: &FxHashMap<NodeRef, Vec<NodeRef>>,
+    ) -> Pool {
         let mut pool: Vec<NodeRef> = Vec::new();
         let mut seen_signatures: FxHashSet<&str> = FxHashSet::default();
         let mut seen: FxHashSet<NodeRef> = FxHashSet::default();
-        let mut level = vec![(owner.fi(), owner.index())];
+        let mut level = vec![owner];
         while !level.is_empty() {
             let mut next = Vec::new();
             for class in level {
                 if !seen.insert(class) {
                     continue;
                 }
-                let class_cursor = self.cursor(class);
-                let declared = members_named(class_cursor)
-                    .filter(|&(member_name, _)| member_name == name)
-                    .map(|(_, def)| self.cursor((class.0, def)))
-                    .filter(|def| def.is_member_of(class_cursor))
-                    .filter_map(|def| Some((def, self.signature(def)?)));
+                let members = self.members_of(class);
                 let mut hidden_here = Vec::new();
-                for (def, signature) in declared {
+                for &def in members.get(&name).into_iter().flatten() {
+                    let Some(signature) = self.signature(self.cursor(def)) else {
+                        continue;
+                    };
                     if !seen_signatures.contains(signature) {
                         hidden_here.push(signature);
-                        pool.push((def.fi(), def.index()));
+                        pool.push(def);
                     }
                 }
                 seen_signatures.extend(hidden_here);
@@ -165,11 +187,46 @@ impl<'a> Narrower<'a> {
             }
             level = next;
         }
-        pool
+        pool.into()
+    }
+
+    fn members_of(&self, class: NodeRef) -> Rc<MemberIndex> {
+        if let Some(index) = self.members.borrow().get(&class) {
+            return Rc::clone(index);
+        }
+        let class_cursor = self.cursor(class);
+        let mut index: FxHashMap<u32, Vec<NodeRef>> = FxHashMap::default();
+        for (name, def) in members_named(class_cursor) {
+            if self.cursor((class.0, def)).is_member_of(class_cursor) {
+                index.entry(name).or_default().push((class.0, def));
+            }
+        }
+        let index = Rc::new(index);
+        self.members.borrow_mut().insert(class, Rc::clone(&index));
+        index
+    }
+
+    fn fields_of(&self, class: Cursor<'a>) -> Rc<FxHashMap<u32, NodeRef>> {
+        let key = (class.fi(), class.index());
+        if let Some(index) = self.fields.borrow().get(&key) {
+            return Rc::clone(index);
+        }
+        let mut index: FxHashMap<u32, NodeRef> = FxHashMap::default();
+        for field in class
+            .children()
+            .filter(|child| child.is(C::Def) && child.has(C::FieldDef))
+        {
+            if let Some(name) = field.child_sym(C::DefName) {
+                index.entry(name).or_insert((field.fi(), field.index()));
+            }
+        }
+        let index = Rc::new(index);
+        self.fields.borrow_mut().insert(key, Rc::clone(&index));
+        index
     }
 
     fn arguments(&self, call: Cursor<'a>) -> Option<Vec<ArgType>> {
-        let tokens = self.tag_text(call, self.tags.arg_types)?;
+        let tokens = self.tag_text(call, self.tags.java_arg_types)?;
         let tokens = tokens.strip_prefix('(')?.strip_suffix(')')?;
         if tokens.is_empty() {
             return Some(Vec::new());
@@ -204,46 +261,49 @@ impl<'a> Narrower<'a> {
                 .and_then(|class| class.child_sym(C::DefName))
                 .map_or(ArgType::Unknown, |sym| named(self.lang.syms.resolve(sym)));
         }
-        match token {
-            "?" => ArgType::Unknown,
-            _ => match token.strip_prefix('~') {
-                Some(variable) => self.variable_type(call, variable),
-                None => named(token),
-            },
+        match token.split_at_checked(1) {
+            Some(("~", name)) => self.local_type(call, name),
+            Some(("^", name)) => self.field_type(call, name),
+            _ if token == "?" => ArgType::Unknown,
+            _ => named(token),
         }
     }
 
-    fn variable_type(&self, call: Cursor<'a>, name: &str) -> ArgType {
+    fn declared(&self, node: Cursor<'a>) -> ArgType {
+        match self.tag_text(node, self.tags.java_decl_type) {
+            Some("var") | None => ArgType::Unknown,
+            Some(ty) => ArgType::Named(ty.to_string()),
+        }
+    }
+
+    fn local_type(&self, call: Cursor<'a>, name: &str) -> ArgType {
         let sym = self.lang.syms.lookup(name);
         if sym == 0 {
             return ArgType::Unknown;
         }
-        let declared = |node: Cursor<'a>| match self.tag_text(node, self.tags.decl_type) {
-            Some("var") | None => ArgType::Unknown,
-            Some(ty) => ArgType::Named(ty.to_string()),
-        };
         let mut node = call;
         while let Some(parent) = node.parent() {
-            let earlier: Vec<Cursor<'a>> = parent
+            let binding = parent
                 .children()
                 .take_while(|sibling| sibling.index() != node.index())
-                .collect();
-            if let Some(binding) = earlier
-                .iter()
-                .rev()
-                .find(|sibling| sibling.is(C::Binding) && sibling.sym() == sym)
-            {
-                return declared(*binding);
-            }
-            let field = parent
-                .children()
-                .filter(|child| child.is(C::Def) && child.has(C::FieldDef))
-                .find(|child| child.child_sym(C::DefName) == Some(sym));
-            if let Some(field) = field {
-                return declared(field);
+                .filter(|sibling| sibling.is(C::Binding) && sibling.sym() == sym)
+                .last();
+            if let Some(binding) = binding {
+                return self.declared(binding);
             }
             node = parent;
         }
         ArgType::Unknown
+    }
+
+    fn field_type(&self, call: Cursor<'a>, name: &str) -> ArgType {
+        let sym = self.lang.syms.lookup(name);
+        let Some(class) = call.enclosing_def(CLASS_LIKE) else {
+            return ArgType::Unknown;
+        };
+        match self.fields_of(class).get(&sym) {
+            Some(&field) if sym != 0 => self.declared(self.cursor(field)),
+            _ => ArgType::Unknown,
+        }
     }
 }

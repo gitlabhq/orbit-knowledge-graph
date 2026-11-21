@@ -16,8 +16,8 @@ pub struct ReservedTags {
     pub visible_from: u32,
     pub implicit_self: u32,
     pub signature: u32,
-    pub decl_type: u32,
-    pub arg_types: u32,
+    pub java_decl_type: u32,
+    pub java_arg_types: u32,
 }
 
 impl ReservedTags {
@@ -38,8 +38,8 @@ impl ReservedTags {
             visible_from: k("visible_from"),
             implicit_self: k("implicit_self"),
             signature: k("signature"),
-            decl_type: k("decl_type"),
-            arg_types: k("arg_types"),
+            java_decl_type: k("java_decl_type"),
+            java_arg_types: k("java_arg_types"),
         }
     }
 }
