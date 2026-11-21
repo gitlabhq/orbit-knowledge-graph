@@ -1,5 +1,5 @@
 use crate::intern::Lang;
-use crate::tree::{Cursor, Node, Storage, Tree};
+use crate::tree::{Cursor, NEARBY_ANCESTORS, Node, Storage, Tree};
 
 use super::types::Tf;
 
@@ -197,15 +197,18 @@ impl<'a, S: Storage<Node = Node>> Reader<'a, S> {
     }
 
     fn in_anonymous_body(&self, node: Cursor<'a, S>) -> bool {
-        node.ancestors()
+        let Some(body) = node
+            .nearby_ancestors()
             .find(|up| self.kind(*up) == "class_body")
-            .and_then(|body| body.parent())
-            .is_some_and(|owner| {
-                matches!(
-                    self.kind(owner),
-                    "object_creation_expression" | "enum_constant"
-                )
-            })
+        else {
+            return node.ancestors().nth(NEARBY_ANCESTORS).is_some();
+        };
+        body.parent().is_some_and(|owner| {
+            matches!(
+                self.kind(owner),
+                "object_creation_expression" | "enum_constant"
+            )
+        })
     }
 
     fn locals(&self, member: Cursor<'a, S>) -> Option<String> {

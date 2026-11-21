@@ -8,6 +8,8 @@ pub enum Step<R> {
     Out(R),
 }
 
+pub const NEARBY_ANCESTORS: usize = 256;
+
 pub struct Cursor<'a, S: Storage = Mutable> {
     trees: &'a [Tree<S>],
     fi: u32,
@@ -72,6 +74,9 @@ impl<'a, S: Storage> Cursor<'a, S> {
     }
     pub fn ancestors(self) -> impl Iterator<Item = Self> + 'a {
         std::iter::successors(self.parent(), |node| node.parent())
+    }
+    pub fn nearby_ancestors(self) -> impl Iterator<Item = Self> + 'a {
+        self.ancestors().take(NEARBY_ANCESTORS)
     }
     pub fn walk(self) -> Walk<'a, S> {
         Walk {

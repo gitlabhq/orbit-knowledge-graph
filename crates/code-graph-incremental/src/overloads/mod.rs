@@ -268,8 +268,8 @@ impl<'a> Narrower<'a> {
             });
         }
         if token == "this" {
-            let class = call.enclosing_def(CLASS_LIKE);
-            return class
+            return self
+                .class_around(call)
                 .and_then(|class| class.child_sym(C::DefName))
                 .map_or(ArgType::Unknown, |sym| named(self.lang.syms.resolve(sym)));
         }
@@ -281,7 +281,7 @@ impl<'a> Narrower<'a> {
     }
 
     fn variable_type(&self, call: Cursor<'a>, name: &str) -> ArgType {
-        let Some(member) = call.ancestors().find(|node| node.is(C::Def)) else {
+        let Some(member) = call.nearby_ancestors().find(|node| node.is(C::Def)) else {
             return ArgType::Unknown;
         };
         let Some(locals) = self.locals_of(member) else {
@@ -339,7 +339,7 @@ impl<'a> Narrower<'a> {
             return ArgType::Unknown;
         }
         let mut node = call;
-        while let Some(parent) = node.parent() {
+        for parent in call.nearby_ancestors() {
             let scope = self.scope_of(parent);
             let before = scope.positions.get(&node.index()).copied().unwrap_or(0);
             let binding = scope.bindings.get(&sym).and_then(|bindings| {
@@ -357,9 +357,18 @@ impl<'a> Narrower<'a> {
         ArgType::Unknown
     }
 
+    fn class_around(&self, call: Cursor<'a>) -> Option<Cursor<'a>> {
+        call.nearby_ancestors().find(|node| {
+            node.is(C::Def)
+                && node
+                    .children()
+                    .any(|child| CLASS_LIKE.iter().any(|&kind| child.is(kind)))
+        })
+    }
+
     fn field_type(&self, call: Cursor<'a>, name: &str) -> ArgType {
         let sym = self.lang.syms.lookup(name);
-        let Some(class) = call.enclosing_def(CLASS_LIKE) else {
+        let Some(class) = self.class_around(call) else {
             return ArgType::Unknown;
         };
         match self.fields_of(class).get(&sym) {
