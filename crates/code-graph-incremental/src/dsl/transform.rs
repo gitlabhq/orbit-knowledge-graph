@@ -130,7 +130,10 @@ impl Tf {
             "sibling_index" => Tf::SiblingIndex,
             "tree_node_id" => Tf::TreeNodeId,
             "kind" => Tf::KindName,
-            _ => return Err(LoadError(format!("unknown transform: {name}"))),
+            _ => {
+                return super::java::JavaTf::from_name(name)
+                    .ok_or_else(|| LoadError(format!("unknown transform: {name}")));
+            }
         })
     }
 
@@ -307,6 +310,7 @@ impl Tf {
                 }
             }
             Tf::Tag(key) => t.get_tag(id, *key).unwrap_or(0),
+            Tf::Java(java) => java.apply(t, lang, id),
             Tf::LitSym(s) => *s,
             Tf::HasEdge(kind, dir) => {
                 let raw = id;

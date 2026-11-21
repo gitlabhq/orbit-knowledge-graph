@@ -42,6 +42,29 @@ config:
       - __source_root
 
 stages:
+  - name: overload-facts
+    rules:
+      - match: '(method_declaration)'
+        tag: { signature: '@$ROOT|java_signature' }
+      - match: '(constructor_declaration)'
+        tag: { signature: '@$ROOT|java_signature' }
+      - match: '(method_invocation arguments: $A)'
+        tag: { arg_types: '@$A|java_arg_types' }
+      - match: '(formal_parameter)'
+        tag: { decl_type: '@$ROOT|java_declared_type' }
+      - match: '(spread_parameter)'
+        tag: { decl_type: '@$ROOT|java_declared_type' }
+      - match: '(local_variable_declaration)'
+        tag: { decl_type: '@$ROOT|java_declared_type' }
+      - match: '(field_declaration)'
+        tag: { decl_type: '@$ROOT|java_declared_type' }
+      - match: '(constant_declaration)'
+        tag: { decl_type: '@$ROOT|java_declared_type' }
+      - match: '(enhanced_for_statement)'
+        tag: { decl_type: '@$ROOT|java_declared_type' }
+      - match: '(instanceof_expression)'
+        tag: { decl_type: '@$ROOT|java_declared_type' }
+
   - name: imports
     rules:
       - match: '(import_declaration (static) $S:scoped_identifier (asterisk))'
@@ -60,6 +83,7 @@ stages:
     rules:
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: (cast_expression type: $T:type_identifier value: $V)))'
         replace: '(local_variable_declaration type: $T declarator: (variable_declarator name: $N value: $V))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(program $P:java_pkg $$$C)'
         replace: '(__source_file @$ROOT $P $$$C)'
       - match: '(program $$$C)'
@@ -99,6 +123,8 @@ stages:
 
       - match: '(instanceof_expression left: $L right: $T:type_identifier name: $N:identifier)'
         replace: '(instanceof_expression $L (__call (__callee @$T $T)) (__binding @$N (__ssa_typed @$T)))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
+        tag_on: __binding
       - match: '(instanceof_expression left: $L right: $T:type_identifier)'
         replace: '(instanceof_expression $L (__call (__callee @$T $T)))'
       - match: '(throw_statement $$$V)'
@@ -128,12 +154,16 @@ stages:
 
       - match: '(formal_parameter type: $T:__member name: $N:identifier)'
         replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(formal_parameter type: $T:type_identifier name: $N:identifier)'
         replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(formal_parameter name: $N:identifier)'
         replace: '(__binding @$N)'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(spread_parameter (variable_declarator name: $N:identifier))'
         replace: '(__binding @$N)'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(catch_formal_parameter (catch_type $T:__member) name: $N:identifier)'
         replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
       - match: '(catch_formal_parameter (catch_type $T:type_identifier) name: $N:identifier)'
@@ -168,19 +198,25 @@ stages:
 
       - match: '(method_invocation object: (this) name: $N:identifier arguments: $A)'
         replace: '(__call (__callee (__ivar @$N)) $A)'
+        tag: { arg_types: '@$ROOT|tag("arg_types")' }
       - match: '(method_invocation object: (super) name: $N:identifier arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object (__ivar "super")))) $A)'
+        tag: { arg_types: '@$ROOT|tag("arg_types")' }
       - match: '(method_invocation object: $O:__ivar name: $N:identifier arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object $O))) $A)'
+        tag: { arg_types: '@$ROOT|tag("arg_types")' }
       - match: '(method_invocation object: $O:__member name: $N:identifier arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object $O))) $A)'
+        tag: { arg_types: '@$ROOT|tag("arg_types")' }
       - match: '(method_invocation object: $O:__call name: $N:identifier arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object $O))) $A)'
+        tag: { arg_types: '@$ROOT|tag("arg_types")' }
       - match: '(method_invocation object: $O name: $N:identifier arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object @$O $O))) $A)'
+        tag: { arg_types: '@$ROOT|tag("arg_types")' }
       - match: '(method_invocation name: $N:identifier arguments: $A)'
         replace: '(__call (__callee @$N $N) $A)'
-        tag: { implicit_self: "true" }
+        tag: { implicit_self: "true", arg_types: '@$ROOT|tag("arg_types")' }
       - match: '(object_creation_expression type: $T:__member arguments: $A $$$B:class_body)'
         replace: '(__call (__callee $T) $A $$$B)'
       - match: '(object_creation_expression type: $T:type_identifier arguments: $A $$$B:class_body)'
@@ -190,28 +226,41 @@ stages:
     rules:
       - match: '(local_variable_declaration type: $T:__member declarator: (variable_declarator name: $N:identifier value:? $V))'
         replace: '(java_local $V (__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__type) (__callee $T)))))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
+        tag_on: __binding
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__call))'
         replace: '(__binding @$N (__declaration) (__rhs $V))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__member))'
         replace: '(__binding @$N (__declaration) (__rhs $V))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__ssa_branch))'
         replace: '(__binding @$N (__declaration) (__rhs $V))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V))'
         replace: '(__binding @$N (__declaration) (__rhs @$V $V))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value: $V:__call))'
         replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value: $V:__ssa_branch))'
         replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value: $V))'
         replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs @$V $V))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier))'
         replace: '(__binding @$N (__declaration) (__ssa_typed @$T))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(local_variable_declaration declarator: (variable_declarator name: $N:identifier value: $V:__call))'
         replace: '(__binding @$N (__declaration) (__rhs $V))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(local_variable_declaration declarator: (variable_declarator name: $N:identifier value: $V))'
         replace: '(__binding @$N (__declaration) (__rhs @$V $V))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(local_variable_declaration declarator: (variable_declarator name: $N:identifier))'
         replace: '(__binding @$N (__declaration))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
 
       - match: '(assignment_expression left: $N:__ivar right: $R:__call)'
         replace: '(__binding $N (__rhs $R))'
@@ -234,8 +283,12 @@ stages:
         replace: '(__ssa_branch $R (__ssa_arm $B) $$$ALTS->__ssa_arm)'
       - match: '(enhanced_for_statement type: $T:type_identifier name: $N:identifier value: $V body: $B)'
         replace: '(__ssa_loop $V (__binding @$N (__ssa_typed @$T)) $B)'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
+        tag_on: __binding
       - match: '(enhanced_for_statement name: $N:identifier value: $V body: $B)'
         replace: '(__ssa_loop $V (__binding @$N) $B)'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
+        tag_on: __binding
       - match: '(for_statement body: $B)'
         replace: '(__ssa_loop $B)'
       - match: '(while_statement body: $B)'
@@ -245,23 +298,31 @@ stages:
 
       - match: '(field_declaration type: $T:__member declarator: (variable_declarator name: $N:identifier value:? $V))'
         replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee $T)))) $V)'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(field_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value:? $V))'
         replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))) $V)'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(field_declaration declarator: (variable_declarator name: $N:identifier value:? $V))'
         replace: '(__def (__defname @$N) (__field_def) $V)'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(constant_declaration declarator: (variable_declarator name: $N:identifier))'
         replace: '(__def (__defname @$N) (__constant))'
+        tag: { decl_type: '@$ROOT|tag("decl_type")' }
       - match: '(enum_constant name: $N:identifier arguments:? $A body:? $B)'
         replace: '(__def (__defname @$N) (__enum_variant) $A $B)'
 
       - match: '(method_declaration $M?:modifiers type: $RT:__member name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type $RT) $M $P $B)'
+        tag: { signature: '@$ROOT|tag("signature")' }
       - match: '(method_declaration $M?:modifiers type: $RT:type_identifier name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $M $P (__call (__callee @$RT $RT)) $B)'
+        tag: { signature: '@$ROOT|tag("signature")' }
       - match: '(method_declaration $M?:modifiers name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) $M $P $B)'
+        tag: { signature: '@$ROOT|tag("signature")' }
       - match: '(constructor_declaration $M?:modifiers name: $N:identifier parameters: $P body: $B)'
         replace: '(__def (__defname @$N) (__method) $M $P $B)'
+        tag: { signature: '@$ROOT|tag("signature")' }
       - match: '(compact_constructor_declaration $M?:modifiers name: $N:identifier body: $B)'
         replace: '(__def (__defname @$N) (__method) $M $B)'
 

@@ -41,7 +41,7 @@ entities:
       - { name: end_byte, type: Int64, position: end_byte, span: [tag:definition_span, __defname] }
       - { name: start_char, type: Int64, position: start_col, span: [tag:definition_span, __defname] }
       - { name: end_char, type: Int64, position: end_col, span: [tag:definition_span, __defname] }
-      - { name: signature, type: Utf8, from: default("") }
+      - { name: signature, type: Utf8, from: tag("signature")|default("") }
       - { name: front_matter_name, type: Utf8, from: child_sym("__front_matter_name") }
       - { name: front_matter_description, type: Utf8, from: child_sym("__front_matter_description") }
       - { name: front_matter_license, type: Utf8, from: child_sym("__front_matter_license") }

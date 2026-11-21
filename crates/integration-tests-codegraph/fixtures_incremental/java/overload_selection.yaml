@@ -1,0 +1,184 @@
+name: "Java: a call binds to the overload its argument types select"
+
+fixtures:
+  - path: p/Calc.java
+    content: |
+      package p;
+
+      class Calc {
+        int base = 1;
+        static int sf = 2;
+
+        static String plus(String a, String b) { return a; }
+        static double plus(double a, double b) { return a; }
+        static int plus(int a, int b) { return a; }
+        static long plus(Integer a, Integer b) { return 0; }
+        static int plus(int... xs) { return 0; }
+        static int one() { return 1; }
+
+        void literals() { plus(1, 2); }
+        void localInts(int i) { plus(i, i); }
+        void localDoubles() { double d = 2.0; plus(d, d); }
+        void widened() { int i = 1; double d = 2.0; plus(i, d); }
+        void strings() { String s = "x"; plus(s, s); }
+        void parameters(String param, double pd) { plus(param, param); plus(pd, 1); }
+        void fields() { plus(base, sf); }
+        void boxed() { Integer b = 3; plus(b, b); }
+        void variadic() { plus(1, 2, 3); }
+        void suffixed() { plus(1L, 2); }
+        void characters() { plus('c', 'd'); }
+        void unknownArguments() { plus(one(), one()); }
+        void unknownAndKnown() { plus(one(), "s"); }
+      }
+
+  - path: p/Hierarchy.java
+    content: |
+      package p;
+
+      class Base {
+        int g(int a) { return a; }
+        int g(String a) { return 0; }
+        int h(int a) { return a; }
+      }
+
+      class Sub extends Base {
+        int g(long a) { return 0; }
+        int h(int a) { return 2; }
+
+        void bare() { g(1); }
+        void viaThis() { this.g("s"); }
+        void viaParameter(Sub other) { other.g(2L); }
+        void viaBase(Base b) { b.g("s"); }
+        void overridden() { h(1); }
+        void viaSuper() { super.g(1); }
+      }
+
+  - path: p/Receivers.java
+    content: |
+      package p;
+
+      class Inst {
+        int f(int a) { return a; }
+        int f(String a) { return 0; }
+
+        void bare() { f(1); }
+        void viaThis() { this.f("s"); }
+        void viaParameter(Inst obj) { obj.f(1); }
+        void viaLocal() { Inst loc = new Inst(); loc.f("z"); }
+      }
+
+      class Rev {
+        static String plus(String a, String b) { return a; }
+        static double plus(double a, double b) { return a; }
+        static int plus(int a, int b) { return a; }
+        static void go() { plus(8, 5); plus(4.3, 6.28); plus("a", "b"); }
+      }
+
+      class User {
+        void qualified() { Rev.plus(8, 5); }
+      }
+
+tests:
+  - name: argument kinds pick the overload of plus
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE t.name = 'plus' AND t.fqn = 'p.Calc.plus'
+      RETURN c.name AS caller, t.signature AS signature
+      ORDER BY c.name, t.start_line
+    assert:
+      - { row: { caller: "literals", signature: "(int, int)" } }
+      - { row: { caller: "localInts", signature: "(int, int)" } }
+      - { row: { caller: "localDoubles", signature: "(double, double)" } }
+      - { row: { caller: "widened", signature: "(double, double)" } }
+      - { row: { caller: "strings", signature: "(String, String)" } }
+      - { row: { caller: "fields", signature: "(int, int)" } }
+      - { row: { caller: "boxed", signature: "(Integer, Integer)" } }
+      - { row: { caller: "variadic", signature: "(int...)" } }
+      - { row: { caller: "suffixed", signature: "(double, double)" } }
+      - { row: { caller: "characters", signature: "(int, int)" } }
+      - { row: { caller: "parameters", signature: "(String, String)" } }
+      - { row: { caller: "parameters", signature: "(double, double)" } }
+
+  - name: exactly one overload per call with known argument types
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE t.fqn = 'p.Calc.plus' AND c.name <> 'unknownArguments' AND c.name <> 'unknownAndKnown'
+      RETURN c.name AS caller, t.signature AS signature
+    assert:
+      - { row_count: 12 }
+
+  - name: an argument of unknown type keeps every overload of that arity
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'unknownArguments' AND t.fqn = 'p.Calc.plus'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 5 }
+      - { row: { signature: "(String, String)" } }
+      - { row: { signature: "(double, double)" } }
+      - { row: { signature: "(int, int)" } }
+      - { row: { signature: "(Integer, Integer)" } }
+      - { row: { signature: "(int...)" } }
+
+  - name: a known argument still rules overloads out next to an unknown one
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'unknownAndKnown' AND t.fqn = 'p.Calc.plus'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(String, String)" } }
+
+  - name: inherited overloads are candidates next to the subclass overload
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn STARTS WITH 'p.Sub.' AND t.name = 'g'
+      RETURN c.name AS caller, t.fqn AS callee, t.signature AS signature
+    assert:
+      - { row_count: 5 }
+      - { row: { caller: "bare", callee: "p.Base.g", signature: "(int)" } }
+      - { row: { caller: "viaThis", callee: "p.Base.g", signature: "(String)" } }
+      - { row: { caller: "viaParameter", callee: "p.Sub.g", signature: "(long)" } }
+      - { row: { caller: "viaBase", callee: "p.Base.g", signature: "(String)" } }
+      - { row: { caller: "viaSuper", callee: "p.Base.g", signature: "(int)" } }
+
+  - name: an overriding method hides the inherited one
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'overridden' AND t.name = 'h'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "p.Sub.h" } }
+
+  - name: bare, this and receiver calls select instance overloads
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn STARTS WITH 'p.Inst.' AND t.name = 'f'
+      RETURN c.name AS caller, t.signature AS signature
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: "bare", signature: "(int)" } }
+      - { row: { caller: "viaThis", signature: "(String)" } }
+      - { row: { caller: "viaParameter", signature: "(int)" } }
+      - { row: { caller: "viaLocal", signature: "(String)" } }
+
+  - name: declaration order does not decide the target
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'p.Rev.go' AND t.name = 'plus'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 3 }
+      - { row: { signature: "(int, int)" } }
+      - { row: { signature: "(double, double)" } }
+      - { row: { signature: "(String, String)" } }
+
+  - name: a qualified call to a type reaches one overload
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'qualified' AND t.name = 'plus'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(int, int)" } }

@@ -1,3 +1,4 @@
+pub(crate) mod java;
 pub(crate) mod matching;
 pub(crate) mod parser;
 pub(crate) mod rewrite;

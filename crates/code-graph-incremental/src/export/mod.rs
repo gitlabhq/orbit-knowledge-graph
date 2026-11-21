@@ -290,6 +290,8 @@ pub fn export_trees(
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
     envelope.check(plan)?;
     run.check()?;
+    let narrowed = crate::overloads::narrow_calls(trees, edges, lang);
+    let edges = narrowed.as_deref().unwrap_or(edges);
     let forest = Forest::new(trees, lang);
     let needed: Option<FxHashSet<u32>> = only.map(|only| {
         let endpoints = edges

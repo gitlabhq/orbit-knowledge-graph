@@ -1,0 +1,67 @@
+name: "Java: overloaded plusMethod calls attribute to the overload the arguments select"
+
+fixtures:
+  - path: src/main/java/cloud/gronk/example/calc/App.java
+    content: |
+      package cloud.gronk.example.calc;
+
+      class App {
+
+        static int plusMethod(int x, int y) {
+          return x + y;
+        }
+
+        static double plusMethod(double x, double y) {
+          return x + y;
+        }
+
+        static String plusMethod(String x, String y) {
+          return x + y;
+        }
+
+        public static void main(String[] args) {
+          int myNum1 = plusMethod(8, 5);
+          double myNum2 = plusMethod(4.3, 6.28);
+          String myStr1 = plusMethod("Hello ", "World!");
+          System.out.println("int: " + myNum1);
+        }
+      }
+
+  - path: src/test/java/cloud/gronk/example/calc/AppTest.java
+    content: |
+      package cloud.gronk.example.calc;
+
+      import static org.junit.jupiter.api.Assertions.assertEquals;
+
+      import org.junit.jupiter.api.DisplayName;
+      import org.junit.jupiter.api.Test;
+
+      public class AppTest {
+          @DisplayName("Test bla bla")
+          @Test
+          void testGet() {
+              assertEquals(13, App.plusMethod(8, 5));
+          }
+      }
+
+tests:
+  - name: main calls each overload once
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'main' AND t.name = 'plusMethod'
+      RETURN t.signature AS signature, t.start_line AS line
+      ORDER BY t.start_line
+    assert:
+      - { row_count: 3 }
+      - { row: { signature: "(int, int)", line: 5 } }
+      - { row: { signature: "(double, double)", line: 9 } }
+      - { row: { signature: "(String, String)", line: 13 } }
+
+  - name: a test that calls the int overload through the class name reaches only that overload
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'testGet' AND t.name = 'plusMethod'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(int, int)" } }

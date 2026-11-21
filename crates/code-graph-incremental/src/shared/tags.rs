@@ -15,6 +15,9 @@ pub struct ReservedTags {
     pub alias_scope: u32,
     pub visible_from: u32,
     pub implicit_self: u32,
+    pub signature: u32,
+    pub decl_type: u32,
+    pub arg_types: u32,
 }
 
 impl ReservedTags {
@@ -34,6 +37,9 @@ impl ReservedTags {
             alias_scope: k("alias_scope"),
             visible_from: k("visible_from"),
             implicit_self: k("implicit_self"),
+            signature: k("signature"),
+            decl_type: k("decl_type"),
+            arg_types: k("arg_types"),
         }
     }
 }

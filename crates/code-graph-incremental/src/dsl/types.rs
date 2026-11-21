@@ -49,6 +49,7 @@ pub enum Tf {
     RegexFirst(regex::Regex, Box<str>),
     RegexLoop(regex::Regex, Box<str>),
     RegexMatch(regex::Regex),
+    Java(super::java::JavaTf),
 }
 
 impl Tf {
@@ -74,6 +75,7 @@ impl Tf {
                 | Tf::TreeNodeId
                 | Tf::KindName
                 | Tf::HasEdge(_, _)
+                | Tf::Java(_)
         )
     }
 }

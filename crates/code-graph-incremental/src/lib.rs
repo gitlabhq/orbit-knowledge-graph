@@ -7,6 +7,7 @@ pub mod file_tree;
 pub mod intern;
 pub mod linker;
 pub mod markdown;
+pub mod overloads;
 pub mod pipeline;
 pub mod resolver;
 pub mod shared;
