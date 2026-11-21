@@ -16,6 +16,13 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 126
+  scope: "*"
+  note: >-
+    BLOCKS is a new WorkItem edge from issue links with link_type 1. RELATED_TO
+    keeps only link_type 0, so a blocking link no longer reads as relates to. Edge files
+    drop the properties blocks that the loader never read. The rebuild removes the
+    blocking links already stored as RELATED_TO.
 - version: 125
   scope: "*"
   note: >-

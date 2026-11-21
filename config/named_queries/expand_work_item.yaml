@@ -16,10 +16,10 @@ query:
         node_ids: { $param: node_ids }
     neighbors:
       direction: both
-      rel_types: [AUTHORED, ASSIGNED, HAS_LABEL, IN_MILESTONE, IN_PROJECT, IN_GROUP, CLOSES, RELATED_TO, CONTAINS]
+      rel_types: [AUTHORED, ASSIGNED, HAS_LABEL, IN_MILESTONE, IN_PROJECT, IN_GROUP, CLOSES, RELATED_TO, BLOCKS, CONTAINS]
     limit: { $param: limit }
   gql: |
-    MATCH (center:WorkItem)-[:AUTHORED|ASSIGNED|HAS_LABEL|IN_MILESTONE|IN_PROJECT|IN_GROUP|CLOSES|RELATED_TO|CONTAINS]-(neighbor)
+    MATCH (center:WorkItem)-[:AUTHORED|ASSIGNED|HAS_LABEL|IN_MILESTONE|IN_PROJECT|IN_GROUP|CLOSES|RELATED_TO|BLOCKS|CONTAINS]-(neighbor)
     WHERE center.id IN {{ param("node_ids") }}
     RETURN center, neighbor
     LIMIT {{ param("limit") }}

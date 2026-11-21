@@ -1,0 +1,25 @@
+description: A work item blocks another work item
+
+variants:
+  - from_node: { type: WorkItem, id: id }
+    to_node: { type: WorkItem, id: id }
+    scope: prune_to_source
+    description: "Work item blocks the target work item. The target is blocked by the source."
+
+indexer:
+  reindex: [siphon_issue_links]
+pipelines:
+  - name: BLOCKS_siphon_issue_links_WorkItem
+    extract:
+      type: clickhouse
+      tables: [siphon_issue_links]
+      fields: [source_id, target_id]
+      order_by: [traversal_path, source_id, id]
+      filter: "link_type = 1"
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: source_id, kind: WorkItem }
+          to: { field: target_id, kind: WorkItem }
+          label: BLOCKS
