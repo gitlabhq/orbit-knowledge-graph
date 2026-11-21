@@ -176,6 +176,7 @@ impl<'a, S: Storage<Node = Node>> Reader<'a, S> {
             "null_literal" => "null".into(),
             "identifier" if self.in_anonymous_body(arg) => unknown(),
             "identifier" => format!("~{}", self.text(arg)),
+            "this" if self.in_anonymous_body(arg) => unknown(),
             "this" => "this".into(),
             "object_creation_expression" => self
                 .field(arg, "type")

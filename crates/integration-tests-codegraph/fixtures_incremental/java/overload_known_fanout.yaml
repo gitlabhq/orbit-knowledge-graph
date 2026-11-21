@@ -1,0 +1,114 @@
+name: "Java: a known argument that fits more than 32 overloads keeps the original edges"
+
+fixtures:
+  - path: p/Known.java
+    content: |
+      package p;
+
+      class Foo {}
+      class B0 {}
+      class B1 {}
+      class B2 {}
+      class B3 {}
+      class B4 {}
+      class B5 {}
+      class B6 {}
+      class B7 {}
+      class B8 {}
+      class B9 {}
+      class B10 {}
+      class B11 {}
+      class B12 {}
+      class B13 {}
+      class B14 {}
+      class B15 {}
+      class B16 {}
+      class B17 {}
+      class B18 {}
+      class B19 {}
+      class B20 {}
+      class B21 {}
+      class B22 {}
+      class B23 {}
+      class B24 {}
+      class B25 {}
+      class B26 {}
+      class B27 {}
+      class B28 {}
+      class B29 {}
+      class B30 {}
+      class B31 {}
+      class B32 {}
+      class B33 {}
+      class B34 {}
+      class B35 {}
+      class B36 {}
+      class B37 {}
+      class B38 {}
+      class B39 {}
+
+      class Known {
+        void f(B0 x) {}
+        void f(B1 x) {}
+        void f(B2 x) {}
+        void f(B3 x) {}
+        void f(B4 x) {}
+        void f(B5 x) {}
+        void f(B6 x) {}
+        void f(B7 x) {}
+        void f(B8 x) {}
+        void f(B9 x) {}
+        void f(B10 x) {}
+        void f(B11 x) {}
+        void f(B12 x) {}
+        void f(B13 x) {}
+        void f(B14 x) {}
+        void f(B15 x) {}
+        void f(B16 x) {}
+        void f(B17 x) {}
+        void f(B18 x) {}
+        void f(B19 x) {}
+        void f(B20 x) {}
+        void f(B21 x) {}
+        void f(B22 x) {}
+        void f(B23 x) {}
+        void f(B24 x) {}
+        void f(B25 x) {}
+        void f(B26 x) {}
+        void f(B27 x) {}
+        void f(B28 x) {}
+        void f(B29 x) {}
+        void f(B30 x) {}
+        void f(B31 x) {}
+        void f(B32 x) {}
+        void f(B33 x) {}
+        void f(B34 x) {}
+        void f(B35 x) {}
+        void f(B36 x) {}
+        void f(B37 x) {}
+        void f(B38 x) {}
+        void f(B39 x) {}
+
+        void many(Foo x) { f(x); }
+        void prim(int x) { g(x); }
+        void g(int x) {}
+        void g(String x) {}
+      }
+
+tests:
+  - name: an unrelated class type fits every overload, so the call keeps its original edges
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'many' AND t.name = 'f'
+      RETURN count(t) AS n
+    assert:
+      - { row: { n: 1 } }
+
+  - name: a primitive argument still narrows to one overload
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'prim' AND t.name = 'g'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(int)" } }

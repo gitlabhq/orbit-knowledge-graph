@@ -304,6 +304,9 @@ pub(super) fn select_parsed(candidates: &[Vec<Param>], args: &[ArgType]) -> Vec<
         if found.is_empty() {
             continue;
         }
+        if found.len() > super::MAX_FAN_OUT {
+            return found;
+        }
         return found
             .iter()
             .copied()

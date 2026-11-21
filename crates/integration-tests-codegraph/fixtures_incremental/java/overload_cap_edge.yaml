@@ -1,0 +1,182 @@
+name: "Java: the overload cap counts the viable overloads of one pool"
+
+fixtures:
+  - path: edge32/Edge32.java
+    content: |
+      package edge32;
+
+      final class Pad0 {}
+      final class Pad1 {}
+      final class Pad2 {}
+      final class Pad3 {}
+      final class Pad4 {}
+      final class Pad5 {}
+      final class Pad6 {}
+      final class Pad7 {}
+      final class Pad8 {}
+      final class Pad9 {}
+      final class Pad10 {}
+      final class Pad11 {}
+      final class Pad12 {}
+      final class Pad13 {}
+      final class Pad14 {}
+      final class Pad15 {}
+      final class Pad16 {}
+      final class Pad17 {}
+      final class Pad18 {}
+      final class Pad19 {}
+      final class Pad20 {}
+      final class Pad21 {}
+      final class Pad22 {}
+      final class Pad23 {}
+      final class Pad24 {}
+      final class Pad25 {}
+      final class Pad26 {}
+      final class Pad27 {}
+      final class Pad28 {}
+      final class Pad29 {}
+      final class Pad30 {}
+      final class Pad31 {}
+
+      class Edge32 {
+        void f(Pad0 x) {}
+        void f(Pad1 x) {}
+        void f(Pad2 x) {}
+        void f(Pad3 x) {}
+        void f(Pad4 x) {}
+        void f(Pad5 x) {}
+        void f(Pad6 x) {}
+        void f(Pad7 x) {}
+        void f(Pad8 x) {}
+        void f(Pad9 x) {}
+        void f(Pad10 x) {}
+        void f(Pad11 x) {}
+        void f(Pad12 x) {}
+        void f(Pad13 x) {}
+        void f(Pad14 x) {}
+        void f(Pad15 x) {}
+        void f(Pad16 x) {}
+        void f(Pad17 x) {}
+        void f(Pad18 x) {}
+        void f(Pad19 x) {}
+        void f(Pad20 x) {}
+        void f(Pad21 x) {}
+        void f(Pad22 x) {}
+        void f(Pad23 x) {}
+        void f(Pad24 x) {}
+        void f(Pad25 x) {}
+        void f(Pad26 x) {}
+        void f(Pad27 x) {}
+        void f(Pad28 x) {}
+        void f(Pad29 x) {}
+        void f(Pad30 x) {}
+        void f(Pad31 x) {}
+
+        void call32() { f(null); }
+        void make32() { f(new Pad5()); }
+      }
+
+  - path: edge33/Edge33.java
+    content: |
+      package edge33;
+
+      final class Pad0 {}
+      final class Pad1 {}
+      final class Pad2 {}
+      final class Pad3 {}
+      final class Pad4 {}
+      final class Pad5 {}
+      final class Pad6 {}
+      final class Pad7 {}
+      final class Pad8 {}
+      final class Pad9 {}
+      final class Pad10 {}
+      final class Pad11 {}
+      final class Pad12 {}
+      final class Pad13 {}
+      final class Pad14 {}
+      final class Pad15 {}
+      final class Pad16 {}
+      final class Pad17 {}
+      final class Pad18 {}
+      final class Pad19 {}
+      final class Pad20 {}
+      final class Pad21 {}
+      final class Pad22 {}
+      final class Pad23 {}
+      final class Pad24 {}
+      final class Pad25 {}
+      final class Pad26 {}
+      final class Pad27 {}
+      final class Pad28 {}
+      final class Pad29 {}
+      final class Pad30 {}
+      final class Pad31 {}
+      final class Pad32 {}
+
+      class Edge33 {
+        void f(Pad0 x) {}
+        void f(Pad1 x) {}
+        void f(Pad2 x) {}
+        void f(Pad3 x) {}
+        void f(Pad4 x) {}
+        void f(Pad5 x) {}
+        void f(Pad6 x) {}
+        void f(Pad7 x) {}
+        void f(Pad8 x) {}
+        void f(Pad9 x) {}
+        void f(Pad10 x) {}
+        void f(Pad11 x) {}
+        void f(Pad12 x) {}
+        void f(Pad13 x) {}
+        void f(Pad14 x) {}
+        void f(Pad15 x) {}
+        void f(Pad16 x) {}
+        void f(Pad17 x) {}
+        void f(Pad18 x) {}
+        void f(Pad19 x) {}
+        void f(Pad20 x) {}
+        void f(Pad21 x) {}
+        void f(Pad22 x) {}
+        void f(Pad23 x) {}
+        void f(Pad24 x) {}
+        void f(Pad25 x) {}
+        void f(Pad26 x) {}
+        void f(Pad27 x) {}
+        void f(Pad28 x) {}
+        void f(Pad29 x) {}
+        void f(Pad30 x) {}
+        void f(Pad31 x) {}
+        void f(Pad32 x) {}
+
+        void f(int a, String b) {}
+        void call33() { f(null); }
+        void make33() { f(1, "s"); }
+      }
+
+tests:
+  - name: 32 viable overloads for null all stay viable
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'call32' AND t.name = 'f'
+      RETURN t.signature AS signature
+      LIMIT 100
+    assert:
+      - { row_count: 32 }
+
+  - name: 33 viable overloads for null keep the original edges
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'call33' AND t.name = 'f'
+      RETURN count(t) AS n
+    assert:
+      - { row: { n: 1 } }
+
+  - name: a call with a different arity still narrows to one overload past the cap
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'make33' AND t.name = 'f'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(int, String)" } }

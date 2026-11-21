@@ -1,0 +1,36 @@
+name: "Java: this inside an anonymous class body is not the named class"
+
+fixtures:
+  - path: p/This.java
+    content: |
+      package p;
+
+      class Base {}
+
+      class Outer {
+        void add(Object o) {}
+        void add(Outer o) {}
+
+        void plain() { add(this); }
+        void anonymous() { new Base() { void run() { add(this); } }; }
+      }
+
+tests:
+  - name: this in a named class narrows to the class
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'plain' AND t.name = 'add'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(Outer)" } }
+
+  - name: this in an anonymous class body keeps every overload
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'run' AND t.name = 'add'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 2 }
+      - { row: { signature: "(Object)" } }
+      - { row: { signature: "(Outer)" } }

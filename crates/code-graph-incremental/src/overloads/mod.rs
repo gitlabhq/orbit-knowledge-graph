@@ -168,7 +168,11 @@ impl<'a> Narrower<'a> {
         let mut chosen_set: FxHashSet<NodeRef> = FxHashSet::default();
         for &target in targets {
             let pool = self.overloads(self.cursor(target), extends);
-            for index in select_parsed(&pool.parsed, &args) {
+            let picked = select_parsed(&pool.parsed, &args);
+            if picked.len() > MAX_FAN_OUT {
+                return None;
+            }
+            for index in picked {
                 if chosen_set.insert(pool.defs[index]) {
                     chosen.push(pool.defs[index]);
                 }
