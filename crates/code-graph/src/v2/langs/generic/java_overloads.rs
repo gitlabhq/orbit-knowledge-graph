@@ -383,11 +383,15 @@ pub fn select_overloads(signatures: &[&str], args: &[ArgType]) -> Vec<usize> {
         if found.is_empty() {
             continue;
         }
-        if found.len() + possible_only.len() > MAX_SELECTED_OVERLOADS {
-            return found.into_iter().map(|(i, _)| i).collect();
+        let mut viable_so_far = possible_only.clone();
+        viable_so_far.extend(found.iter().map(|&(i, _)| i));
+        viable_so_far.sort_unstable();
+        viable_so_far.dedup();
+        if viable_so_far.len() > MAX_SELECTED_OVERLOADS {
+            return viable_so_far;
         }
         if found.iter().all(|&(_, proven)| !proven) {
-            possible_only.extend(found.into_iter().map(|(i, _)| i));
+            possible_only = viable_so_far;
             continue;
         }
         let mut selected: Vec<usize> = found
@@ -527,5 +531,14 @@ mod tests {
     #[test]
     fn short_class_names_are_kept_next_to_other_overloads() {
         assert_eq!(pick(&["(IO)", "(Foo)"], &named(&["IO"])), [0, 1]);
+    }
+
+    #[test]
+    fn overflow_counts_distinct_candidates_and_keeps_carried_ones() {
+        let mut signatures: Vec<String> = (0..5).map(|_| "(AlphaI)".to_string()).collect();
+        signatures.extend((0..23).map(|_| "(BetaI...)".to_string()));
+        let signatures: Vec<&str> = signatures.iter().map(String::as_str).collect();
+        let picked = pick(&signatures, &named(&["Widget"]));
+        assert_eq!(picked, (0..28).collect::<Vec<_>>());
     }
 }

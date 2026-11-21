@@ -130,14 +130,20 @@ fixtures:
         static void s(String v) {}
         static void s(Res v) {}
 
-        void catchAndFinally() {
+        void inCatch() {
           try (Res name = new Res()) {
-            s(name);
           } catch (RuntimeException x) {
             s(name);
+          }
+        }
+
+        void inFinally() {
+          try (Res name = new Res()) {
           } finally {
             s(name);
           }
+        }
+      }
         }
       }
 
@@ -268,15 +274,24 @@ tests:
       - { row_count: 1 }
       - { row: { signature: "(Object[])" } }
 
-  - name: "a resource variable is not in scope in catch and finally"
+  - name: "a resource variable is not in scope in catch"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
-      WHERE caller.fqn = 'q.ResourceScope.catchAndFinally' AND callee.name = 's'
+      WHERE caller.fqn = 'q.ResourceScope.inCatch' AND callee.name = 's'
       RETURN callee.signature AS signature
       LIMIT 10
     assert:
-      - { row_count: 3 }
-      - { row: { signature: "(Res)" } }
+      - { row_count: 1 }
+      - { row: { signature: "(String)" } }
+
+  - name: "a resource variable is not in scope in finally"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.ResourceScope.inFinally' AND callee.name = 's'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 1 }
       - { row: { signature: "(String)" } }
 
   - name: "Chars.charLiteral picks (Object)"
