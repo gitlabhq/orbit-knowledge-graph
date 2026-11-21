@@ -111,11 +111,7 @@ impl DuckDbClient {
                 )
             })
             .unwrap_or_default();
-        let time_zone = if has_time_zone_setting(&conn)? {
-            "SET TimeZone = 'UTC';"
-        } else {
-            ""
-        };
+        let time_zone = utc_time_zone_statement(&conn)?;
         conn.execute_batch(&format!(
             "{allowed} {time_zone} SET enable_external_access = false; SET lock_configuration = true;"
         ))
@@ -220,14 +216,19 @@ impl DuckDbClient {
     }
 }
 
-/// Bundled builds omit ICU, which owns the TimeZone setting, and render timestamps in UTC.
-fn has_time_zone_setting(conn: &duckdb::Connection) -> Result<bool> {
-    conn.query_row(
-        "SELECT count(*) > 0 FROM duckdb_settings() WHERE name = 'TimeZone'",
-        [],
-        |row| row.get(0),
-    )
-    .map_err(|e| DuckDbError::Schema(e.to_string()))
+/// DuckDB builds without ICU have no TimeZone setting and already render timestamps in UTC.
+fn utc_time_zone_statement(conn: &duckdb::Connection) -> Result<&'static str> {
+    let has_setting: bool = conn
+        .query_row(
+            "SELECT count(*) > 0 FROM duckdb_settings() WHERE name = 'TimeZone'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| DuckDbError::Schema(e.to_string()))?;
+    if !has_setting {
+        return Ok("");
+    }
+    Ok("SET TimeZone = 'UTC';")
 }
 
 fn json_params_to_sql(params: &[serde_json::Value]) -> Vec<Box<dyn duckdb::ToSql>> {
