@@ -6,11 +6,13 @@ fixtures:
       package p;
 
       class Err extends Exception {}
-      class Res implements AutoCloseable { public void close() {} }
+      class Other { void ping() {} }
+      class Res implements AutoCloseable { public void close() {} void ping() {} }
 
       class Scopes {
         int name = 0;
         int e = 0;
+        Other o = new Other();
 
         void k(int x) {}
         void k(String x) {}
@@ -37,6 +39,11 @@ fixtures:
 
         void inCatch() throws Exception {
           try (Res name = new Res()) { } catch (Err x) { k(name); }
+        }
+
+        void afterTry() throws Exception {
+          try (Res o = new Res()) { }
+          o.ping();
         }
 
         void caught() {
@@ -105,3 +112,12 @@ tests:
       - { row: { signature: "(int)" } }
       - { row: { signature: "(String)" } }
       - { row: { signature: "(Res)" } }
+
+  - name: a resource is not visible after the try statement
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'afterTry' AND t.name = 'ping'
+      RETURN t.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "p.Other.ping" } }

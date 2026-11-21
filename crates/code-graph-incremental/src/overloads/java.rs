@@ -214,9 +214,9 @@ fn convertible(arg: &Ty, param: &Ty, phase: Phase) -> Fit {
                 Fit::No
             }
         }
+        (Ty::Array { .. }, Ty::Reference(p)) if is_type_variable(p) => Fit::Maybe,
         (Ty::Array { .. }, Ty::Reference(p)) => {
-            (matches!(p.as_str(), "Object" | "Cloneable" | "Serializable") || is_type_variable(p))
-                .into()
+            matches!(p.as_str(), "Object" | "Cloneable" | "Serializable").into()
         }
         (Ty::Reference(_), Ty::Primitive(_) | Ty::Boxed(_) | Ty::Null) => Fit::No,
         (Ty::Reference(_), Ty::Array { .. }) => Fit::No,
@@ -490,6 +490,21 @@ mod tests {
         let signatures: Vec<&str> = signatures.iter().map(String::as_str).collect();
         let picked = pick(&signatures, &named(&["Widget"]));
         assert_eq!(picked, (0..28).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_type_variable_parameter_is_only_possible_for_arrays_and_references() {
+        assert_eq!(pick(&["(IO)", "(Foo[]...)"], &named(&["Foo[]"])), [0, 1]);
+        assert_eq!(pick(&["(IO)", "(Foo...)"], &named(&["Foo"])), [0, 1]);
+    }
+
+    #[test]
+    fn overflow_after_a_carried_phase_keeps_every_viable_overload() {
+        let mut signatures: Vec<String> = (0..17).map(|_| "(AlphaI)".to_string()).collect();
+        signatures.extend((0..16).map(|_| "(BetaI...)".to_string()));
+        let signatures: Vec<&str> = signatures.iter().map(String::as_str).collect();
+        let picked = pick(&signatures, &named(&["Widget"]));
+        assert_eq!(picked, (0..33).collect::<Vec<_>>());
     }
 
     #[test]
