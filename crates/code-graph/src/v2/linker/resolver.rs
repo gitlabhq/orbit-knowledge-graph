@@ -10,12 +10,11 @@ use petgraph::graph::NodeIndex;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
-const MAX_UNKNOWN_ARG_OVERLOADS: usize = 32;
-
 use super::graph::{CodeGraph, GraphEdge};
 use super::imports::{ImportResolver, ResolveSettings};
 use super::rules::{
-    AmbientImportFallback, ImportedSymbolFallbackContext, ResolutionRules, ResolveStage,
+    AmbientImportFallback, ImportedSymbolFallbackContext, MAX_SELECTED_OVERLOADS, ResolutionRules,
+    ResolveStage,
 };
 use super::state::ScratchBuf;
 
@@ -646,9 +645,7 @@ impl<'a> ResolveCtx<'a> {
                 .map(|&n| signature_of(n).unwrap_or_default())
                 .collect();
             let selected = select(&signatures, args);
-            let fans_out_unbounded =
-                selected.len() > MAX_UNKNOWN_ARG_OVERLOADS && args.contains(&ArgType::Unknown);
-            if selected.is_empty() || fans_out_unbounded {
+            if selected.is_empty() || selected.len() > MAX_SELECTED_OVERLOADS {
                 kept.extend(group);
             } else {
                 kept.extend(selected.into_iter().map(|i| pool[i]));

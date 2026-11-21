@@ -1,3 +1,5 @@
+
+use crate::v2::linker::MAX_SELECTED_OVERLOADS;
 use crate::v2::types::ssa::ArgType;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
@@ -322,6 +324,9 @@ pub fn select_overloads(signatures: &[&str], args: &[ArgType]) -> Vec<usize> {
         let found = viable(phase, variadic_call);
         if found.is_empty() {
             continue;
+        }
+        if found.len() > MAX_SELECTED_OVERLOADS {
+            return found;
         }
         return found
             .iter()

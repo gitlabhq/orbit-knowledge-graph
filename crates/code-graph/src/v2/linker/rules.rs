@@ -112,6 +112,8 @@ pub type ImportedSymbolFallbackCandidatesHook =
 
 pub type ReexportIndexBuilder = fn(&CodeGraph, &str) -> super::graph::ReexportIndex;
 
+pub const MAX_SELECTED_OVERLOADS: usize = 32;
+
 pub type OverloadSelector = fn(&[&str], &[ArgType]) -> Vec<usize>;
 
 #[derive(Default)]

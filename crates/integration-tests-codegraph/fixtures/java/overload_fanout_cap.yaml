@@ -6,44 +6,50 @@ fixtures:
       package p;
 
       class AtCap {
-        static void f(C0 x) {}
-        static void f(C1 x) {}
-        static void f(C2 x) {}
-        static void f(C3 x) {}
-        static void f(C4 x) {}
-        static void f(C5 x) {}
-        static void f(C6 x) {}
-        static void f(C7 x) {}
-        static void f(C8 x) {}
-        static void f(C9 x) {}
-        static void f(C10 x) {}
-        static void f(C11 x) {}
-        static void f(C12 x) {}
-        static void f(C13 x) {}
-        static void f(C14 x) {}
-        static void f(C15 x) {}
-        static void f(C16 x) {}
-        static void f(C17 x) {}
-        static void f(C18 x) {}
-        static void f(C19 x) {}
-        static void f(C20 x) {}
-        static void f(C21 x) {}
-        static void f(C22 x) {}
-        static void f(C23 x) {}
-        static void f(C24 x) {}
-        static void f(C25 x) {}
-        static void f(C26 x) {}
-        static void f(C27 x) {}
-        static void f(C28 x) {}
-        static void f(C29 x) {}
-        static void f(C30 x) {}
-        static void f(C31 x) {}
+        static void f(Klass0 x) {}
+        static void f(Klass1 x) {}
+        static void f(Klass2 x) {}
+        static void f(Klass3 x) {}
+        static void f(Klass4 x) {}
+        static void f(Klass5 x) {}
+        static void f(Klass6 x) {}
+        static void f(Klass7 x) {}
+        static void f(Klass8 x) {}
+        static void f(Klass9 x) {}
+        static void f(Klass10 x) {}
+        static void f(Klass11 x) {}
+        static void f(Klass12 x) {}
+        static void f(Klass13 x) {}
+        static void f(Klass14 x) {}
+        static void f(Klass15 x) {}
+        static void f(Klass16 x) {}
+        static void f(Klass17 x) {}
+        static void f(Klass18 x) {}
+        static void f(Klass19 x) {}
+        static void f(Klass20 x) {}
+        static void f(Klass21 x) {}
+        static void f(Klass22 x) {}
+        static void f(Klass23 x) {}
+        static void f(Klass24 x) {}
+        static void f(Klass25 x) {}
+        static void f(Klass26 x) {}
+        static void f(Klass27 x) {}
+        static void f(Klass28 x) {}
+        static void f(Klass29 x) {}
+        static void f(Klass30 x) {}
+        static void f(Klass31 x) {}
         static int g() { return 1; }
         void caller() {
           f(g());
         }
+        void userType(Foo foo) {
+          f(foo);
+        }
+        void nullArg() {
+          f(null);
+        }
         void known() {
-          C0 c = null;
+          Klass0 c = null;
           f(c);
         }
       }
@@ -53,43 +59,49 @@ fixtures:
       package p;
 
       class OverCap {
-        static void f(C0 x) {}
-        static void f(C1 x) {}
-        static void f(C2 x) {}
-        static void f(C3 x) {}
-        static void f(C4 x) {}
-        static void f(C5 x) {}
-        static void f(C6 x) {}
-        static void f(C7 x) {}
-        static void f(C8 x) {}
-        static void f(C9 x) {}
-        static void f(C10 x) {}
-        static void f(C11 x) {}
-        static void f(C12 x) {}
-        static void f(C13 x) {}
-        static void f(C14 x) {}
-        static void f(C15 x) {}
-        static void f(C16 x) {}
-        static void f(C17 x) {}
-        static void f(C18 x) {}
-        static void f(C19 x) {}
-        static void f(C20 x) {}
-        static void f(C21 x) {}
-        static void f(C22 x) {}
-        static void f(C23 x) {}
-        static void f(C24 x) {}
-        static void f(C25 x) {}
-        static void f(C26 x) {}
-        static void f(C27 x) {}
-        static void f(C28 x) {}
-        static void f(C29 x) {}
-        static void f(C30 x) {}
-        static void f(C31 x) {}
-        static void f(C32 x) {}
+        static void f(Klass0 x) {}
+        static void f(Klass1 x) {}
+        static void f(Klass2 x) {}
+        static void f(Klass3 x) {}
+        static void f(Klass4 x) {}
+        static void f(Klass5 x) {}
+        static void f(Klass6 x) {}
+        static void f(Klass7 x) {}
+        static void f(Klass8 x) {}
+        static void f(Klass9 x) {}
+        static void f(Klass10 x) {}
+        static void f(Klass11 x) {}
+        static void f(Klass12 x) {}
+        static void f(Klass13 x) {}
+        static void f(Klass14 x) {}
+        static void f(Klass15 x) {}
+        static void f(Klass16 x) {}
+        static void f(Klass17 x) {}
+        static void f(Klass18 x) {}
+        static void f(Klass19 x) {}
+        static void f(Klass20 x) {}
+        static void f(Klass21 x) {}
+        static void f(Klass22 x) {}
+        static void f(Klass23 x) {}
+        static void f(Klass24 x) {}
+        static void f(Klass25 x) {}
+        static void f(Klass26 x) {}
+        static void f(Klass27 x) {}
+        static void f(Klass28 x) {}
+        static void f(Klass29 x) {}
+        static void f(Klass30 x) {}
+        static void f(Klass31 x) {}
+        static void f(Klass32 x) {}
         static void f(String x) {}
         static int g() { return 1; }
         void caller() {
           f(g());
+        }
+        void userType(Foo foo) {
+          f(foo);
+        }
+        void nullArg() {
+          f(null);
         }
         void known() {
           String s = "x";
@@ -101,39 +113,40 @@ fixtures:
     content: |
       package p;
 
-      class C0 {}
-      class C1 {}
-      class C2 {}
-      class C3 {}
-      class C4 {}
-      class C5 {}
-      class C6 {}
-      class C7 {}
-      class C8 {}
-      class C9 {}
-      class C10 {}
-      class C11 {}
-      class C12 {}
-      class C13 {}
-      class C14 {}
-      class C15 {}
-      class C16 {}
-      class C17 {}
-      class C18 {}
-      class C19 {}
-      class C20 {}
-      class C21 {}
-      class C22 {}
-      class C23 {}
-      class C24 {}
-      class C25 {}
-      class C26 {}
-      class C27 {}
-      class C28 {}
-      class C29 {}
-      class C30 {}
-      class C31 {}
-      class C32 {}
+      class Foo {}
+      class Klass0 {}
+      class Klass1 {}
+      class Klass2 {}
+      class Klass3 {}
+      class Klass4 {}
+      class Klass5 {}
+      class Klass6 {}
+      class Klass7 {}
+      class Klass8 {}
+      class Klass9 {}
+      class Klass10 {}
+      class Klass11 {}
+      class Klass12 {}
+      class Klass13 {}
+      class Klass14 {}
+      class Klass15 {}
+      class Klass16 {}
+      class Klass17 {}
+      class Klass18 {}
+      class Klass19 {}
+      class Klass20 {}
+      class Klass21 {}
+      class Klass22 {}
+      class Klass23 {}
+      class Klass24 {}
+      class Klass25 {}
+      class Klass26 {}
+      class Klass27 {}
+      class Klass28 {}
+      class Klass29 {}
+      class Klass30 {}
+      class Klass31 {}
+      class Klass32 {}
 
 tests:
   - name: "exactly 32 overloads still fan out for an unknown argument"
@@ -163,3 +176,39 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { signature: "(String)" } }
+
+  - name: "AtCap: a known non-final argument (userType)"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'p.AtCap.userType' AND callee.name = 'f'
+      RETURN callee.signature AS signature
+      LIMIT 100
+    assert:
+      - { row_count: 32 }
+
+  - name: "AtCap: a null argument (nullArg)"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'p.AtCap.nullArg' AND callee.name = 'f'
+      RETURN callee.signature AS signature
+      LIMIT 100
+    assert:
+      - { row_count: 32 }
+
+  - name: "OverCap: a known non-final argument (userType)"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'p.OverCap.userType' AND callee.name = 'f'
+      RETURN callee.signature AS signature
+      LIMIT 100
+    assert:
+      - { row_count: 1 }
+
+  - name: "OverCap: a null argument (nullArg)"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'p.OverCap.nullArg' AND callee.name = 'f'
+      RETURN callee.signature AS signature
+      LIMIT 100
+    assert:
+      - { row_count: 1 }

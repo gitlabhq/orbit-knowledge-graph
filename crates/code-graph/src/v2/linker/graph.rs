@@ -784,7 +784,8 @@ impl CodeGraph {
         };
         let signature_of =
             |idx: NodeIndex| self.def(idx).metadata.as_ref().and_then(|m| m.signature);
-        let mut seen_signatures = Vec::new();
+        let mut seen_signatures = rustc_hash::FxHashSet::default();
+        let mut level_signatures = Vec::new();
         let mut emitted: rustc_hash::FxHashSet<NodeIndex> = out.iter().copied().collect();
         let mut level = Vec::new();
         for &start in &self.resolve_scope_nodes(scope_fqn) {
@@ -798,17 +799,18 @@ impl CodeGraph {
                 self.indexes
                     .nested
                     .lookup_into(self.def(scope).fqn, member_id, &mut level);
-                let nearer = seen_signatures.len();
+                level_signatures.clear();
                 for &member in &level {
                     let signature = signature_of(member);
-                    if signature.is_some() && seen_signatures[..nearer].contains(&signature) {
+                    if signature.is_some() && seen_signatures.contains(&signature) {
                         continue;
                     }
-                    seen_signatures.push(signature);
+                    level_signatures.push(signature);
                     if emitted.insert(member) {
                         out.push(member);
                     }
                 }
+                seen_signatures.extend(level_signatures.drain(..));
             }
         }
     }
