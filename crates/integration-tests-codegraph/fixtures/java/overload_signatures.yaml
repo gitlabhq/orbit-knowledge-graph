@@ -34,6 +34,14 @@ fixtures:
           }
 
           public void log(String... messages) {}
+
+          public void declared(final @Deprecated String a, @Deprecated int... rest) {}
+
+          public void typeUse(@Nullable Object @Nullable [] arr, java.util.@Nullable List<String> list) {}
+
+          public void multiDim(int @A [] @B [] grid, int flat[]) {}
+
+          public void brokenSpread(int x, String @NonNull ... xs) {}
       }
 
   - path: com/example/Child.java
@@ -95,6 +103,34 @@ tests:
       MATCH (c:Definition)
       WHERE c.name = 'App' AND c.definition_type = 'Class'
       RETURN c.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "" } }
+
+  - name: "declaration annotations and modifiers are dropped"
+    query: |
+      MATCH (m:Definition)
+      WHERE m.name = 'declared'
+      RETURN m.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(String, int...)" } }
+
+  - name: "type-use annotations are not part of the signature"
+    query: |
+      MATCH (m:Definition)
+      WHERE m.name = 'typeUse' OR m.name = 'multiDim'
+      RETURN m.name AS name, m.signature AS signature
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "typeUse", signature: "(Object[], java.util.List)" } }
+      - { row: { name: "multiDim", signature: "(int[][], int[])" } }
+
+  - name: "a parameter list that does not parse stores no signature"
+    query: |
+      MATCH (m:Definition)
+      WHERE m.name = 'brokenSpread'
+      RETURN m.signature AS signature
     assert:
       - { row_count: 1 }
       - { row: { signature: "" } }

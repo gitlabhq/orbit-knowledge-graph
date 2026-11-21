@@ -57,40 +57,51 @@ fn java_super_types(node: &N<'_>) -> Vec<String> {
     result
 }
 
-fn strip_type_arguments(text: &str) -> String {
-    let mut depth = 0usize;
-    let mut erased = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '<' => depth += 1,
-            '>' => depth = depth.saturating_sub(1),
-            _ if depth == 0 && !ch.is_whitespace() => erased.push(ch),
-            _ => {}
+fn is_annotation(node: &N<'_>) -> bool {
+    matches!(node.kind().as_ref(), "annotation" | "marker_annotation")
+}
+
+fn bracket_pairs(node: &N<'_>) -> usize {
+    node.children().filter(|c| c.kind() == "[").count()
+}
+
+fn erased_type(node: &N<'_>) -> String {
+    match node.kind().as_ref() {
+        "array_type" => {
+            let element = node.field("element").map(|e| erased_type(&e));
+            let dims = node.field("dimensions").map_or(0, |d| bracket_pairs(&d));
+            format!("{}{}", element.unwrap_or_default(), "[]".repeat(dims))
         }
+        "generic_type" | "scoped_type_identifier" => node
+            .children()
+            .filter(|c| c.is_named() && !is_annotation(c) && c.kind() != "type_arguments")
+            .map(|c| erased_type(&c))
+            .collect::<Vec<_>>()
+            .join("."),
+        _ => node.text().to_string(),
     }
-    erased
 }
 
 fn java_signature(node: &N<'_>) -> Option<String> {
     let parameters = node.field("parameters")?;
+    if parameters.get_inner_node().has_error() {
+        return None;
+    }
     let types: Vec<String> = parameters
         .children()
         .filter_map(|param| match param.kind().as_ref() {
             "formal_parameter" => {
-                let ty = strip_type_arguments(&param.field("type")?.text());
-                let dims = param
-                    .field("dimensions")
-                    .map(|d| strip_type_arguments(&d.text()))
-                    .unwrap_or_default();
-                Some(format!("{ty}{dims}"))
+                let ty = erased_type(&param.field("type")?);
+                let dims = param.field("dimensions").map_or(0, |d| bracket_pairs(&d));
+                Some(format!("{ty}{}", "[]".repeat(dims)))
             }
             "spread_parameter" => {
                 let ty = param
                     .children()
                     .take_while(|c| c.kind() != "...")
-                    .filter(|c| c.is_named() && c.kind() != "modifiers")
+                    .filter(|c| c.is_named() && c.kind() != "modifiers" && !is_annotation(c))
                     .last()?;
-                Some(format!("{}...", strip_type_arguments(&ty.text())))
+                Some(format!("{}...", erased_type(&ty)))
             }
             _ => None,
         })
