@@ -1,4 +1,6 @@
-import { findPage, type NavItem, type Page, pages, SectionNav } from "@gitlab-org/orbit-site";
+import { useState } from "react";
+import { findPage, Icon, type NavItem, type Page, pages, SectionNav } from "@gitlab-org/orbit-site";
+import { useRouterState } from "@tanstack/react-router";
 import { ENGINEERING } from "../sections";
 
 const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/"));
@@ -21,6 +23,22 @@ const items = (): NavItem[] => [
   { path: "team", title: "Team" },
 ];
 
-export function Sidebar() {
-  return <SectionNav items={items()} label="Engineering" storageKey="orbit-site.sidebar-collapsed" />;
+export function Sidebar({ title }: { title: string }) {
+  const path = useRouterState({ select: (state) => state.location.pathname });
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState(path);
+  if (shown !== path) {
+    setShown(path);
+    setOpen(false);
+  }
+  return (
+    <div data-open={open} className="sidebar md:contents">
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="sidebar-toggle md:hidden">
+        <span className="sidebar-toggle-section">Developers</span>
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <Icon name={open ? "chevron-up" : "chevron-down"} size={16} />
+      </button>
+      <SectionNav items={items()} label="Engineering" storageKey="orbit-site.sidebar-collapsed" />
+    </div>
+  );
 }
