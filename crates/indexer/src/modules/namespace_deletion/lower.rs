@@ -16,7 +16,7 @@ pub struct DeletionStatement {
 /// ```sql
 /// INSERT INTO {prefixed_table} ({sort_key..., unchanging columns..., _deleted, _version})
 /// SELECT {sort_key..., unchanging columns..., true, now64(6)}
-/// FROM {prefixed_table}
+/// FROM {prefixed_table} FINAL
 /// WHERE startsWith(traversal_path, {traversal_path:String})
 ///   AND _deleted = false
 /// ```
@@ -107,10 +107,12 @@ fn build_deletion_insert(
         .join(", ");
     let insert_columns = format!("{carried_cols}, {DELETED_COLUMN}, {VERSION_COLUMN}");
     let extra = extra_predicate.map(|p| format!(" {p}")).unwrap_or_default();
+    // FINAL reads the latest row per key. A raw scan still sees the old live
+    // version of a tombstoned row and writes a new tombstone on every run.
     let sql = format!(
         "INSERT INTO {prefixed_table} ({insert_columns}) \
          SELECT {carried_cols}, true, now64(6) \
-         FROM {prefixed_table} \
+         FROM {prefixed_table} FINAL \
          WHERE (startsWith({TRAVERSAL_PATH_COLUMN}, {{{TRAVERSAL_PATH_COLUMN}:String}}) \
          AND ({DELETED_COLUMN} = false){extra})"
     );
@@ -210,8 +212,8 @@ mod tests {
                 "{table}: should start with INSERT INTO prefixed table: {sql}"
             );
             assert!(
-                sql.contains(&format!("FROM {prefixed}")),
-                "{table}: should SELECT FROM same prefixed table: {sql}"
+                sql.contains(&format!("FROM {prefixed} FINAL ")),
+                "{table}: should read the latest rows of the same prefixed table: {sql}"
             );
             assert!(
                 sql.contains(", true, now64(6)"),
@@ -321,7 +323,7 @@ mod tests {
         );
         assert!(
             sql.contains("(_deleted = false)"),
-            "should keep the FINAL-safe non-deleted filter: {sql}"
+            "should tombstone only rows that are still live: {sql}"
         );
         assert!(
             sql.contains("traversal_path IN {stale_paths:Array(String)}"),
