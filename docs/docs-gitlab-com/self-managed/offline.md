@@ -22,12 +22,13 @@ Prepare the values files from those pages first.
 
 Prerequisites:
 
-- A host that can reach `registry.gitlab.com` and your registry.
+- A host that can reach your registry, `registry.gitlab.com`, and `gitlab.com`. With `initCopy`, also `gcr.io` and `docker.io`.
 - [Helm](https://helm.sh/docs/intro/install/) 3 or later and [skopeo](https://github.com/containers/skopeo/blob/main/install.md).
 
 To mirror the images and charts:
 
-1. Pull both charts:
+1. Pull both charts.
+   To list Siphon chart versions, run `helm search repo siphon/siphon --versions` after `helm repo add`:
 
    ```shell
    helm pull oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit --version <orbit_chart_version>
