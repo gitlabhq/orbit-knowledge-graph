@@ -130,7 +130,7 @@ properties:
     type: string
     source: signature
     nullable: false
-    description: "Parameter types as written, generics and annotations erased (e.g., `(int, String...)`). Empty when not extracted; the incremental engine leaves it empty for now."
+    description: "Parameter types as written, generics and annotations erased (e.g., `(int, String...)`). Set for Java methods and constructors; empty otherwise."
 
   front_matter_name:
     type: string

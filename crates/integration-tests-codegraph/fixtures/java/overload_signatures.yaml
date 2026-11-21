@@ -41,6 +41,8 @@ fixtures:
 
           public void multiDim(int @A [] @B [] grid, int flat[]) {}
 
+          public void receiver(App this, int x) {}
+
           public void brokenSpread(int x, String @NonNull ... xs) {}
       }
 
@@ -134,3 +136,12 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { signature: "" } }
+
+  - name: "receiver parameters are not part of the signature"
+    query: |
+      MATCH (m:Definition)
+      WHERE m.name = 'receiver'
+      RETURN m.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(int)" } }
