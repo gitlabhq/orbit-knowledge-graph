@@ -1,4 +1,7 @@
 use crate::v2::types::ssa::ArgType;
+use rustc_hash::FxHashMap;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Primitive {
@@ -120,6 +123,28 @@ fn is_final_reference(name: &str) -> bool {
 struct Param {
     ty: Ty,
     variadic: bool,
+}
+
+thread_local! {
+    static PARSED_SIGNATURES: RefCell<FxHashMap<Box<str>, Rc<[Param]>>> =
+        RefCell::new(FxHashMap::default());
+}
+
+const PARSED_SIGNATURE_CACHE_LIMIT: usize = 100_000;
+
+fn parse_signature_cached(signature: &str) -> Rc<[Param]> {
+    PARSED_SIGNATURES.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(parsed) = cache.get(signature) {
+            return Rc::clone(parsed);
+        }
+        if cache.len() >= PARSED_SIGNATURE_CACHE_LIMIT {
+            cache.clear();
+        }
+        let parsed: Rc<[Param]> = parse_signature(signature).into();
+        cache.insert(signature.into(), Rc::clone(&parsed));
+        parsed
+    })
 }
 
 fn parse_signature(signature: &str) -> Vec<Param> {
@@ -260,7 +285,10 @@ fn more_specific(a: &[Param], b: &[Param], arg_count: usize, variadic_call: bool
 }
 
 pub fn select_overloads(signatures: &[&str], args: &[ArgType]) -> Vec<usize> {
-    let candidates: Vec<Vec<Param>> = signatures.iter().map(|s| parse_signature(s)).collect();
+    let candidates: Vec<Rc<[Param]>> = signatures
+        .iter()
+        .map(|s| parse_signature_cached(s))
+        .collect();
     let arg_types: Vec<Option<Ty>> = args
         .iter()
         .map(|a| match a {

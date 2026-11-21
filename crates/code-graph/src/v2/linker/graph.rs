@@ -785,6 +785,7 @@ impl CodeGraph {
         let signature_of =
             |idx: NodeIndex| self.def(idx).metadata.as_ref().and_then(|m| m.signature);
         let mut seen_signatures = Vec::new();
+        let mut emitted: rustc_hash::FxHashSet<NodeIndex> = out.iter().copied().collect();
         let mut level = Vec::new();
         for &start in &self.resolve_scope_nodes(scope_fqn) {
             let ancestors = self
@@ -804,7 +805,7 @@ impl CodeGraph {
                         continue;
                     }
                     seen_signatures.push(signature);
-                    if !out.contains(&member) {
+                    if emitted.insert(member) {
                         out.push(member);
                     }
                 }

@@ -1,0 +1,165 @@
+name: "Java: unknown-argument overload fan-out is capped"
+
+fixtures:
+  - path: p/AtCap.java
+    content: |
+      package p;
+
+      class AtCap {
+        static void f(C0 x) {}
+        static void f(C1 x) {}
+        static void f(C2 x) {}
+        static void f(C3 x) {}
+        static void f(C4 x) {}
+        static void f(C5 x) {}
+        static void f(C6 x) {}
+        static void f(C7 x) {}
+        static void f(C8 x) {}
+        static void f(C9 x) {}
+        static void f(C10 x) {}
+        static void f(C11 x) {}
+        static void f(C12 x) {}
+        static void f(C13 x) {}
+        static void f(C14 x) {}
+        static void f(C15 x) {}
+        static void f(C16 x) {}
+        static void f(C17 x) {}
+        static void f(C18 x) {}
+        static void f(C19 x) {}
+        static void f(C20 x) {}
+        static void f(C21 x) {}
+        static void f(C22 x) {}
+        static void f(C23 x) {}
+        static void f(C24 x) {}
+        static void f(C25 x) {}
+        static void f(C26 x) {}
+        static void f(C27 x) {}
+        static void f(C28 x) {}
+        static void f(C29 x) {}
+        static void f(C30 x) {}
+        static void f(C31 x) {}
+        static int g() { return 1; }
+        void caller() {
+          f(g());
+        }
+        void known() {
+          C0 c = null;
+          f(c);
+        }
+      }
+
+  - path: p/OverCap.java
+    content: |
+      package p;
+
+      class OverCap {
+        static void f(C0 x) {}
+        static void f(C1 x) {}
+        static void f(C2 x) {}
+        static void f(C3 x) {}
+        static void f(C4 x) {}
+        static void f(C5 x) {}
+        static void f(C6 x) {}
+        static void f(C7 x) {}
+        static void f(C8 x) {}
+        static void f(C9 x) {}
+        static void f(C10 x) {}
+        static void f(C11 x) {}
+        static void f(C12 x) {}
+        static void f(C13 x) {}
+        static void f(C14 x) {}
+        static void f(C15 x) {}
+        static void f(C16 x) {}
+        static void f(C17 x) {}
+        static void f(C18 x) {}
+        static void f(C19 x) {}
+        static void f(C20 x) {}
+        static void f(C21 x) {}
+        static void f(C22 x) {}
+        static void f(C23 x) {}
+        static void f(C24 x) {}
+        static void f(C25 x) {}
+        static void f(C26 x) {}
+        static void f(C27 x) {}
+        static void f(C28 x) {}
+        static void f(C29 x) {}
+        static void f(C30 x) {}
+        static void f(C31 x) {}
+        static void f(C32 x) {}
+        static void f(String x) {}
+        static int g() { return 1; }
+        void caller() {
+          f(g());
+        }
+        void known() {
+          String s = "x";
+          f(s);
+        }
+      }
+
+  - path: p/Types.java
+    content: |
+      package p;
+
+      class C0 {}
+      class C1 {}
+      class C2 {}
+      class C3 {}
+      class C4 {}
+      class C5 {}
+      class C6 {}
+      class C7 {}
+      class C8 {}
+      class C9 {}
+      class C10 {}
+      class C11 {}
+      class C12 {}
+      class C13 {}
+      class C14 {}
+      class C15 {}
+      class C16 {}
+      class C17 {}
+      class C18 {}
+      class C19 {}
+      class C20 {}
+      class C21 {}
+      class C22 {}
+      class C23 {}
+      class C24 {}
+      class C25 {}
+      class C26 {}
+      class C27 {}
+      class C28 {}
+      class C29 {}
+      class C30 {}
+      class C31 {}
+      class C32 {}
+
+tests:
+  - name: "exactly 32 overloads still fan out for an unknown argument"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'p.AtCap.caller' AND callee.name = 'f'
+      RETURN callee.signature AS signature
+      LIMIT 100
+    assert:
+      - { row_count: 32 }
+
+  - name: "more than 32 overloads fall back to the original candidates"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'p.OverCap.caller' AND callee.name = 'f'
+      RETURN callee.signature AS signature
+      LIMIT 100
+    assert:
+      - { row_count: 1 }
+
+  - name: "known arguments still pick one overload past the cap"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'p.OverCap.known' AND callee.name = 'f'
+      RETURN callee.signature AS signature
+      LIMIT 100
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(String)" } }
