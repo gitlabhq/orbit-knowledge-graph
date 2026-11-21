@@ -84,6 +84,58 @@ fixtures:
         }
       }
 
+  - path: g/Declarations.java
+    content: |
+      package g;
+
+      class Declarations {
+        int s = 0;
+        int label = 0;
+
+        static void k(int x) {}
+        static void k(String x) {}
+        static void p(String s) {}
+        static void p(String[] s) {}
+
+        void instanceofPattern(Object o) {
+          if (o instanceof String s) {
+            k(s);
+          }
+        }
+
+        void switchPattern(Object o) {
+          switch (o) {
+            case String s -> k(s);
+            default -> {}
+          }
+        }
+
+        void spread(String... xs) {
+          p(xs);
+        }
+
+        void thisField() {
+          k(this.s);
+        }
+      }
+
+  - path: g/Enumerated.java
+    content: |
+      package g;
+
+      enum Enumerated {
+        A;
+
+        String label;
+
+        static void k(int x) {}
+        static void k(String x) {}
+
+        void use() {
+          k(label);
+        }
+      }
+
 tests:
   - name: "a generic local keeps its declared type as the receiver"
     query: |
@@ -151,3 +203,39 @@ tests:
       - { row_count: 2 }
       - { row: { fqn: "g.A.process" } }
       - { row: { fqn: "g.B.process" } }
+
+  - name: "a pattern variable shadows a field of the same name"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['instanceofPattern', 'switchPattern'] AND callee.name = 'k'
+      RETURN caller.name AS caller, callee.signature AS signature
+      ORDER BY caller.name, callee.signature
+    assert:
+      - { row_count: 4 }
+
+  - name: "a varargs parameter is an array argument"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'spread' AND callee.name = 'p'
+      RETURN callee.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(String[])" } }
+
+  - name: "an enum field argument uses its declared type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'use' AND callee.name = 'k'
+      RETURN callee.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(String)" } }
+
+  - name: "this-qualified field argument uses the field type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'thisField' AND callee.name = 'k'
+      RETURN callee.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(int)" } }

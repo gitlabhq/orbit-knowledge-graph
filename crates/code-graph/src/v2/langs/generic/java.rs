@@ -3,6 +3,7 @@ use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::ssa::ArgType;
 use crate::v2::types::{BindingKind, DefKind};
+use rustc_hash::FxHashMap;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{Extract, default_name, field, text};
@@ -151,96 +152,157 @@ fn written_type(type_owner: &N<'_>, dimensions_owner: &N<'_>) -> Option<String> 
     Some(format!("{base}{}", "[]".repeat(dimensions)))
 }
 
-fn declared_type(usage: &N<'_>, name: &str, fields_only: bool) -> Option<String> {
+fn declarator_named(declaration: &N<'_>, name: &str) -> Option<String> {
+    let declarator = declaration.children().find(|d| {
+        d.kind() == "variable_declarator" && d.field("name").is_some_and(|n| n.text() == name)
+    })?;
+    written_type(declaration, &declarator)
+}
+
+fn field_types(body: &N<'_>) -> FxHashMap<String, Option<String>> {
+    let mut fields = FxHashMap::default();
+    for declaration in body.children().filter(|c| c.kind() == "field_declaration") {
+        for declarator in declaration
+            .children()
+            .filter(|d| d.kind() == "variable_declarator")
+        {
+            if let Some(name) = declarator.field("name") {
+                fields.insert(
+                    name.text().to_string(),
+                    written_type(&declaration, &declarator),
+                );
+            }
+        }
+    }
+    fields
+}
+
+fn pattern_variables(member: &N<'_>) -> FxHashMap<String, Option<String>> {
+    let mut names = FxHashMap::default();
+    for node in member.dfs() {
+        let binding = match node.kind().as_ref() {
+            "instanceof_expression" => node.field("name"),
+            "type_pattern" | "record_pattern_component" => {
+                node.children().filter(|c| c.kind() == "identifier").last()
+            }
+            _ => None,
+        };
+        if let Some(binding) = binding {
+            names.insert(binding.text().to_string(), None);
+        }
+    }
+    names
+}
+
+fn parameter_name(param: &N<'_>) -> Option<String> {
+    let named = match param.field("name") {
+        Some(name) => name,
+        None => param
+            .children()
+            .find(|c| c.kind() == "variable_declarator")?
+            .field("name")?,
+    };
+    Some(named.text().to_string())
+}
+
+fn parameter_type(param: &N<'_>) -> Option<String> {
+    if param.kind() != "spread_parameter" {
+        return written_type(param, param);
+    }
+    let element = param
+        .children()
+        .take_while(|c| c.kind() != "...")
+        .filter(|c| c.is_named() && c.kind() != "modifiers" && !is_annotation(c))
+        .last()?;
+    Some(format!("{}[]", erased_type(&element)))
+}
+
+fn declared_type(
+    usage: &N<'_>,
+    name: &str,
+    fields_only: bool,
+    index: &mut DeclarationIndex,
+) -> Option<String> {
     let usage_start = usage.range().start;
     let mut child = usage.clone();
     while let Some(parent) = child.parent() {
-        if fields_only && !matches!(parent.kind().as_ref(), "class_body" | "enum_body") {
-            child = parent;
-            continue;
+        let kind = parent.kind();
+        if matches!(
+            kind.as_ref(),
+            "class_body" | "enum_body_declarations" | "interface_body"
+        ) {
+            return index
+                .entry(parent.node_id())
+                .or_insert_with(|| field_types(&parent))
+                .get(name)
+                .cloned()
+                .flatten();
         }
-        match parent.kind().as_ref() {
-            "lambda_expression"
-                if parent.field("parameters").is_some_and(|p| {
-                    p.text()
-                        .split(|c: char| !c.is_alphanumeric() && c != '_')
-                        .any(|t| t == name)
-                }) =>
-            {
-                return None;
-            }
-            "enhanced_for_statement" | "resource" | "catch_formal_parameter"
-                if parent.field("name").is_some_and(|n| n.text() == name) =>
-            {
-                return written_type(&parent, &parent);
-            }
-            "method_declaration" | "constructor_declaration" => {
-                if let Some(found) = parent
-                    .field("parameters")
-                    .into_iter()
-                    .flat_map(|p| p.children().collect::<Vec<_>>())
-                    .find(|p| p.field("name").is_some_and(|n| n.text() == name))
+        if !fields_only {
+            match kind.as_ref() {
+                "lambda_expression"
+                    if parent.field("parameters").is_some_and(|p| {
+                        p.text()
+                            .split(|c: char| !c.is_alphanumeric() && c != '_')
+                            .any(|t| t == name)
+                    }) =>
                 {
-                    return declared_type_of_parameter(&found);
+                    return None;
                 }
-            }
-            "block"
-            | "constructor_body"
-            | "switch_block_statement_group"
-            | "for_statement"
-            | "class_body"
-            | "enum_body" => {
-                let is_class = matches!(parent.kind().as_ref(), "class_body" | "enum_body");
-                for sibling in parent.children() {
-                    if !is_class && sibling.range().start >= usage_start {
-                        break;
+                "enhanced_for_statement" | "resource" | "catch_formal_parameter"
+                    if parent.field("name").is_some_and(|n| n.text() == name) =>
+                {
+                    return written_type(&parent, &parent);
+                }
+                "method_declaration" | "constructor_declaration" | "static_initializer" => {
+                    let parameter = parent
+                        .field("parameters")
+                        .into_iter()
+                        .flat_map(|p| p.children().collect::<Vec<_>>())
+                        .find(|p| parameter_name(p).is_some_and(|n| n == name));
+                    if let Some(parameter) = parameter {
+                        return parameter_type(&parameter);
                     }
-                    let kind = sibling.kind();
-                    if kind != "local_variable_declaration" && kind != "field_declaration" {
-                        continue;
-                    }
-                    let declarator = sibling.children().find(|d| {
-                        d.kind() == "variable_declarator"
-                            && d.field("name").is_some_and(|n| n.text() == name)
-                    });
-                    if let Some(declarator) = declarator {
-                        return written_type(&sibling, &declarator);
+                    let is_pattern_variable = index
+                        .entry(parent.node_id())
+                        .or_insert_with(|| pattern_variables(&parent))
+                        .contains_key(name);
+                    if is_pattern_variable {
+                        return None;
                     }
                 }
+                "block" | "constructor_body" | "switch_block_statement_group" | "for_statement" => {
+                    let local = parent
+                        .children()
+                        .take_while(|s| s.range().start < usage_start)
+                        .filter(|s| s.kind() == "local_variable_declaration")
+                        .find_map(|s| declarator_named(&s, name));
+                    if local.is_some() {
+                        return local;
+                    }
+                }
+                _ => {}
             }
-            _ => {}
         }
         child = parent;
     }
     None
 }
 
-fn declared_type_of_parameter(param: &N<'_>) -> Option<String> {
-    if param.kind() == "spread_parameter" {
-        let element = param
-            .children()
-            .take_while(|c| c.kind() != "...")
-            .filter(|c| c.is_named() && c.kind() != "modifiers" && !is_annotation(c))
-            .last()?;
-        return Some(format!("{}[]", erased_type(&element)));
-    }
-    written_type(param, param)
-}
-
-fn java_call_arg(node: &N<'_>) -> ArgType {
+fn java_call_arg(node: &N<'_>, index: &mut DeclarationIndex) -> ArgType {
     if let Some(literal) = java_literal_type(node) {
         return named(literal);
     }
     match node.kind().as_ref() {
-        "identifier" => declared_type(node, &node.text(), false)
+        "identifier" => declared_type(node, &node.text(), false, index)
             .filter(|t| t != "var")
             .map_or(ArgType::Unknown, named),
         "parenthesized_expression" => node
             .children()
             .find(|c| c.is_named())
-            .map_or(ArgType::Unknown, |inner| java_call_arg(&inner)),
+            .map_or(ArgType::Unknown, |inner| java_call_arg(&inner, index)),
         "unary_expression" => match node.field("operand") {
-            Some(operand) if operand.kind().ends_with("_literal") => java_call_arg(&operand),
+            Some(operand) if operand.kind().ends_with("_literal") => java_call_arg(&operand, index),
             _ => ArgType::Unknown,
         },
         "cast_expression" | "object_creation_expression" => node
@@ -248,7 +310,7 @@ fn java_call_arg(node: &N<'_>) -> ArgType {
             .map_or(ArgType::Unknown, |ty| named(erased_type(&ty))),
         "field_access" => match (node.field("object"), node.field("field")) {
             (Some(object), Some(field)) if object.kind() == "this" => {
-                declared_type(node, &field.text(), true).map_or(ArgType::Unknown, named)
+                declared_type(node, &field.text(), true, index).map_or(ArgType::Unknown, named)
             }
             _ => ArgType::Unknown,
         },
@@ -256,7 +318,7 @@ fn java_call_arg(node: &N<'_>) -> ArgType {
     }
 }
 
-fn java_call_args(node: &N<'_>) -> Option<Vec<ArgType>> {
+fn java_call_args(node: &N<'_>, index: &mut DeclarationIndex) -> Option<Vec<ArgType>> {
     if node.kind() != "method_invocation" {
         return None;
     }
@@ -265,7 +327,7 @@ fn java_call_args(node: &N<'_>) -> Option<Vec<ArgType>> {
         arguments
             .children()
             .filter(|c| c.is_named() && !c.kind().contains("comment"))
-            .map(|arg| java_call_arg(&arg))
+            .map(|arg| java_call_arg(&arg, index))
             .collect(),
     )
 }

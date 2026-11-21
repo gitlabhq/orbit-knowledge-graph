@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::types::{ImportRewriter, LanguageSpec, Rule};
+use super::types::{DeclarationIndex, ImportRewriter, LanguageSpec, Rule};
 use super::utils::{
     canonical_range, find_first_ident, infer_import_binding_kind, resolve_type_name,
 };
@@ -1248,7 +1248,10 @@ impl LanguageSpec {
                         is_return: state.in_return,
                     }
                 );
-                let args = self.hooks.call_args.and_then(|f| f(node));
+                let args = self
+                    .hooks
+                    .call_args
+                    .and_then(|f| f(node, &mut state.declarations));
                 state.pending_refs.push(PendingRef {
                     name,
                     chain: expression,
@@ -1449,6 +1452,7 @@ struct WalkFullState<'a> {
     defs: Vec<CanonicalDefinition>,
     imports: Vec<CanonicalImport>,
     pending_refs: Vec<PendingRef<'a>>,
+    declarations: DeclarationIndex,
     saved_blocks: Vec<super::ssa::BlockId>,
     import_map: rustc_hash::FxHashMap<String, String>,
     import_rewriter: Option<&'a ImportRewriter>,
@@ -1481,6 +1485,7 @@ impl<'a> WalkFullState<'a> {
             defs: Vec::new(),
             imports: Vec::new(),
             pending_refs: Vec::new(),
+            declarations: DeclarationIndex::default(),
             saved_blocks: Vec::new(),
             import_map: rustc_hash::FxHashMap::default(),
             import_rewriter,

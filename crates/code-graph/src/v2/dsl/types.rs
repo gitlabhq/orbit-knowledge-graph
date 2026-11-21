@@ -18,7 +18,10 @@ pub type LabelFn = fn(&N<'_>) -> &'static str;
 
 pub type NameHookFn = fn(&N<'_>) -> Option<String>;
 
-pub type CallArgsHook = fn(&N<'_>) -> Option<Vec<crate::v2::types::ssa::ArgType>>;
+pub type CallArgsHook =
+    fn(&N<'_>, &mut DeclarationIndex) -> Option<Vec<crate::v2::types::ssa::ArgType>>;
+
+pub type DeclarationIndex = FxHashMap<usize, FxHashMap<String, Option<String>>>;
 
 pub trait Rule {
     fn kinds(&self) -> &[&'static str];
