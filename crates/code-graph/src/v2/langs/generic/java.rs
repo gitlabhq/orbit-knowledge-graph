@@ -1,6 +1,7 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
+use crate::v2::types::ssa::ArgType;
 use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
@@ -138,37 +139,124 @@ fn java_literal_type(node: &N<'_>) -> Option<&'static str> {
     })
 }
 
-fn java_call_arg(node: &N<'_>) -> RawArg {
+fn named(type_name: impl Into<smol_str::SmolStr>) -> ArgType {
+    ArgType::Named(type_name.into())
+}
+
+fn written_type(type_owner: &N<'_>, dimensions_owner: &N<'_>) -> Option<String> {
+    let base = erased_type(&type_owner.field("type")?);
+    let dimensions = dimensions_owner
+        .field("dimensions")
+        .map_or(0, |d| bracket_pairs(&d));
+    Some(format!("{base}{}", "[]".repeat(dimensions)))
+}
+
+fn declared_type(usage: &N<'_>, name: &str, fields_only: bool) -> Option<String> {
+    let usage_start = usage.range().start;
+    let mut child = usage.clone();
+    while let Some(parent) = child.parent() {
+        if fields_only && !matches!(parent.kind().as_ref(), "class_body" | "enum_body") {
+            child = parent;
+            continue;
+        }
+        match parent.kind().as_ref() {
+            "lambda_expression"
+                if parent.field("parameters").is_some_and(|p| {
+                    p.text()
+                        .split(|c: char| !c.is_alphanumeric() && c != '_')
+                        .any(|t| t == name)
+                }) =>
+            {
+                return None;
+            }
+            "enhanced_for_statement" | "resource" | "catch_formal_parameter"
+                if parent.field("name").is_some_and(|n| n.text() == name) =>
+            {
+                return written_type(&parent, &parent);
+            }
+            "method_declaration" | "constructor_declaration" => {
+                if let Some(found) = parent
+                    .field("parameters")
+                    .into_iter()
+                    .flat_map(|p| p.children().collect::<Vec<_>>())
+                    .find(|p| p.field("name").is_some_and(|n| n.text() == name))
+                {
+                    return declared_type_of_parameter(&found);
+                }
+            }
+            "block"
+            | "constructor_body"
+            | "switch_block_statement_group"
+            | "for_statement"
+            | "class_body"
+            | "enum_body" => {
+                let is_class = matches!(parent.kind().as_ref(), "class_body" | "enum_body");
+                for sibling in parent.children() {
+                    if !is_class && sibling.range().start >= usage_start {
+                        break;
+                    }
+                    let kind = sibling.kind();
+                    if kind != "local_variable_declaration" && kind != "field_declaration" {
+                        continue;
+                    }
+                    let declarator = sibling.children().find(|d| {
+                        d.kind() == "variable_declarator"
+                            && d.field("name").is_some_and(|n| n.text() == name)
+                    });
+                    if let Some(declarator) = declarator {
+                        return written_type(&sibling, &declarator);
+                    }
+                }
+            }
+            _ => {}
+        }
+        child = parent;
+    }
+    None
+}
+
+fn declared_type_of_parameter(param: &N<'_>) -> Option<String> {
+    if param.kind() == "spread_parameter" {
+        let element = param
+            .children()
+            .take_while(|c| c.kind() != "...")
+            .filter(|c| c.is_named() && c.kind() != "modifiers" && !is_annotation(c))
+            .last()?;
+        return Some(format!("{}[]", erased_type(&element)));
+    }
+    written_type(param, param)
+}
+
+fn java_call_arg(node: &N<'_>) -> ArgType {
     if let Some(literal) = java_literal_type(node) {
-        return RawArg::Type(literal.to_string());
+        return named(literal);
     }
     match node.kind().as_ref() {
-        "identifier" => RawArg::Variable(node.text().to_string()),
+        "identifier" => declared_type(node, &node.text(), false)
+            .filter(|t| t != "var")
+            .map_or(ArgType::Unknown, named),
         "parenthesized_expression" => node
             .children()
             .find(|c| c.is_named())
-            .map_or(RawArg::Unknown, |inner| java_call_arg(&inner)),
+            .map_or(ArgType::Unknown, |inner| java_call_arg(&inner)),
         "unary_expression" => match node.field("operand") {
             Some(operand) if operand.kind().ends_with("_literal") => java_call_arg(&operand),
-            _ => RawArg::Unknown,
+            _ => ArgType::Unknown,
         },
-        "cast_expression" => node
+        "cast_expression" | "object_creation_expression" => node
             .field("type")
-            .map_or(RawArg::Unknown, |ty| RawArg::Type(erased_type(&ty))),
-        "object_creation_expression" => node
-            .field("type")
-            .map_or(RawArg::Unknown, |ty| RawArg::Type(erased_type(&ty))),
+            .map_or(ArgType::Unknown, |ty| named(erased_type(&ty))),
         "field_access" => match (node.field("object"), node.field("field")) {
             (Some(object), Some(field)) if object.kind() == "this" => {
-                RawArg::Variable(format!("this.{}", field.text()))
+                declared_type(node, &field.text(), true).map_or(ArgType::Unknown, named)
             }
-            _ => RawArg::Unknown,
+            _ => ArgType::Unknown,
         },
-        _ => RawArg::Unknown,
+        _ => ArgType::Unknown,
     }
 }
 
-fn java_call_args(node: &N<'_>) -> Option<Vec<RawArg>> {
+fn java_call_args(node: &N<'_>) -> Option<Vec<ArgType>> {
     if node.kind() != "method_invocation" {
         return None;
     }
@@ -382,7 +470,10 @@ impl DslLanguage for JavaDsl {
     }
 
     fn bindings() -> Vec<BindingRule> {
-        let skip = &["void", "var"];
+        let skip = &[
+            "int", "long", "short", "byte", "float", "double", "boolean", "char", "void", "String",
+            "var",
+        ];
         let java_type = |rule: BindingRule| {
             rule.typed(
                 vec![

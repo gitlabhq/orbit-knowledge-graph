@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::types::{ImportRewriter, LanguageSpec, RawArg, Rule};
+use super::types::{ImportRewriter, LanguageSpec, Rule};
 use super::utils::{
     canonical_range, find_first_ident, infer_import_binding_kind, resolve_type_name,
 };
@@ -8,7 +8,7 @@ use crate::trace_event;
 use crate::utils::node_to_range;
 use crate::v2::config::Language;
 use crate::v2::trace::Tracer;
-use crate::v2::types::ssa::{ArgType, ParseValue};
+use crate::v2::types::ssa::ArgType;
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, ExpressionStep, Fqn,
     ImportBindingKind, ImportMode,
@@ -1437,7 +1437,7 @@ struct PendingRef<'a> {
     block: super::ssa::BlockId,
     enclosing_def: Option<u32>,
     is_return: bool,
-    args: Option<Vec<RawArg>>,
+    args: Option<Vec<ArgType>>,
 }
 
 struct WalkFullState<'a> {
@@ -1491,24 +1491,6 @@ impl<'a> WalkFullState<'a> {
             budget: budget.map(treesitter_visit::CpuBudget::start),
             timed_out: false,
         }
-    }
-
-    fn resolve_args(&mut self, args: &[RawArg], block: super::ssa::BlockId) -> Vec<ArgType> {
-        args.iter()
-            .map(|arg| match arg {
-                RawArg::Type(name) => ArgType::Named(name.as_str().into()),
-                RawArg::Unknown => ArgType::Unknown,
-                RawArg::Variable(name) => {
-                    let key = self.arena.alloc_str(name);
-                    let reaching = self.ssa.read_variable_stateless(key, block);
-                    let mut types = reaching.values.iter().map(|v| v.to_parse_value());
-                    match (types.next(), types.next()) {
-                        (Some(Some(ParseValue::Type(ty))), None) => ArgType::Named(ty),
-                        _ => ArgType::Unknown,
-                    }
-                }
-            })
-            .collect()
     }
 
     fn collect_refs(&mut self, pending_refs: &[PendingRef<'a>]) -> Vec<CollectedRef> {
@@ -1578,10 +1560,7 @@ impl<'a> WalkFullState<'a> {
                 chain: chain_slice.map(|s| s.to_vec()),
                 reaching: parse_values.to_vec(),
                 enclosing_def: pending.enclosing_def,
-                args: pending
-                    .args
-                    .as_deref()
-                    .map(|args| self.resolve_args(args, pending.block)),
+                args: pending.args.clone(),
             });
         }
         collected

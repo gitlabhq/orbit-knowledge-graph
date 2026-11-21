@@ -175,9 +175,10 @@ fn convertible(arg: &Ty, param: &Ty, phase: Phase) -> bool {
                 element: pe,
             },
         ) => {
-            ad == pd
-                && (ae == pe
-                    || (Primitive::from_name(ae).is_none() && Primitive::from_name(pe).is_none()))
+            let reference_elements =
+                Primitive::from_name(ae).is_none() && Primitive::from_name(pe).is_none();
+            (ad == pd && (ae == pe || reference_elements))
+                || (ad > pd && matches!(pe.as_str(), "Object" | "Cloneable" | "Serializable"))
         }
         (Ty::Array { .. }, Ty::Reference(p)) => {
             matches!(p.as_str(), "Object" | "Cloneable" | "Serializable") || is_type_variable(p)
@@ -206,7 +207,7 @@ fn subtype(sub: &Ty, sup: &Ty) -> bool {
             matches!(name.as_str(), "Object" | "Serializable" | "Comparable")
                 || (name == "Number" && p.is_numeric())
         }
-        (_, Ty::Reference(name)) => name == "Object",
+        (_, Ty::Reference(name)) => name == "Object" || is_type_variable(name),
         _ => false,
     }
 }
@@ -383,6 +384,23 @@ mod tests {
     fn nothing_applicable_returns_empty() {
         assert!(pick(&["(int)"], &named(&["String"])).is_empty());
         assert!(pick(&["(int)"], &named(&["int", "int"])).is_empty());
+    }
+
+    #[test]
+    fn arrays_are_not_their_elements() {
+        assert_eq!(
+            pick(&["(String)", "(String[])"], &named(&["String[]"])),
+            [1]
+        );
+        assert_eq!(
+            pick(&["(Object)", "(Object[])"], &named(&["String[][]"])),
+            [1]
+        );
+    }
+
+    #[test]
+    fn type_variable_parameter_is_as_general_as_object() {
+        assert_eq!(pick(&["(T)", "(String)"], &named(&["String"])), [1]);
     }
 
     #[test]

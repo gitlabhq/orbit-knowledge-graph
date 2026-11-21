@@ -1,0 +1,153 @@
+name: "Java: overload selection keeps receivers and declared types faithful"
+
+fixtures:
+  - path: g/Generics.java
+    content: |
+      package g;
+
+      import java.util.List;
+
+      class Box<T> {
+        T get() { return null; }
+      }
+
+      class Generics {
+        void local() {
+          Box<String> b = new Box<>();
+          b.get();
+        }
+
+        void param(Box<String> p) {
+          p.get();
+        }
+
+        static void f(String s) {}
+        static void f(List l) {}
+        static void p(String s) {}
+        static void p(String[] s) {}
+        static void o(Object s) {}
+        static void o(Object[] s) {}
+
+        void genericArgument(List<String> names) {
+          f(names);
+        }
+
+        void arrayParam(String[] args) {
+          p(args);
+        }
+
+        void arrayLocal() {
+          String[] xs = new String[1];
+          p(xs);
+        }
+
+        void nestedArray(String[][] m) {
+          o(m);
+        }
+      }
+
+  - path: g/FieldAndMethod.java
+    content: |
+      package g;
+
+      class FieldAndMethod {
+        int size = 0;
+
+        int size() { return size; }
+
+        void useSize() {
+          size();
+        }
+      }
+
+  - path: g/Receivers.java
+    content: |
+      package g;
+
+      class A {
+        void process(long x) {}
+      }
+
+      class B {
+        void process(int x) {}
+      }
+
+      class Receivers {
+        void either(boolean flag) {
+          Object x;
+          if (flag) {
+            x = new A();
+          } else {
+            x = new B();
+          }
+          x.process(5);
+        }
+      }
+
+tests:
+  - name: "a generic local keeps its declared type as the receiver"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'local' AND callee.name = 'get'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "g.Box.get" } }
+
+  - name: "a generic parameter keeps its declared type as the receiver"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'param' AND callee.name = 'get'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "g.Box.get" } }
+
+  - name: "a parameterized argument does not match its type argument"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'genericArgument' AND callee.name = 'f'
+      RETURN callee.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(List)" } }
+
+  - name: "array arguments do not match their element type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['arrayParam', 'arrayLocal'] AND callee.name = 'p'
+      RETURN caller.name AS caller, callee.signature AS signature
+      ORDER BY caller.name
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "arrayLocal", signature: "(String[])" } }
+      - { row: { caller: "arrayParam", signature: "(String[])" } }
+
+  - name: "a nested array argument matches the Object array overload"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'nestedArray' AND callee.name = 'o'
+      RETURN callee.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(Object[])" } }
+
+  - name: "a field that shares a method name is not a call target"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'useSize' AND callee.name = 'size'
+      RETURN callee.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: "Method" } }
+
+  - name: "most specific applies per receiver type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'either' AND callee.name = 'process'
+      RETURN callee.fqn AS fqn
+      ORDER BY callee.fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "g.A.process" } }
+      - { row: { fqn: "g.B.process" } }

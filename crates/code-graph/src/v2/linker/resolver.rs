@@ -612,40 +612,47 @@ impl<'a> ResolveCtx<'a> {
             Some(self.graph.str(id)).filter(|signature| !signature.is_empty())
         };
 
-        let mut pool = Vec::with_capacity(candidates.len());
-        let mut others = Vec::new();
+        let mut kept = Vec::new();
+        let mut by_scope: Vec<(&str, &str, Vec<NodeIndex>)> = Vec::new();
         for &candidate in &candidates {
-            if signature_of(candidate).is_none() {
-                others.push(candidate);
-                continue;
-            }
             let fqn = self.graph.def_fqn(candidate);
-            let Some((scope_fqn, member_name)) = fqn.rsplit_once(self.rules.fqn_separator) else {
-                pool.push(candidate);
-                continue;
-            };
-            self.graph
-                .lookup_nested_overloads(scope_fqn, member_name, &mut pool);
-            if !pool.contains(&candidate) {
-                pool.push(candidate);
+            match fqn.rsplit_once(self.rules.fqn_separator) {
+                Some((scope, member)) if signature_of(candidate).is_some() => {
+                    match by_scope
+                        .iter_mut()
+                        .find(|(s, m, _)| *s == scope && *m == member)
+                    {
+                        Some((_, _, group)) => group.push(candidate),
+                        None => by_scope.push((scope, member, vec![candidate])),
+                    }
+                }
+                _ => kept.push(candidate),
             }
-        }
-        if pool.is_empty() {
-            return candidates;
         }
 
-        let signatures: Vec<&str> = pool
-            .iter()
-            .map(|&n| signature_of(n).unwrap_or_default())
-            .collect();
-        let selected = select(&signatures, args);
-        if selected.is_empty() {
-            return candidates;
+        for (scope, member, group) in by_scope {
+            let mut pool = Vec::new();
+            self.graph.lookup_nested_overloads(scope, member, &mut pool);
+            pool.retain(|&n| signature_of(n).is_some());
+            for &candidate in &group {
+                if !pool.contains(&candidate) {
+                    pool.push(candidate);
+                }
+            }
+            let signatures: Vec<&str> = pool
+                .iter()
+                .map(|&n| signature_of(n).unwrap_or_default())
+                .collect();
+            let selected = select(&signatures, args);
+            if selected.is_empty() {
+                kept.extend(group);
+            } else {
+                kept.extend(selected.into_iter().map(|i| pool[i]));
+            }
         }
-        others.extend(selected.into_iter().map(|i| pool[i]));
         let mut seen = rustc_hash::FxHashSet::default();
-        others.retain(|n| seen.insert(*n));
-        others
+        kept.retain(|n| seen.insert(*n));
+        kept
     }
 
     fn resolve_bare(&mut self, r: &RefData<'_>) -> Result<Vec<NodeIndex>, Killed> {

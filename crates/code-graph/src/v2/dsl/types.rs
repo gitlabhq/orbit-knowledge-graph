@@ -18,14 +18,7 @@ pub type LabelFn = fn(&N<'_>) -> &'static str;
 
 pub type NameHookFn = fn(&N<'_>) -> Option<String>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RawArg {
-    Type(String),
-    Variable(String),
-    Unknown,
-}
-
-pub type CallArgsHook = fn(&N<'_>) -> Option<Vec<RawArg>>;
+pub type CallArgsHook = fn(&N<'_>) -> Option<Vec<crate::v2::types::ssa::ArgType>>;
 
 pub trait Rule {
     fn kinds(&self) -> &[&'static str];
