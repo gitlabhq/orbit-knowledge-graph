@@ -662,15 +662,17 @@ impl Phase<Displayed> for Export<'_> {
     }
 
     fn run(self, context: &mut Context, Displayed { state }: Displayed) -> Result<Exported, Error> {
+        let mut plan = export::ExportPlan::from_config(
+            &context.env.export_config,
+            self.ontology,
+            &context.env.lang,
+        )?;
+        plan.max_file_edges = context.env.limits.max_file_edges;
         let tables = export::export(
             &state.trees,
             &state.edges,
             &context.env.lang,
-            &export::ExportPlan::from_config(
-                &context.env.export_config,
-                self.ontology,
-                &context.env.lang,
-            )?,
+            &plan,
             &self.envelope,
             true,
             &|_| true,

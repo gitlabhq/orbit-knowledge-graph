@@ -72,7 +72,8 @@ impl<'a> Exporter<'a> {
         report: &Report,
         stats: bool,
     ) -> Result<FamilyOutput> {
-        let plan = ExportPlan::from_config(&env.export_config, self.ontology, &env.lang)?;
+        let mut plan = ExportPlan::from_config(&env.export_config, self.ontology, &env.lang)?;
+        plan.max_file_edges = env.limits.max_file_edges;
         let tables = code_graph_incremental::export::export(
             &state.trees,
             &state.edges,
@@ -191,7 +192,8 @@ pub(super) fn replacement(
     files: &FxHashSet<String>,
 ) -> Result<Replacement> {
     let envelope = envelope(git);
-    let plan = ExportPlan::from_config(&env.export_config, ontology, &env.lang)?;
+    let mut plan = ExportPlan::from_config(&env.export_config, ontology, &env.lang)?;
+    plan.max_file_edges = env.limits.max_file_edges;
     let edge_table = ontology
         .local_edge_table_name()
         .ok_or_else(|| anyhow::anyhow!("local_db.edge_table.name must be configured"))?;

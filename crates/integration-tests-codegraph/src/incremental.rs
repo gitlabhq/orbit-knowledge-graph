@@ -66,6 +66,7 @@ fn suite_limits(suite: &TestSuite) -> Limits {
     };
     Limits {
         max_tree_depth: suite.max_tree_depth.unwrap_or(limits.max_tree_depth),
+        max_file_edges: suite.max_file_edges.unwrap_or(limits.max_file_edges),
         ..limits
     }
 }
@@ -199,6 +200,7 @@ fn check(
         trace: false,
         limits: None,
         max_tree_depth: None,
+        max_file_edges: None,
         skipped: Vec::new(),
         limited: Vec::new(),
         tests: tests.to_vec(),

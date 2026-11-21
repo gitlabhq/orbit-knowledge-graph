@@ -184,6 +184,7 @@ pub struct ExportPlan {
     pub(super) containment: Vec<Containment>,
     pub(super) graph: Vec<GraphEdge>,
     pub batch_bytes: usize,
+    pub max_file_edges: usize,
 }
 
 impl ExportPlan {
@@ -296,6 +297,7 @@ impl ExportPlan {
             containment,
             graph,
             batch_bytes: orbit_arrow::BATCH_BYTES,
+            max_file_edges: 0,
         })
     }
 }

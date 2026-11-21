@@ -58,6 +58,8 @@ pub struct TestSuite {
     #[serde(default)]
     pub max_tree_depth: Option<usize>,
     #[serde(default)]
+    pub max_file_edges: Option<usize>,
+    #[serde(default)]
     pub skipped: Vec<SkippedFile>,
     #[serde(default)]
     pub limited: Vec<SkippedFile>,

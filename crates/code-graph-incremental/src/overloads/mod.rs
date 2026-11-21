@@ -8,9 +8,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::canonical::Canonical as C;
 use crate::intern::Lang;
 use crate::resolver::CLASS_LIKE;
+use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{Compact, Edge, EdgeKind, members_named};
-use java::{ArgType, select_overloads};
+use java::{ArgType, Param, parse_signature, select_parsed};
 
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
@@ -18,7 +19,14 @@ type NodeRef = (u32, u32);
 
 type Site = (u32, u32, u32);
 
-type Pool = Rc<[NodeRef]>;
+const MAX_FAN_OUT: usize = 32;
+
+struct PoolData {
+    defs: Vec<NodeRef>,
+    parsed: Vec<Vec<Param>>,
+}
+
+type Pool = Rc<PoolData>;
 type MemberIndex = FxHashMap<u32, Vec<NodeRef>>;
 
 #[derive(Default)]
@@ -27,7 +35,13 @@ struct Scope {
     bindings: FxHashMap<u32, Vec<(usize, u32)>>,
 }
 
-pub fn narrow_calls(trees: &[Tree], edges: &[Edge], lang: &Lang) -> Option<Vec<Edge>> {
+pub fn narrow_calls(
+    trees: &[Tree],
+    edges: &[Edge],
+    lang: &Lang,
+    max_file_edges: usize,
+    run: &Sentinel,
+) -> Result<Option<Vec<Edge>>, Killed> {
     let narrower = Narrower {
         trees,
         lang,
@@ -52,12 +66,21 @@ pub fn narrow_calls(trees: &[Tree], edges: &[Edge], lang: &Lang) -> Option<Vec<E
         }
     }
     if sites.is_empty() {
-        return None;
+        return Ok(None);
     }
+    let mut file_edges: FxHashMap<u32, usize> = FxHashMap::default();
+    for edge in edges {
+        *file_edges.entry(edge.from_tree).or_default() += 1;
+    }
+    let mut sites: Vec<_> = sites.into_iter().collect();
+    sites.sort_unstable_by_key(|(site, _)| *site);
     let extends = extends_of(edges);
     let mut replaced: FxHashMap<usize, Vec<Edge>> = FxHashMap::default();
     let mut dropped: FxHashSet<usize> = FxHashSet::default();
-    for ((from_tree, _, site), indices) in &sites {
+    for (visited, ((from_tree, _, site), indices)) in sites.iter().enumerate() {
+        if visited % 256 == 0 {
+            run.check()?;
+        }
         let call = narrower.cursor((*from_tree, *site));
         let targets: Vec<NodeRef> = indices
             .iter()
@@ -66,9 +89,16 @@ pub fn narrow_calls(trees: &[Tree], edges: &[Edge], lang: &Lang) -> Option<Vec<E
         let Some(chosen) = narrower.choose(call, &targets, &extends) else {
             continue;
         };
-        if chosen.len() == targets.len() && chosen.iter().all(|c| targets.contains(c)) {
+        let existing: FxHashSet<NodeRef> = targets.iter().copied().collect();
+        if chosen.len() == targets.len() && chosen.iter().all(|c| existing.contains(c)) {
             continue;
         }
+        let file_total = file_edges.entry(*from_tree).or_default();
+        let grown = (*file_total + chosen.len()).saturating_sub(targets.len());
+        if max_file_edges != 0 && chosen.len() > targets.len() && grown > max_file_edges {
+            continue;
+        }
+        *file_total = grown;
         let template = edges[indices[0]];
         let narrowed = chosen.iter().map(|&(to_tree, to_node)| Edge {
             to_tree,
@@ -79,7 +109,7 @@ pub fn narrow_calls(trees: &[Tree], edges: &[Edge], lang: &Lang) -> Option<Vec<E
         dropped.extend(indices);
     }
     if replaced.is_empty() {
-        return None;
+        return Ok(None);
     }
     let mut narrowed = Vec::with_capacity(edges.len());
     for (index, edge) in edges.iter().enumerate() {
@@ -89,7 +119,7 @@ pub fn narrow_calls(trees: &[Tree], edges: &[Edge], lang: &Lang) -> Option<Vec<E
             None => {}
         }
     }
-    Some(narrowed)
+    Ok(Some(narrowed))
 }
 
 fn extends_of(edges: &[Edge]) -> FxHashMap<NodeRef, Vec<NodeRef>> {
@@ -135,23 +165,30 @@ impl<'a> Narrower<'a> {
     ) -> Option<Vec<NodeRef>> {
         let args = self.arguments(call)?;
         let mut chosen: Vec<NodeRef> = Vec::new();
+        let mut chosen_set: FxHashSet<NodeRef> = FxHashSet::default();
         for &target in targets {
             let pool = self.overloads(self.cursor(target), extends);
-            let signatures: Vec<&str> = pool
-                .iter()
-                .filter_map(|&def| self.signature(self.cursor(def)))
-                .collect();
-            for index in select_overloads(&signatures, &args) {
-                if !chosen.contains(&pool[index]) {
-                    chosen.push(pool[index]);
+            for index in select_parsed(&pool.parsed, &args) {
+                if chosen_set.insert(pool.defs[index]) {
+                    chosen.push(pool.defs[index]);
                 }
             }
+        }
+        let unknown = args.iter().any(|arg| matches!(arg, ArgType::Unknown));
+        if unknown && chosen.len() > MAX_FAN_OUT {
+            return None;
         }
         (!chosen.is_empty()).then_some(chosen)
     }
 
     fn overloads(&self, method: Cursor<'a>, extends: &FxHashMap<NodeRef, Vec<NodeRef>>) -> Pool {
-        let own = || Rc::from(vec![(method.fi(), method.index())]);
+        let own = || {
+            let signature = self.signature(method).unwrap_or_default();
+            Rc::new(PoolData {
+                defs: vec![(method.fi(), method.index())],
+                parsed: vec![parse_signature(signature)],
+            })
+        };
         let Some(name) = method.child_sym(C::DefName) else {
             return own();
         };
@@ -199,7 +236,11 @@ impl<'a> Narrower<'a> {
             }
             level = next;
         }
-        pool.into()
+        let parsed = pool
+            .iter()
+            .map(|&def| parse_signature(self.signature(self.cursor(def)).unwrap_or_default()))
+            .collect();
+        Rc::new(PoolData { defs: pool, parsed })
     }
 
     fn members_of(&self, class: NodeRef) -> Rc<MemberIndex> {

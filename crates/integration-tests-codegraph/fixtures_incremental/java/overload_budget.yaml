@@ -1,0 +1,43 @@
+name: "Java: narrowing never grows a file past its edge budget"
+
+limits: default
+max_file_edges: 32
+
+fixtures:
+  - path: p/Budget.java
+    content: |
+      package p;
+
+      class A {}
+      class B {}
+      class C {}
+
+      class Budget {
+        static A a() { return null; }
+        void f(A x) {}
+        void f(B x) {}
+        void f(C x) {}
+
+        void one() { f(a().hashCode()); }
+        void two() { f(a().hashCode()); }
+        void three() { f(a().hashCode()); }
+        void four() { f(a().hashCode()); }
+        void five() { f(a().hashCode()); }
+      }
+
+tests:
+  - name: only the calls that fit the budget fan out, in source order
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE t.name = 'f'
+      RETURN c.name AS caller, t.signature AS signature
+      ORDER BY c.name, t.signature
+      LIMIT 100
+    assert:
+      - { row_count: 9 }
+      - { row: { caller: "one", signature: "(A)" } }
+      - { row: { caller: "one", signature: "(B)" } }
+      - { row: { caller: "one", signature: "(C)" } }
+      - { row: { caller: "two", signature: "(A)" } }
+      - { row: { caller: "two", signature: "(B)" } }
+      - { row: { caller: "two", signature: "(C)" } }

@@ -186,6 +186,7 @@ pub fn repository<E: std::fmt::Display>(
                                     &env.lang,
                                 )?;
                                 plan.batch_bytes = options.batch_bytes;
+                                plan.max_file_edges = env.limits.max_file_edges;
                                 phase_started(family, "export", file_count);
                                 let batches = crate::export::export(
                                     &graph.state.trees,

@@ -87,3 +87,39 @@ tests:
     );
     run_incremental_suite(&yaml);
 }
+
+const OVERLOADS: usize = 40;
+
+#[test]
+fn a_call_to_more_overloads_than_the_fan_out_cap_keeps_its_original_edges() {
+    let mut overloads = String::new();
+    for i in 0..OVERLOADS {
+        overloads.push_str(&format!("        void f(T{i} x) {{}}\n"));
+    }
+    let yaml = format!(
+        r#"name: "Java: a call with too many candidate overloads is not expanded"
+
+fixtures:
+  - path: p/Many.java
+    content: |
+      package p;
+
+      class Many {{
+        static Object g() {{ return null; }}
+{overloads}
+        void call() {{ f(g()); }}
+      }}
+
+tests:
+  - name: the unknown argument does not fan out to every overload
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'call' AND t.name = 'f'
+      RETURN t.signature AS signature
+      LIMIT 100
+    assert:
+      - {{ row_count: 1 }}
+"#
+    );
+    run_incremental_suite(&yaml);
+}

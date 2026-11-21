@@ -121,12 +121,12 @@ fn is_final_reference(name: &str) -> bool {
 }
 
 #[derive(Debug)]
-struct Param {
+pub(super) struct Param {
     ty: Ty,
     variadic: bool,
 }
 
-fn parse_signature(signature: &str) -> Vec<Param> {
+pub(super) fn parse_signature(signature: &str) -> Vec<Param> {
     let inner = signature
         .trim()
         .strip_prefix('(')
@@ -263,8 +263,13 @@ fn more_specific(a: &[Param], b: &[Param], arg_count: usize, variadic_call: bool
     )
 }
 
-pub fn select_overloads(signatures: &[&str], args: &[ArgType]) -> Vec<usize> {
+#[cfg(test)]
+fn select_overloads(signatures: &[&str], args: &[ArgType]) -> Vec<usize> {
     let candidates: Vec<Vec<Param>> = signatures.iter().map(|s| parse_signature(s)).collect();
+    select_parsed(&candidates, args)
+}
+
+pub(super) fn select_parsed(candidates: &[Vec<Param>], args: &[ArgType]) -> Vec<usize> {
     let arg_types: Vec<Option<Ty>> = args
         .iter()
         .map(|a| match a {
