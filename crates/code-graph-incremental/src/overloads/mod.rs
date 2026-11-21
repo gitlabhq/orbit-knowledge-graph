@@ -21,6 +21,12 @@ type Site = (u32, u32, u32);
 type Pool = Rc<[NodeRef]>;
 type MemberIndex = FxHashMap<u32, Vec<NodeRef>>;
 
+#[derive(Default)]
+struct Scope {
+    positions: FxHashMap<u32, usize>,
+    bindings: FxHashMap<u32, Vec<(usize, u32)>>,
+}
+
 pub fn narrow_calls(trees: &[Tree], edges: &[Edge], lang: &Lang) -> Option<Vec<Edge>> {
     let narrower = Narrower {
         trees,
@@ -29,6 +35,8 @@ pub fn narrow_calls(trees: &[Tree], edges: &[Edge], lang: &Lang) -> Option<Vec<E
         pools: RefCell::default(),
         members: RefCell::default(),
         fields: RefCell::default(),
+        locals: RefCell::default(),
+        scopes: RefCell::default(),
     };
     let mut sites: FxHashMap<Site, Vec<usize>> = FxHashMap::default();
     for (index, edge) in edges.iter().enumerate() {
@@ -92,12 +100,16 @@ fn extends_of(edges: &[Edge]) -> FxHashMap<NodeRef, Vec<NodeRef>> {
     extends
 }
 
+type Locals<'a> = FxHashSet<&'a str>;
+
 struct Narrower<'a> {
     trees: &'a [Tree],
     lang: &'a Lang,
     tags: ReservedTags,
     pools: RefCell<FxHashMap<(NodeRef, u32), Pool>>,
     members: RefCell<FxHashMap<NodeRef, Rc<MemberIndex>>>,
+    locals: RefCell<FxHashMap<NodeRef, Rc<Locals<'a>>>>,
+    scopes: RefCell<FxHashMap<NodeRef, Rc<Scope>>>,
     fields: RefCell<FxHashMap<NodeRef, Rc<FxHashMap<u32, NodeRef>>>>,
 }
 
@@ -272,14 +284,46 @@ impl<'a> Narrower<'a> {
         let Some(member) = call.ancestors().find(|node| node.is(C::Def)) else {
             return ArgType::Unknown;
         };
-        let Some(locals) = self.tag_text(member, self.tags.java_locals) else {
+        let Some(locals) = self.locals_of(member) else {
             return ArgType::Unknown;
         };
-        if locals.contains(&format!(" {name} ")) {
+        if locals.contains(name) {
             self.local_type(call, member, name)
         } else {
             self.field_type(call, name)
         }
+    }
+
+    fn locals_of(&self, member: Cursor<'a>) -> Option<Rc<Locals<'a>>> {
+        let key = (member.fi(), member.index());
+        if let Some(locals) = self.locals.borrow().get(&key) {
+            return Some(Rc::clone(locals));
+        }
+        let names = self.tag_text(member, self.tags.java_locals)?;
+        let locals = Rc::new(names.split_whitespace().collect::<Locals>());
+        self.locals.borrow_mut().insert(key, Rc::clone(&locals));
+        Some(locals)
+    }
+
+    fn scope_of(&self, node: Cursor<'a>) -> Rc<Scope> {
+        let key = (node.fi(), node.index());
+        if let Some(scope) = self.scopes.borrow().get(&key) {
+            return Rc::clone(scope);
+        }
+        let mut scope = Scope::default();
+        for (position, child) in node.children().enumerate() {
+            scope.positions.insert(child.index(), position);
+            if child.is(C::Binding) {
+                scope
+                    .bindings
+                    .entry(child.sym())
+                    .or_default()
+                    .push((position, child.index()));
+            }
+        }
+        let scope = Rc::new(scope);
+        self.scopes.borrow_mut().insert(key, Rc::clone(&scope));
+        scope
     }
 
     fn declared(&self, node: Cursor<'a>) -> ArgType {
@@ -296,13 +340,14 @@ impl<'a> Narrower<'a> {
         }
         let mut node = call;
         while let Some(parent) = node.parent() {
-            let binding = parent
-                .children()
-                .take_while(|sibling| sibling.index() != node.index())
-                .filter(|sibling| sibling.is(C::Binding) && sibling.sym() == sym)
-                .last();
-            if let Some(binding) = binding {
-                return self.declared(binding);
+            let scope = self.scope_of(parent);
+            let before = scope.positions.get(&node.index()).copied().unwrap_or(0);
+            let binding = scope.bindings.get(&sym).and_then(|bindings| {
+                let earlier = bindings.partition_point(|&(position, _)| position < before);
+                bindings[..earlier].last()
+            });
+            if let Some(&(_, binding)) = binding {
+                return self.declared(self.cursor((parent.fi(), binding)));
             }
             if parent.index() == member.index() {
                 break;
