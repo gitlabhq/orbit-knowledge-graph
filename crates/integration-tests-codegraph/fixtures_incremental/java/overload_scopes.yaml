@@ -61,7 +61,7 @@ fixtures:
       }
 
 tests:
-  - name: a lambda parameter, loop variable, pattern, resource or later declarator is not the field
+  - name: a lambda parameter, loop variable, pattern or later declarator is not the field
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.fqn STARTS WITH 'p.Scopes.'
@@ -79,14 +79,13 @@ tests:
       - { row: { caller: "secondDeclarator", signature: "(int)" } }
       - { row: { caller: "secondDeclarator", signature: "(String)" } }
 
-  - name: a resource keeps both overloads
+  - name: a typed resource resolves to its declared type
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'resource' AND t.name = 'g'
       RETURN t.signature AS signature
     assert:
-      - { row_count: 2 }
-      - { row: { signature: "(String)" } }
+      - { row_count: 1 }
       - { row: { signature: "(Object)" } }
 
   - name: a field of an outer class is not read through an inner or anonymous class

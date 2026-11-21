@@ -133,9 +133,21 @@ impl<'a, S: Storage<Node = Node>> Reader<'a, S> {
         Some(format!("({})", types.join(", ")))
     }
 
+    fn caught_type(&self, param: Cursor<'a, S>) -> Option<String> {
+        let catch_type = param.children().find(|c| self.kind(*c) == "catch_type")?;
+        let mut types = catch_type
+            .children()
+            .filter(|c| c.named() && !self.is_annotation(*c));
+        let only = types.next()?;
+        types.next().is_none().then(|| self.erased_type(only))
+    }
+
     fn declared_type(&self, node: Cursor<'a, S>) -> Option<String> {
         if self.kind(node) == "spread_parameter" {
             return Some(format!("{}[]", self.spread_type(node)?));
+        }
+        if self.kind(node) == "catch_formal_parameter" {
+            return self.caught_type(node);
         }
         let ty = self
             .field(node, "type")

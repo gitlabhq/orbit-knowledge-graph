@@ -1,0 +1,49 @@
+name: "Java: a resource or catch parameter shadows a field of the same name in its body"
+
+fixtures:
+  - path: p/Scopes.java
+    content: |
+      package p;
+
+      class Err extends Exception {}
+
+      class Scopes {
+        int name = 0;
+        int e = 0;
+
+        void k(int x) {}
+        void k(String x) {}
+        void k(Err x) {}
+
+        void resource() throws Exception {
+          try (java.io.StringReader name = new java.io.StringReader("")) { k(name); }
+        }
+
+        void typedResource() throws Exception {
+          try (String name = "") { k(name); }
+        }
+
+        void caught() {
+          try { k(1); } catch (Err e) { k(e); }
+        }
+      }
+
+tests:
+  - name: a try resource of type String shadows the int field
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'typedResource' AND t.name = 'k'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(String)" } }
+
+  - name: a catch parameter shadows the int field
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'caught' AND t.name = 'k'
+      RETURN t.signature AS signature
+    assert:
+      - { row: { signature: "(Err)" } }
+      - { row: { signature: "(int)" } }
+      - { row_count: 2 }

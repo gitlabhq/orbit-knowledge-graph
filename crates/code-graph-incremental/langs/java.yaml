@@ -54,6 +54,10 @@ stages:
         tag: { java_decl_type: '@$ROOT|java_declared_type' }
       - match: '(spread_parameter)'
         tag: { java_decl_type: '@$ROOT|java_declared_type' }
+      - match: '(catch_formal_parameter)'
+        tag: { java_decl_type: '@$ROOT|java_declared_type' }
+      - match: '(resource)'
+        tag: { java_decl_type: '@$ROOT|java_declared_type' }
       - match: '(local_variable_declaration)'
         tag: { java_decl_type: '@$ROOT|java_declared_type' }
       - match: '(field_declaration)'
@@ -166,10 +170,13 @@ stages:
         tag: { java_decl_type: '@$ROOT|tag("java_decl_type")' }
       - match: '(catch_formal_parameter (catch_type $T:__member) name: $N:identifier)'
         replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
+        tag: { java_decl_type: '@$ROOT|tag("java_decl_type")' }
       - match: '(catch_formal_parameter (catch_type $T:type_identifier) name: $N:identifier)'
         replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
+        tag: { java_decl_type: '@$ROOT|tag("java_decl_type")' }
       - match: '(catch_formal_parameter name: $N:identifier)'
         replace: '(__binding @$N)'
+        tag: { java_decl_type: '@$ROOT|tag("java_decl_type")' }
 
   - name: qualified-references
     rules:
@@ -228,6 +235,9 @@ stages:
         replace: '(java_local $V (__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__type) (__callee $T)))))'
         tag: { java_decl_type: '@$ROOT|tag("java_decl_type")' }
         tag_on: __binding
+      - match: '(resource type: $T:type_identifier name: $N:identifier value: $V)'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs @$V $V))'
+        tag: { java_decl_type: '@$ROOT|tag("java_decl_type")' }
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__call))'
         replace: '(__binding @$N (__declaration) (__rhs $V))'
         tag: { java_decl_type: '@$ROOT|tag("java_decl_type")' }

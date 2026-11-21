@@ -1,0 +1,61 @@
+name: "Java: the selector keeps what it cannot rule out and drops only what is provably less specific"
+
+fixtures:
+  - path: p/Rules.java
+    content: |
+      package p;
+
+      class Foo {}
+      class Widget {}
+      class IO {}
+
+      class Rules {
+        void obj(Object o) {}
+        void obj(Foo f) {}
+        void spec(Foo f) {}
+        void spec(Object o) {}
+        void tv(IO x) {}
+        void tv(Foo x) {}
+
+        void objectArgument(Object o) { obj(o); }
+        void unrelatedArgument(Widget w) { spec(w); }
+        void exactArgument(Foo f) { spec(f); }
+        void shortClassName(IO io) { tv(io); }
+      }
+
+tests:
+  - name: an Object argument reaches only the Object overload
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'objectArgument' AND t.name = 'obj'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(Object)" } }
+
+  - name: an unrelated class keeps the Object overload next to the specific one
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'unrelatedArgument' AND t.name = 'spec'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 2 }
+      - { row: { signature: "(Foo)" } }
+      - { row: { signature: "(Object)" } }
+
+  - name: an exact argument still picks the most specific overload
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'exactArgument' AND t.name = 'spec'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(Foo)" } }
+
+  - name: a two-letter class name keeps its exact overload
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'shortClassName' AND t.name = 'tv'
+      RETURN t.signature AS signature
+    assert:
+      - { row: { signature: "(IO)" } }
