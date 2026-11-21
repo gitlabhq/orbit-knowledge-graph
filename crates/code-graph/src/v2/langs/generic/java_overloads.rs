@@ -275,7 +275,10 @@ fn subtype(sub: &Ty, sup: &Ty) -> bool {
             matches!(name.as_str(), "Object" | "Serializable" | "Comparable")
                 || (name == "Number" && p.boxes_to_number())
         }
-        (_, Ty::Reference(name)) => name == "Object" || is_type_variable(name),
+        (Ty::Reference(_) | Ty::Array { .. }, Ty::Reference(_) | Ty::Array { .. }) => {
+            convertible(sub, sup, Phase::Strict) == Fit::Proven
+        }
+        (_, Ty::Reference(name)) => name == "Object",
         _ => false,
     }
 }
@@ -505,11 +508,6 @@ mod tests {
     }
 
     #[test]
-    fn type_variable_parameter_is_as_general_as_object() {
-        assert_eq!(pick(&["(T)", "(String)"], &named(&["String"])), [1]);
-    }
-
-    #[test]
     fn generics_and_packages_are_ignored() {
         assert_eq!(
             pick(&["(List)", "(String)"], &named(&["java.util.List<String>"])),
@@ -540,5 +538,40 @@ mod tests {
         let signatures: Vec<&str> = signatures.iter().map(String::as_str).collect();
         let picked = pick(&signatures, &named(&["Widget"]));
         assert_eq!(picked, (0..28).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn most_specific_uses_the_supertypes_the_fit_check_proves() {
+        assert_eq!(
+            pick(&["(String)", "(CharSequence)"], &named(&["String"])),
+            [0]
+        );
+        assert_eq!(
+            pick(&["(String)", "(Comparable)"], &named(&["String"])),
+            [0]
+        );
+        assert_eq!(
+            pick(&["(String[])", "(Object[])"], &named(&["String[]"])),
+            [0]
+        );
+        assert_eq!(
+            pick(&["(Integer)", "(Comparable)"], &named(&["Integer"])),
+            [0]
+        );
+    }
+
+    #[test]
+    fn most_specific_keeps_both_when_the_relation_is_only_possible() {
+        assert_eq!(pick(&["(Foo)", "(Runnable)"], &named(&["Foo"])), [0, 1]);
+        assert_eq!(pick(&["(Widget)", "(Runnable)"], &named(&["Foo"])), [0, 1]);
+    }
+
+    #[test]
+    fn type_variable_shaped_parameter_is_not_a_provable_supertype() {
+        assert_eq!(pick(&["(T)", "(String)"], &named(&["String"])), [0, 1]);
+        assert_eq!(
+            pick(&["(IO)", "(Foo)"], &[ArgType::Named("null".into())]),
+            [0, 1]
+        );
     }
 }
