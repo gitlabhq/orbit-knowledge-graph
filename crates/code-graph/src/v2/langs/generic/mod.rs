@@ -8,6 +8,7 @@ pub mod elixir;
 pub mod go;
 pub mod hcl;
 pub mod java;
+pub mod java_overloads;
 pub mod kotlin;
 pub mod lua;
 pub mod markdown;

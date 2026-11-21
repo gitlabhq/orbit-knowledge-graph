@@ -2,6 +2,7 @@ use petgraph::graph::NodeIndex;
 
 use super::graph::CodeGraph;
 use crate::v2::types::ExpressionStep;
+use crate::v2::types::ssa::ArgType;
 
 pub trait HasRules {
     fn rules() -> ResolutionRules;
@@ -111,6 +112,8 @@ pub type ImportedSymbolFallbackCandidatesHook =
 
 pub type ReexportIndexBuilder = fn(&CodeGraph, &str) -> super::graph::ReexportIndex;
 
+pub type OverloadSelector = fn(&[&str], &[ArgType]) -> Vec<usize>;
+
 #[derive(Default)]
 pub struct ResolverHooks {
     pub call_method: Option<&'static str>,
@@ -121,6 +124,7 @@ pub struct ResolverHooks {
     pub external_import_type: Option<ExternalImportTypeHook>,
     pub resolve_ident_type: Option<fn(&super::CodeGraph, &str) -> Option<String>>,
     pub reexport_index_builder: Option<ReexportIndexBuilder>,
+    pub select_overloads: Option<OverloadSelector>,
 }
 
 pub struct ResolutionRules {

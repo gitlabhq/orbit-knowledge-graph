@@ -109,6 +109,79 @@ fn java_signature(node: &N<'_>) -> Option<String> {
     Some(format!("({})", types.join(", ")))
 }
 
+fn java_literal_type(node: &N<'_>) -> Option<&'static str> {
+    let text = node.text();
+    let has_suffix = |suffixes: [char; 2]| text.ends_with(suffixes);
+    Some(match node.kind().as_ref() {
+        "decimal_integer_literal"
+        | "hex_integer_literal"
+        | "octal_integer_literal"
+        | "binary_integer_literal" => {
+            if has_suffix(['l', 'L']) {
+                "long"
+            } else {
+                "int"
+            }
+        }
+        "decimal_floating_point_literal" | "hex_floating_point_literal" => {
+            if has_suffix(['f', 'F']) {
+                "float"
+            } else {
+                "double"
+            }
+        }
+        "true" | "false" => "boolean",
+        "character_literal" => "char",
+        "string_literal" => "String",
+        "null_literal" => "null",
+        _ => return None,
+    })
+}
+
+fn java_call_arg(node: &N<'_>) -> RawArg {
+    if let Some(literal) = java_literal_type(node) {
+        return RawArg::Type(literal.to_string());
+    }
+    match node.kind().as_ref() {
+        "identifier" => RawArg::Variable(node.text().to_string()),
+        "parenthesized_expression" => node
+            .children()
+            .find(|c| c.is_named())
+            .map_or(RawArg::Unknown, |inner| java_call_arg(&inner)),
+        "unary_expression" => match node.field("operand") {
+            Some(operand) if operand.kind().ends_with("_literal") => java_call_arg(&operand),
+            _ => RawArg::Unknown,
+        },
+        "cast_expression" => node.field("type").map_or(RawArg::Unknown, |ty| {
+            RawArg::Type(strip_type_arguments(&ty.text()))
+        }),
+        "object_creation_expression" => node.field("type").map_or(RawArg::Unknown, |ty| {
+            RawArg::Type(strip_type_arguments(&ty.text()))
+        }),
+        "field_access" => match (node.field("object"), node.field("field")) {
+            (Some(object), Some(field)) if object.kind() == "this" => {
+                RawArg::Variable(format!("this.{}", field.text()))
+            }
+            _ => RawArg::Unknown,
+        },
+        _ => RawArg::Unknown,
+    }
+}
+
+fn java_call_args(node: &N<'_>) -> Option<Vec<RawArg>> {
+    if node.kind() != "method_invocation" {
+        return None;
+    }
+    let arguments = node.field("arguments")?;
+    Some(
+        arguments
+            .children()
+            .filter(|c| c.is_named() && !c.kind().contains("comment"))
+            .map(|arg| java_call_arg(&arg))
+            .collect(),
+    )
+}
+
 fn java_record_accessors(
     node: &N<'_>,
     defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
@@ -183,6 +256,7 @@ impl DslLanguage for JavaDsl {
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["marker_annotation", "annotation"],
             on_scope: Some(java_record_accessors),
+            call_args: Some(java_call_args),
             ..LanguageHooks::default()
         }
     }
@@ -308,10 +382,7 @@ impl DslLanguage for JavaDsl {
     }
 
     fn bindings() -> Vec<BindingRule> {
-        let skip = &[
-            "int", "long", "short", "byte", "float", "double", "boolean", "char", "void", "String",
-            "var",
-        ];
+        let skip = &["void", "var"];
         let java_type = |rule: BindingRule| {
             rule.typed(
                 vec![
@@ -425,6 +496,7 @@ impl HasRules for JavaRules {
         .with_hooks(ResolverHooks {
             imported_symbol_fallback: ImportedSymbolFallbackPolicy::ambient_wildcard(),
             excluded_ambient_imported_symbol_names: &["print", "println"],
+            select_overloads: Some(super::java_overloads::select_overloads),
             ..Default::default()
         })
         .with_settings(ResolveSettings {

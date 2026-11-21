@@ -1,11 +1,12 @@
 use crate::v2::dsl::engine::CollectedRef;
 use crate::v2::types::ExpressionStep;
-use crate::v2::types::ssa::ParseValue;
+use crate::v2::types::ssa::{ArgType, ParseValue};
 use orbit_utils::strings::{StrId, StringPool};
 use smol_str::SmolStr;
 
 const NO_CHAIN: u32 = u32::MAX;
 const NO_ENCLOSING: u32 = u32::MAX;
+const NO_ARGS: u32 = u32::MAX;
 
 #[derive(Debug)]
 struct PackedRef {
@@ -15,6 +16,8 @@ struct PackedRef {
     chain_len: u32,
     values_start: u32,
     values_len: u32,
+    args_start: u32,
+    args_len: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -54,12 +57,14 @@ pub struct RefPack {
     refs: Vec<PackedRef>,
     steps: Vec<PackedStep>,
     values: Vec<PackedValue>,
+    args: Vec<Option<StrId>>,
 }
 
 pub struct DecodedRef<'a> {
     pub name: &'a str,
     pub has_chain: bool,
     pub enclosing_def: Option<u32>,
+    pub has_args: bool,
 }
 
 impl RefPack {
@@ -69,6 +74,7 @@ impl RefPack {
             refs: Vec::with_capacity(refs.len()),
             steps: Vec::new(),
             values: Vec::new(),
+            args: Vec::new(),
         };
 
         for r in refs {
@@ -121,6 +127,20 @@ impl RefPack {
                 pack.values.push(packed);
             }
 
+            let (args_start, args_len) = match &r.args {
+                None => (NO_ARGS, 0),
+                Some(args) => {
+                    let start = pack.args.len() as u32;
+                    for arg in args {
+                        pack.args.push(match arg {
+                            ArgType::Unknown => None,
+                            ArgType::Named(ty) => Some(pack.strings.alloc(ty.as_str())),
+                        });
+                    }
+                    (start, args.len() as u32)
+                }
+            };
+
             pack.refs.push(PackedRef {
                 name,
                 enclosing_def: r.enclosing_def.unwrap_or(NO_ENCLOSING),
@@ -128,12 +148,15 @@ impl RefPack {
                 chain_len,
                 values_start,
                 values_len: r.reaching.len() as u32,
+                args_start,
+                args_len,
             });
         }
 
         pack.strings.shrink_to_arena();
         pack.steps.shrink_to_fit();
         pack.values.shrink_to_fit();
+        pack.args.shrink_to_fit();
         pack
     }
 
@@ -150,6 +173,7 @@ impl RefPack {
         idx: usize,
         chain_buf: &mut Vec<ExpressionStep>,
         values_buf: &mut Vec<ParseValue>,
+        args_buf: &mut Vec<ArgType>,
     ) -> DecodedRef<'_> {
         let r = &self.refs[idx];
 
@@ -180,9 +204,20 @@ impl RefPack {
             });
         }
 
+        args_buf.clear();
+        let has_args = r.args_start != NO_ARGS;
+        if has_args {
+            let start = r.args_start as usize;
+            for arg in &self.args[start..start + r.args_len as usize] {
+                args_buf
+                    .push(arg.map_or(ArgType::Unknown, |id| ArgType::Named(self.sym(Some(id)))));
+            }
+        }
+
         DecodedRef {
             name: self.strings.get(r.name),
             has_chain,
+            has_args,
             enclosing_def: (r.enclosing_def != NO_ENCLOSING).then_some(r.enclosing_def),
         }
     }
@@ -214,14 +249,16 @@ mod tests {
     fn decode_all(pack: &RefPack) -> Vec<CollectedRef> {
         let mut chain_buf = Vec::new();
         let mut values_buf = Vec::new();
+        let mut args_buf = Vec::new();
         (0..pack.len())
             .map(|i| {
-                let d = pack.decode(i, &mut chain_buf, &mut values_buf);
+                let d = pack.decode(i, &mut chain_buf, &mut values_buf, &mut args_buf);
                 CollectedRef {
                     name: SmolStr::from(d.name),
                     chain: d.has_chain.then(|| chain_buf.clone()),
                     reaching: values_buf.clone(),
                     enclosing_def: d.enclosing_def,
+                    args: d.has_args.then(|| args_buf.clone()),
                 }
             })
             .collect()
@@ -232,6 +269,7 @@ mod tests {
             && a.chain == b.chain
             && a.reaching == b.reaching
             && a.enclosing_def == b.enclosing_def
+            && a.args == b.args
     }
 
     #[test]
@@ -243,6 +281,7 @@ mod tests {
                 chain: None,
                 reaching: vec![],
                 enclosing_def: None,
+                args: None,
             },
             CollectedRef {
                 name: SmolStr::from(long),
@@ -261,12 +300,18 @@ mod tests {
                     ParseValue::Opaque,
                 ],
                 enclosing_def: Some(42),
+                args: Some(vec![
+                    ArgType::Named(SmolStr::from("int")),
+                    ArgType::Unknown,
+                    ArgType::Named(SmolStr::from(long)),
+                ]),
             },
             CollectedRef {
                 name: SmolStr::from("empty_chain"),
                 chain: Some(vec![]),
                 reaching: vec![ParseValue::Opaque],
                 enclosing_def: Some(0),
+                args: None,
             },
         ];
 
@@ -287,6 +332,7 @@ mod tests {
                 chain: Some(vec![ExpressionStep::Field(SmolStr::from("repeated_name"))]),
                 reaching: vec![],
                 enclosing_def: None,
+                args: None,
             })
             .collect();
         let pack = RefPack::from_refs(&refs);
@@ -300,6 +346,7 @@ mod tests {
             chain: None,
             reaching: vec![ParseValue::LocalDef(1), ParseValue::Opaque],
             enclosing_def: None,
+            args: None,
         }];
         let mut pack = RefPack::from_refs(&refs);
         pack.set_reaching_type(0, "pkg.Alias");

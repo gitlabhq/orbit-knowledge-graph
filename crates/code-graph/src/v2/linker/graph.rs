@@ -773,6 +773,45 @@ impl CodeGraph {
         false
     }
 
+    pub fn lookup_nested_overloads(
+        &self,
+        scope_fqn: &str,
+        member_name: &str,
+        out: &mut Vec<NodeIndex>,
+    ) {
+        let Some(member_id) = self.strings.find(member_name) else {
+            return;
+        };
+        let signature_of =
+            |idx: NodeIndex| self.def(idx).metadata.as_ref().and_then(|m| m.signature);
+        let mut seen_signatures = Vec::new();
+        let mut level = Vec::new();
+        for &start in &self.resolve_scope_nodes(scope_fqn) {
+            let ancestors = self
+                .indexes
+                .ancestors
+                .get(&start)
+                .map_or(&[][..], |chain| chain.as_slice());
+            for &scope in std::iter::once(&start).chain(ancestors) {
+                level.clear();
+                self.indexes
+                    .nested
+                    .lookup_into(self.def(scope).fqn, member_id, &mut level);
+                let nearer = seen_signatures.len();
+                for &member in &level {
+                    let signature = signature_of(member);
+                    if signature.is_some() && seen_signatures[..nearer].contains(&signature) {
+                        continue;
+                    }
+                    seen_signatures.push(signature);
+                    if !out.contains(&member) {
+                        out.push(member);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn lookup_by_receiver_type(
         &self,
         type_name: &str,

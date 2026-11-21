@@ -148,6 +148,7 @@ struct FailedChain {
     chain: Vec<crate::v2::types::ExpressionStep>,
     reaching: smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]>,
     enclosing_def: Option<u32>,
+    args: Option<Vec<crate::v2::types::ssa::ArgType>>,
     pending_import_edges: Vec<EdgeTriple>,
 }
 
@@ -1488,15 +1489,19 @@ impl FamilyPipeline {
 
                 let mut chain_buf: Vec<crate::v2::types::ExpressionStep> = Vec::new();
                 let mut values_buf: Vec<crate::v2::types::ssa::ParseValue> = Vec::new();
+                let mut args_buf: Vec<crate::v2::types::ssa::ArgType> = Vec::new();
                 for i in 0..fwr.refs.len() {
                     let before = edges.len();
-                    let r = fwr.refs.decode(i, &mut chain_buf, &mut values_buf);
+                    let r = fwr
+                        .refs
+                        .decode(i, &mut chain_buf, &mut values_buf, &mut args_buf);
                     if resolver
                         .resolve(
                             r.name,
                             r.has_chain.then_some(chain_buf.as_slice()),
                             &values_buf,
                             r.enclosing_def,
+                            r.has_args.then_some(args_buf.as_slice()),
                             &mut edges,
                         )
                         .is_err()
@@ -1511,6 +1516,7 @@ impl FamilyPipeline {
                             chain: chain_buf.clone(),
                             reaching: values_buf.as_slice().into(),
                             enclosing_def: r.enclosing_def,
+                            args: r.has_args.then(|| args_buf.clone()),
                             pending_import_edges: import_edges,
                         });
                     } else {
@@ -1628,6 +1634,7 @@ impl FamilyPipeline {
                                 Some(&failed.chain),
                                 &failed.reaching,
                                 failed.enclosing_def,
+                                failed.args.as_deref(),
                                 &mut edges,
                             )
                             .is_err()

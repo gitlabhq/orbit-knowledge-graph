@@ -18,6 +18,15 @@ pub type LabelFn = fn(&N<'_>) -> &'static str;
 
 pub type NameHookFn = fn(&N<'_>) -> Option<String>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RawArg {
+    Type(String),
+    Variable(String),
+    Unknown,
+}
+
+pub type CallArgsHook = fn(&N<'_>) -> Option<Vec<RawArg>>;
+
 pub trait Rule {
     fn kinds(&self) -> &[&'static str];
     fn condition(&self) -> Option<&Pred>;
@@ -751,6 +760,7 @@ pub struct LanguageHooks {
     pub import_rewriter: Option<ImportRewriterBuilder>,
     pub expression_body_kinds: &'static [&'static str],
     pub ref_name_rewrite: Option<fn(&N<'_>, &str) -> Option<String>>,
+    pub call_args: Option<CallArgsHook>,
 }
 
 fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {

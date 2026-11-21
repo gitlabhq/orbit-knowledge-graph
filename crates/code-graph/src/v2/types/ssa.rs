@@ -5,3 +5,9 @@ pub enum ParseValue {
     Type(smol_str::SmolStr),
     Opaque,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ArgType {
+    Unknown,
+    Named(smol_str::SmolStr),
+}

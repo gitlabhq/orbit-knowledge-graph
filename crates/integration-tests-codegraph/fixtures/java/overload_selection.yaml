@@ -1,0 +1,246 @@
+name: "Java: overload selection by argument types"
+
+fixtures:
+  - path: p/Calc.java
+    content: |
+      package p;
+
+      class Calc {
+        int base = 1;
+        static int sf = 2;
+        static int add(int a, int b) { return a + b; }
+        static double add(double a, double b) { return a + b; }
+        static String add(String a, String b) { return a + b; }
+        static long add(Integer a, Integer b) { return 0; }
+        static int add(int... xs) { return 0; }
+        static int one() { return 1; }
+
+        void literals() {
+          add(1, 2);
+          add(1.5, 2.5);
+          add("x", "y");
+        }
+
+        void locals() {
+          int i = 1;
+          double d = 2.0;
+          String s = "x";
+          Integer boxed = 3;
+          add(i, i);
+          add(d, d);
+          add(s, s);
+          add(boxed, boxed);
+        }
+
+        void widening() {
+          int i = 1;
+          double d = 2.0;
+          add(i, d);
+        }
+
+        void fields() {
+          add(base, sf);
+        }
+
+        void variadic() {
+          add(1, 2, 3);
+        }
+
+        void unknownArgument() {
+          add(one(), "x");
+        }
+      }
+
+  - path: p/Rev.java
+    content: |
+      package p;
+
+      class Rev {
+        static String plus(String a, String b) { return a + b; }
+        static double plus(double a, double b) { return a + b; }
+        static int plus(int a, int b) { return a + b; }
+
+        void bare() {
+          plus(8, 5);
+          plus(4.3, 6.28);
+          plus("a", "b");
+        }
+      }
+
+  - path: p/RevUser.java
+    content: |
+      package p;
+
+      class RevUser {
+        void qualified() {
+          Rev.plus(8, 5);
+        }
+      }
+
+  - path: p/Inst.java
+    content: |
+      package p;
+
+      class Inst {
+        void f(int x) {}
+        void f(String s) {}
+
+        void callBareInt() {
+          f(1);
+        }
+
+        void callThisString() {
+          this.f("s");
+        }
+      }
+
+  - path: p/InstUser.java
+    content: |
+      package p;
+
+      class InstUser {
+        void use() {
+          Inst obj = new Inst();
+          obj.f(1);
+        }
+      }
+
+  - path: p/Inherit.java
+    content: |
+      package p;
+
+      class Base {
+        void g(int x) {}
+        void h(int x) {}
+      }
+
+      class Sub extends Base {
+        void g(String s) {}
+        void h(int x) {}
+
+        void gInt() {
+          g(1);
+        }
+
+        void gString() {
+          g("s");
+        }
+
+        void hInt() {
+          h(1);
+        }
+      }
+
+tests:
+  - name: "literal arguments pick the matching overload"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'literals' AND callee.name = 'add'
+      RETURN callee.signature AS signature
+      ORDER BY callee.start_line
+    assert:
+      - { row_count: 3 }
+      - { row: { signature: "(int, int)" } }
+      - { row: { signature: "(double, double)" } }
+      - { row: { signature: "(String, String)" } }
+
+  - name: "declared local and parameter types pick the overload"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'locals' AND callee.name = 'add'
+      RETURN callee.signature AS signature
+      ORDER BY callee.start_line
+    assert:
+      - { row_count: 4 }
+      - { row: { signature: "(int, int)" } }
+      - { row: { signature: "(double, double)" } }
+      - { row: { signature: "(String, String)" } }
+      - { row: { signature: "(Integer, Integer)" } }
+
+  - name: "widening int to double selects the double overload"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'widening' AND callee.name = 'add'
+      RETURN callee.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(double, double)" } }
+
+  - name: "field arguments use their declared types"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'fields' AND callee.name = 'add'
+      RETURN callee.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(int, int)" } }
+
+  - name: "three arguments select the varargs overload"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'variadic' AND callee.name = 'add'
+      RETURN callee.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(int...)" } }
+
+  - name: "an argument of unknown type keeps every overload it could fit"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'unknownArgument' AND callee.name = 'add'
+      RETURN callee.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(String, String)" } }
+
+  - name: "declaration order does not decide bare calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'bare' AND callee.name = 'plus'
+      RETURN callee.signature AS signature
+    assert:
+      - { row_count: 3 }
+      - { row: { signature: "(int, int)" } }
+      - { row: { signature: "(double, double)" } }
+      - { row: { signature: "(String, String)" } }
+
+  - name: "declaration order does not decide qualified calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'qualified' AND callee.name = 'plus'
+      RETURN callee.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(int, int)" } }
+
+  - name: "bare, this-qualified and typed-local receivers pick the overload"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'f' AND caller.name IN ['callBareInt', 'callThisString', 'use']
+      RETURN caller.name AS caller, callee.signature AS signature
+      ORDER BY caller.name
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: "callBareInt", signature: "(int)" } }
+      - { row: { caller: "callThisString", signature: "(String)" } }
+      - { row: { caller: "use", signature: "(int)" } }
+
+  - name: "inherited overloads stay candidates"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'g' AND caller.name IN ['gInt', 'gString']
+      RETURN caller.name AS caller, callee.fqn AS fqn, callee.signature AS signature
+      ORDER BY caller.name
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "gInt", fqn: "p.Base.g", signature: "(int)" } }
+      - { row: { caller: "gString", fqn: "p.Sub.g", signature: "(String)" } }
+
+  - name: "an override is not duplicated by its ancestor"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'hInt' AND callee.name = 'h'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "p.Sub.h" } }

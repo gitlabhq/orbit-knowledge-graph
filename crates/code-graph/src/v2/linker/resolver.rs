@@ -2,7 +2,7 @@ use crate::trace_event;
 use crate::v2::pipeline::LanguageContext;
 use crate::v2::sentinel::{FileGuard, Killed};
 use crate::v2::trace::Tracer;
-use crate::v2::types::ssa::ParseValue;
+use crate::v2::types::ssa::{ArgType, ParseValue};
 use crate::v2::types::{
     DefKind, EdgeKind, ExpressionStep, ImportBindingKind, NodeKind, Relationship,
 };
@@ -22,6 +22,7 @@ pub struct RefData<'a> {
     pub chain: Option<&'a [ExpressionStep]>,
     pub reaching: &'a [ParseValue],
     pub enclosing_def: Option<u32>,
+    pub args: Option<&'a [ArgType]>,
 }
 
 pub struct FileResolver<'a> {
@@ -131,6 +132,7 @@ impl<'a> FileResolver<'a> {
         chain: Option<&[ExpressionStep]>,
         reaching: &[ParseValue],
         enclosing_def: Option<u32>,
+        args: Option<&[ArgType]>,
         edges: &mut Vec<(NodeIndex, NodeIndex, GraphEdge)>,
     ) -> Result<(), Killed> {
         self.ctx.check_killed()?;
@@ -140,6 +142,7 @@ impl<'a> FileResolver<'a> {
             chain,
             reaching,
             enclosing_def,
+            args,
         };
         let targets = self.ctx.resolve_single(&ref_data)?;
         if targets.is_empty() {
@@ -578,6 +581,7 @@ impl<'a> ResolveCtx<'a> {
         } else {
             self.resolve_bare(r)?
         };
+        let result = self.select_overloads(r, result);
 
         trace_event!(
             self.tracer,
@@ -597,6 +601,51 @@ impl<'a> ResolveCtx<'a> {
         );
 
         Ok(result)
+    }
+
+    fn select_overloads(&self, r: &RefData<'_>, candidates: Vec<NodeIndex>) -> Vec<NodeIndex> {
+        let (Some(select), Some(args)) = (self.rules.hooks.select_overloads, r.args) else {
+            return candidates;
+        };
+        let signature_of = |n: NodeIndex| {
+            let id = self.graph.try_def(n)?.metadata.as_ref()?.signature?;
+            Some(self.graph.str(id))
+        };
+
+        let mut pool = Vec::with_capacity(candidates.len());
+        let mut others = Vec::new();
+        for &candidate in &candidates {
+            if signature_of(candidate).is_none() {
+                others.push(candidate);
+                continue;
+            }
+            let fqn = self.graph.def_fqn(candidate);
+            let Some((scope_fqn, member_name)) = fqn.rsplit_once(self.rules.fqn_separator) else {
+                pool.push(candidate);
+                continue;
+            };
+            self.graph
+                .lookup_nested_overloads(scope_fqn, member_name, &mut pool);
+            if !pool.contains(&candidate) {
+                pool.push(candidate);
+            }
+        }
+        if pool.is_empty() {
+            return candidates;
+        }
+
+        let signatures: Vec<&str> = pool
+            .iter()
+            .map(|&n| signature_of(n).unwrap_or_default())
+            .collect();
+        let selected = select(&signatures, args);
+        if selected.is_empty() {
+            return candidates;
+        }
+        others.extend(selected.into_iter().map(|i| pool[i]));
+        let mut seen = rustc_hash::FxHashSet::default();
+        others.retain(|n| seen.insert(*n));
+        others
     }
 
     fn resolve_bare(&mut self, r: &RefData<'_>) -> Result<Vec<NodeIndex>, Killed> {
@@ -1019,6 +1068,7 @@ impl<'a> ResolveCtx<'a> {
             chain: None,
             reaching: &[],
             enclosing_def: r.enclosing_def,
+            args: None,
         };
         self.resolve_bare(&fallback)
     }
@@ -1194,6 +1244,7 @@ impl<'a> ResolveCtx<'a> {
                         chain: None,
                         reaching: &[],
                         enclosing_def: None,
+                        args: None,
                     };
                     let mut nodes = self.resolve_bare(&fallback)?;
                     // GlobalName: last-resort lookup for chain bases only.

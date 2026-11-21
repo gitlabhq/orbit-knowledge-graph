@@ -303,6 +303,7 @@ impl<'a> DockerfileParser<'a> {
             chain: None,
             reaching: vec![reaching],
             enclosing_def: enclosing,
+            args: None,
         });
     }
 

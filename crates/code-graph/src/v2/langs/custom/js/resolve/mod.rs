@@ -218,6 +218,7 @@ fn resolve_local_call_edges(
             call.chain.as_deref(),
             &call.reaching,
             call.enclosing_def,
+            None,
             &mut resolved,
         );
 

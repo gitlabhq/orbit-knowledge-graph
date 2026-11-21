@@ -1,0 +1,69 @@
+name: "Java: overloaded calls resolve by argument types (javacalc3 shape)"
+
+fixtures:
+  - path: src/main/java/cloud/gronk/example/calc/App.java
+    content: |
+      package cloud.gronk.example.calc;
+
+      class App {
+
+        static int plusMethod(int x, int y) {
+          return x + y;
+        }
+
+        static double plusMethod(double x, double y) {
+          return x + y;
+        }
+
+        static String plusMethod(String x, String y) {
+          return x + y;
+        }
+
+        public static void main(String[] args) {
+          int myNum1 = plusMethod(8, 5);
+          double myNum2 = plusMethod(4.3, 6.28);
+          String myStr1 = plusMethod("Hello ", "World!");
+          System.out.println("int: " + myNum1);
+          System.out.println("double: " + myNum2);
+          System.out.println("String: " + myStr1);
+        }
+      }
+
+  - path: src/test/java/cloud/gronk/example/calc/AppTest.java
+    content: |
+      package cloud.gronk.example.calc;
+
+      import static org.junit.jupiter.api.Assertions.assertEquals;
+
+      import org.junit.jupiter.api.DisplayName;
+      import org.junit.jupiter.api.Test;
+
+      public class AppTest {
+          @DisplayName("Test bla bla")
+          @Test
+          void testGet() {
+              assertEquals(13, App.plusMethod(8, 5));
+          }
+      }
+
+tests:
+  - name: "main binds each plusMethod call to its own overload"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'main' AND callee.name = 'plusMethod'
+      RETURN callee.signature AS signature
+      ORDER BY callee.start_line
+    assert:
+      - { row_count: 3 }
+      - { row: { signature: "(int, int)" } }
+      - { row: { signature: "(double, double)" } }
+      - { row: { signature: "(String, String)" } }
+
+  - name: "testGet binds the qualified call to the int overload only"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'testGet' AND callee.name = 'plusMethod'
+      RETURN callee.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(int, int)" } }
