@@ -57,6 +57,47 @@ fn java_super_types(node: &N<'_>) -> Vec<String> {
     result
 }
 
+fn strip_type_arguments(text: &str) -> String {
+    let mut depth = 0usize;
+    let mut erased = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            _ if depth == 0 && !ch.is_whitespace() => erased.push(ch),
+            _ => {}
+        }
+    }
+    erased
+}
+
+fn java_signature(node: &N<'_>) -> Option<String> {
+    let parameters = node.field("parameters")?;
+    let types: Vec<String> = parameters
+        .children()
+        .filter_map(|param| match param.kind().as_ref() {
+            "formal_parameter" => {
+                let ty = strip_type_arguments(&param.field("type")?.text());
+                let dims = param
+                    .field("dimensions")
+                    .map(|d| strip_type_arguments(&d.text()))
+                    .unwrap_or_default();
+                Some(format!("{ty}{dims}"))
+            }
+            "spread_parameter" => {
+                let ty = param
+                    .children()
+                    .take_while(|c| c.kind() != "...")
+                    .filter(|c| c.is_named() && c.kind() != "modifiers")
+                    .last()?;
+                Some(format!("{}...", strip_type_arguments(&ty.text())))
+            }
+            _ => None,
+        })
+        .collect();
+    Some(format!("({})", types.join(", ")))
+}
+
 fn java_record_accessors(
     node: &N<'_>,
     defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
@@ -164,13 +205,16 @@ impl DslLanguage for JavaDsl {
                     metadata()
                         .type_annotation(field("type").inner("type_arguments", "type_identifier")),
                 ),
-            scope("constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
+            scope("constructor_declaration", "Constructor")
+                .def_kind(DefKind::Constructor)
+                .metadata(metadata().signature(java_signature)),
             scope("compact_constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
                 .metadata(
                     metadata()
-                        .return_type(field("type").inner("type_arguments", "type_identifier")),
+                        .return_type(field("type").inner("type_arguments", "type_identifier"))
+                        .signature(java_signature),
                 ),
             scope("lambda_expression", "Lambda")
                 .def_kind(DefKind::Lambda)

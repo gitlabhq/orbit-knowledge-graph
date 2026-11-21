@@ -1,0 +1,100 @@
+name: "Java: overload signatures"
+
+fixtures:
+  - path: com/example/App.java
+    content: |
+      package com.example;
+
+      import java.util.List;
+      import java.util.Map;
+
+      public class App {
+          public App() {}
+
+          public App(String name, int... counts) {}
+
+          public static int plusMethod(int a, int b) {
+              return a + b;
+          }
+
+          public static double plusMethod(double a, double b) {
+              return a + b;
+          }
+
+          public static String plusMethod(String a, String b) {
+              return a + b;
+          }
+
+          public int add(int a) {
+              return a;
+          }
+
+          public int add(List<String> items, Map<String, List<Integer>> index, int[] raw, String tail[]) {
+              return 0;
+          }
+
+          public void log(String... messages) {}
+      }
+
+  - path: com/example/Child.java
+    content: |
+      package com.example;
+
+      public class Child extends App {
+          public int add(long a) {
+              return 0;
+          }
+      }
+
+tests:
+  - name: "plusMethod overloads carry distinct signatures"
+    query: |
+      MATCH (m:Definition)
+      WHERE m.name = 'plusMethod'
+      RETURN m.signature AS signature
+      ORDER BY m.start_line
+    assert:
+      - { row_count: 3 }
+      - { row: { signature: "(int, int)" } }
+      - { row: { signature: "(double, double)" } }
+      - { row: { signature: "(String, String)" } }
+
+  - name: "instance method overloads, including one inherited from a parent, carry distinct signatures"
+    query: |
+      MATCH (m:Definition)
+      WHERE m.name = 'add'
+      RETURN m.fqn AS fqn, m.signature AS signature
+      ORDER BY m.start_line
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: "com.example.App.add", signature: "(int)" } }
+      - { row: { fqn: "com.example.App.add", signature: "(List, Map, int[], String[])" } }
+      - { row: { fqn: "com.example.Child.add", signature: "(long)" } }
+
+  - name: "varargs keep their marker"
+    query: |
+      MATCH (m:Definition)
+      WHERE m.name = 'log'
+      RETURN m.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(String...)" } }
+
+  - name: "constructors carry signatures"
+    query: |
+      MATCH (m:Definition)
+      WHERE m.definition_type = 'Constructor' AND m.fqn = 'com.example.App.App'
+      RETURN m.signature AS signature
+    assert:
+      - { row_count: 2 }
+      - { row: { signature: "()" } }
+      - { row: { signature: "(String, int...)" } }
+
+  - name: "classes carry no signature"
+    query: |
+      MATCH (c:Definition)
+      WHERE c.name = 'App' AND c.definition_type = 'Class'
+      RETURN c.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "" } }
