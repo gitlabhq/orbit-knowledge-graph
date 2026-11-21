@@ -220,8 +220,7 @@ impl DuckDbClient {
     }
 }
 
-/// The ICU extension owns the TimeZone setting. Bundled builds leave ICU out
-/// and always render timestamps in UTC.
+/// Bundled builds omit ICU, which owns the TimeZone setting, and render timestamps in UTC.
 fn has_time_zone_setting(conn: &duckdb::Connection) -> Result<bool> {
     conn.query_row(
         "SELECT count(*) > 0 FROM duckdb_settings() WHERE name = 'TimeZone'",
