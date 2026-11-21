@@ -18,6 +18,7 @@ pub struct ReservedTags {
     pub signature: u32,
     pub java_decl_type: u32,
     pub java_arg_types: u32,
+    pub java_locals: u32,
 }
 
 impl ReservedTags {
@@ -40,6 +41,7 @@ impl ReservedTags {
             signature: k("signature"),
             java_decl_type: k("java_decl_type"),
             java_arg_types: k("java_arg_types"),
+            java_locals: k("java_locals"),
         }
     }
 }

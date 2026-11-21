@@ -261,11 +261,24 @@ impl<'a> Narrower<'a> {
                 .and_then(|class| class.child_sym(C::DefName))
                 .map_or(ArgType::Unknown, |sym| named(self.lang.syms.resolve(sym)));
         }
-        match token.split_at_checked(1) {
-            Some(("~", name)) => self.local_type(call, name),
-            Some(("^", name)) => self.field_type(call, name),
-            _ if token == "?" => ArgType::Unknown,
-            _ => named(token),
+        match token.strip_prefix('~') {
+            Some(name) => self.variable_type(call, name),
+            None if token == "?" => ArgType::Unknown,
+            None => named(token),
+        }
+    }
+
+    fn variable_type(&self, call: Cursor<'a>, name: &str) -> ArgType {
+        let Some(member) = call.ancestors().find(|node| node.is(C::Def)) else {
+            return ArgType::Unknown;
+        };
+        let Some(locals) = self.tag_text(member, self.tags.java_locals) else {
+            return ArgType::Unknown;
+        };
+        if locals.contains(&format!(" {name} ")) {
+            self.local_type(call, member, name)
+        } else {
+            self.field_type(call, name)
         }
     }
 
@@ -276,7 +289,7 @@ impl<'a> Narrower<'a> {
         }
     }
 
-    fn local_type(&self, call: Cursor<'a>, name: &str) -> ArgType {
+    fn local_type(&self, call: Cursor<'a>, member: Cursor<'a>, name: &str) -> ArgType {
         let sym = self.lang.syms.lookup(name);
         if sym == 0 {
             return ArgType::Unknown;
@@ -290,6 +303,9 @@ impl<'a> Narrower<'a> {
                 .last();
             if let Some(binding) = binding {
                 return self.declared(binding);
+            }
+            if parent.index() == member.index() {
+                break;
             }
             node = parent;
         }

@@ -42,6 +42,22 @@ fixtures:
         void sameNameLocal() { int own = 1; k(own); }
         void plainField() { k(own); }
         void parameterShadowsField(int fld) { k(fld); }
+        void instanceofPattern(Object o) { if (o instanceof Integer s) { k(s); } }
+        void flowScoping(Object o) { if (!(o instanceof Integer fld)) return; k(fld); }
+        { Object o = 1; if (o instanceof Integer fld) { k(fld); } }
+
+        static class Nested {
+          int nestedInt = 0;
+          void useNestedInt() { k(nestedInt); }
+        }
+        class InnerOwn {
+          String innerString = "";
+          void useInnerString() { k(innerString); }
+        }
+        void localClassField() {
+          String v = "";
+          class Local { int v = 1; void useLocalField() { k(v); } }
+        }
       }
 
 tests:
@@ -95,3 +111,35 @@ tests:
       - { row: { caller: "sameNameLocal", signature: "(int)" } }
       - { row: { caller: "plainField", signature: "(String)" } }
       - { row: { caller: "parameterShadowsField", signature: "(int)" } }
+
+  - name: an instanceof pattern is a local, not the field
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name IN ['instanceofPattern', 'flowScoping'] AND t.name = 'k'
+      RETURN c.name AS caller, t.signature AS signature
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: "instanceofPattern", signature: "(int)" } }
+      - { row: { caller: "flowScoping", signature: "(int)" } }
+      - { row: { caller: "flowScoping", signature: "(String)" } }
+
+  - name: a pattern in an instance initializer keeps both overloads
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'p.Scopes' AND t.name = 'k'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 2 }
+      - { row: { signature: "(int)" } }
+      - { row: { signature: "(String)" } }
+
+  - name: a field of a nested or local class resolves to its own type
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name IN ['useNestedInt', 'useInnerString', 'useLocalField'] AND t.name = 'k'
+      RETURN c.name AS caller, t.signature AS signature
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: "useNestedInt", signature: "(int)" } }
+      - { row: { caller: "useInnerString", signature: "(String)" } }
+      - { row: { caller: "useLocalField", signature: "(int)" } }

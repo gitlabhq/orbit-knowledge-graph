@@ -45,9 +45,9 @@ stages:
   - name: overload-facts
     rules:
       - match: '(method_declaration)'
-        tag: { signature: '@$ROOT|java_signature' }
+        tag: { signature: '@$ROOT|java_signature', java_locals: '@$ROOT|java_locals' }
       - match: '(constructor_declaration)'
-        tag: { signature: '@$ROOT|java_signature' }
+        tag: { signature: '@$ROOT|java_signature', java_locals: '@$ROOT|java_locals' }
       - match: '(method_invocation arguments: $A)'
         tag: { java_arg_types: '@$A|java_arg_types' }
       - match: '(formal_parameter)'
@@ -313,16 +313,16 @@ stages:
 
       - match: '(method_declaration $M?:modifiers type: $RT:__member name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type $RT) $M $P $B)'
-        tag: { signature: '@$ROOT|tag("signature")' }
+        tag: { signature: '@$ROOT|tag("signature")', java_locals: '@$ROOT|tag("java_locals")' }
       - match: '(method_declaration $M?:modifiers type: $RT:type_identifier name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $M $P (__call (__callee @$RT $RT)) $B)'
-        tag: { signature: '@$ROOT|tag("signature")' }
+        tag: { signature: '@$ROOT|tag("signature")', java_locals: '@$ROOT|tag("java_locals")' }
       - match: '(method_declaration $M?:modifiers name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) $M $P $B)'
-        tag: { signature: '@$ROOT|tag("signature")' }
+        tag: { signature: '@$ROOT|tag("signature")', java_locals: '@$ROOT|tag("java_locals")' }
       - match: '(constructor_declaration $M?:modifiers name: $N:identifier parameters: $P body: $B)'
         replace: '(__def (__defname @$N) (__method) $M $P $B)'
-        tag: { signature: '@$ROOT|tag("signature")' }
+        tag: { signature: '@$ROOT|tag("signature")', java_locals: '@$ROOT|tag("java_locals")' }
       - match: '(compact_constructor_declaration $M?:modifiers name: $N:identifier body: $B)'
         replace: '(__def (__defname @$N) (__method) $M $B)'
 

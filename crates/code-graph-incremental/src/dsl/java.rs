@@ -7,6 +7,7 @@ use super::types::Tf;
 pub enum JavaTf {
     Signature,
     DeclaredType,
+    Locals,
     ArgTypes,
 }
 
@@ -16,6 +17,7 @@ impl JavaTf {
             "java_signature" => Self::Signature,
             "java_declared_type" => Self::DeclaredType,
             "java_arg_types" => Self::ArgTypes,
+            "java_locals" => Self::Locals,
             _ => return None,
         }))
     }
@@ -27,6 +29,7 @@ impl JavaTf {
             Self::Signature => reader.signature(node),
             Self::DeclaredType => reader.declared_type(node),
             Self::ArgTypes => reader.arg_types(node),
+            Self::Locals => reader.locals(node),
         };
         match text.as_deref() {
             None | Some("") => 0,
@@ -171,18 +174,8 @@ impl<'a, S: Storage<Node = Node>> Reader<'a, S> {
             "string_literal" => "String".into(),
             "true" | "false" => "boolean".into(),
             "null_literal" => "null".into(),
-            "identifier" => {
-                let name = self.text(arg);
-                if self.in_anonymous_body(arg) {
-                    return unknown();
-                }
-                let sigil = if self.declared_in_members(arg, name) {
-                    '~'
-                } else {
-                    '^'
-                };
-                format!("{sigil}{name}")
-            }
+            "identifier" if self.in_anonymous_body(arg) => unknown(),
+            "identifier" => format!("~{}", self.text(arg)),
             "this" => "this".into(),
             "object_creation_expression" => self
                 .field(arg, "type")
@@ -215,28 +208,27 @@ impl<'a, S: Storage<Node = Node>> Reader<'a, S> {
             })
     }
 
-    fn declared_in_members(&self, node: Cursor<'a, S>, name: &str) -> bool {
-        node.ancestors()
-            .filter(|member| {
-                member.parent().is_some_and(|parent| {
-                    matches!(
-                        self.kind(parent),
-                        "class_body"
-                            | "interface_body"
-                            | "enum_body_declarations"
-                            | "annotation_type_body"
-                    )
-                })
-            })
-            .any(|member| {
-                std::iter::once(member)
-                    .chain(member.descendants())
-                    .any(|id| self.declares(id, name))
-            })
+    fn locals(&self, member: Cursor<'a, S>) -> Option<String> {
+        let mut names: Vec<&str> = Vec::new();
+        let mut pending = vec![member];
+        while let Some(node) = pending.pop() {
+            for child in node.children() {
+                if self.kind(child) == "class_body" {
+                    continue;
+                }
+                if self.declares(child) {
+                    names.push(self.text(child));
+                }
+                pending.push(child);
+            }
+        }
+        names.sort_unstable();
+        names.dedup();
+        Some(format!(" {} ", names.join(" ")))
     }
 
-    fn declares(&self, id: Cursor<'a, S>, name: &str) -> bool {
-        if self.kind(id) != "identifier" || self.text(id) != name {
+    fn declares(&self, id: Cursor<'a, S>) -> bool {
+        if self.kind(id) != "identifier" {
             return false;
         }
         let Some(parent) = id.parent() else {
@@ -248,7 +240,8 @@ impl<'a, S: Storage<Node = Node>> Reader<'a, S> {
             | "formal_parameter"
             | "catch_formal_parameter"
             | "resource"
-            | "enhanced_for_statement" => self.lang.field_name(id.field()) == "name",
+            | "enhanced_for_statement"
+            | "instanceof_expression" => self.lang.field_name(id.field()) == "name",
             "lambda_expression" => self.lang.field_name(id.field()) == "parameters",
             _ => false,
         }
