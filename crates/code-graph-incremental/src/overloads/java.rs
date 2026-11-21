@@ -247,7 +247,9 @@ fn subtype(sub: &Ty, sup: &Ty) -> bool {
             matches!(name.as_str(), "Object" | "Serializable" | "Comparable")
                 || (name == "Number" && p.boxes_to_number())
         }
-        (_, Ty::Reference(name)) => name == "Object" || is_type_variable(name),
+        (Ty::Reference(_) | Ty::Array { .. }, Ty::Reference(_) | Ty::Array { .. }) => {
+            convertible(sub, sup, Phase::Strict) == Fit::Yes
+        }
         _ => false,
     }
 }
@@ -508,6 +510,22 @@ mod tests {
     }
 
     #[test]
+    fn a_known_supertype_is_less_specific() {
+        assert_eq!(
+            pick(&["(String)", "(CharSequence)"], &named(&["String"])),
+            [0]
+        );
+        assert_eq!(
+            pick(&["(String[])", "(Object[])"], &named(&["String[]"])),
+            [0]
+        );
+        assert_eq!(
+            pick(&["(Widget)", "(Runnable)"], &named(&["Widget"])),
+            [0, 1]
+        );
+    }
+
+    #[test]
     fn char_is_not_a_number() {
         assert_eq!(pick(&["(Number)", "(Object)"], &named(&["char"])), [1]);
         assert_eq!(pick(&["(Number)", "(Object)"], &named(&["Character"])), [1]);
@@ -542,8 +560,8 @@ mod tests {
     }
 
     #[test]
-    fn type_variable_parameter_is_as_general_as_object() {
-        assert_eq!(pick(&["(T)", "(String)"], &named(&["String"])), [1]);
+    fn type_variable_parameter_is_never_provably_less_specific() {
+        assert_eq!(pick(&["(T)", "(String)"], &named(&["String"])), [0, 1]);
     }
 
     #[test]
