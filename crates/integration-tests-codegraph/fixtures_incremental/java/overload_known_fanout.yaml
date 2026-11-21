@@ -6,89 +6,156 @@ fixtures:
       package p;
 
       class Foo {}
-      class B0 {}
-      class B1 {}
-      class B2 {}
-      class B3 {}
-      class B4 {}
-      class B5 {}
-      class B6 {}
-      class B7 {}
-      class B8 {}
-      class B9 {}
-      class B10 {}
-      class B11 {}
-      class B12 {}
-      class B13 {}
-      class B14 {}
-      class B15 {}
-      class B16 {}
-      class B17 {}
-      class B18 {}
-      class B19 {}
-      class B20 {}
-      class B21 {}
-      class B22 {}
-      class B23 {}
-      class B24 {}
-      class B25 {}
-      class B26 {}
-      class B27 {}
-      class B28 {}
-      class B29 {}
-      class B30 {}
-      class B31 {}
-      class B32 {}
-      class B33 {}
-      class B34 {}
-      class B35 {}
-      class B36 {}
-      class B37 {}
-      class B38 {}
-      class B39 {}
+      class Box0 {}
+      class Box1 {}
+      class Box2 {}
+      class Box3 {}
+      class Box4 {}
+      class Box5 {}
+      class Box6 {}
+      class Box7 {}
+      class Box8 {}
+      class Box9 {}
+      class Box10 {}
+      class Box11 {}
+      class Box12 {}
+      class Box13 {}
+      class Box14 {}
+      class Box15 {}
+      class Box16 {}
+      class Box17 {}
+      class Box18 {}
+      class Box19 {}
+      class Box20 {}
+      class Box21 {}
+      class Box22 {}
+      class Box23 {}
+      class Box24 {}
+      class Box25 {}
+      class Box26 {}
+      class Box27 {}
+      class Box28 {}
+      class Box29 {}
+      class Box30 {}
+      class Box31 {}
+      class Box32 {}
+      class Box33 {}
+      class Box34 {}
+      class Box35 {}
+      class Box36 {}
+      class Box37 {}
+      class Box38 {}
+      class Box39 {}
+
+      class Sk0 {}
+      class Sk1 {}
+      class Sk2 {}
+      class Sk3 {}
+      class Sk4 {}
+      class Sk5 {}
+      class Sk6 {}
+      class Sk7 {}
+      class Sk8 {}
+      class Sk9 {}
+      class Sk10 {}
+      class Sk11 {}
+      class Sk12 {}
+      class Sk13 {}
+      class Sk14 {}
+      class Sk15 {}
+      class Sk16 {}
+      class Sk17 {}
+      class Sk18 {}
+      class Sk19 {}
+      class Sk20 {}
+      class Sk21 {}
+      class Sk22 {}
+      class Sk23 {}
+      class Sk24 {}
+      class Sk25 {}
+      class Sk26 {}
+      class Sk27 {}
+      class Sk28 {}
+      class Sk29 {}
+      class Sk30 {}
+      class Sk31 {}
 
       class Known {
-        void f(B0 x) {}
-        void f(B1 x) {}
-        void f(B2 x) {}
-        void f(B3 x) {}
-        void f(B4 x) {}
-        void f(B5 x) {}
-        void f(B6 x) {}
-        void f(B7 x) {}
-        void f(B8 x) {}
-        void f(B9 x) {}
-        void f(B10 x) {}
-        void f(B11 x) {}
-        void f(B12 x) {}
-        void f(B13 x) {}
-        void f(B14 x) {}
-        void f(B15 x) {}
-        void f(B16 x) {}
-        void f(B17 x) {}
-        void f(B18 x) {}
-        void f(B19 x) {}
-        void f(B20 x) {}
-        void f(B21 x) {}
-        void f(B22 x) {}
-        void f(B23 x) {}
-        void f(B24 x) {}
-        void f(B25 x) {}
-        void f(B26 x) {}
-        void f(B27 x) {}
-        void f(B28 x) {}
-        void f(B29 x) {}
-        void f(B30 x) {}
-        void f(B31 x) {}
-        void f(B32 x) {}
-        void f(B33 x) {}
-        void f(B34 x) {}
-        void f(B35 x) {}
-        void f(B36 x) {}
-        void f(B37 x) {}
-        void f(B38 x) {}
-        void f(B39 x) {}
+        void f(Box0 x) {}
+        void f(Box1 x) {}
+        void f(Box2 x) {}
+        void f(Box3 x) {}
+        void f(Box4 x) {}
+        void f(Box5 x) {}
+        void f(Box6 x) {}
+        void f(Box7 x) {}
+        void f(Box8 x) {}
+        void f(Box9 x) {}
+        void f(Box10 x) {}
+        void f(Box11 x) {}
+        void f(Box12 x) {}
+        void f(Box13 x) {}
+        void f(Box14 x) {}
+        void f(Box15 x) {}
+        void f(Box16 x) {}
+        void f(Box17 x) {}
+        void f(Box18 x) {}
+        void f(Box19 x) {}
+        void f(Box20 x) {}
+        void f(Box21 x) {}
+        void f(Box22 x) {}
+        void f(Box23 x) {}
+        void f(Box24 x) {}
+        void f(Box25 x) {}
+        void f(Box26 x) {}
+        void f(Box27 x) {}
+        void f(Box28 x) {}
+        void f(Box29 x) {}
+        void f(Box30 x) {}
+        void f(Box31 x) {}
+        void f(Box32 x) {}
+        void f(Box33 x) {}
+        void f(Box34 x) {}
+        void f(Box35 x) {}
+        void f(Box36 x) {}
+        void f(Box37 x) {}
+        void f(Box38 x) {}
+        void f(Box39 x) {}
 
+        void h(Object x) {}
+        void h(Sk0 x) {}
+        void h(Sk1 x) {}
+        void h(Sk2 x) {}
+        void h(Sk3 x) {}
+        void h(Sk4 x) {}
+        void h(Sk5 x) {}
+        void h(Sk6 x) {}
+        void h(Sk7 x) {}
+        void h(Sk8 x) {}
+        void h(Sk9 x) {}
+        void h(Sk10 x) {}
+        void h(Sk11 x) {}
+        void h(Sk12 x) {}
+        void h(Sk13 x) {}
+        void h(Sk14 x) {}
+        void h(Sk15 x) {}
+        void h(Sk16 x) {}
+        void h(Sk17 x) {}
+        void h(Sk18 x) {}
+        void h(Sk19 x) {}
+        void h(Sk20 x) {}
+        void h(Sk21 x) {}
+        void h(Sk22 x) {}
+        void h(Sk23 x) {}
+        void h(Sk24 x) {}
+        void h(Sk25 x) {}
+        void h(Sk26 x) {}
+        void h(Sk27 x) {}
+        void h(Sk28 x) {}
+        void h(Sk29 x) {}
+        void h(Sk30 x) {}
+        void h(Sk31 x) {}
+        void skip() { h(null); }
         void many(Foo x) { f(x); }
         void prim(int x) { g(x); }
         void g(int x) {}
@@ -112,3 +179,12 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { signature: "(int)" } }
+
+  - name: the most specific pass is skipped past the cap, so null keeps the original edge
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'skip' AND t.name = 'h'
+      RETURN t.signature AS signature
+      LIMIT 100
+    assert:
+      - { row_count: 1 }

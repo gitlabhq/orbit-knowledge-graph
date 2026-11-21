@@ -73,7 +73,6 @@ fixtures:
         void f(Pad31 x) {}
 
         void call32() { f(null); }
-        void make32() { f(new Pad5()); }
       }
 
   - path: edge33/Edge33.java
