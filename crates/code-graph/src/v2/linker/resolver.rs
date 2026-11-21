@@ -609,7 +609,7 @@ impl<'a> ResolveCtx<'a> {
         };
         let signature_of = |n: NodeIndex| {
             let id = self.graph.try_def(n)?.metadata.as_ref()?.signature?;
-            Some(self.graph.str(id))
+            Some(self.graph.str(id)).filter(|signature| !signature.is_empty())
         };
 
         let mut pool = Vec::with_capacity(candidates.len());

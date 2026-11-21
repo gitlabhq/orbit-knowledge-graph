@@ -152,12 +152,12 @@ fn java_call_arg(node: &N<'_>) -> RawArg {
             Some(operand) if operand.kind().ends_with("_literal") => java_call_arg(&operand),
             _ => RawArg::Unknown,
         },
-        "cast_expression" => node.field("type").map_or(RawArg::Unknown, |ty| {
-            RawArg::Type(strip_type_arguments(&ty.text()))
-        }),
-        "object_creation_expression" => node.field("type").map_or(RawArg::Unknown, |ty| {
-            RawArg::Type(strip_type_arguments(&ty.text()))
-        }),
+        "cast_expression" => node
+            .field("type")
+            .map_or(RawArg::Unknown, |ty| RawArg::Type(erased_type(&ty))),
+        "object_creation_expression" => node
+            .field("type")
+            .map_or(RawArg::Unknown, |ty| RawArg::Type(erased_type(&ty))),
         "field_access" => match (node.field("object"), node.field("field")) {
             (Some(object), Some(field)) if object.kind() == "this" => {
                 RawArg::Variable(format!("this.{}", field.text()))
