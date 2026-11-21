@@ -107,6 +107,7 @@ const APPLICATION = {
   name: HOME.title,
   description: HOME.description,
   url: SITE,
+  image: `${SITE}logo.png`,
   applicationCategory: "DeveloperApplication",
   publisher: { "@type": "Organization", name: "GitLab", url: "https://about.gitlab.com/" },
   softwareHelp: { "@type": "CreativeWork", url: USER_DOCS.href },
