@@ -92,6 +92,78 @@ fixtures:
         }
       }
 
+  - path: q/Phases.java
+    content: |
+      package q;
+
+      class Phases {
+        static void b(Foo foo) {}
+        static void b(Object... rest) {}
+        static void c(IO io) {}
+        static void c(int i) {}
+        static void h(Object[] a) {}
+        static void h(Object o) {}
+
+        void possibleThenVarargs() {
+          Widget w = null;
+          b(w);
+        }
+
+        void possibleThenUnboxing() {
+          Integer i = 1;
+          c(i);
+        }
+
+        void referenceArray() {
+          String[] arr = null;
+          h(arr);
+        }
+      }
+
+  - path: q/ResourceScope.java
+    content: |
+      package q;
+
+      class ResourceScope {
+        String name;
+
+        static void s(String v) {}
+        static void s(Res v) {}
+
+        void catchAndFinally() {
+          try (Res name = new Res()) {
+            s(name);
+          } catch (RuntimeException x) {
+            s(name);
+          } finally {
+            s(name);
+          }
+        }
+      }
+
+  - path: q/Chars.java
+    content: |
+      package q;
+
+      class Chars {
+        static void n(Number v) {}
+        static void n(Object v) {}
+
+        void charLiteral() {
+          n('a');
+        }
+
+        void characterArgument() {
+          Character c = 'a';
+          n(c);
+        }
+
+        void integerArgument() {
+          Integer i = 1;
+          n(i);
+        }
+      }
+
 tests:
   - name: "an Object argument reaches only the Object overload"
     query: |
@@ -163,3 +235,76 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { signature: "(String)" } }
+
+  - name: "a possible-only phase keeps the proven overload of a later phase"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.Phases.possibleThenVarargs' AND callee.name = 'b'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 2 }
+      - { row: { signature: "(Foo)" } }
+      - { row: { signature: "(Object...)" } }
+
+  - name: "a possible-only strict phase keeps the unboxing overload"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.Phases.possibleThenUnboxing' AND callee.name = 'c'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 2 }
+      - { row: { signature: "(IO)" } }
+      - { row: { signature: "(int)" } }
+
+  - name: "a reference array reaches Object[] as the most specific overload"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.Phases.referenceArray' AND callee.name = 'h'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(Object[])" } }
+
+  - name: "a resource variable is not in scope in catch and finally"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.ResourceScope.catchAndFinally' AND callee.name = 's'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 3 }
+      - { row: { signature: "(Res)" } }
+      - { row: { signature: "(String)" } }
+
+  - name: "Chars.charLiteral picks (Object)"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.Chars.charLiteral' AND callee.name = 'n'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(Object)" } }
+
+  - name: "Chars.characterArgument picks (Object)"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.Chars.characterArgument' AND callee.name = 'n'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(Object)" } }
+
+  - name: "Chars.integerArgument picks (Number)"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.Chars.integerArgument' AND callee.name = 'n'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(Number)" } }

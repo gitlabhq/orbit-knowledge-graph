@@ -45,8 +45,8 @@ impl Primitive {
         })
     }
 
-    fn is_numeric(self) -> bool {
-        self != Self::Boolean
+    fn boxes_to_number(self) -> bool {
+        !matches!(self, Self::Boolean | Self::Char)
     }
 
     fn widens_to(self, target: Self) -> bool {
@@ -112,7 +112,7 @@ fn is_type_variable(name: &str) -> bool {
 
 fn is_box_supertype(name: &str, primitive: Primitive) -> bool {
     matches!(name, "Object" | "Serializable" | "Comparable" | "Constable")
-        || (name == "Number" && primitive.is_numeric())
+        || (name == "Number" && primitive.boxes_to_number())
         || is_type_variable(name)
 }
 
@@ -227,7 +227,7 @@ fn convertible(arg: &Ty, param: &Ty, phase: Phase) -> Fit {
         ) => {
             let reference_elements =
                 Primitive::from_name(ae).is_none() && Primitive::from_name(pe).is_none();
-            if ad == pd && ae == pe
+            if ad == pd && (ae == pe || pe == "Object" && reference_elements)
                 || ad > pd && matches!(pe.as_str(), "Object" | "Cloneable" | "Serializable")
             {
                 Fit::Proven
@@ -273,7 +273,7 @@ fn subtype(sub: &Ty, sup: &Ty) -> bool {
         (a, b) if a == b => true,
         (Ty::Boxed(p), Ty::Reference(name)) => {
             matches!(name.as_str(), "Object" | "Serializable" | "Comparable")
-                || (name == "Number" && p.is_numeric())
+                || (name == "Number" && p.boxes_to_number())
         }
         (_, Ty::Reference(name)) => name == "Object" || is_type_variable(name),
         _ => false,
@@ -372,6 +372,8 @@ pub fn select_overloads(signatures: &[&str], args: &[ArgType]) -> Vec<usize> {
         return kept;
     }
 
+    let args_len = args.len();
+    let mut possible_only: Vec<usize> = Vec::new();
     for (phase, variadic_call) in [
         (Phase::Strict, false),
         (Phase::Loose, false),
@@ -381,11 +383,14 @@ pub fn select_overloads(signatures: &[&str], args: &[ArgType]) -> Vec<usize> {
         if found.is_empty() {
             continue;
         }
-        if found.len() > MAX_SELECTED_OVERLOADS {
+        if found.len() + possible_only.len() > MAX_SELECTED_OVERLOADS {
             return found.into_iter().map(|(i, _)| i).collect();
         }
-        let args_len = args.len();
-        return found
+        if found.iter().all(|&(_, proven)| !proven) {
+            possible_only.extend(found.into_iter().map(|(i, _)| i));
+            continue;
+        }
+        let mut selected: Vec<usize> = found
             .iter()
             .filter(|&&(i, _)| {
                 !found.iter().any(|&(j, j_proven)| {
@@ -397,8 +402,14 @@ pub fn select_overloads(signatures: &[&str], args: &[ArgType]) -> Vec<usize> {
             })
             .map(|&(i, _)| i)
             .collect();
+        selected.extend(possible_only);
+        selected.sort_unstable();
+        selected.dedup();
+        return selected;
     }
-    Vec::new()
+    possible_only.sort_unstable();
+    possible_only.dedup();
+    possible_only
 }
 
 #[cfg(test)]

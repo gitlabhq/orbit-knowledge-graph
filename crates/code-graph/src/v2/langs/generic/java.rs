@@ -254,7 +254,9 @@ fn declared_type(
                 {
                     return written_type(&parent, &parent);
                 }
-                "try_with_resources_statement" => {
+                "try_with_resources_statement"
+                    if !matches!(child.kind().as_ref(), "catch_clause" | "finally_clause") =>
+                {
                     let resource = parent
                         .children()
                         .filter(|c| c.kind() == "resource_specification")
