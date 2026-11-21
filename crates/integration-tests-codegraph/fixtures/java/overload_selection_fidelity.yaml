@@ -1,0 +1,165 @@
+name: "Java: overload selection keeps proven and possible overloads apart"
+
+fixtures:
+  - path: q/Types.java
+    content: |
+      package q;
+
+      class Foo {}
+      class Widget {}
+      class IO {}
+
+  - path: q/Obj.java
+    content: |
+      package q;
+
+      class Obj {
+        static void f(Object o) {}
+        static void f(Foo foo) {}
+
+        void objectArgument() {
+          Object obj = null;
+          f(obj);
+        }
+      }
+
+  - path: q/Spec.java
+    content: |
+      package q;
+
+      class Spec {
+        static void f(Foo foo) {}
+        static void f(Object o) {}
+
+        void unrelatedClass() {
+          Widget w = null;
+          f(w);
+        }
+
+        void exactMatch() {
+          Foo foo = null;
+          f(foo);
+        }
+      }
+
+  - path: q/TyVar.java
+    content: |
+      package q;
+
+      class TyVar {
+        static void f(IO io) {}
+        static void f(Foo foo) {}
+
+        void shortClassName() {
+          IO io = null;
+          f(io);
+        }
+      }
+
+  - path: q/Scopes.java
+    content: |
+      package q;
+
+      class Res implements AutoCloseable {
+        public void close() {}
+      }
+
+      class Scopes {
+        String name;
+        String e;
+
+        static void k(String s) {}
+        static void k(IllegalStateException x) {}
+        static void r(String s) {}
+        static void r(Res x) {}
+
+        void resourceBody() throws Exception {
+          try (Res name = new Res()) {
+            r(name);
+          }
+        }
+
+        void catchBody() {
+          try {
+            k(e);
+          } catch (IllegalStateException e) {
+            k(e);
+          }
+        }
+
+        void fieldOutsideTry() {
+          k(name);
+        }
+      }
+
+tests:
+  - name: "an Object argument reaches only the Object overload"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.Obj.objectArgument' AND callee.name = 'f'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(Object)" } }
+
+  - name: "an unrelated class keeps the possible overload next to the proven one"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.Spec.unrelatedClass' AND callee.name = 'f'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 2 }
+      - { row: { signature: "(Foo)" } }
+      - { row: { signature: "(Object)" } }
+
+  - name: "an exact match still beats Object"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.Spec.exactMatch' AND callee.name = 'f'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(Foo)" } }
+
+  - name: "a short class name is not dropped as a type variable"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.TyVar.shortClassName' AND callee.name = 'f'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row: { signature: "(IO)" } }
+
+  - name: "a try-with-resources variable shadows the field in the body"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.Scopes.resourceBody' AND callee.name = 'r'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(Res)" } }
+
+  - name: "a catch parameter shadows the field only in the catch body"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.Scopes.catchBody' AND callee.name = 'k'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 2 }
+      - { row: { signature: "(String)" } }
+      - { row: { signature: "(IllegalStateException)" } }
+
+  - name: "outside the try the field type applies"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.Scopes.fieldOutsideTry' AND callee.name = 'k'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(String)" } }

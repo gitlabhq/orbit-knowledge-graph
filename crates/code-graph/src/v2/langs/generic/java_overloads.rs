@@ -1,4 +1,3 @@
-
 use crate::v2::linker::MAX_SELECTED_OVERLOADS;
 use crate::v2::types::ssa::ArgType;
 use rustc_hash::FxHashMap;
@@ -178,20 +177,44 @@ enum Phase {
     Loose,
 }
 
-fn convertible(arg: &Ty, param: &Ty, phase: Phase) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Fit {
+    No,
+    Possible,
+    Proven,
+}
+
+impl Fit {
+    fn of(fits: bool) -> Self {
+        if fits { Self::Proven } else { Self::No }
+    }
+
+    fn possible_if(fits: bool) -> Self {
+        if fits { Self::Possible } else { Self::No }
+    }
+}
+
+fn convertible(arg: &Ty, param: &Ty, phase: Phase) -> Fit {
     let loose = phase == Phase::Loose;
+    let box_supertype = |p: &str, a: Primitive| {
+        if is_type_variable(p) {
+            Fit::Possible
+        } else {
+            Fit::of(is_box_supertype(p, a))
+        }
+    };
     match (arg, param) {
-        (Ty::Primitive(a), Ty::Primitive(p)) => a.widens_to(*p),
-        (Ty::Primitive(a), Ty::Boxed(p)) => loose && a == p,
-        (Ty::Primitive(a), Ty::Reference(p)) => loose && is_box_supertype(p, *a),
-        (Ty::Primitive(_), _) => false,
-        (Ty::Boxed(a), Ty::Primitive(p)) => loose && a.widens_to(*p),
-        (Ty::Boxed(a), Ty::Boxed(p)) => a == p,
-        (Ty::Boxed(a), Ty::Reference(p)) => is_box_supertype(p, *a),
-        (Ty::Boxed(_), _) => false,
-        (Ty::Null, Ty::Primitive(_)) => false,
-        (Ty::Null, _) => true,
-        (Ty::Array { .. }, Ty::Primitive(_) | Ty::Boxed(_) | Ty::Null) => false,
+        (Ty::Primitive(a), Ty::Primitive(p)) => Fit::of(a.widens_to(*p)),
+        (Ty::Primitive(a), Ty::Boxed(p)) => Fit::of(loose && a == p),
+        (Ty::Primitive(a), Ty::Reference(p)) if loose => box_supertype(p, *a),
+        (Ty::Primitive(_), _) => Fit::No,
+        (Ty::Boxed(a), Ty::Primitive(p)) => Fit::of(loose && a.widens_to(*p)),
+        (Ty::Boxed(a), Ty::Boxed(p)) => Fit::of(a == p),
+        (Ty::Boxed(a), Ty::Reference(p)) => box_supertype(p, *a),
+        (Ty::Boxed(_), _) => Fit::No,
+        (Ty::Null, Ty::Primitive(_)) => Fit::No,
+        (Ty::Null, _) => Fit::Proven,
+        (Ty::Array { .. }, Ty::Primitive(_) | Ty::Boxed(_) | Ty::Null) => Fit::No,
         (
             Ty::Array {
                 depth: ad,
@@ -204,23 +227,41 @@ fn convertible(arg: &Ty, param: &Ty, phase: Phase) -> bool {
         ) => {
             let reference_elements =
                 Primitive::from_name(ae).is_none() && Primitive::from_name(pe).is_none();
-            (ad == pd && (ae == pe || reference_elements))
-                || (ad > pd && matches!(pe.as_str(), "Object" | "Cloneable" | "Serializable"))
+            if ad == pd && ae == pe
+                || ad > pd && matches!(pe.as_str(), "Object" | "Cloneable" | "Serializable")
+            {
+                Fit::Proven
+            } else {
+                Fit::possible_if(ad == pd && reference_elements)
+            }
         }
         (Ty::Array { .. }, Ty::Reference(p)) => {
-            matches!(p.as_str(), "Object" | "Cloneable" | "Serializable") || is_type_variable(p)
+            if is_type_variable(p) {
+                Fit::Possible
+            } else {
+                Fit::of(matches!(
+                    p.as_str(),
+                    "Object" | "Cloneable" | "Serializable"
+                ))
+            }
         }
-        (Ty::Reference(_), Ty::Primitive(_) | Ty::Boxed(_) | Ty::Null) => false,
-        (Ty::Reference(_), Ty::Array { .. }) => false,
+        (Ty::Reference(_), Ty::Primitive(_) | Ty::Boxed(_) | Ty::Null) => Fit::No,
+        (Ty::Reference(_), Ty::Array { .. }) => Fit::No,
         (Ty::Reference(a), Ty::Reference(p)) => {
-            a == p
-                || p == "Object"
-                || is_type_variable(p)
-                || if is_final_reference(a) {
-                    matches!(p.as_str(), "CharSequence" | "Comparable" | "Serializable")
-                } else {
-                    !is_final_reference(p)
-                }
+            if a == p || p == "Object" {
+                Fit::Proven
+            } else if a == "Object" {
+                Fit::possible_if(is_type_variable(p))
+            } else if is_type_variable(p) {
+                Fit::Possible
+            } else if is_final_reference(a) {
+                Fit::of(matches!(
+                    p.as_str(),
+                    "CharSequence" | "Comparable" | "Serializable"
+                ))
+            } else {
+                Fit::possible_if(!is_final_reference(p))
+            }
         }
     }
 }
@@ -256,20 +297,31 @@ fn param_at(params: &[Param], i: usize, expand_variadic: bool) -> Option<Ty> {
     }
 }
 
-fn applicable(params: &[Param], args: &[Option<Ty>], phase: Phase, variadic_call: bool) -> bool {
+fn applicable(
+    params: &[Param],
+    args: &[Option<Ty>],
+    phase: Phase,
+    variadic_call: bool,
+) -> Option<bool> {
     let arity_ok = if variadic_call {
         params.last().is_some_and(|p| p.variadic) && args.len() + 1 >= params.len()
     } else {
         args.len() == params.len()
     };
-    arity_ok
-        && args.iter().enumerate().all(|(i, arg)| {
-            let Some(param) = param_at(params, i, variadic_call) else {
-                return false;
-            };
-            arg.as_ref()
-                .is_none_or(|arg| convertible(arg, &param, phase))
-        })
+    if !arity_ok {
+        return None;
+    }
+    let mut proven = true;
+    for (i, arg) in args.iter().enumerate() {
+        let param = param_at(params, i, variadic_call)?;
+        let Some(arg) = arg else { continue };
+        match convertible(arg, &param, phase) {
+            Fit::No => return None,
+            Fit::Possible => proven = false,
+            Fit::Proven => {}
+        }
+    }
+    Some(proven)
 }
 
 fn more_specific(a: &[Param], b: &[Param], arg_count: usize, variadic_call: bool) -> bool {
@@ -300,9 +352,12 @@ pub fn select_overloads(signatures: &[&str], args: &[ArgType]) -> Vec<usize> {
         .collect();
     let all_known = arg_types.iter().all(Option::is_some);
 
-    let viable = |phase: Phase, variadic_call: bool| -> Vec<usize> {
+    let viable = |phase: Phase, variadic_call: bool| -> Vec<(usize, bool)> {
         (0..candidates.len())
-            .filter(|&i| applicable(&candidates[i], &arg_types, phase, variadic_call))
+            .filter_map(|i| {
+                applicable(&candidates[i], &arg_types, phase, variadic_call)
+                    .map(|proven| (i, proven))
+            })
             .collect()
     };
 
@@ -310,6 +365,7 @@ pub fn select_overloads(signatures: &[&str], args: &[ArgType]) -> Vec<usize> {
         let mut kept: Vec<usize> = [(Phase::Loose, false), (Phase::Loose, true)]
             .into_iter()
             .flat_map(|(phase, variadic_call)| viable(phase, variadic_call))
+            .map(|(i, _)| i)
             .collect();
         kept.sort_unstable();
         kept.dedup();
@@ -326,18 +382,20 @@ pub fn select_overloads(signatures: &[&str], args: &[ArgType]) -> Vec<usize> {
             continue;
         }
         if found.len() > MAX_SELECTED_OVERLOADS {
-            return found;
+            return found.into_iter().map(|(i, _)| i).collect();
         }
+        let args_len = args.len();
         return found
             .iter()
-            .copied()
-            .filter(|&i| {
-                !found.iter().any(|&j| {
+            .filter(|&&(i, _)| {
+                !found.iter().any(|&(j, j_proven)| {
                     j != i
-                        && more_specific(&candidates[j], &candidates[i], args.len(), variadic_call)
-                        && !more_specific(&candidates[i], &candidates[j], args.len(), variadic_call)
+                        && j_proven
+                        && more_specific(&candidates[j], &candidates[i], args_len, variadic_call)
+                        && !more_specific(&candidates[i], &candidates[j], args_len, variadic_call)
                 })
             })
+            .map(|&(i, _)| i)
             .collect();
     }
     Vec::new()
@@ -442,5 +500,21 @@ mod tests {
             pick(&["(List)", "(String)"], &named(&["java.util.List<String>"])),
             [0]
         );
+    }
+
+    #[test]
+    fn object_argument_reaches_only_object_parameter() {
+        assert_eq!(pick(&["(Object)", "(Foo)"], &named(&["Object"])), [0]);
+    }
+
+    #[test]
+    fn possible_overload_does_not_eliminate_a_proven_one() {
+        assert_eq!(pick(&["(Foo)", "(Object)"], &named(&["Widget"])), [0, 1]);
+        assert_eq!(pick(&["(Foo)", "(Object)"], &named(&["Foo"])), [0]);
+    }
+
+    #[test]
+    fn short_class_names_are_kept_next_to_other_overloads() {
+        assert_eq!(pick(&["(IO)", "(Foo)"], &named(&["IO"])), [0, 1]);
     }
 }

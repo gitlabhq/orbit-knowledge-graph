@@ -249,10 +249,38 @@ fn declared_type(
                 {
                     return None;
                 }
-                "enhanced_for_statement" | "resource" | "catch_formal_parameter"
+                "enhanced_for_statement"
                     if parent.field("name").is_some_and(|n| n.text() == name) =>
                 {
                     return written_type(&parent, &parent);
+                }
+                "try_with_resources_statement" => {
+                    let resource = parent
+                        .children()
+                        .filter(|c| c.kind() == "resource_specification")
+                        .flat_map(|spec| spec.children().collect::<Vec<_>>())
+                        .find(|r| {
+                            r.kind() == "resource"
+                                && r.field("name").is_some_and(|n| n.text() == name)
+                        });
+                    if let Some(resource) = resource {
+                        return written_type(&resource, &resource);
+                    }
+                }
+                "catch_clause" => {
+                    let formal = parent.children().find(|c| {
+                        c.kind() == "catch_formal_parameter"
+                            && c.field("name").is_some_and(|n| n.text() == name)
+                    });
+                    if let Some(formal) = formal {
+                        let mut caught = formal.children().filter(|c| c.kind() == "catch_type");
+                        let single = caught.next().filter(|_| caught.next().is_none())?;
+                        let mut alternatives = single.children().filter(|c| c.is_named());
+                        let only = alternatives
+                            .next()
+                            .filter(|_| alternatives.next().is_none())?;
+                        return Some(erased_type(&only));
+                    }
                 }
                 "method_declaration" | "constructor_declaration" | "static_initializer" => {
                     let parameter = parent
