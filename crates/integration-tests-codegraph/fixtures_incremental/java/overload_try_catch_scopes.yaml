@@ -6,6 +6,7 @@ fixtures:
       package p;
 
       class Err extends Exception {}
+      class Res implements AutoCloseable { public void close() {} }
 
       class Scopes {
         int name = 0;
@@ -13,7 +14,10 @@ fixtures:
 
         void k(int x) {}
         void k(String x) {}
-        void k(Err x) {}
+        void k(Res x) {}
+        void j(int x) {}
+        void j(String x) {}
+        void j(Err x) {}
 
         void resource() throws Exception {
           try (java.io.StringReader name = new java.io.StringReader("")) { k(name); }
@@ -23,8 +27,20 @@ fixtures:
           try (String name = "") { k(name); }
         }
 
+        void inBody() throws Exception {
+          try (Res name = new Res()) { k(name); }
+        }
+
+        void inFinally() throws Exception {
+          try (Res name = new Res()) { } finally { k(name); }
+        }
+
+        void inCatch() throws Exception {
+          try (Res name = new Res()) { } catch (Err x) { k(name); }
+        }
+
         void caught() {
-          try { k(1); } catch (Err e) { k(e); }
+          try { j(1); } catch (Err e) { j(e); }
         }
       }
 
@@ -41,9 +57,51 @@ tests:
   - name: a catch parameter shadows the int field
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
-      WHERE c.name = 'caught' AND t.name = 'k'
+      WHERE c.name = 'caught' AND t.name = 'j'
       RETURN t.signature AS signature
     assert:
       - { row: { signature: "(Err)" } }
       - { row: { signature: "(int)" } }
       - { row_count: 2 }
+
+  - name: a resource is visible in the body only
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'inBody' AND t.name = 'k'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(Res)" } }
+
+  - name: a resource is not visible in finally, so the call keeps every overload
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'inFinally' AND t.name = 'k'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 3 }
+      - { row: { signature: "(int)" } }
+      - { row: { signature: "(String)" } }
+      - { row: { signature: "(Res)" } }
+
+  - name: a resource is not visible in catch, so the call keeps every overload
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'inCatch' AND t.name = 'k'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 3 }
+      - { row: { signature: "(int)" } }
+      - { row: { signature: "(String)" } }
+      - { row: { signature: "(Res)" } }
+
+  - name: a qualified resource type keeps every overload
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'resource' AND t.name = 'k'
+      RETURN t.signature AS signature
+    assert:
+      - { row_count: 3 }
+      - { row: { signature: "(int)" } }
+      - { row: { signature: "(String)" } }
+      - { row: { signature: "(Res)" } }

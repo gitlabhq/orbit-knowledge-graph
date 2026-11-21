@@ -290,7 +290,7 @@ stages:
       - match: '(try_statement body: $B $$$ALTS:catch_clause|finally_clause)'
         replace: '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm)'
       - match: '(try_with_resources_statement resources: $R body: $B $$$ALTS:catch_clause|finally_clause)'
-        replace: '(__ssa_branch $R (__ssa_arm $B) $$$ALTS->__ssa_arm)'
+        replace: '(__ssa_branch (__ssa_arm $R $B) $$$ALTS->__ssa_arm)'
       - match: '(enhanced_for_statement type: $T:type_identifier name: $N:identifier value: $V body: $B)'
         replace: '(__ssa_loop $V (__binding @$N (__ssa_typed @$T)) $B)'
         tag: { java_decl_type: '@$ROOT|tag("java_decl_type")' }

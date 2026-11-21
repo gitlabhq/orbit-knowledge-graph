@@ -16,11 +16,22 @@ fixtures:
         void spec(Object o) {}
         void tv(IO x) {}
         void tv(Foo x) {}
+        void b(Foo f) {}
+        void b(Object... o) {}
+        void c(IO x) {}
+        void c(int x) {}
+        void num(Number n) {}
+        void num(Object o) {}
 
         void objectArgument(Object o) { obj(o); }
         void unrelatedArgument(Widget w) { spec(w); }
         void exactArgument(Foo f) { spec(f); }
         void shortClassName(IO io) { tv(io); }
+        void varargsCarry(Widget w) { b(w); }
+        void boxedCarry(Integer i) { c(i); }
+        void charIsNotNumber(char ch) { num(ch); }
+        void characterIsNotNumber(Character ch) { num(ch); }
+        void integerIsNumber(Integer i) { num(i); }
       }
 
 tests:
@@ -59,3 +70,26 @@ tests:
       RETURN t.signature AS signature
     assert:
       - { row: { signature: "(IO)" } }
+
+  - name: a possible-only phase is kept next to a later certain one
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name IN ['varargsCarry', 'boxedCarry'] AND t.name IN ['b', 'c']
+      RETURN c.name AS caller, t.signature AS signature
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: "varargsCarry", signature: "(Foo)" } }
+      - { row: { caller: "varargsCarry", signature: "(Object...)" } }
+      - { row: { caller: "boxedCarry", signature: "(IO)" } }
+      - { row: { caller: "boxedCarry", signature: "(int)" } }
+
+  - name: char and Character are not a Number
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name IN ['charIsNotNumber', 'characterIsNotNumber', 'integerIsNumber'] AND t.name = 'num'
+      RETURN c.name AS caller, t.signature AS signature
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: "charIsNotNumber", signature: "(Object)" } }
+      - { row: { caller: "characterIsNotNumber", signature: "(Object)" } }
+      - { row: { caller: "integerIsNumber", signature: "(Number)" } }

@@ -45,8 +45,8 @@ impl Primitive {
         })
     }
 
-    fn is_numeric(self) -> bool {
-        self != Self::Boolean
+    fn boxes_to_number(self) -> bool {
+        !matches!(self, Self::Boolean | Self::Char)
     }
 
     fn widens_to(self, target: Self) -> bool {
@@ -112,8 +112,7 @@ fn is_type_variable(name: &str) -> bool {
 
 fn is_box_supertype(name: &str, primitive: Primitive) -> bool {
     matches!(name, "Object" | "Serializable" | "Comparable" | "Constable")
-        || (name == "Number" && primitive.is_numeric())
-        || is_type_variable(name)
+        || (name == "Number" && primitive.boxes_to_number())
 }
 
 fn is_final_reference(name: &str) -> bool {
@@ -170,14 +169,21 @@ impl From<bool> for Fit {
 
 fn convertible(arg: &Ty, param: &Ty, phase: Phase) -> Fit {
     let loose = phase == Phase::Loose;
+    let box_supertype = |p: &str, a: Primitive| {
+        if is_type_variable(p) {
+            Fit::Maybe
+        } else {
+            is_box_supertype(p, a).into()
+        }
+    };
     match (arg, param) {
         (Ty::Primitive(a), Ty::Primitive(p)) => a.widens_to(*p).into(),
         (Ty::Primitive(a), Ty::Boxed(p)) => (loose && a == p).into(),
-        (Ty::Primitive(a), Ty::Reference(p)) => (loose && is_box_supertype(p, *a)).into(),
+        (Ty::Primitive(a), Ty::Reference(p)) if loose => box_supertype(p, *a),
         (Ty::Primitive(_), _) => Fit::No,
         (Ty::Boxed(a), Ty::Primitive(p)) => (loose && a.widens_to(*p)).into(),
         (Ty::Boxed(a), Ty::Boxed(p)) => (a == p).into(),
-        (Ty::Boxed(a), Ty::Reference(p)) => is_box_supertype(p, *a).into(),
+        (Ty::Boxed(a), Ty::Reference(p)) => box_supertype(p, *a),
         (Ty::Boxed(_), _) => Fit::No,
         (Ty::Null, Ty::Primitive(_)) => Fit::No,
         (Ty::Null, _) => Fit::Yes,
@@ -215,8 +221,10 @@ fn convertible(arg: &Ty, param: &Ty, phase: Phase) -> Fit {
         (Ty::Reference(_), Ty::Primitive(_) | Ty::Boxed(_) | Ty::Null) => Fit::No,
         (Ty::Reference(_), Ty::Array { .. }) => Fit::No,
         (Ty::Reference(a), Ty::Reference(p)) => {
-            if a == p || p == "Object" || is_type_variable(p) {
+            if a == p || p == "Object" {
                 Fit::Yes
+            } else if is_type_variable(p) {
+                Fit::Maybe
             } else if a == "Object" {
                 Fit::No
             } else if is_final_reference(a) {
@@ -237,7 +245,7 @@ fn subtype(sub: &Ty, sup: &Ty) -> bool {
         (a, b) if a == b => true,
         (Ty::Boxed(p), Ty::Reference(name)) => {
             matches!(name.as_str(), "Object" | "Serializable" | "Comparable")
-                || (name == "Number" && p.is_numeric())
+                || (name == "Number" && p.boxes_to_number())
         }
         (_, Ty::Reference(name)) => name == "Object" || is_type_variable(name),
         _ => false,
@@ -339,6 +347,7 @@ pub(super) fn select_parsed(candidates: &[Vec<Param>], args: &[ArgType]) -> Vec<
         return kept;
     }
 
+    let mut possible_only: Vec<usize> = Vec::new();
     for (phase, variadic_call) in [
         (Phase::Strict, false),
         (Phase::Loose, false),
@@ -348,8 +357,16 @@ pub(super) fn select_parsed(candidates: &[Vec<Param>], args: &[ArgType]) -> Vec<
         if found.is_empty() {
             continue;
         }
-        if found.len() > super::MAX_FAN_OUT {
-            return found.into_iter().map(|(i, _)| i).collect();
+        let mut viable_so_far = possible_only.clone();
+        viable_so_far.extend(found.iter().map(|&(i, _)| i));
+        viable_so_far.sort_unstable();
+        viable_so_far.dedup();
+        if viable_so_far.len() > super::MAX_FAN_OUT {
+            return viable_so_far;
+        }
+        if found.iter().all(|&(_, fit)| fit != Fit::Yes) {
+            possible_only = viable_so_far;
+            continue;
         }
         let beats = |winner: usize, loser: usize| {
             more_specific(
@@ -364,7 +381,7 @@ pub(super) fn select_parsed(candidates: &[Vec<Param>], args: &[ArgType]) -> Vec<
                 variadic_call,
             )
         };
-        return found
+        let mut selected: Vec<usize> = found
             .iter()
             .filter(|&&(i, _)| {
                 !found
@@ -373,8 +390,12 @@ pub(super) fn select_parsed(candidates: &[Vec<Param>], args: &[ArgType]) -> Vec<
             })
             .map(|&(i, _)| i)
             .collect();
+        selected.extend(possible_only);
+        selected.sort_unstable();
+        selected.dedup();
+        return selected;
     }
-    Vec::new()
+    possible_only
 }
 
 #[cfg(test)]
@@ -454,6 +475,29 @@ mod tests {
     #[test]
     fn a_short_class_name_keeps_the_exact_match_alongside_the_rest() {
         assert_eq!(pick(&["(IO)", "(Foo)"], &named(&["IO"])), [0, 1]);
+    }
+
+    #[test]
+    fn possible_only_phases_carry_into_the_next_certain_one() {
+        assert_eq!(pick(&["(Foo)", "(Object...)"], &named(&["Widget"])), [0, 1]);
+        assert_eq!(pick(&["(IO)", "(int)"], &named(&["Integer"])), [0, 1]);
+    }
+
+    #[test]
+    fn overflow_counts_distinct_candidates_and_keeps_carried_ones() {
+        let mut signatures: Vec<String> = (0..5).map(|_| "(AlphaI)".to_string()).collect();
+        signatures.extend((0..23).map(|_| "(BetaI...)".to_string()));
+        let signatures: Vec<&str> = signatures.iter().map(String::as_str).collect();
+        let picked = pick(&signatures, &named(&["Widget"]));
+        assert_eq!(picked, (0..28).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn char_is_not_a_number() {
+        assert_eq!(pick(&["(Number)", "(Object)"], &named(&["char"])), [1]);
+        assert_eq!(pick(&["(Number)", "(Object)"], &named(&["Character"])), [1]);
+        assert_eq!(pick(&["(Number)", "(Object)"], &named(&["Integer"])), [0]);
+        assert_eq!(pick(&["(int)", "(long)"], &named(&["char"])), [0]);
     }
 
     #[test]
