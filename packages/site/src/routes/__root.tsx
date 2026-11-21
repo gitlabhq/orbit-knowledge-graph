@@ -1,6 +1,7 @@
 import { pageHead, SiteShell, site } from "@gitlab-org/orbit-site";
 import { createRootRoute, HeadContent, Outlet, useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { MobileMenu } from "../components/MobileMenu";
 import { TabNav } from "../components/TabNav";
 
 export const Route = createRootRoute({
@@ -12,6 +13,12 @@ const LANDINGS = new Set(["", "/next"]);
 
 function RootLayout() {
   const home = useRouterState({ select: (state) => LANDINGS.has(state.location.pathname.replace(/\/+$/, "")) });
+
+  // A landing page starts and ends on a dark band, so the canvas is dark too: iOS paints it under the
+  // status bar, under the toolbar, and in the overscroll past either end.
+  useEffect(() => {
+    document.documentElement.classList.toggle("page-landing", home);
+  }, [home]);
 
   useEffect(() => {
     const panel = document.querySelector<HTMLElement>(".page-panel");
@@ -29,7 +36,7 @@ function RootLayout() {
         headerClassName={home ? "gl-dark gl-dark-scope" : undefined}
         autoHideHeader={home}
         nav={<TabNav className="hidden md:flex" />}
-        mobileNav={<TabNav className="flex overflow-x-auto px-2 py-1 md:hidden" />}
+        end={<MobileMenu className="md:hidden" sheetClassName={home ? "gl-dark gl-dark-scope" : undefined} />}
       >
         <Outlet />
       </SiteShell>
