@@ -48,8 +48,12 @@ datalake:
   database: default
   username: default
   # password: ""
+  # Oldest supported ClickHouse version. Keep in step with the version requirements docs.
+  compatibility: "26.6"
   replicated: false
-  session_settings: {}
+  session_settings:
+    # Must stay 0 to avoid a ClickHouse 26.6 bug that skips the Siphon watermark index and scans whole tables.
+    use_skip_indexes_on_data_read: "0"
   insert_settings: {}
   profiling:
     enabled: false
@@ -63,6 +67,8 @@ graph:
   database: default
   username: default
   # password: ""
+  # Oldest supported ClickHouse version. Keep in step with the version requirements docs.
+  compatibility: "26.6"
   replicated: false
   # Universal graph defaults, also set by the Helm chart in production.
   session_settings:

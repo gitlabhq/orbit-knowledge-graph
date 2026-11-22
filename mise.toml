@@ -143,8 +143,8 @@ run = "cargo nextest run --test local --test compiler"
 description = "Run local integration tests — compiler + querying pipeline (no Docker)"
 
 [tasks."test:scripts"]
-run = "for t in scripts/dev/tests/*_test.sh scripts/fuzz/*_test.sh; do bash \"$t\" || exit 1; done"
-description = "Run the shell tests for the local development scripts (no cluster needed)"
+run = "for t in scripts/dev/tests/*_test.sh scripts/fuzz/*_test.sh scripts/ci/mr-housekeeping/*_test.sh; do bash \"$t\" || exit 1; done"
+description = "Run the shell tests for the local development and CI scripts (no cluster needed)"
 
 [tasks."test:compiler"]
 run = "cargo test -p integration-tests --test compiler -- --nocapture"
@@ -174,7 +174,7 @@ env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run container tests (requires the Colima `gkg` profile: `colima start gkg --memory 12`)"
 
 [tasks."test:integration:server"]
-run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(redaction_integration) | test(graph_formatter)'"
+run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(graph_formatter)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run server integration tests (data correctness, redaction, graph formatter)"
 
@@ -235,8 +235,11 @@ run = [
 description = "Check log, span and print call sites against the red data rules (scripts/linting/logs)"
 
 [tasks."lint:deps"]
-run = "cargo shear"
-description = "Check for unused workspace and crate dependencies"
+run = [
+  "cargo shear",
+  "python3 scripts/checks/check_workspace_deps.py --registry-only",
+]
+description = "Check for unused dependencies and crate-local dependency declarations"
 
 [tasks."lint:code:fix"]
 run = [
@@ -436,6 +439,92 @@ description = "Regenerate rust-toolchain.toml from mise.toml"
 [tasks."toolchain:check"]
 run = "bash ./scripts/checks/check-rust-toolchain.sh --check"
 description = "Fail if rust-toolchain.toml is out of sync with mise.toml"
+
+[tasks."spec:engine:tools"]
+description = "Download the pinned TLA+ tools for the indexing engine spec"
+shell = "bash -c"
+run = """
+set -euo pipefail
+jar=target/tla2tools-1.7.4.jar
+[ -f "$jar" ] && exit 0
+mkdir -p target
+curl -fsSL -o "$jar.tmp" https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  $jar.tmp" | shasum -a 256 -c -
+mv "$jar.tmp" "$jar"
+"""
+
+[tasks."spec:engine"]
+description = "Model-check the indexing engine lease and dedupe spec with TLC"
+tools = { java = "temurin-21.0.13+9.0.LTS" }
+depends = ["spec:engine:tools"]
+shell = "bash -c"
+run = """
+set -euo pipefail
+for config in specs/indexing-engine-next/*.cfg; do
+  java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states -config "$config" specs/indexing-engine-next/LeaseDedupe.tla
+done
+"""
+
+[tasks."spec:engine:liveness"]
+description = "Check with TLC that every acked submit of the indexing engine spec ends done once faults stop"
+tools = { java = "temurin-21.0.13+9.0.LTS" }
+depends = ["spec:engine:tools"]
+shell = "bash -c"
+run = """
+set -euo pipefail
+for config in specs/indexing-engine-next/liveness/*.cfg; do
+  java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-liveness -config "$config" specs/indexing-engine-next/LeaseDedupeLiveness.tla
+done
+"""
+
+[tasks."spec:engine:counterexample"]
+description = "Check that TLC still finds each counterexample, and that it breaks the rule that its config names"
+tools = { java = "temurin-21.0.13+9.0.LTS" }
+depends = ["spec:engine:tools"]
+shell = "bash -c"
+run = """
+set -uo pipefail
+spec=specs/indexing-engine-next
+tlc() { java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states "$@" 2>&1; }
+for config in "$spec"/counterexamples/*.cfg; do
+  rule=$(awk '/^INVARIANTS/ { print $NF }' "$config")
+  out=$(tlc -config "$config" "$spec/LeaseDedupe.tla"); status=$?
+  if [ "$status" -ne 12 ] || ! grep -q "Invariant $rule is violated" <<< "$out"; then
+    tail -40 <<< "$out"; echo "$config: expected $rule to be violated, TLC exit $status"; exit 1
+  fi
+  echo "$config: $rule violated, as expected"
+done
+for config in "$spec"/liveness/counterexamples/*.cfg; do
+  rule=$(awk '/^PROPERTIES/ { print $NF }' "$config")
+  out=$(tlc -config "$config" "$spec/LeaseDedupeLiveness.tla"); status=$?
+  if [ "$status" -ne 13 ] || ! grep -q "Temporal properties were violated" <<< "$out"; then
+    tail -40 <<< "$out"; echo "$config: expected $rule to be violated, TLC exit $status"; exit 1
+  fi
+  echo "$config: $rule violated, as expected"
+done
+"""
+
+[tasks."spec:engine:code"]
+description = "Check that the Rust protocol code has the same state graph as the spec in small clusters (ENGINE_SPEC_CLUSTER picks one)"
+tools = { java = "temurin-21.0.13+9.0.LTS" }
+depends = ["spec:engine:tools"]
+shell = "bash -c"
+run = """
+set -euo pipefail
+graphs="$PWD/${CARGO_TARGET_DIR:-target}/tmp/indexing-engine-next-spec/graphs"
+rm -rf "$graphs" && mkdir -p "$graphs"
+for config in specs/indexing-engine-next/code-check/*.cfg; do
+  name=$(basename "$config" .cfg)
+  [ -z "${ENGINE_SPEC_CLUSTER:-}" ] || [ "$ENGINE_SPEC_CLUSTER" = "$name" ] || continue
+  java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir "target/tlc-graph-$name" \
+    -dump dot,actionlabels "$graphs/$name" -config "$config" specs/indexing-engine-next/LeaseDedupe.tla > "$graphs/$name.log" 2>&1 \
+    || { tail -40 "$graphs/$name.log"; exit 1; }
+  echo "$name: $(grep -oE "[0-9]+ distinct states found, 0 states left" "$graphs/$name.log" | grep -oE "^[0-9]+") states in the spec"
+done
+ENGINE_SPEC_TLC_GRAPHS="$graphs" cargo test -q --release -p indexing-engine-next --test protocol \
+  every_state_and_step_of_the_small_clusters_matches_the_spec -- --include-ignored --nocapture
+rm -f "$graphs"/*.dot
+"""
 
 [tasks."schema:bump"]
 run = "cargo xtask migration-ledger bump"

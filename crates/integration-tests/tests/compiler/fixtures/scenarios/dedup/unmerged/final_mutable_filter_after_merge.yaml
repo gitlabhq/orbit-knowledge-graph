@@ -12,7 +12,6 @@ cases:
         sql:
           contains:
             - AS p FINAL
-            - use_skip_indexes_if_final_exact_mode = 1
           not_contains:
             - tuple(p.traversal_path, p.id) IN
     missing_frontends:

@@ -278,6 +278,9 @@
             "null"
           ]
         },
+        "compatibility": {
+          "type": "string"
+        },
         "session_settings": {
           "type": "object",
           "additionalProperties": {
@@ -305,6 +308,7 @@
         "database",
         "url",
         "username",
+        "compatibility",
         "replicated",
         "profiling"
       ]
@@ -1450,12 +1454,12 @@
             "null"
           ],
           "format": "uint64",
-          "minimum": 0
+          "minimum": 1
         },
         "max_connection_age_grace_secs": {
           "type": "integer",
           "format": "uint64",
-          "minimum": 0
+          "minimum": 1
         },
         "stream_timeout_secs": {
           "type": "integer",

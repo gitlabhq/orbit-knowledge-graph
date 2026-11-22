@@ -1,7 +1,7 @@
 ---
 name: orbit-start
 description: Walk a user through their first GitLab Orbit session. Check the setup, then answer a simple first question and a workflow from the prompt examples with Orbit. Offer to run a prompt again without Orbit, and to show how Orbit works. Use when the user asks to get started with Orbit, try Orbit, or see what Orbit can do.
-version: 0.2.2
+version: 0.2.3
 license: MIT
 compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance.
 metadata:
@@ -17,6 +17,7 @@ metadata:
 Guide the user through real questions about their own GitLab data, answered with GitLab Orbit.
 Start with a simple question, then try a bigger one, such as a workflow from the prompt examples.
 After an answer, offer to run the same prompt again without Orbit, or to show how Orbit works with diagrams of the user's own graph.
+To explain how Orbit is built, link to <https://gitlaborbit.dev/engineering/architecture/>.
 
 Keep the session short and read-only. Do not create issues, merge requests, comments, or commits.
 

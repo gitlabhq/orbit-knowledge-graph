@@ -20,7 +20,7 @@ query:
         "limit": 10
     }
   gql: |
-    MATCH (g:Group {full_path: 'no-such-group'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User) RETURN u.username, count(mr) AS c LIMIT 10
+    MATCH (g:Group {full_path: 'no-such-group'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User) RETURN u{.username}, count(mr) AS c LIMIT 10
 
 expect:
   empty_aggregation: true

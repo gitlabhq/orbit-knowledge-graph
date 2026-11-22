@@ -6,9 +6,9 @@ publish = false
 
 [dependencies]
 compiler = { path = "../query-engine/compiler" }
-bolero = "0.13.4"
+bolero = { workspace = true }
 serde_json.workspace = true
-pest_meta = "2.9.1"
+pest_meta = { workspace = true }
 
 [dev-dependencies]
 code-graph = { path = "../code-graph" }

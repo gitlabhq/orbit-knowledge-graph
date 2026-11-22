@@ -1,0 +1,13 @@
+cases:
+  - name: Pinned target ids and a covered target filter both narrow the edge read
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","node_ids":[1]},{"id":"p","entity":"Pipeline","node_ids":[1,2,3],"filters":{"source":{"eq":"push"}}}],"relationships":[{"type":"TRIGGERS_PIPELINE","from":"j","to":"p"}],"limit":10}
+      gql: |
+        MATCH (j:Job {id: 1})-[:TRIGGERS_PIPELINE]->(p:Pipeline {source: 'push'}) WHERE p.id IN [1, 2, 3] RETURN j, p LIMIT 10
+    logical:
+      expect: ["(Filter p.id IN [1, 2, 3], p.source = 'push' (NodeScan Pipeline AS p))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter _orbit_edge_0._deleted = false, _orbit_edge_0.target_tags HAS ANY ['source:push'] (Deduplicate LimitBy ... (Filter _orbit_edge_0.target_id IN [1, 2, 3], ... (Scan Table(gl_ci_edge) AS _orbit_edge_0))))"]

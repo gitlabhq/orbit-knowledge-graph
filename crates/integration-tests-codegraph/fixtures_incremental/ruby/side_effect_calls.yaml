@@ -1,0 +1,80 @@
+name: "Ruby: calls inside ensure clauses and rescue modifier handlers"
+
+fixtures:
+  - path: lib/client.rb
+    content: |
+      class Client
+        def get; end
+      end
+
+  - path: lib/third.rb
+    content: |
+      class Third
+        def get; end
+      end
+
+  - path: side_effects.rb
+    content: |
+      class SideEffects
+        def rescue_ensure_local
+          x = begin
+            Client.new
+          rescue
+            Client.new
+          ensure
+            Third.new.get
+          end
+          x
+        end
+
+        def rescue_ensure_ivar
+          @x ||= begin
+            Client.new
+          rescue
+            Client.new
+          ensure
+            Third.new.get
+          end
+        end
+
+        def ensure_local
+          x = begin
+            Client.new
+          ensure
+            Third.new.get
+          end
+          x
+        end
+
+        def ensure_ivar
+          @x ||= begin
+            Client.new
+          ensure
+            Third.new.get
+          end
+        end
+
+        def modifier_local
+          x = Client.new rescue Third.new.get
+          x
+        end
+
+        def modifier_ivar
+          @x ||= Client.new rescue Third.new.get
+        end
+      end
+
+tests:
+  - name: "Calls in ensure clauses and rescue modifier handlers keep their edges"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'side_effects.rb' AND callee.fqn = 'Third::get'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 6 }
+      - { row: { caller: SideEffects::rescue_ensure_local } }
+      - { row: { caller: SideEffects::rescue_ensure_ivar } }
+      - { row: { caller: SideEffects::ensure_local } }
+      - { row: { caller: SideEffects::ensure_ivar } }
+      - { row: { caller: SideEffects::modifier_local } }
+      - { row: { caller: SideEffects::modifier_ivar } }

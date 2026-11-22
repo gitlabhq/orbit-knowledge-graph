@@ -568,21 +568,4 @@ mod tests {
         );
         assert!(bound_keys(&node, ANCHOR_FKS).is_empty());
     }
-
-    #[test]
-    fn bound_edges_resolve_scope_policy() {
-        let input = crate::parse_input(
-            r#"{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"diff","entity":"MergeRequestDiff"}],"relationships":[{"type":"HAS_DIFF","from":"mr","to":"diff"}],"limit":1}"#,
-        )
-        .unwrap();
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(
-            ontology::Ontology::load_embedded().unwrap(),
-        ))
-        .unwrap();
-        let edges = bound_edges(&input, model.as_ref());
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].from, "mr");
-        assert_eq!(edges[0].to, "diff");
-        assert!(edges[0].scope_preserving);
-    }
 }

@@ -20,11 +20,10 @@ pipelines:
       order_by: [traversal_path, id]
       query: generated
       lookups:
-        - { node: MergeRequest, id: merge_request_id }
         - { node: Vulnerability, id: vulnerability_id }
     transform:
       type: datafusion
       edges:
-        - from: { field: merge_request_id, kind: MergeRequest, enrich: true }
+        - from: { field: merge_request_id, kind: MergeRequest }
           to: { field: vulnerability_id, kind: Vulnerability, enrich: true }
           label: FIXES

@@ -49,7 +49,7 @@ function siteLink(target: string, file: string, routes: Map<string, string>): st
   const page = statSync(absolute).isDirectory() ? posix.join(linked, "README.md") : linked;
   const route = routes.get(page);
   const fragment = hash ? `#${hash}` : "";
-  if (route !== undefined) return `/${route}${fragment}`;
+  if (route !== undefined) return `/${route}${isReadme(page) ? "/" : ""}${fragment}`;
   return `${IMAGE.test(linked) ? repoRaw : repoBlob}${linked}${fragment}`;
 }
 

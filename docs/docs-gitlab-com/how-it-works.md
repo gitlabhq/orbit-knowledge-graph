@@ -8,7 +8,7 @@ title: GitLab Orbit architecture
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
+- Tier: [Premium, Ultimate](https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/#trials-and-purchases)
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -97,5 +97,6 @@ After 30 days, GitLab deletes all graph data of the group.
 
 ## Related topics
 
-- [GitLab Orbit roadmap](https://gitlab-org.gitlab.io/orbit/knowledge-graph/)
+- [GitLab Orbit roadmap](https://gitlaborbit.dev/next)
+- [How GitLab Orbit is built](https://gitlaborbit.dev/engineering/architecture/)
 - [Troubleshooting](troubleshooting.md)

@@ -14,27 +14,28 @@ thiserror = { workspace = true }
 cpu-time = { workspace = true }
 
 # Tree-sitter
-tree-sitter = "0.26.3"
+tree-sitter = { workspace = true }
 stacker = { workspace = true }
-tree-sitter-bash = { version = "0.25.1", optional = true }
-tree-sitter-c = { version = "0.24.2", optional = true }
-tree-sitter-c-sharp = { version = "0.23.0", optional = true }
-tree-sitter-go = { version = "0.25.0", optional = true }
-tree-sitter-java = { version = "0.23.0", optional = true }
-tree-sitter-kotlin = { version = "0.4.0", package = "tree-sitter-kotlin-sg", optional = true }
-tree-sitter-python = { version = "0.25.0", optional = true }
-tree-sitter-ruby = { version = "0.23.0", optional = true }
-tree-sitter-rust = { version = "0.24.0", optional = true }
-tree-sitter-scala = { version = "0.24.0", optional = true }
-tree-sitter-typescript = { version = "0.23.2", optional = true }
-tree-sitter-cpp = { version = "0.23.4", optional = true }
-tree-sitter-elixir = { version = "0.3.5", optional = true }
-tree-sitter-php = { version = "0.24.2", optional = true }
-tree-sitter-hcl = { version = "1.1.0", optional = true }
-tree-sitter-swift = { version = "0.7.2", optional = true }
-tree-sitter-yaml = { version = "0.7.2", optional = true }
-tree-sitter-lua = { version = "0.5.0", optional = true }
-tree-sitter-zig = { version = "1.1.2", optional = true }
+tree-sitter-bash = { workspace = true, optional = true }
+tree-sitter-c = { workspace = true, optional = true }
+tree-sitter-c-sharp = { workspace = true, optional = true }
+tree-sitter-go = { workspace = true, optional = true }
+tree-sitter-java = { workspace = true, optional = true }
+tree-sitter-kotlin = { workspace = true, optional = true }
+tree-sitter-python = { workspace = true, optional = true }
+tree-sitter-ruby = { workspace = true, optional = true }
+tree-sitter-rust = { workspace = true, optional = true }
+tree-sitter-scala = { workspace = true, optional = true }
+tree-sitter-typescript = { workspace = true, optional = true }
+tree-sitter-cpp = { workspace = true, optional = true }
+tree-sitter-elixir = { workspace = true, optional = true }
+tree-sitter-php = { workspace = true, optional = true }
+tree-sitter-hcl = { workspace = true, optional = true }
+tree-sitter-swift = { workspace = true, optional = true }
+tree-sitter-yaml = { workspace = true, optional = true }
+tree-sitter-lua = { workspace = true, optional = true }
+tree-sitter-zig = { workspace = true, optional = true }
+tree-sitter-containerfile = { workspace = true, optional = true }
 
 [[bin]]
 name = "ast"
@@ -63,12 +64,14 @@ builtin-parser = [
   "tree-sitter-lua",
   "tree-sitter-yaml",
   "tree-sitter-zig",
+  "tree-sitter-containerfile",
 ]
 tree-sitter-hcl = ["dep:tree-sitter-hcl"]
 tree-sitter-lua = ["dep:tree-sitter-lua"]
 tree-sitter-scala = ["dep:tree-sitter-scala"]
 tree-sitter-yaml = ["dep:tree-sitter-yaml"]
 tree-sitter-zig = ["dep:tree-sitter-zig"]
+tree-sitter-containerfile = ["dep:tree-sitter-containerfile"]
 
 [dev-dependencies]
 

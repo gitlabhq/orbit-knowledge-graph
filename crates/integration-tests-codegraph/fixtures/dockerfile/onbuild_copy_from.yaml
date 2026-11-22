@@ -1,0 +1,18 @@
+name: "Dockerfile: ONBUILD COPY --from links the stage"
+
+fixtures:
+  - path: Dockerfile
+    content: |
+      FROM golang:1.22 AS builder
+      FROM alpine:3.19 AS user
+      ONBUILD COPY --from=builder /out/app /usr/local/bin/app
+
+tests:
+  - name: "an ONBUILD COPY --from calls the stage it copies from"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.definition_type = 'Class' AND b.definition_type = 'Class'
+      RETURN a.name AS from_stage, b.name AS to_stage
+    assert:
+      - { row_count: 1 }
+      - { row: { from_stage: "user", to_stage: "builder" } }

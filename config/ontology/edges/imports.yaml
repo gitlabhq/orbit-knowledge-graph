@@ -12,3 +12,23 @@ variants:
     to_node: { type: Definition, id: id }
     scope: prune_to_source
     description: "Imported symbol resolves to a concrete definition (e.g. JS/TS module-system resolution to the imported export)."
+
+  - from_node: { type: File, id: id }
+    to_node: { type: File, id: id }
+    scope: same_namespace
+    description: "Documentation file links to another repository file (e.g. a Markdown link or image)."
+
+  - from_node: { type: File, id: id }
+    to_node: { type: Definition, id: id }
+    scope: same_namespace
+    description: "Documentation file links to a heading anchor in another file (e.g. a Markdown link to a section)."
+
+  - from_node: { type: Definition, id: id }
+    to_node: { type: File, id: id }
+    scope: same_namespace
+    description: "Documentation section links to another repository file (e.g. a Markdown link under a heading)."
+
+  - from_node: { type: Definition, id: id }
+    to_node: { type: Definition, id: id }
+    scope: same_namespace
+    description: "Documentation section links to a heading anchor in another file (e.g. a Markdown link under a heading to a section)."

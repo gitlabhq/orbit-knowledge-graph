@@ -135,6 +135,14 @@ fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> F
         })
         .collect();
 
+    let dropped_link_sources: Vec<u32> = state
+        .edges
+        .iter()
+        .filter(|e| e.kind == crate::edge::EdgeKind::Links)
+        .filter(|e| dirty.contains(old_labels[e.to_fi()].as_str()))
+        .filter_map(|e| label_to_fi.get(old_labels[e.from_fi()].as_str()))
+        .copied()
+        .collect();
     state.edges = state
         .edges
         .iter()
@@ -170,6 +178,7 @@ fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> F
 
     let mut dependents = state.resolver.remap(old_labels, &label_to_fi);
     dependents.extend(reverse_dirty);
+    dependents.extend(dropped_link_sources);
     dependents
 }
 
@@ -581,6 +590,22 @@ impl Phase<DirtyGraph> for Resolve {
                 .into_iter()
                 .filter(|edge| !retained.contains(edge)),
         );
+        let mut old_links = FxHashSet::default();
+        state.edges.retain(|edge| {
+            let link = edge.kind == crate::edge::EdgeKind::Links;
+            if link {
+                old_links.insert(*edge);
+            }
+            !link
+        });
+        let new_links = crate::markdown::link_edges(&state.trees, &env.lang);
+        for edge in &new_links {
+            if !old_links.remove(edge) {
+                touched.insert(edge.from_tree);
+            }
+        }
+        debug_assert!(old_links.is_empty(), "stale Links edges: {old_links:?}");
+        state.edges.extend(new_links);
         context.run.check()?;
         // Only files parsed in this run have an entry.
         let mut resolved = Vec::with_capacity(result.file_timings.len());
