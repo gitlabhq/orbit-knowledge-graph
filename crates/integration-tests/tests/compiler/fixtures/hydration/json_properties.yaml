@@ -1,0 +1,68 @@
+hydration: {}
+
+logical:
+  expect: ["(Input hydration (...))"]
+
+cases:
+  - name: Hydrating two entities unions one JSON property arm per table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[1,2,3],"columns":["id","noteable_type"]},{"id":"p","entity":"Project","node_ids":[10,20],"columns":["id","name"]}],"relationships":[{"type":"IN_PROJECT","from":"n","to":"p"}]}
+      gql: |
+        MATCH (n:Note)-[:IN_PROJECT]->(p:Project) WHERE n.id IN [1, 2, 3] AND p.id IN [10, 20] RETURN n.id, n.noteable_type, p.id, p.name
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Union ALL (Project n.id AS n_id, 'Note' AS n_entity_type, ToJson(Object('id', ToString(n.id), 'noteable_type', ToString(n.noteable_type))) AS n_props (...)) (Project p.id AS p_id, 'Project' AS p_entity_type, ToJson(Object('id', ToString(p.id), 'name', ToString(p.name))) AS p_props (...)))
+            - (Scan Table(gl_note) AS n)
+            - (Scan Table(gl_project) AS p)
+
+  - name: Hydrating one entity reads one table without a union
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[42],"columns":["id","username"]}]}
+      gql: |
+        MATCH (u:User {id: 42}) RETURN u.id, u.username
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Project u.id AS u_id, 'User' AS u_entity_type, ToJson(Object('id', ToString(u.id), 'username', ToString(u.username))) AS u_props (...))
+            - (Scan Table(gl_user) AS u)
+          reject: ["(Union ... (...))"]
+
+  - name: Hydration filters by the caller scope directly
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[1],"columns":["id","confidential"]}]}
+      gql: |
+        MATCH (n:Note {id: 1}) RETURN n.id, n.confidential
+    physical:
+      clickhouse:
+        final_ast:
+          expect: ["(Filter StartsWith(n.traversal_path, '1/'), n.id = 1 (Scan Table(gl_note) AS n))"]
+        sql:
+          not_contains: [arrayExists]
+
+  - name: Hydrating only the ID keeps it in the property map
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]}]}
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u.id
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Project u.id AS u_id, 'User' AS u_entity_type, ToJson(Object('id', ToString(u.id))) AS u_props (...))"]
+
+  - name: Hydrating the ID with other properties keeps every key in the property map
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id","username","state"]}]}
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u.id, u.username, u.state
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Project u.id AS u_id, 'User' AS u_entity_type, ToJson(Object('id', ToString(u.id), 'username', ToString(u.username), 'state', ToString(u.state))) AS u_props (...))"]

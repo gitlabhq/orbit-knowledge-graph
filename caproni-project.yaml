@@ -30,7 +30,7 @@ lifecycle_hooks:
     script: mise trust && mise install && scripts/dev/caproni-edit-mode.sh build
 
 reloaders:
-  gkg-webserver:
+  orbit-webserver:
     type: mirror
     repository: knowledge-graph
     edit_mode: false
@@ -38,8 +38,8 @@ reloaders:
       target:
         namespace: gitlab
         kubernetes_type: deployment
-        name: gkg-webserver
-        container: gkg-webserver
+        name: orbit-webserver
+        container: orbit-webserver
       filesystem:
         mode: localwithoverrides
         read_only:
@@ -58,10 +58,10 @@ reloaders:
         gkg-build:
           command: scripts/dev/caproni-edit-mode.sh watch
           context: local
-        gkg-webserver:
+        orbit-webserver:
           command: scripts/dev/caproni-edit-mode.sh webserver
           port: 50054
-  gkg-indexer-sdlc:
+  orbit-indexer-sdlc:
     type: mirror
     repository: knowledge-graph
     edit_mode: false
@@ -69,8 +69,8 @@ reloaders:
       target:
         namespace: gitlab
         kubernetes_type: deployment
-        name: gkg-indexer-sdlc
-        container: gkg-indexer
+        name: orbit-indexer-sdlc
+        container: orbit-indexer
       filesystem:
         mode: localwithoverrides
         read_only:
@@ -84,9 +84,9 @@ reloaders:
         gkg-build:
           command: scripts/dev/caproni-edit-mode.sh watch
           context: local
-        gkg-indexer-sdlc:
+        orbit-indexer-sdlc:
           command: scripts/dev/caproni-edit-mode.sh indexer-sdlc
-  gkg-indexer-code:
+  orbit-indexer-code:
     type: mirror
     repository: knowledge-graph
     edit_mode: false
@@ -94,8 +94,8 @@ reloaders:
       target:
         namespace: gitlab
         kubernetes_type: deployment
-        name: gkg-indexer-code
-        container: gkg-indexer
+        name: orbit-indexer-code
+        container: orbit-indexer
       filesystem:
         mode: localwithoverrides
         read_only:
@@ -109,9 +109,9 @@ reloaders:
         gkg-build:
           command: scripts/dev/caproni-edit-mode.sh watch
           context: local
-        gkg-indexer-code:
+        orbit-indexer-code:
           command: scripts/dev/caproni-edit-mode.sh indexer-code
-  gkg-dispatcher:
+  orbit-dispatcher:
     type: mirror
     repository: knowledge-graph
     edit_mode: false
@@ -119,8 +119,8 @@ reloaders:
       target:
         namespace: gitlab
         kubernetes_type: deployment
-        name: gkg-dispatcher
-        container: gkg-dispatcher
+        name: orbit-dispatcher
+        container: orbit-dispatcher
       filesystem:
         mode: localwithoverrides
         read_only:
@@ -134,5 +134,5 @@ reloaders:
         gkg-build:
           command: scripts/dev/caproni-edit-mode.sh watch
           context: local
-        gkg-dispatcher:
+        orbit-dispatcher:
           command: scripts/dev/caproni-edit-mode.sh dispatcher

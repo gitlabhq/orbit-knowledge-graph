@@ -1,0 +1,135 @@
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2,3,5],"id_range":{"start":1,"end":3},"filters":{"state":"active"}}]}
+
+logical:
+  exact: |
+    (Limit 30
+      (Input traversal
+        (Project u.id, u.username, u.name, u.state
+          (Filter u.state = 'active', u.id IN [1, 2, 3, 5], u.id >= 1, u.id <= 3
+            (NodeScan User AS u)))))
+
+physical:
+  clickhouse: {}
+
+cases:
+  - name: A numeric id list and inclusive id bounds in order 012 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id IN [1, 2, 3, 5] AND u.id >= 1 AND u.id <= 3 AND u.state = 'active' RETURN u
+
+  - name: A numeric id list and inclusive id bounds in order 021 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id IN [1, 2, 3, 5] AND u.id <= 3 AND u.id >= 1 AND u.state = 'active' RETURN u
+
+  - name: A numeric id list and inclusive id bounds in order 102 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id IN [1, 2, 3, 5] AND u.id <= 3 AND u.state = 'active' RETURN u
+
+  - name: A numeric id list and inclusive id bounds in order 120 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 3 AND u.id IN [1, 2, 3, 5] AND u.state = 'active' RETURN u
+
+  - name: A numeric id list and inclusive id bounds in order 201 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id <= 3 AND u.id IN [1, 2, 3, 5] AND u.id >= 1 AND u.state = 'active' RETURN u
+
+  - name: A numeric id list and inclusive id bounds in order 210 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id <= 3 AND u.id >= 1 AND u.id IN [1, 2, 3, 5] AND u.state = 'active' RETURN u
+
+  - name: A numeric id list and strict id bounds in order 012 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id IN [1, 2, 3, 5] AND u.id > 0 AND u.id < 4 AND u.state = 'active' RETURN u
+
+  - name: A numeric id list and strict id bounds in order 021 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id IN [1, 2, 3, 5] AND u.id < 4 AND u.id > 0 AND u.state = 'active' RETURN u
+
+  - name: A numeric id list and strict id bounds in order 102 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id > 0 AND u.id IN [1, 2, 3, 5] AND u.id < 4 AND u.state = 'active' RETURN u
+
+  - name: A numeric id list and strict id bounds in order 120 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id > 0 AND u.id < 4 AND u.id IN [1, 2, 3, 5] AND u.state = 'active' RETURN u
+
+  - name: A numeric id list and strict id bounds in order 201 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id < 4 AND u.id IN [1, 2, 3, 5] AND u.id > 0 AND u.state = 'active' RETURN u
+
+  - name: A numeric id list and strict id bounds in order 210 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id < 4 AND u.id > 0 AND u.id IN [1, 2, 3, 5] AND u.state = 'active' RETURN u
+
+  - name: A digit string id list and inclusive id bounds in order 012 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id IN ['1', '2', '3', '5'] AND u.id >= 1 AND u.id <= 3 AND u.state = 'active' RETURN u
+
+  - name: A digit string id list and inclusive id bounds in order 021 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id IN ['1', '2', '3', '5'] AND u.id <= 3 AND u.id >= 1 AND u.state = 'active' RETURN u
+
+  - name: A digit string id list and inclusive id bounds in order 102 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id IN ['1', '2', '3', '5'] AND u.id <= 3 AND u.state = 'active' RETURN u
+
+  - name: A digit string id list and inclusive id bounds in order 120 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 3 AND u.id IN ['1', '2', '3', '5'] AND u.state = 'active' RETURN u
+
+  - name: A digit string id list and inclusive id bounds in order 201 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id <= 3 AND u.id IN ['1', '2', '3', '5'] AND u.id >= 1 AND u.state = 'active' RETURN u
+
+  - name: A digit string id list and inclusive id bounds in order 210 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id <= 3 AND u.id >= 1 AND u.id IN ['1', '2', '3', '5'] AND u.state = 'active' RETURN u
+
+  - name: A digit string id list and strict id bounds in order 012 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id IN ['1', '2', '3', '5'] AND u.id > 0 AND u.id < 4 AND u.state = 'active' RETURN u
+
+  - name: A digit string id list and strict id bounds in order 021 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id IN ['1', '2', '3', '5'] AND u.id < 4 AND u.id > 0 AND u.state = 'active' RETURN u
+
+  - name: A digit string id list and strict id bounds in order 102 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id > 0 AND u.id IN ['1', '2', '3', '5'] AND u.id < 4 AND u.state = 'active' RETURN u
+
+  - name: A digit string id list and strict id bounds in order 120 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id > 0 AND u.id < 4 AND u.id IN ['1', '2', '3', '5'] AND u.state = 'active' RETURN u
+
+  - name: A digit string id list and strict id bounds in order 201 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id < 4 AND u.id IN ['1', '2', '3', '5'] AND u.id > 0 AND u.state = 'active' RETURN u
+
+  - name: A digit string id list and strict id bounds in order 210 become node ids and an id range
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id < 4 AND u.id > 0 AND u.id IN ['1', '2', '3', '5'] AND u.state = 'active' RETURN u

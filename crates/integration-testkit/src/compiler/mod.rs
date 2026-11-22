@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use compiler::config::{self, CompilerCtx};
 use compiler::passes::{frontend, normalize, plan};
+use duckdb_client::{DuckDbClient, OpenMode};
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
 use serde::Deserialize;
 
@@ -24,6 +25,7 @@ struct Scenario {
     ontology_overlay: Option<String>,
     query: BTreeMap<String, String>,
     missing_frontends: BTreeMap<String, String>,
+    language_differs: BTreeMap<String, String>,
     physical: BTreeMap<String, BTreeMap<String, StateAssertions>>,
     rejected: BTreeMap<String, Rejection>,
     hydration: Option<HydrationSetup>,
@@ -132,6 +134,8 @@ struct RawScenario {
     query: BTreeMap<String, String>,
     #[serde(default)]
     missing_frontends: BTreeMap<String, String>,
+    #[serde(default)]
+    language_differs: BTreeMap<String, String>,
     logical: Option<serde_json::Value>,
     physical: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
     hydration: Option<HydrationSetup>,
@@ -147,11 +151,19 @@ impl TryFrom<RawScenario> for Scenario {
         let mut rejected = BTreeMap::new();
         for (backend, mut entries) in raw.physical {
             if let Some(rejection) = entries.remove("rejected") {
-                rejected.insert(
-                    backend.clone(),
-                    serde_json::from_value(rejection)
-                        .map_err(|error| format!("{backend}.rejected: {error}"))?,
-                );
+                let rejection: Rejection = serde_json::from_value(rejection)
+                    .map_err(|error| format!("{backend}.rejected: {error}"))?;
+                if let Some(language) = raw.query.keys().find(|language| {
+                    !rejection
+                        .contains
+                        .get(language)
+                        .is_ok_and(|fragments| !fragments.is_empty())
+                }) {
+                    return Err(format!(
+                        "{backend}.rejected needs a nonempty contains for {language}"
+                    ));
+                }
+                rejected.insert(backend.clone(), rejection);
             }
             let phases = aliases::resolve(&backend, hydration, raw.logical.as_ref(), entries)?
                 .into_iter()
@@ -168,6 +180,7 @@ impl TryFrom<RawScenario> for Scenario {
             ontology_overlay: raw.ontology_overlay,
             query: raw.query,
             missing_frontends: raw.missing_frontends,
+            language_differs: raw.language_differs,
             physical,
             rejected,
             hydration: raw.hydration,
@@ -196,6 +209,23 @@ impl Scenario {
                     ));
                 }
             }
+        }
+        for (language, reason) in &self.language_differs {
+            if !self.query.contains_key(language) {
+                return Err(format!(
+                    "language_differs.{language} names no query language"
+                ));
+            }
+            if reason.trim().is_empty() {
+                return Err(format!("language_differs.{language} needs a reason"));
+            }
+        }
+        if self
+            .query
+            .keys()
+            .all(|language| self.language_differs.contains_key(language))
+        {
+            return Err("language_differs must leave one language to compare against".into());
         }
         Ok(())
     }
@@ -486,29 +516,40 @@ impl Assertions {
 
 type PhaseTable = [(&'static str, &'static [&'static str])];
 
+type Compiled = (Vec<String>, Option<compiler::CompiledQueryContext>);
+
 struct Models {
     remote: Arc<ClickHouseDataModel>,
     local: Arc<DuckDbDataModel>,
+    local_database: DuckDbClient,
 }
 
 impl Models {
     fn derive(ontology: Arc<ontology::Ontology>) -> Self {
+        let local_database = DuckDbClient::open(OpenMode::InMemory).unwrap();
+        local_database
+            .initialize_schema(&compiler::generate_local_ddl(&ontology, ""))
+            .unwrap();
         Self {
             remote: Arc::new(ClickHouseDataModel::derive(ontology.clone()).unwrap()),
             local: Arc::new(DuckDbDataModel::derive(ontology).unwrap()),
+            local_database,
         }
     }
 }
 
 fn check(scenario: &Scenario, models: &Models, path: &Path) -> Vec<String> {
+    let name = format!(
+        "{}: {}",
+        path.display(),
+        scenario.name.as_deref().unwrap_or("unnamed")
+    );
     let mut failures = Vec::new();
+    let mut differing = BTreeMap::new();
     for (backend, phases) in &scenario.physical {
+        let mut compiled = Vec::new();
         for (language, raw) in &scenario.query {
-            let label = format!(
-                "{}: {} [{language}/{backend}]",
-                path.display(),
-                scenario.name.as_deref().unwrap_or("unnamed")
-            );
+            let label = format!("{name} [{language}/{backend}]");
             let rejection = scenario.rejected.contains_key(backend);
             if (phases.is_empty() && !rejection)
                 || phases.values().any(|state| state.fields().next().is_none())
@@ -518,12 +559,114 @@ fn check(scenario: &Scenario, models: &Models, path: &Path) -> Vec<String> {
                 ));
                 continue;
             }
-            failures.extend(check_pipeline(
-                scenario, models, backend, language, raw, phases, &label,
+            let (pipeline_failures, output) =
+                check_pipeline(scenario, models, backend, language, raw, phases, &label);
+            failures.extend(pipeline_failures);
+            compiled.extend(output.map(|output| (language.as_str(), output)));
+        }
+        if compiled.len() == scenario.query.len() {
+            failures.extend(compare_languages(
+                scenario,
+                &compiled,
+                &format!("{name} [{backend}]"),
+                &mut differing,
             ));
         }
     }
+    for language in scenario.language_differs.keys() {
+        match differing.get(language.as_str()) {
+            Some(true) => {}
+            Some(false) => failures.push(format!(
+                "{name}: language_differs.{language} is stale; {language} compiles to the same output on every backend"
+            )),
+            None => failures.push(format!(
+                "{name}: language_differs.{language} has no compiled output to compare"
+            )),
+        }
+    }
     failures
+}
+
+fn compare_languages<'a>(
+    scenario: &Scenario,
+    compiled: &[(&'a str, compiler::CompiledQueryContext)],
+    label: &str,
+    differing: &mut BTreeMap<&'a str, bool>,
+) -> Vec<String> {
+    let Some((reference, expected)) = compiled
+        .iter()
+        .find(|(language, _)| !scenario.language_differs.contains_key(*language))
+    else {
+        return vec![];
+    };
+    let mut failures = Vec::new();
+    for (language, actual) in compiled
+        .iter()
+        .filter(|(language, _)| language != reference)
+    {
+        let difference = output_difference(expected, actual, reference, language);
+        if scenario.language_differs.contains_key(*language) {
+            *differing.entry(language).or_default() |= difference.is_some();
+        } else if let Some(difference) = difference {
+            failures.push(format!("{label}: {difference}"));
+        }
+    }
+    failures
+}
+
+fn output_difference(
+    expected: &compiler::CompiledQueryContext,
+    actual: &compiler::CompiledQueryContext,
+    reference: &str,
+    language: &str,
+) -> Option<String> {
+    let differ = |part: &str, expected: String, actual: String| {
+        (expected != actual).then(|| {
+            let start = expected
+                .chars()
+                .zip(actual.chars())
+                .take_while(|(left, right)| left == right)
+                .count()
+                .saturating_sub(40);
+            let window = |text: &str| text.chars().skip(start).take(240).collect::<String>();
+            format!(
+                "{part} differ: {reference} [{}] vs {language} [{}]",
+                window(&expected),
+                window(&actual)
+            )
+        })
+    };
+    let params = |output: &compiler::CompiledQueryContext| {
+        format!(
+            "{:?}",
+            output.base.params.iter().collect::<BTreeMap<_, _>>()
+        )
+    };
+    differ(
+        "query types",
+        format!("{:?}", expected.query_type),
+        format!("{:?}", actual.query_type),
+    )
+    .or_else(|| differ("SQL", expected.base.sql.clone(), actual.base.sql.clone()))
+    .or_else(|| differ("params", params(expected), params(actual)))
+    .or_else(|| {
+        (expected.hydration != actual.hydration).then(|| {
+            differ(
+                "hydration plans",
+                format!("{:?}", expected.hydration),
+                format!("{:?}", actual.hydration),
+            )
+            .unwrap_or_else(|| "hydration plans differ".into())
+        })
+    })
+    .or_else(|| {
+        (expected.base.result_context != actual.base.result_context).then(|| {
+            format!(
+                "result contexts differ: {reference} {:?} vs {language} {:?}",
+                expected.base.result_context, actual.base.result_context
+            )
+        })
+    })
 }
 
 fn check_pipeline(
@@ -534,7 +677,7 @@ fn check_pipeline(
     raw: &str,
     phases: &BTreeMap<String, StateAssertions>,
     label: &str,
-) -> Vec<String> {
+) -> Compiled {
     let security = || crate::query_scenario::build_security(&scenario.security);
     let remote = &models.remote;
     let index_exists = |table: &str, index: &str| {
@@ -549,6 +692,7 @@ fn check_pipeline(
         rejection: scenario.rejected.get(backend),
         frontend: language,
         index_exists: &index_exists,
+        local_database: (backend == "duckdb").then_some(&models.local_database),
         label,
     };
     match (backend, language, scenario.hydration.as_ref()) {
@@ -562,7 +706,7 @@ fn check_pipeline(
                         config::run_ch_hydration_observed(ctx, f)
                     })
                 }
-                Err(error) => vec![format!("{label}: {error}")],
+                Err(error) => (vec![format!("{label}: {error}")], None),
             }
         }
         ("clickhouse", "json", None) => {
@@ -593,7 +737,10 @@ fn check_pipeline(
                 config::run_duckdb_gql_observed(ctx, f)
             })
         }
-        _ => vec![format!("{label}: no {backend} pipeline for this fixture")],
+        _ => (
+            vec![format!("{label}: no {backend} pipeline for this fixture")],
+            None,
+        ),
     }
 }
 
@@ -636,6 +783,7 @@ struct Expectations<'a> {
     rejection: Option<&'a Rejection>,
     frontend: &'a str,
     index_exists: &'a dyn Fn(&str, &str) -> bool,
+    local_database: Option<&'a DuckDbClient>,
     label: &'a str,
 }
 
@@ -645,10 +793,10 @@ impl Expectations<'_> {
         mut ctx: C,
         table: &PhaseTable,
         run: impl FnOnce(&mut C, &mut dyn FnMut(&'static str, &C)) -> compiler::Result<()>,
-    ) -> Vec<String> {
+    ) -> Compiled {
         let mut failures = self.unknown_targets(table);
         if !failures.is_empty() {
-            return failures;
+            return (failures, None);
         }
         let result = run(&mut ctx, &mut |phase, ctx| {
             failures.extend(self.check_phase(phase, ctx))
@@ -667,9 +815,20 @@ impl Expectations<'_> {
                 self.label,
             )),
             (Err(error), None) => failures.push(format!("{}: {error}", self.label)),
-            (Ok(()), None) => {}
+            (Ok(()), None) => {
+                if let (Some(database), Some(output)) = (self.local_database, ctx.output()) {
+                    let sql = output.base.render();
+                    if let Err(error) = database.query_arrow(&sql) {
+                        failures.push(format!(
+                            "{}: DuckDB rejects the SQL: {error}\n{sql}",
+                            self.label
+                        ));
+                    }
+                }
+                return (failures, ctx.take_output());
+            }
         }
-        failures
+        (failures, None)
     }
 
     fn unknown_targets(&self, table: &PhaseTable) -> Vec<String> {
@@ -901,6 +1060,7 @@ fn read_fixtures(directory: &Path) -> Vec<(std::path::PathBuf, Scenario)> {
 
 fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), Vec<String>> {
     let models = Models::derive(ontology);
+    let mut overlays = BTreeMap::new();
     let mut cases = 0;
     let mut passed = 0;
     let mut failures = Vec::new();
@@ -918,12 +1078,14 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
             failures.push(format!("{}: {error}", path.display()));
             continue;
         }
-        let overlay = scenario
-            .ontology_overlay
-            .as_ref()
-            .map(|name| Models::derive(Arc::new(crate::load_ontology_overlay(name))));
+        let scenario_models = match &scenario.ontology_overlay {
+            Some(name) => &*overlays
+                .entry(name.clone())
+                .or_insert_with(|| Models::derive(Arc::new(crate::load_ontology_overlay(name)))),
+            None => &models,
+        };
         let failure_count = failures.len();
-        failures.extend(check(&scenario, overlay.as_ref().unwrap_or(&models), path));
+        failures.extend(check(&scenario, scenario_models, path));
         if failures.len() == failure_count {
             passed += 1;
             println!("PASS {}", scenario.name.as_deref().unwrap_or("unnamed"));
@@ -1028,6 +1190,68 @@ cases:
 }
 
 #[test]
+fn languages_compile_to_the_same_output_unless_a_reason_says_why() {
+    let run = |cases: &str| {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("parity.yaml"),
+            format!(
+                "physical: {{clickhouse: {{normalize: {{input: {{expect: ['(_)']}}}}}}}}\ncases:\n{cases}"
+            ),
+        )
+        .unwrap();
+        check_dir(
+            directory.path(),
+            Arc::new(ontology::Ontology::new().with_nodes(["User"])),
+        )
+        .err()
+        .unwrap_or_default()
+    };
+    let query = |limit: u32| {
+        format!(
+            "{{json: '{{\"query_type\":\"traversal\",\"nodes\":[{{\"id\":\"u\",\"entity\":\"User\",\"node_ids\":[1]}}],\"limit\":{limit}}}', gql: 'MATCH (u:User {{id: 1}}) RETURN u LIMIT 5'}}"
+        )
+    };
+    let differing = query(6);
+    let matching = query(5);
+
+    assert!(run(&format!("  - {{name: same, query: {matching}}}")).is_empty());
+    let failures = run(&format!("  - {{name: differs, query: {differing}}}"));
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(
+        failures[0].contains("differs [clickhouse]: "),
+        "{failures:?}"
+    );
+    assert!(failures[0].contains(" vs json ["), "{failures:?}");
+    assert!(
+        run(&format!(
+            "  - {{name: explained, query: {differing}, language_differs: {{json: The limits differ}}}}"
+        ))
+        .is_empty()
+    );
+    for (differs, expected) in [
+        ("{json: Stale}", "language_differs.json is stale"),
+        (
+            "{sql: Unknown}",
+            "language_differs.sql names no query language",
+        ),
+        ("{json: ' '}", "language_differs.json needs a reason"),
+        (
+            "{json: Both, gql: Both}",
+            "language_differs must leave one language to compare against",
+        ),
+    ] {
+        let failures = run(&format!(
+            "  - {{name: opt-out, query: {matching}, language_differs: {differs}}}"
+        ));
+        assert!(
+            failures.iter().any(|failure| failure.contains(expected)),
+            "{differs}: {failures:?}"
+        );
+    }
+}
+
+#[test]
 fn fixtures_name_phases_that_run_and_fields_they_write() {
     let directory = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -1107,17 +1331,17 @@ fn rejections_check_the_phase_reason_and_message() {
         case(
             "wrong phase",
             "CREATE (u:User)",
-            "        rejected: {phase: validate, reason: schema}\n",
+            "        rejected: {phase: validate, reason: schema, contains: [Orbit query syntax]}\n",
         ),
         case(
             "wrong reason",
             "CREATE (u:User)",
-            "        rejected: {phase: gql_parse, reason: parse}\n",
+            "        rejected: {phase: gql_parse, reason: parse, contains: [Orbit query syntax]}\n",
         ),
         case(
             "unknown reason",
             "CREATE (u:User)",
-            "        rejected: {phase: gql_parse, reason: syntax}\n",
+            "        rejected: {phase: gql_parse, reason: syntax, contains: [Orbit query syntax]}\n",
         ),
         case(
             "missing fragment",
@@ -1127,12 +1351,12 @@ fn rejections_check_the_phase_reason_and_message() {
         case(
             "compiles",
             "MATCH (u:User {id: 1}) RETURN u",
-            "        rejected: {phase: validate, reason: schema}\n",
+            "        rejected: {phase: validate, reason: schema, contains: [x]}\n",
         ),
         case(
             "after rejection",
             "CREATE (u:User)",
-            "        rejected: {phase: gql_parse, reason: schema}\n        emitted: {expect: ['(_)']}\n",
+            "        rejected: {phase: gql_parse, reason: schema, contains: [Orbit query syntax]}\n        emitted: {expect: ['(_)']}\n",
         ),
     ];
     std::fs::write(
@@ -1178,6 +1402,32 @@ fn rejections_check_the_phase_reason_and_message() {
         "after rejection",
         "does not run after the rejection"
     ));
+}
+
+#[test]
+fn rejections_need_contains_for_every_language() {
+    let parse = |contains: &str| {
+        orbit_utils::yaml::from_str::<Scenario>(&format!(
+            "name: r\nquery: {{json: q, gql: q}}\nphysical: {{clickhouse: {{rejected: {{phase: validate, reason: schema{contains}}}}}}}"
+        ))
+        .err()
+        .map(|error| error.to_string())
+    };
+    assert_eq!(parse(", contains: [x]"), None);
+    for (contains, language) in [
+        ("", "gql"),
+        (", contains: []", "gql"),
+        (", contains: {json: [x], gql: []}", "gql"),
+        (", contains: {gql: [x]}", "json"),
+    ] {
+        let error = parse(contains).expect(contains);
+        assert!(
+            error.contains(&format!(
+                "clickhouse.rejected needs a nonempty contains for {language}"
+            )),
+            "{error}"
+        );
+    }
 }
 
 #[test]

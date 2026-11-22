@@ -1,0 +1,28 @@
+cases:
+  - name: Package BUILT_BY filters CI edges by kind and both endpoint types
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"pkg","entity":"Package","columns":["name","version","package_type"],"filters":{"package_type":"npm"}},{"id":"pl","entity":"Pipeline","columns":["id","status"]}],"relationships":[{"type":"BUILT_BY","from":"pkg","to":"pl"}],"limit":25}
+      gql: |
+        MATCH (pkg:Package {package_type: 'npm'})-[:BUILT_BY]->(pl:Pipeline) RETURN pkg.name, pkg.version, pkg.package_type, pl.id, pl.status LIMIT 25
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter _orbit_edge_0.relationship_kind = 'BUILT_BY', _orbit_edge_0.source_kind = 'Package', _orbit_edge_0.target_kind = 'Pipeline' (Deduplicate Final (Scan Table(gl_ci_edge) AS _orbit_edge_0)))
+            - (Filter pkg.package_type = 'npm', ... (Deduplicate Final (Scan Table(gl_package) AS pkg)))
+        emitted:
+          expect: ["(Limit 26 (_))"]
+
+  - name: AgentSession CREATED_MR filters edges by kind and both endpoint types
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"w","entity":"AgentSession","columns":["flow_type"],"filters":{"flow_type":"developer"}},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"CREATED_MR","from":"w","to":"mr"}],"limit":25}
+      gql: |
+        MATCH (w:AgentSession {flow_type: 'developer'})-[:CREATED_MR]->(mr:MergeRequest) RETURN w.flow_type, mr.title LIMIT 25
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter _orbit_edge_0.relationship_kind = 'CREATED_MR', _orbit_edge_0.source_kind = 'AgentSession', _orbit_edge_0.target_kind = 'MergeRequest' (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_0)))
+            - (Filter w.flow_type = 'developer', ... (Deduplicate Final (Scan Table(gl_agent_session) AS w)))

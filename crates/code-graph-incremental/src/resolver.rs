@@ -893,12 +893,7 @@ fn gather_imports_for(
     let root_relative = lang.syms.lookup("source_root_rel");
     let declared_roots: FxHashSet<_> = trees
         .iter()
-        .filter_map(|tree| {
-            let relative = lang.syms.resolve(tree.root().tag(root_relative)?);
-            tree.label
-                .strip_suffix(relative)
-                .map(|root| root.trim_end_matches(PATH_SEP))
-        })
+        .filter_map(|tree| source_root(tree, lang, root_relative))
         .collect();
     let stdlib_prefixes: Vec<_> = lookup
         .prefixes
@@ -945,18 +940,35 @@ fn gather_imports_for(
                     } else {
                         &lookup.prefixes
                     };
-                    let target_path = mapped.unwrap_or_else(|| raw_path.to_owned());
+                    let mut target_path = mapped.unwrap_or_else(|| raw_path.to_owned());
+                    if config.submodule_imports
+                        && target_path.is_empty()
+                        && let Some(root) = source_root(tree, lang, root_relative)
+                    {
+                        target_path = root.to_owned();
+                    }
                     let mut direct = resolve_glob(&target_path, file_index, prefixes);
                     direct.retain(|loc| loc.fi != fi);
                     if direct.is_empty() && stdlib {
                         return;
                     }
+                    let modules = match config.submodule_imports {
+                        true => {
+                            let names: Vec<_> =
+                                cur.names().map(|c| lang.syms.resolve(c.sym())).collect();
+                            submodule_files(&direct, &names, trees, file_index)
+                        }
+                        false => Vec::new(),
+                    };
                     let candidates = match direct.is_empty() {
-                        false => Either::Left(
+                        false if !modules.is_empty() => {
+                            Either::Left(Either::Left(modules.into_iter()))
+                        }
+                        false => Either::Left(Either::Right(
                             direct
                                 .into_iter()
                                 .map(|loc| (loc, target_path.clone(), false)),
-                        ),
+                        )),
                         true => Either::Right(cur.names().flat_map(|c| {
                             let submod =
                                 format!("{target_path}{PATH_SEP}{}", lang.syms.resolve(c.sym()));
@@ -2230,6 +2242,38 @@ fn build_file_index(
         }
     }
     idx
+}
+
+fn source_root<'a>(tree: &'a Tree, lang: &Lang, root_relative: u32) -> Option<&'a str> {
+    let relative = lang.syms.resolve(tree.root().tag(root_relative)?);
+    tree.label
+        .strip_suffix(relative)
+        .map(|root| root.trim_end_matches(PATH_SEP))
+}
+
+/// Module files for `names` under the files in `parents`: `a.rs` keeps them in `a/`.
+/// `lib.rs` and `mod.rs` need no lookup, since their `mod` declarations resolve.
+fn submodule_files(
+    parents: &[Loc],
+    names: &[&str],
+    trees: &[Tree],
+    file_index: &FileIndex,
+) -> Vec<(Loc, String, bool)> {
+    let mut found = Vec::new();
+    for parent in parents.iter().filter(|loc| loc.node == 0) {
+        let path = trees[parent.fi as usize].label.as_str();
+        let Some(file_lang) = SupportLang::from_path(path) else {
+            continue;
+        };
+        let stem = file_lang.strip_extension(path);
+        for &name in names {
+            let key = format!("{stem}{PATH_SEP}{name}");
+            if let Some(loc) = file_index.get(&key).filter(|loc| loc.node == 0) {
+                found.push((loc, key, true));
+            }
+        }
+    }
+    found
 }
 
 fn resolve_glob(target: &str, idx: &FileIndex, prefixes: &[String]) -> Vec<Loc> {

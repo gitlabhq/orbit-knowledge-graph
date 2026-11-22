@@ -139,6 +139,7 @@ mod tests {
                 "APPROVED_siphon_approvals_MergeRequest",
                 "ASSIGNED_siphon_issue_assignees_WorkItem",
                 "ASSIGNED_siphon_merge_request_assignees_MergeRequest",
+                "BLOCKS_siphon_issue_links_WorkItem",
                 "BUILT_BY_siphon_packages_build_infos_Pipeline",
                 "BUILT_BY_siphon_packages_package_file_build_infos_Pipeline",
                 "CHILD_OF_siphon_ci_sources_pipelines_Pipeline",

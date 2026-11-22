@@ -270,7 +270,7 @@ fn grammar_to_ts_language(grammar: &str) -> tree_sitter::Language {
         "tree-sitter-go" => tree_sitter_go::LANGUAGE.into(),
         "tree-sitter-hcl" => tree_sitter_hcl::LANGUAGE.into(),
         "tree-sitter-java" => tree_sitter_java::LANGUAGE.into(),
-        "tree-sitter-kotlin-sg" => tree_sitter_kotlin_sg::LANGUAGE.into(),
+        "tree-sitter-kotlin-sg" => tree_sitter_kotlin::LANGUAGE.into(),
         "tree-sitter-lua" => tree_sitter_lua::LANGUAGE.into(),
         "tree-sitter-php" => tree_sitter_php::LANGUAGE_PHP.into(),
         "tree-sitter-python" => tree_sitter_python::LANGUAGE.into(),

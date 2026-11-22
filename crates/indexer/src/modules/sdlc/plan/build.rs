@@ -557,20 +557,18 @@ mod tests {
             "sql: {sql}"
         );
         assert!(
-            normalized.contains("argMax(state, _siphon_replicated_at)"),
+            normalized.contains("argMax(user_type, _siphon_replicated_at)"),
             "sql: {sql}"
         );
-        assert!(!normalized.contains("argMax(state, _siphon_watermark)"));
+        assert!(!normalized.contains("argMax(user_type, _siphon_watermark)"));
         assert!(normalized.contains("GROUP BY id"), "sql: {sql}");
-        assert!(normalized.contains("_e0.state AS user_state"), "sql: {sql}");
         assert!(
-            normalized.contains("_e1.state_id AS work_item_state_id"),
+            normalized.contains("_e0.user_type AS user_user_type"),
             "sql: {sql}"
         );
-        assert!(!normalized.contains("AS _e0_state"), "sql: {sql}");
-        assert!(!normalized.contains("AS _e1_state_id"), "sql: {sql}");
+        assert!(!normalized.contains("AS _e0_user_type"), "sql: {sql}");
         assert!(
-            normalized.contains("id IN (SELECT DISTINCT issue_id FROM _batch)"),
+            normalized.contains("id IN (SELECT DISTINCT user_id FROM _batch)"),
             "sql: {sql}"
         );
 
@@ -583,11 +581,20 @@ mod tests {
             !e0_body.contains("traversal_path"),
             "User is a global node with no traversal_path column, so _e0 must not prune: {e0_body}"
         );
+        let triggers = built
+            .namespaced
+            .iter()
+            .find(|p| p.name == "TRIGGERS_PIPELINE_siphon_ci_sources_pipelines_Pipeline")
+            .expect("TRIGGERS_PIPELINE plan");
+        let triggers_sql = normalize(&render_namespaced(
+            triggers,
+            &TraversalPath::new_unchecked("1/2/"),
+        ));
         assert!(
-            normalized.contains(
-                "issue_id FROM _batch) AND startsWith(traversal_path, {traversal_path:String})"
+            triggers_sql.contains(
+                "source_job_id FROM _batch) AND startsWith(traversal_path, {traversal_path:String})"
             ),
-            "sql: {sql}"
+            "sql: {triggers_sql}"
         );
 
         let TransformSpec::DataFusion(transforms) = &plan.transform else {
@@ -605,26 +612,23 @@ mod tests {
         let plan = built
             .namespaced
             .iter()
-            .find(|p| {
-                render_namespaced(p, &TraversalPath::new_unchecked("1/2/"))
-                    .contains("siphon_issue_links")
-            })
-            .expect("siphon_issue_links plan");
+            .find(|p| p.name == "CHILD_OF_siphon_ci_sources_pipelines_Pipeline")
+            .expect("CHILD_OF plan");
 
         let normalized = normalize(&render_namespaced(
             plan,
             &TraversalPath::new_unchecked("1/2/"),
         ));
         assert!(
-            normalized.contains("_e0.state_id AS source_state_id"),
+            normalized.contains("_e0.source AS pipeline_source"),
             "sql: {normalized}"
         );
         assert!(
-            normalized.contains("_e1.state_id AS target_state_id"),
+            normalized.contains("_e1.source AS source_pipeline_source"),
             "sql: {normalized}"
         );
         assert!(
-            normalized.contains("_e0.confidential AS source_confidential"),
+            normalized.contains("_e0.tag AS pipeline_tag"),
             "sql: {normalized}"
         );
     }

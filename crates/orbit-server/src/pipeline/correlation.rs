@@ -1,5 +1,6 @@
 //! Tags each ClickHouse query with the request correlation ID. Sub-queries carry
-//! a per-stage `query_id` and a lightweight `gkg;<kind>;correlation_id=<id>`
+//! a per-query `query_id` (`<correlation_id>-<stage>-<ulid>`, unique even when
+//! parallel requests share one correlation ID) and a lightweight `gkg;<kind>;correlation_id=<id>`
 //! comment; the base query additionally carries an attribution payload
 //! (`gkg;<base64(json)>`) so retention can recover who ran which query, in which
 //! language, with which compiler and schema version.
@@ -32,7 +33,8 @@ pub(crate) fn query_id(stage: &str) -> String {
     let prefix = labkit::correlation::current()
         .and_then(|id| sanitize(&id))
         .unwrap_or_else(labkit::correlation::generate_id);
-    format!("{prefix}-{stage}")
+    let unique = labkit::correlation::generate_id();
+    format!("{prefix}-{stage}-{unique}")
 }
 
 pub(crate) fn log_comment(suffix: Option<&str>) -> String {
@@ -108,13 +110,24 @@ mod tests {
         assert_eq!(sanitize("semi;colon"), None);
     }
 
+    fn split_query_id<'a>(id: &'a str, stage: &str) -> (&'a str, &'a str) {
+        let (rest, unique) = id.rsplit_once('-').expect("unique suffix present");
+        let prefix = rest
+            .strip_suffix(&format!("-{stage}"))
+            .expect("stage before the unique suffix");
+        (prefix, unique)
+    }
+
+    fn is_ulid(s: &str) -> bool {
+        s.len() == 26 && s.chars().all(|c| c.is_ascii_alphanumeric())
+    }
+
     #[test]
     fn query_id_without_correlation_falls_back_to_ulid_prefix() {
         let id = query_id("base");
-        let (prefix, stage) = id.rsplit_once('-').expect("stage suffix present");
-        assert_eq!(stage, "base");
-        assert_eq!(prefix.len(), 26);
-        assert!(prefix.chars().all(|c| c.is_ascii_alphanumeric()));
+        let (prefix, unique) = split_query_id(&id, "base");
+        assert!(is_ulid(prefix));
+        assert!(is_ulid(unique));
     }
 
     #[test]
@@ -129,15 +142,34 @@ mod tests {
     #[test]
     fn query_id_uses_clean_correlation_id_as_prefix() {
         let id = with_correlation("req-abc-123", || query_id("base"));
-        assert_eq!(id, "req-abc-123-base");
+        let (prefix, unique) = split_query_id(&id, "base");
+        assert_eq!(prefix, "req-abc-123");
+        assert!(is_ulid(unique));
+    }
+
+    #[test]
+    fn query_id_is_unique_per_call_under_one_correlation_id() {
+        let (first, second) =
+            with_correlation("req-abc-123", || (query_id("base"), query_id("base")));
+        assert_ne!(first, second);
+        assert!(first.starts_with("req-abc-123-base-"));
+        assert!(second.starts_with("req-abc-123-base-"));
+    }
+
+    #[test]
+    fn hydration_query_id_keeps_correlation_prefix_and_stage() {
+        let id = with_correlation("req-abc-123", || query_id("hydration-static"));
+        let (prefix, unique) = split_query_id(&id, "hydration-static");
+        assert_eq!(prefix, "req-abc-123");
+        assert!(is_ulid(unique));
     }
 
     #[test]
     fn query_id_falls_back_to_ulid_for_dirty_correlation_id() {
         let id = with_correlation("dirty/id", || query_id("base"));
-        let prefix = id.strip_suffix("-base").expect("stage suffix present");
-        assert_eq!(prefix.len(), 26);
-        assert!(prefix.chars().all(|c| c.is_ascii_alphanumeric()));
+        let (prefix, unique) = split_query_id(&id, "base");
+        assert!(is_ulid(prefix));
+        assert!(is_ulid(unique));
     }
 
     #[test]

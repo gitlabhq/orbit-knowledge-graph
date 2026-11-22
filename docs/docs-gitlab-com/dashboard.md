@@ -8,7 +8,7 @@ title: GitLab Orbit dashboard
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
+- Tier: [Premium, Ultimate](https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/#trials-and-purchases)
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -72,6 +72,7 @@ Turn GitLab Orbit on or off for one of your top-level groups.
 Prerequisites:
 
 - The Owner role for the top-level group.
+- GitLab Orbit for the top-level group. GitLab Orbit is a [separate purchase](https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/#trials-and-purchases) for Premium and Ultimate.
 
 If GitLab Orbit is not turned on for any of your groups, the dashboard has no tabs and lists the top-level groups that you own.
 To turn on GitLab Orbit, select the groups, select **Turn on GitLab Orbit**, then in the confirmation dialog, select **Turn on GitLab Orbit**.

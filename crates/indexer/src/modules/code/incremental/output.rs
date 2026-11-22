@@ -3,8 +3,9 @@ use arrow::record_batch::RecordBatch;
 use code_graph::v2::SinkError;
 use ontology::Ontology;
 use orbit_arrow::{ArrowUtils, AsRecordBatch, BatchBuilder};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::super::arrow_converter::{
     ConvertedGraphData, IndexerEdgeRow, IndexerEnvelope, build_tag_properties, compute_branch_id,
@@ -16,6 +17,51 @@ pub(super) struct Output<'a> {
     ontology: &'a Ontology,
     emitted_branch: AtomicBool,
     pub(super) batch_bytes: usize,
+    file_tags: Mutex<FileTags>,
+    deferred: Mutex<Vec<DeferredEdge>>,
+}
+
+#[derive(Default)]
+struct FileTags {
+    by_id: HashMap<i64, Arc<[String]>>,
+    distinct: HashSet<Arc<[String]>>,
+}
+
+impl FileTags {
+    fn insert(&mut self, id: i64, tags: &[String]) {
+        let tags = match self.distinct.get(tags) {
+            Some(tags) => tags.clone(),
+            None => {
+                let tags: Arc<[String]> = tags.into();
+                self.distinct.insert(tags.clone());
+                tags
+            }
+        };
+        self.by_id.insert(id, tags);
+    }
+
+    fn resolve<'a>(&'a self, known: &'a Option<Vec<String>>, id: i64) -> &'a [String] {
+        match known {
+            Some(tags) => tags,
+            None => self.by_id.get(&id).map_or(&[], |tags| tags),
+        }
+    }
+}
+
+struct DeferredEdge {
+    source_id: i64,
+    target_id: i64,
+    kind: String,
+    source_kind: String,
+    target_kind: String,
+    source_tags: Option<Vec<String>>,
+    target_tags: Option<Vec<String>>,
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, SinkError> {
+    mutex
+        .lock()
+        .map_err(|_| SinkError("incremental output lock poisoned".into()))
 }
 
 fn text(batch: &RecordBatch, column: &str, row: usize) -> Result<String, SinkError> {
@@ -37,6 +83,8 @@ impl<'a> Output<'a> {
             ontology,
             emitted_branch: AtomicBool::new(false),
             batch_bytes: orbit_arrow::BATCH_BYTES,
+            file_tags: Mutex::default(),
+            deferred: Mutex::default(),
         }
     }
 
@@ -62,6 +110,7 @@ impl<'a> Output<'a> {
             .map(|(key, _)| format!("{key}:true"))
             .collect();
         let mut tags: HashMap<i64, Vec<String>> = HashMap::new();
+        let mut file_rows = Vec::new();
         let mut structure = Vec::new();
         let mut entities = Vec::new();
         for kind in ["Directory", "File", "Definition", "ImportedSymbol"] {
@@ -81,6 +130,9 @@ impl<'a> Output<'a> {
                             text(batch, property, row).map(|value| format!("{key}:{value}"))
                         })
                         .collect::<Result<Vec<_>, _>>()?;
+                    if kind == "File" {
+                        file_rows.push(id);
+                    }
                     tags.insert(id, row_tags);
                     if matches!(kind, "Directory" | "File") {
                         structure.push((id, kind, text(batch, "path", row)?));
@@ -89,20 +141,36 @@ impl<'a> Output<'a> {
             }
             entities.push(batches);
         }
+        {
+            let mut file_tags = lock(&self.file_tags)?;
+            for id in file_rows {
+                file_tags.insert(id, &tags[&id]);
+            }
+        }
         let mut edges = BatchBuilder::new(&edge_specs(self.ontology), 0)?;
         let mut edge_batches = Vec::new();
         let empty_tags = Vec::new();
+        let endpoint_tags = |id, kind: &str| match kind {
+            "Branch" => Some(&branch_tags),
+            "File" => tags.get(&id),
+            _ => Some(tags.get(&id).unwrap_or(&empty_tags)),
+        };
+        let mut deferred = Vec::new();
         let mut edge =
             |source_id, target_id, edge_kind: &str, source_kind: &str, target_kind: &str| {
-                let source_tags = if source_kind == "Branch" {
-                    &branch_tags
-                } else {
-                    tags.get(&source_id).unwrap_or(&empty_tags)
-                };
-                let target_tags = if target_kind == "Branch" {
-                    &branch_tags
-                } else {
-                    tags.get(&target_id).unwrap_or(&empty_tags)
+                let source_tags = endpoint_tags(source_id, source_kind);
+                let target_tags = endpoint_tags(target_id, target_kind);
+                let (Some(source_tags), Some(target_tags)) = (source_tags, target_tags) else {
+                    deferred.push(DeferredEdge {
+                        source_id,
+                        target_id,
+                        kind: edge_kind.to_owned(),
+                        source_kind: source_kind.to_owned(),
+                        target_kind: target_kind.to_owned(),
+                        source_tags: source_tags.cloned(),
+                        target_tags: target_tags.cloned(),
+                    });
+                    return Ok(());
                 };
                 IndexerEdgeRow {
                     env: self.envelope,
@@ -156,6 +224,7 @@ impl<'a> Output<'a> {
                 )?;
             }
         }
+        lock(&self.deferred)?.append(&mut deferred);
         edge_batches.push(edges.finish()?);
         let [directories, files, definitions, imported_symbols]: [Vec<RecordBatch>; 4] = entities
             .try_into()
@@ -191,5 +260,44 @@ impl<'a> Output<'a> {
                 edges: part(&edge_batches, index),
             })
             .collect())
+    }
+
+    pub fn finish(&self) -> Result<Vec<ConvertedGraphData>, SinkError> {
+        let deferred = std::mem::take(&mut *lock(&self.deferred)?);
+        if deferred.is_empty() {
+            return Ok(Vec::new());
+        }
+        let file_tags = lock(&self.file_tags)?;
+        let mut edges = BatchBuilder::new(&edge_specs(self.ontology), 0)?;
+        let mut edge_batches = Vec::new();
+        for edge in &deferred {
+            IndexerEdgeRow {
+                env: self.envelope,
+                source_id: edge.source_id,
+                target_id: edge.target_id,
+                edge_kind: &edge.kind,
+                source_node_kind: &edge.source_kind,
+                target_node_kind: &edge.target_kind,
+                source_tags: file_tags.resolve(&edge.source_tags, edge.source_id),
+                target_tags: file_tags.resolve(&edge.target_tags, edge.target_id),
+            }
+            .write_row(&mut edges, &())?;
+            edge_batches.extend(edges.take_if_over(self.batch_bytes)?);
+        }
+        edge_batches.push(edges.finish()?);
+        let empty = |kind| BatchBuilder::new(&entity_specs(self.ontology, kind), 0)?.finish();
+        edge_batches
+            .into_iter()
+            .map(|edges| {
+                Ok(ConvertedGraphData {
+                    branch: empty("Branch")?,
+                    directories: empty("Directory")?,
+                    files: empty("File")?,
+                    definitions: empty("Definition")?,
+                    imported_symbols: empty("ImportedSymbol")?,
+                    edges,
+                })
+            })
+            .collect()
     }
 }

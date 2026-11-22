@@ -1,0 +1,176 @@
+description: Int filter values on int-based enums become their labels, and string-based enums pass through, before redaction runs
+
+config:
+  security: { paths: ["1/700/"] }
+  seed: redaction
+
+cases:
+  - name: int_user_type_coerced_to_label
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 0}}]
+        }
+    expect:
+      node_count: 3
+      nodes:
+        User:
+          ids: [1, 2, 3]
+          filters:
+            user_type: human
+          rows:
+            - { id: 1, user_type: human }
+            - { id: 2, user_type: human }
+            - { id: 3, user_type: human }
+
+  - name: int_user_type_project_bot
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 6}}]
+        }
+    expect:
+      node_count: 1
+      nodes:
+        User:
+          ids: [4]
+          filters:
+            user_type: project_bot
+
+  - name: int_merge_request_state_opened
+    config:
+      redaction:
+        allow:
+          merge_request: [7200, 7201, 7202, 7203]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 1}}]
+        }
+    expect:
+      node_count: 2
+      nodes:
+        MergeRequest:
+          ids: [7200, 7201]
+          filters:
+            state: opened
+          rows:
+            - { id: 7200, state: opened }
+            - { id: 7201, state: opened }
+
+  - name: int_merge_request_state_merged
+    config:
+      redaction:
+        allow:
+          merge_request: [7200, 7201, 7202, 7203]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 3}}]
+        }
+    expect:
+      node_count: 1
+      nodes:
+        MergeRequest:
+          ids: [7202]
+          filters:
+            state: merged
+
+  - name: int_merge_request_state_in
+    config:
+      redaction:
+        allow:
+          merge_request: [7200, 7201, 7202, 7203]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": [1, 2]}}}]
+        }
+    expect:
+      node_count: 3
+      nodes:
+        MergeRequest:
+          ids: [7200, 7201, 7203]
+          filters:
+            state: { in: [opened, closed] }
+
+  - name: string_user_state_active
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "columns": ["state"], "filters": {"state": "active"}}]
+        }
+      gql: |
+        MATCH (u:User) WHERE u.state = 'active' RETURN u.state
+    expect:
+      node_count: 4
+      nodes:
+        User:
+          ids: [1, 2, 3, 4]
+          filters:
+            state: active
+          rows:
+            - { id: 1, state: active }
+            - { id: 2, state: active }
+            - { id: 3, state: active }
+            - { id: 4, state: active }
+
+  - name: string_user_state_blocked
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "filters": {"state": "blocked"}}]
+        }
+      gql: |
+        MATCH (u:User) WHERE u.state = 'blocked' RETURN u
+    expect:
+      node_count: 1
+      nodes:
+        User:
+          ids: [5]
+          filters:
+            state: blocked
+
+  - name: string_user_state_in
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "filters": {"state": {"in": ["active", "blocked"]}}}]
+        }
+      gql: |
+        MATCH (u:User) WHERE u.state IN ['active', 'blocked'] RETURN u
+    expect:
+      node_count: 5
+      nodes:
+        User:
+          ids: [1, 2, 3, 4, 5]
+          filters:
+            state: { in: [active, blocked] }
