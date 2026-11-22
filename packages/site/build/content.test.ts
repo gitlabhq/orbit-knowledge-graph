@@ -19,7 +19,7 @@ describe("site links", () => {
 
   test("turns links to published pages and folders into site routes", () => {
     expect(siteLinks('[ADR 003](003_api_design.md#context "ADR") [Home](../README.md) [Testing](../testing/)', adr, routes)).toBe(
-      '[ADR 003](/engineering/adr/003_api_design#context "ADR") [Home](/engineering) [Testing](/engineering/testing)',
+      '[ADR 003](/engineering/adr/003_api_design#context "ADR") [Home](/engineering/) [Testing](/engineering/testing/)',
     );
     expect(siteLinks("[adr]: 003_api_design.md", adr, routes)).toBe("[adr]: /engineering/adr/003_api_design");
   });
