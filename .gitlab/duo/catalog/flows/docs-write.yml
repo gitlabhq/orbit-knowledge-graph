@@ -13,7 +13,7 @@ components:
     inputs:
       - from: >-
           SKILLS_REPO=gitlab-org/orbit/team/skills;
-          SKILLS_REF=33046b994845965cf2f8695adbd2b42f58d3a591;
+          SKILLS_REF=f52ac80ee0354e9a5728eb1c3e7a1a549fc44bc7;
           MODE=full;
           DOCS_REVIEWERS=fneill,z_painter;
           FLOW_USER=44621578;
@@ -65,7 +65,7 @@ components:
     toolset: [run_command]
     inputs:
       - {from: sh .docs-write/step ci, as: command, literal: true}
-      - {from: "1080", as: timeout, literal: true}
+      - {from: "300", as: timeout, literal: true}
     ui_log_events: [on_tool_execution_success, on_tool_execution_failed]
   - name: read_ci
     type: DeterministicStepComponent
@@ -79,7 +79,7 @@ components:
     toolset: [run_command]
     inputs:
       - {from: sh .docs-write/step threads, as: command, literal: true}
-      - {from: "1080", as: timeout, literal: true}
+      - {from: "300", as: timeout, literal: true}
     ui_log_events: [on_tool_execution_success, on_tool_execution_failed]
   - name: read_threads
     type: DeterministicStepComponent
@@ -164,13 +164,13 @@ routers:
   - from: read_setup
     condition:
       input: "context:read_setup.tool_responses"
-      routes: {write: write, threads: threads, default_route: end}
+      routes: {write: write, ci: ci, default_route: end}
   - {from: write, to: publish}
   - {from: publish, to: read_publish}
   - from: read_publish
     condition:
       input: "context:read_publish.tool_responses"
-      routes: {ci: ci, fix1: fix1, fix2: fix2, fix3: fix3, fix4: fix4, default_route: end}
+      routes: {fix1: fix1, fix2: fix2, fix3: fix3, fix4: fix4, default_route: end}
   - {from: fix1, to: publish}
   - {from: fix2, to: publish}
   - {from: fix3, to: publish}
@@ -179,12 +179,12 @@ routers:
   - from: read_ci
     condition:
       input: "context:read_ci.tool_responses"
-      routes: {threads: threads, wait: ci, fix1: fix1, fix2: fix2, fix3: fix3, fix4: fix4, default_route: end}
+      routes: {threads: threads, fix1: fix1, fix2: fix2, fix3: fix3, fix4: fix4, handoff: handoff, default_route: end}
   - {from: threads, to: read_threads}
   - from: read_threads
     condition:
       input: "context:read_threads.tool_responses"
-      routes: {wait: threads, fix1: fix1, fix2: fix2, fix3: fix3, fix4: fix4, ci: ci, handoff: handoff, default_route: end}
+      routes: {fix1: fix1, fix2: fix2, fix3: fix3, fix4: fix4, handoff: handoff, default_route: end}
   - {from: handoff, to: end}
 flow:
   entry_point: setup

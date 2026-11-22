@@ -1,4 +1,4 @@
-# MODE, SKILLS_REF, MIN_IMPORTANCE, REVIEW_PATHS, and FLOW_USER in setup: README.md in this folder.
+# MODE, SKILLS_REF, MIN_IMPORTANCE, REVIEW_PATHS, FLOW_USER, and WRITE_USER in setup: README.md in this folder.
 # Reviews any docs MR in the project once per head, on a finished MR pipeline or a mention.
 # setup ends the run with no model call when there is nothing to review. The flow never pushes.
 # The image has no python3: steps run through .docs-write/review-step, which uses uv.
@@ -12,14 +12,16 @@ components:
     inputs:
       - from: >-
           SKILLS_REPO=gitlab-org/orbit/team/skills;
-          SKILLS_REF=33046b994845965cf2f8695adbd2b42f58d3a591;
+          SKILLS_REF=f52ac80ee0354e9a5728eb1c3e7a1a549fc44bc7;
           MODE=full;
           MIN_IMPORTANCE=4;
           REVIEW_PATHS=docs/docs-gitlab-com/,docs/navigation.yaml;
           FLOW_USER=;
+          WRITE_USER=;
           D=.docs-write; rm -rf $D; mkdir -p $D/route; U="${GITLAB_BASE_URL:-https://gitlab.com}";
-          printf '#!/bin/sh\nexport LEFTHOOK=0 DOCS_WRITE_FLOW_USER=%s DOCS_REVIEW_MIN_IMPORTANCE=%s\nexec uv run -q --no-project
-          --python 3.12 python .docs-write/skills/docs-write/scripts/review_step.py "$@"\n' "$FLOW_USER" "$MIN_IMPORTANCE" > $D/review-step;
+          printf '#!/bin/sh\nexport LEFTHOOK=0 DOCS_WRITE_FLOW_USER=%s DOCS_REVIEW_MIN_IMPORTANCE=%s DOCS_WRITE_MENTION=%s\nexec uv run -q
+          --no-project --python 3.12 python .docs-write/skills/docs-write/scripts/review_step.py "$@"\n' "$FLOW_USER" "$MIN_IMPORTANCE"
+          "$WRITE_USER" > $D/review-step;
           if git -C "$D" init -q ts && git -C "$D/ts" fetch -q --depth 1
           "https://${DUO_WORKFLOW_GIT_HTTP_USER:-oauth2}:${GITLAB_TOKEN}@${U#https://}/$SKILLS_REPO.git"
           "$SKILLS_REF" >/dev/null 2>&1 && git -C "$D/ts" checkout -q FETCH_HEAD; then
