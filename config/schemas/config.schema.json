@@ -1479,7 +1479,7 @@
           "minimum": 1048576
         },
         "shutdown_drain_timeout_secs": {
-          "description": "How long the server waits on shutdown for in-flight requests to\nfinish before it cancels them. Keep it above the longest query time\nand below the Kubernetes `terminationGracePeriodSeconds`.",
+          "description": "How long the server waits on shutdown for in-flight requests to\nfinish before it stops waiting and exits; requests still running then\nend with the process. Keep it above the longest query time and below\nthe Kubernetes `terminationGracePeriodSeconds`.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
