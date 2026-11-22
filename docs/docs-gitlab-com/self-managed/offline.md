@@ -128,6 +128,9 @@ To verify and install the charts:
      --version <orbit_chart_version> --namespace gitlab-orbit --values orbit-values.yaml
    ```
 
+   If your mirror uses a private certificate authority, add its certificate to the host's trust store,
+   or add `--ca-file <ca_certificate>` to the command.
+
 ## Add a license with the GitLab Orbit add-on
 
 For an offline instance, the license file must include the GitLab Orbit add-on.
