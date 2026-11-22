@@ -185,6 +185,8 @@ The source rule matters: flow sessions run as pipelines too, and without it
 each session would start another. Pipeline runs post no progress note on
 the MR. A run on a pipeline that no docs-write MR covers ends in `setup`,
 with no model call. See [Drift and merge order](#drift-and-merge-order).
+Those runs still cost runner time. In November 2026, this project had about 55 successful
+MR and push pipelines a day. Each one starts a session that spends 90 to 100 seconds on setup.
 
 To run on every new or ready MR later, add **Merge request** events
 (`eventTypes` 6 and 4) in a reviewed MR here first. Filter **Created** with
