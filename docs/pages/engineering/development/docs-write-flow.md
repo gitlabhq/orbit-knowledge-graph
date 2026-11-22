@@ -18,38 +18,29 @@ yet. Plan, decisions, and every result are in
 ```mermaid
 flowchart TD
     accTitle: The docs-write and docs-review flows
-    accDescr: A feature MR event or a mention starts docs-write. A script gate and a related-MR check decide whether to write. A writer agent with the docs-write skill writes the change with a check loop. A publish script checks it again, pushes, and opens a draft docs MR. A CI loop sends docs failures to a fixer. On a green pipeline, the separate docs-review flow reviews the head with only the docs-review skill and posts one inline thread per finding at importance 4 or more, then a summary note. docs-write waits for that summary, and a fixer fixes the threads. When CI is green, the head is reviewed, and only threads for a person are open, docs-write marks the MR ready and requests review from the feature MR author. If the fix cycles run out, CI times out, or no review comes, the MR stays in draft.
+    accDescr: A feature MR event or a mention starts docs-write. A script gate and a related-MR check decide whether to write. A writer agent writes the change with a check loop, and a publish script checks it again, pushes, and ends the run. The docs MR pipeline starts the separate docs-review flow. On failed docs jobs, docs-review mentions docs-write to fix CI. On green, it posts one inline thread per finding at importance 4 or more and a summary note that mentions docs-write. Each mention starts a new docs-write run that reads the MR, fixes and pushes, or hands off. After four fix cycles the MR stays in draft.
 
     A([Feature MR created or marked ready, or a mention]) --> G{Setup: gate and related MRs}
     G -->|no docs, a person's docs MR, or shadow mode| E1([End, no model call])
-    G -->|mention on a flow docs MR| T
     G -->|docs needed| W[Writer agent: docs-write skill, check.py loop]
     W --> P[Publish: check.py gate, docs-only push, draft MR]
-    P -->|nothing to document| E2([End, no docs MR])
-    P -->|check findings| F[Fixer agent: docs-write skill, fresh per cycle]
+    P -->|check findings| F[Fixer agent: fresh per cycle]
     F --> P
-    P --> C[CI loop: 15-minute polls, 90 minutes at most]
-    C -->|docs job fails| F
-    C -->|green| T[Threads: wait for the docs-review summary on the head]
-    C -.->|pipeline event| R[docs-review flow: review agent, docs-review skill only, read-only]
-    R -.->|inline threads, suggestion blocks, summary note| T
-    T -->|open threads| F
-    T -->|only threads for a person left| H([Ready, review requested from feature author])
-    T -->|fix cycles used up, CI timeout, or no review in 45 minutes| D([Stays in draft, reason in description])
-
-    subgraph dw [docs-write skill]
-      W
-      F
-    end
-    subgraph dr [docs-review skill]
-      R
-    end
-
-    classDef agent fill:#fdf1dd,stroke:#c17d10,color:#3d2a05
-    class W,F,R agent
+    P --> E2([End of run])
+    E2 -.->|docs MR pipeline finishes| R{docs-review setup}
+    R -->|docs jobs failed| M[Mention docs-write: fix CI]
+    R -->|green| V[Review agent: docs-review skill, read-only]
+    V --> S[Post threads and a summary that mentions docs-write]
+    M -.-> N{New docs-write run: read CI and threads}
+    S -.-> N
+    G -->|mention on a flow docs MR| N
+    N -->|docs job failed or open threads| F
+    N -->|pipeline running or no review yet| E3([End, the next event continues])
+    N -->|only threads for a person left| H([Ready, review requested from feature author])
+    N -->|four fix cycles used| D([Stays in draft, reason in description])
 ```
 
-The steps inside the skill boxes are model calls. Every other step is a script. Most feature
+The writer, fixer, and review agents are model calls. Every other step is a script. Each run ends after a push, and the next event starts a new run, so no run waits for CI or review. Most feature
 MRs end at the gate. Each agent loads one skill: the writer and the fixers `docs-write`, the
 reviewer only `docs-review`. The reviewer runs in its own flow and session. It sees only the
 pages, the docs diff, and the feature code. It reviews every docs MR in the project the
@@ -59,13 +50,13 @@ same way, a person's or the flow's.
 
 | Stage | What runs | Model call | Goes to |
 |---|---|---|---|
-| Setup | `needs_docs.py` scores the diff at threshold 6, `related_mrs.py` groups related MRs, and the docs branch is checked out | No | Write, or end. A mention on a flow docs MR goes to threads: its branch must be in this project, not a fork, and the flow's identity must already have a note on it. |
+| Setup | `needs_docs.py` scores the diff at threshold 6, `related_mrs.py` groups related MRs, and the docs branch is checked out | No | Write, or end. A mention on a flow docs MR goes to CI: its branch must be in this project, not a fork, and the flow's identity must already have a note on it. |
 | Write | One agent follows `write.md` and runs `check.py`, the docs linters and the rules a script can check, until it is clean | Yes | Publish |
-| Publish | Checks the writer report and runs `check.py`. Pushes only user docs and only when `check.py` reports no errors, opens the draft docs MR, and posts thread replies. | No | CI, a fixer, or end |
-| CI loop | `ci_loop.py` waits for the docs MR pipeline | No | Threads on green, a fixer on a docs failure |
-| Review (docs-review flow) | Starts on the green MR pipeline. One fresh agent with only the `docs-review` skill reads the changed pages, the docs diff, and the feature MR diff and code, and checks claims, missing steps, brevity, the word list, topic type, and links. A script posts each finding at importance 4 or more, and each blocker, as a thread on its line: a suggestion block for a small exact fix, a **Needs reviewer decision** thread for a question. Then one summary note per head. It never pushes. | Yes | End |
-| Threads | Waits for the docs-review summary on the pushed head, up to 45 minutes, then lists the open threads from trusted authors | No | A fixer, CI, or handoff |
-| Fix | A fresh agent per cycle, four at most. It fixes check or CI findings, or the open threads, review threads included, in one pass. | Yes | Publish, which posts one reply per thread |
+| Publish | Checks the writer report and runs `check.py`. Pushes only user docs and only when `check.py` reports no errors, opens the draft docs MR, and posts thread replies. | No | A fixer, or end of the run |
+| CI | `ci_loop.py` reads the docs MR pipeline once | No | Threads on green, a fixer on a docs failure, end while it runs |
+| Review (docs-review flow) | Starts when the MR pipeline finishes. On failed docs jobs of a docs-write MR it only mentions docs-write to fix CI. On green, One fresh agent with only the `docs-review` skill reads the changed pages, the docs diff, and the feature MR diff and code, and checks claims, missing steps, brevity, the word list, topic type, and links. A script posts each finding at importance 4 or more, and each blocker, as a thread on its line: a suggestion block for a small exact fix, a **Needs reviewer decision** thread for a question. Then one summary note per head, which mentions docs-write on its docs MRs. It never pushes. | Yes | A new docs-write run |
+| Threads | Reads the docs-review summary on the head, then lists the open threads from trusted authors | No | A fixer, handoff, or end while no review exists |
+| Fix | A fresh agent per cycle, four at most, counted from the flow's pushes on the docs branch. It fixes check or CI findings, or the open threads, review threads included, in one pass. | Yes | Publish, which posts one reply per thread |
 | Handoff | When CI is green on the head, the head has a review, and the only open threads are decisions or threads the flow does not take: removes `Draft:`, adds the feature MR author and the docs reviewers as reviewers, and posts one note. The note lists the decision threads and threads the flow did not take. | No | End. Otherwise the MR stays in draft, with the reason in its description. |
 
 The gate ends the run with no model call on a draft feature MR or one that scores below 6.
