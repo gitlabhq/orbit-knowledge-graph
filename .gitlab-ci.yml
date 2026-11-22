@@ -257,14 +257,18 @@ docs-in-code-mr-check:
 
 docs-write-merge-order-check:
   # Red until the feature MRs merge: the last stage, so it never holds back later jobs.
+  # team/skills docs-write (ci_loop.py) matches this job name: renamed, every docs MR pipeline is a real failure.
   stage: .post
   image: python:3.12-alpine
   tags:
     - saas-linux-small-amd64
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^docs-write\/mr-/
   needs: []
   script:
+    - python3 scripts/checks/docs-write-merge-order_test.py
     - python3 scripts/checks/docs-write-merge-order.py
 
 mr-title-check:

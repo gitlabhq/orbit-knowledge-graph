@@ -19,7 +19,7 @@ BRANCH = re.compile(r"^docs-write/mr-(\d+)$")
 
 
 def get(path):
-    url = "{}/projects/{}/{}".format(os.environ["CI_API_V4_URL"], os.environ["CI_PROJECT_ID"], path)
+    url = "{}/projects/{}/{}".format(os.environ["CI_API_V4_URL"], os.environ["CI_MERGE_REQUEST_PROJECT_ID"], path)
     with urllib.request.urlopen(url, timeout=30) as resp:
         return json.load(resp)
 
