@@ -3,11 +3,13 @@
 Two GitLab Duo custom flows for this project's docs. Plan and coordination:
 [#1494](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1494).
 
-- `docs-write.yml` drafts the docs MR for a feature MR, fixes its threads,
-  and hands it off.
+- `docs-write.yml` drafts the docs MR for a feature MR, fixes its failed
+  docs jobs and its threads, and hands it off. A run never waits: it ends
+  after each push.
 - `docs-review.yml` reviews every docs MR in the project, whether a person or
   docs-write wrote it, once per head, in its own session. It posts threads
-  and never pushes.
+  and never pushes. On a docs-write MR it mentions docs-write, which starts
+  the next docs-write run.
 
 The logic lives in two skills in
 [`gitlab-org/orbit/team/skills`](https://gitlab.com/gitlab-org/orbit/team/skills),
@@ -21,16 +23,17 @@ update this table.
 
 | Setting | Value |
 |---|---|
-| `SKILLS_REF` in both files | `33046b994845965cf2f8695adbd2b42f58d3a591`, the head of `team/skills` branch `docs-review/flow`, stacked on MR 38 (both unmerged). Re-pin both files to the squash commit on `main` once they merge. |
+| `SKILLS_REF` in both files | `f52ac80ee0354e9a5728eb1c3e7a1a549fc44bc7`, the head of `team/skills` branch `docs-write/event-runs`, stacked on MR 40 and MR 38 (all unmerged). Re-pin both files to the squash commit on `main` once they merge. |
 | `MODE` in both files | `full` |
 | `FLOW_USER` in `docs-write.yml` | `44621578`, the user ID of `ai-docs-write-gitlab-org_510eee`, the service account that authors the flow's notes. Under composite identity `GET /user` returns the person who triggered the run, so the skills need it. An ID survives a rename. |
-| `REVIEW_USER` in `docs-write.yml` | Empty until the docs-review service account exists, then its user ID. docs-write trusts that account's review threads and waits for its summary note. While it is empty, docs-write finds no review and holds each docs MR in draft after 45 minutes. |
+| `REVIEW_USER` in `docs-write.yml` | Empty until the docs-review service account exists, then its user ID. docs-write trusts that account's review threads and its summary note. While it is empty, docs-write finds no review, so a mention on a docs MR with a green pipeline ends without a fix or a handoff. |
 | `DOCS_REVIEWERS` in `docs-write.yml` | `fneill,z_painter`: technical writers who approve and merge the docs MRs |
 | AI Catalog item `docs-write` | Item 1020976 in this project, private, enabled. Trigger: **Mention** only during rollout. Service account `ai-docs-write-gitlab-org_510eee`, Reporter in `team/skills`. |
 | `FLOW_USER` in `docs-review.yml` | Empty until the service account exists, then its user ID. While it is empty, every docs-review run ends in `setup` with no model call. |
+| `WRITE_USER` in `docs-review.yml` | Empty until the docs-review service account exists, then `ai-docs-write-gitlab-org_510eee`, the docs-write service account's username. On a docs-write MR, docs-review mentions it in the summary note, and in one note per head when the pipeline failed. The mention starts the next docs-write run. While it is empty, docs-review mentions nobody, and docs-write runs only when a person mentions it. |
 | `MIN_IMPORTANCE` in `docs-review.yml` | `4`: post findings at importance 4 or 5, and every blocker. Live runs showed fixers that followed wording nits made docs worse. |
 | `REVIEW_PATHS` in `docs-review.yml` | `docs/docs-gitlab-com/,docs/navigation.yaml`, the user docs. See [Engineering docs](#engineering-docs). |
-| AI Catalog item `docs-review` | To be created: private, in this project. Its service account, `ai-docs-review-gitlab-org` or similar, needs the Reporter role in `team/skills`. Trigger: **Mention** during rollout, then **Pipeline**. |
+| AI Catalog item `docs-review` | To be created: private, in this project. Its service account, `ai-docs-review-gitlab-org` or similar, needs the Reporter role in `team/skills`. Trigger: **Mention** during rollout, then **Pipeline**, which the docs-write chain needs. |
 
 ## How docs-write runs
 
@@ -42,16 +45,22 @@ update this table.
 1. A writer agent writes the change in one context. It runs `check.py`, the
    docs linters and the rules a script can check, until the check is clean.
 1. `publish` checks the writer report, runs `check.py` again as a hard gate,
-   refuses a branch that changes files outside the user docs, pushes, and
-   opens or updates the draft docs MR. The description lists what to check.
-1. The CI loop polls for up to 15 minutes per step, 90 minutes in all. Docs
-   failures go to the fixer.
-1. On a green pipeline, `threads` waits for the docs-review summary note on
-   the head it pushed: every 30 seconds, up to 14 minutes per step and 45
-   minutes per head. With no review by then, it hands off with the reason
-   in the description, and the MR stays in draft. docs-write no longer
-   reviews its own change.
-1. A fresh fixer agent, one per cycle and four at most, fixes the unresolved
+   refuses a branch that changes files outside the user docs, pushes one
+   commit, and opens or updates the draft docs MR. The description lists
+   what to check. The run ends here: it never waits for CI or the review.
+1. The docs MR pipeline starts docs-review. When the pipeline failed on any
+   job other than `docs-write-merge-order-check`, docs-review posts one note
+   that mentions docs-write and asks it to fix CI. When it is green,
+   docs-review posts its threads and a summary note that mentions
+   docs-write.
+1. The mention starts a new docs-write run on the docs MR. `ci` reads the
+   pipeline on the head once: failed docs jobs go to a fixer, and a
+   pipeline that is still running ends the run, because its pipeline event
+   starts docs-review again. On green, `threads` reads the docs-review
+   summary on the head once. With no summary yet, the run ends: docs-review
+   mentions docs-write when it posts one. docs-write no longer reviews its
+   own change.
+1. A fresh fixer agent, one per cycle and four at most per docs MR, fixes the unresolved
    threads from trusted authors in one pass: the flow identity, the
    docs-review account (`REVIEW_USER`), Duo Code Review, the authors and
    reviewers of the feature MRs in the group, the docs MR reviewers, and
@@ -63,9 +72,12 @@ update this table.
    merges and do not hold the handoff. The flow replies once per thread. It
    resolves what it fixed once `check.py` is clean. A thread it cannot fix
    gets a reply and stays open as a reviewer decision.
-1. A fix push starts a new pipeline, so docs-review reviews the new head. It
-   posts only findings it has not posted before, and docs-write waits for
-   that review too.
+1. A fix push ends the run and starts a new pipeline, so docs-review reviews
+   the new head. It posts only findings it has not posted before, and
+   mentions docs-write again. The cap of four fix cycles counts the fix
+   pushes on the docs branch, people's commits included. At the cap,
+   docs-write hands off and holds the MR in draft instead of fixing, and
+   pushes nothing, so the loop stops.
 1. When CI is green, the head has a review, and only decision threads and
    threads from other people are open, the flow removes `Draft:`, adds the
    feature MR author and the `DOCS_REVIEWERS` as reviewers, and posts one
@@ -79,16 +91,18 @@ flowchart TD
   T[a mention] --> S[setup: gate, related]
   S -->|no docs, shadow| E[end]
   S --> W[writer agent: docs-write, check.py]
-  S -->|mention on a docs MR| TH
+  S -->|mention on a docs MR| C
   W --> P[publish: check.py gate, push, draft MR]
   P -->|findings| F[fresh fixer agent: docs-write fix.md]
   F --> P
-  P --> C[CI loop]
+  P -->|pushed| E
+  C[ci: read the pipeline on the head once] -->|running or missing| E
   C -->|docs failure| F
-  C -->|green| TH[threads: wait for the docs-review summary on the head]
-  TH -->|no summary yet| TH
+  C -->|docs failure at the cap: hold| H
+  C -->|green| TH[threads: read the docs-review summary on the head once]
+  TH -->|no summary yet| E
   TH -->|review and other open threads| F
-  TH -->|no review after 45 minutes: hold| H
+  TH -->|open threads at the cap: hold| H
   TH -->|only decisions left| H[handoff: ready, reviewer, note]
 ```
 
@@ -97,7 +111,9 @@ flowchart TD
 1. `setup` fetches the skills like docs-write, then decides with no model
    call. It ends the run when the goal is neither an MR pipeline nor a
    mention; the pipeline is not green (a failed
-   `docs-write-merge-order-check` alone counts as green); the MR is closed,
+   `docs-write-merge-order-check` alone counts as green), after one note
+   per head that asks docs-write to fix CI when the MR is an open
+   docs-write MR and `WRITE_USER` is set; the MR is closed,
    from a fork, has `~"docs-factory::skip"`, or moved past the pipeline's
    commit; it changes nothing under `REVIEW_PATHS`; its head already has a
    docs-review summary; or `FLOW_USER` is empty. Every code-only MR pipeline
@@ -116,23 +132,25 @@ flowchart TD
    at most, quote still in the file), a plain **Docs review** thread that
    says what to fix for any other fix, and a **Needs reviewer decision**
    thread for a question. A finding it posted on an earlier head is not
-   posted again. Then one summary note for the head, which docs-write waits
-   for. A failed review posts the summary only, with its status.
+   posted again. Then one summary note for the head, which docs-write
+   reads. A failed review posts the summary only, with its status.
 1. The flow never pushes, resolves, or marks anything ready. On a
-   docs-write MR, docs-write's fixers fix the threads. On a person's MR, the
-   author does.
+   docs-write MR, the summary note mentions `WRITE_USER`, and docs-write's
+   next run fixes the threads or hands off. On a person's MR, the author
+   fixes them.
 
 ```mermaid
 flowchart TD
   T[MR pipeline finished, or a mention] --> S[setup: no model call]
   S -->|not an MR pipeline or mention| E[end]
   S -->|pipeline not green| E
+  S -->|failed docs-write MR pipeline: note that mentions docs-write| E
   S -->|closed, fork, opted out, or moved on| E
   S -->|no change under REVIEW_PATHS| E
   S -->|head already reviewed| E
   S -->|FLOW_USER empty, or shadow mode| E
   S -->|docs to review| R[reviewer agent: docs-review only, read-only]
-  R --> P[post: floor 4, threads, suggestion blocks, summary note]
+  R --> P[post: floor 4, threads, suggestion blocks, summary note, mention on a docs-write MR]
   P --> E
 ```
 
@@ -146,15 +164,22 @@ sequenceDiagram
   participant CI as Docs MR pipeline
   participant R as docs-review
   Dev->>W: mention on the feature MR
-  W->>D: push docs, open draft docs MR
+  W->>D: push docs, open draft docs MR, end the run
   D->>CI: pipeline on head 1
   CI-->>R: pipeline event, green
-  R->>D: inline threads and a summary for head 1
-  W->>D: wait for the head 1 summary, then the fixer fixes the threads
-  W->>D: push head 2, reply, resolve fixed threads
+  R->>D: inline threads and a summary for head 1 that mentions docs-write
+  D-->>W: the mention starts a new run
+  W->>D: CI green, the fixer fixes the threads
+  W->>D: push head 2, reply, resolve fixed threads, end the run
   D->>CI: pipeline on head 2
+  CI-->>R: pipeline event, failed on a docs job
+  R->>D: one note that mentions docs-write: fix CI
+  D-->>W: the mention starts a new run
+  W->>D: the fixer fixes the docs job, push head 3, end the run
+  D->>CI: pipeline on head 3
   CI-->>R: pipeline event, green
-  R->>D: only new findings, and a summary for head 2
+  R->>D: only new findings, and a summary for head 3 that mentions docs-write
+  D-->>W: the mention starts a new run
   W->>D: no thread to fix: handoff, ready for review
   Dev->>D: a technical writer reviews and merges
 ```
@@ -189,7 +214,7 @@ and a write:
   when the flow identity or the docs-review account wrote them. The gate ends the run on a fork MR, and the related-MR check
   groups only MRs from this project, so a fork MR that names the same issue
   never joins the group.
-- A mention on a docs MR runs the threads stage only when its `docs-write/`
+- A mention on a docs MR runs the CI and threads stages only when its `docs-write/`
   branch is in this project, not a fork, and the flow identity already has
   a note on the MR.
 - docs-review has no push step: `post` discards any reviewer commit or edit
@@ -257,8 +282,9 @@ and `release: true`) and `aiCatalogFlowUpdate` (with `versionBump`).
    with the Reporter role. Without it, every run ends at `setup`. The flows
    clone the whole project: each runs scripts from both skills.
 1. For docs-review, put the service account's user ID in `FLOW_USER` in
-   `docs-review.yml` and in `REVIEW_USER` in `docs-write.yml`, in a reviewed
-   MR here, then update both catalog items.
+   `docs-review.yml` and in `REVIEW_USER` in `docs-write.yml`, and the
+   docs-write service account's username in `WRITE_USER` in
+   `docs-review.yml`, in a reviewed MR here, then update both catalog items.
 
 ### Create the docs-write trigger
 
@@ -268,7 +294,7 @@ account and the flow, and add one condition:
 
 | Event | Why |
 |---|---|
-| **Mention** | On a feature MR: run the gate, and draft the docs MR when it needs one. On a docs MR the flow opened in this project: fix open threads from trusted authors (the flow, Duo Code Review, authors and reviewers of feature MRs from this project, docs MR reviewers, and Developer+ members), then hand off again. |
+| **Mention** | On a feature MR: run the gate, and draft the docs MR when it needs one. On a docs MR the flow opened in this project, from docs-review or a person: fix failed docs jobs, or open threads from trusted authors (the flow, the docs-review account, Duo Code Review, authors and reviewers of feature MRs from this project, docs MR reviewers, and Developer+ members), or hand off. |
 
 Leave **Instructions** empty. GraphQL: `aiFlowTriggerCreate` with
 `eventTypes: [0]` (mention) and `aiCatalogItemConsumerId` set to the
@@ -300,8 +326,10 @@ During rollout, the trigger is **Mention** only (`eventTypes: [0]`) with the
 docs-review service account: mention it on a docs MR to review its head.
 
 Then switch to **Pipeline** events (`eventTypes: [3]`), like Duo Code
-Review, once `FLOW_USER` and `REVIEW_USER` are set and `SKILLS_REF` points
-at a `team/skills` commit with `review_step.py`:
+Review, once `FLOW_USER`, `REVIEW_USER`, and `WRITE_USER` are set and
+`SKILLS_REF` points at a `team/skills` commit with `review_step.py`. The
+docs-write chain needs this trigger: docs-write ends after each push, and
+only docs-review's mention on the next pipeline starts its next run.
 
 ```json
 {"pipeline_hooks": {"rules": [
@@ -310,10 +338,11 @@ at a `team/skills` commit with `review_step.py`:
 ]}}
 ```
 
-`failed` is in the filter because a docs-write MR pipeline fails on
+`failed` is in the filter for two reasons. A docs-write MR pipeline fails on
 `docs-write-merge-order-check` until its feature MRs merge: `setup` reviews
-a failed pipeline only when that job is its only failure, and ends on any
-other. The source rule keeps MR pipelines only: flow sessions run as
+a failed pipeline when that job is its only failure. On any other failure
+of a docs-write MR head, `setup` asks docs-write to fix CI, and on other
+MRs it ends. The source rule keeps MR pipelines only: flow sessions run as
 pipelines too, and branch and default-branch pipelines have no MR to
 review. Every MR pipeline in the project starts a run, and every run on an
 MR that changes no docs ends in `setup`, with no model call, after about
@@ -373,6 +402,7 @@ DOCS-REVIEW SHADOW {"base":"...","head":"...","pages":[...],"engineering_pages":
 
 Turn a trigger off in **AI** > **Triggers**, or disable a flow in
 **AI** > **Flows**. Disabling removes the service account and its triggers.
-With docs-review off, docs-write holds each docs MR in draft after 45
-minutes: also empty `REVIEW_USER`, or turn docs-write off. To skip one MR in
+With docs-review off, docs-write runs after its push only when a person
+mentions it on the docs MR, and finds no review there: also empty
+`REVIEW_USER`, or turn docs-write off. To skip one MR in
 both flows, add `~"docs-factory::skip"`.
