@@ -280,8 +280,13 @@ fn leftover_lock_file_does_not_block_a_cached_304() {
 #[test]
 fn unwritable_cache_does_not_discard_a_valid_download() {
     let cache = tempfile::tempdir().unwrap();
-    let cache_parent = cache.path().join("orbit");
-    std::fs::create_dir(&cache_parent).unwrap();
+    let platform_cache = if cfg!(target_os = "macos") {
+        cache.path().join("home/Library/Caches")
+    } else {
+        cache.path().to_path_buf()
+    };
+    let cache_parent = platform_cache.join("orbit");
+    std::fs::create_dir_all(&cache_parent).unwrap();
     // Use a file instead of chmod so this fails even when run as root.
     std::fs::write(cache_parent.join("skills"), b"blocked").unwrap();
     let (url, server) = mock_server(vec![tree_reply("1.0.0", "Remote without cache")]);
