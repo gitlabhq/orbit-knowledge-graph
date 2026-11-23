@@ -21,14 +21,14 @@ pub(super) trait Engine {
     async fn run(&self, query: &str, frontend: Frontend) -> Result<PipelineOutput, PipelineError>;
 }
 
-pub(super) fn scenarios_for(root: &Path, backend: Backend) -> Vec<(String, QueryScenario)> {
+pub(super) fn scenarios_for<E: Engine>(root: &Path) -> Vec<(String, QueryScenario)> {
     let mut files = Vec::new();
     scenario::discover(root, &mut files);
     files.sort();
     files
         .iter()
         .flat_map(|file| read_scenarios(root, file))
-        .filter(|(_, scenario)| scenario.config.backends.contains(&backend))
+        .filter(|(_, scenario)| scenario.config.backends.contains(&E::BACKEND))
         .collect()
 }
 

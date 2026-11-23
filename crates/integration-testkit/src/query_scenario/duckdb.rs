@@ -20,7 +20,7 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) -> Coverage {
     let root = Path::new(root);
     let ontology = Arc::new(crate::load_unprefixed_ontology());
     let base = seed_preset(Path::new(presets), seed);
-    let scenarios = scenarios_for(root, Backend::DuckDb);
+    let scenarios = scenarios_for::<DuckdbEngine>(root);
     assert!(
         !scenarios.is_empty(),
         "no duckdb scenarios under {}",

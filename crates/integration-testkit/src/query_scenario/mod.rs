@@ -102,7 +102,7 @@ fn seed_preset(presets_dir: &Path, name: &str) -> Seed {
 pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let root = Path::new(root);
     let presets: Arc<Path> = Arc::from(Path::new(presets));
-    let mut scenarios = engine::scenarios_for(root, Backend::ClickHouse);
+    let mut scenarios = engine::scenarios_for::<ClickhouseEngine>(root);
     assert!(
         !scenarios.is_empty(),
         "no query scenario files found under {}",
