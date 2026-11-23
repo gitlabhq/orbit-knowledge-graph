@@ -1,6 +1,6 @@
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 
-use query_engine::compiler::{CompiledQueryContext, Input, QueryType};
+use query_engine::compiler::{Input, QueryType};
 use query_engine::formatters::{GraphFormatter, GraphResponse, ResultFormatter};
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::PipelineOutput;
@@ -95,12 +95,12 @@ pub(super) fn assert_no_private_details(message: &str, label: &str) {
     }
 }
 
-pub(super) fn assert_compilation(
-    compiled: Result<Arc<CompiledQueryContext>, PipelineError>,
+pub(super) fn assert_compilation<T>(
+    compiled: Result<T, PipelineError>,
     expect: &QueryExpect,
     (backend, frontend): (&str, &str),
     label: &str,
-) -> Option<Arc<CompiledQueryContext>> {
+) -> Option<T> {
     let expected = expect
         .compile_error
         .as_ref()

@@ -1,18 +1,19 @@
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use duckdb_client::DuckDbClient;
-use orbit_server::redaction::QueryResult;
-use query_engine::compiler::{CompiledQueryContext, Frontend, compile_local, generate_local_ddl};
-use query_engine::pipeline::PipelineError;
-use query_engine::shared::PipelineOutput;
+use query_engine::compiler::{Frontend, generate_local_ddl};
+use query_engine::pipeline::{
+    NoOpObserver, PipelineError, PipelineRunner, QueryPipelineContext, TypeMap,
+};
+use query_engine::shared::{ExtractionStage, OutputStage, PipelineOutput};
 
 use super::coverage::Coverage;
 use super::engine::{Engine, run_steps, scenarios_for};
 use super::format::Backend;
-use super::{pipeline_output, seed_preset};
+use super::seed_preset;
+use super::stages::{LocalCompilationStage, LocalExecutionStage, LocalFinishStage};
 use crate::scenario::Seed;
 use crate::scenario::seed::{group_by_columns, values_insert};
 
@@ -29,7 +30,7 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) -> Coverage {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .expect("DuckDB scenario runtime");
-    let coverage = RefCell::new(Coverage::default());
+    let coverage = Mutex::new(Coverage::default());
     for (name, scenario) in scenarios {
         let ontology = scenario.config.ontology_overlay.as_deref().map_or_else(
             || Arc::clone(&ontology),
@@ -47,7 +48,7 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) -> Coverage {
             .as_ref()
             .map(|preset| seed_preset(Path::new(presets), preset));
         let engine = DuckdbEngine {
-            database,
+            database: Mutex::new(database),
             ontology,
             coverage: &coverage,
         };
@@ -57,53 +58,49 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) -> Coverage {
             run_steps(&engine, &steps, &name).await;
         });
     }
-    coverage.into_inner()
+    coverage.into_inner().unwrap()
 }
 
 struct DuckdbEngine<'a> {
-    database: DuckDbClient,
+    database: Mutex<DuckDbClient>,
     ontology: Arc<ontology::Ontology>,
-    coverage: &'a RefCell<Coverage>,
+    coverage: &'a Mutex<Coverage>,
 }
 
 impl Engine for DuckdbEngine<'_> {
     const BACKEND: Backend = Backend::Duckdb;
 
     async fn seed(&self, seed: &Seed, name: &str) {
-        seed_local(&self.database, seed, name);
+        seed_local(&self.database.lock().unwrap(), seed, name);
     }
 
-    async fn compile(
-        &self,
-        query: &str,
-        frontend: Frontend,
-    ) -> Result<Arc<CompiledQueryContext>, PipelineError> {
-        compile_local(query, frontend, &self.ontology)
-            .map(Arc::new)
-            .map_err(PipelineError::from)
-    }
-
-    async fn execute(
-        &self,
-        compiled: &Arc<CompiledQueryContext>,
-        _frontend: Frontend,
-        label: &str,
-    ) -> PipelineOutput {
-        self.coverage.borrow_mut().record(&compiled.ast);
-        let sql = compiled.base.render();
-        let batches = self
-            .database
-            .query_arrow(&sql)
-            .unwrap_or_else(|error| panic!("{label}: {error}\n{sql}"));
-        let query_result =
-            QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
-        pipeline_output(
-            compiled,
-            query_result,
-            0,
-            compiled.base.result_context.clone(),
-            sql,
-        )
+    async fn run(&self, query: &str, frontend: Frontend) -> Result<PipelineOutput, PipelineError> {
+        let mut ctx = QueryPipelineContext {
+            frontend,
+            query_json: query.to_owned(),
+            compiled: None,
+            ontology: Arc::clone(&self.ontology),
+            security_context: None,
+            server_extensions: TypeMap::default(),
+            phases: TypeMap::default(),
+        };
+        let mut obs = NoOpObserver;
+        PipelineRunner::start(&mut ctx, &mut obs)
+            .then(&LocalCompilationStage)
+            .await?
+            .then(&LocalExecutionStage {
+                database: &self.database,
+                coverage: self.coverage,
+            })
+            .await?
+            .then(&ExtractionStage)
+            .await?
+            .then(&LocalFinishStage)
+            .await?
+            .then(&OutputStage)
+            .await?
+            .finish()
+            .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
     }
 }
 

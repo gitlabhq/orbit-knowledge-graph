@@ -12,6 +12,7 @@ mod pagination;
 #[cfg(test)]
 mod regression;
 mod response;
+mod stages;
 
 use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::Path;
@@ -19,19 +20,17 @@ use std::sync::Arc;
 
 use datasets::{Database, Datasets};
 use futures::FutureExt;
-use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ResultContext,
-    SecurityContext,
-};
+use query_engine::compiler::{AccessLevel, AuthorizedPath, Frontend, Input, SecurityContext};
 use query_engine::pipeline::{
-    NoOpObserver, PipelineError, PipelineStage, QueryPipelineContext, TypeMap,
+    NoOpObserver, PipelineError, PipelineRunner, QueryPipelineContext, TypeMap,
 };
 use query_engine::shared::content::ColumnResolverRegistry;
-use query_engine::shared::{CompilationStage, PipelineOutput, RedactionOutput};
+use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, PipelineOutput};
 use response::{
     assert_compilation, assert_output, assert_pagination, assert_repeated_response, repeat_count,
     validate_response,
 };
+use stages::MockAuthorizationStage;
 
 use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
@@ -49,8 +48,9 @@ pub use format::{
 };
 pub(crate) use response::shown_private_detail;
 
-use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage};
-use orbit_server::redaction::QueryResult;
+use orbit_server::pipeline::{
+    ClickHouseExecutor, HydrationStage, RedactionStage, RoutingOutput, RoutingStage,
+};
 
 /// Parse all YAML scenario files under `root` without executing them.
 /// Catches syntax errors and serde mismatches in `cargo nextest --lib`
@@ -252,35 +252,52 @@ impl engine::Engine for ClickhouseEngine<'_> {
         self.ctx.optimize_if_needed().await;
     }
 
-    async fn compile(
-        &self,
-        query: &str,
-        frontend: Frontend,
-    ) -> Result<Arc<CompiledQueryContext>, PipelineError> {
-        compile_like_server(
-            query,
+    async fn run(&self, query: &str, frontend: Frontend) -> Result<PipelineOutput, PipelineError> {
+        let mut server_extensions = TypeMap::default();
+        server_extensions.insert(Arc::new(self.ctx.create_client()));
+        server_extensions.insert(Arc::clone(&self.data_model));
+        let mut resolvers = ColumnResolverRegistry::new();
+        resolvers.register(
+            "gitaly",
+            Arc::new(SeededColumnResolver::from_seed_file()) as _,
+        );
+        server_extensions.insert(resolvers);
+        let mut ctx = QueryPipelineContext {
             frontend,
-            (&self.data_model, &self.ontology),
-            &self.security,
-        )
-        .await
-    }
-
-    async fn execute(
-        &self,
-        compiled: &Arc<CompiledQueryContext>,
-        frontend: Frontend,
-        _label: &str,
-    ) -> PipelineOutput {
-        execute_output(
-            self.ctx,
-            frontend,
-            compiled,
-            (&self.data_model, &self.ontology),
-            &self.security,
-            &self.redaction,
-        )
-        .await
+            query_json: query.to_owned(),
+            compiled: None,
+            ontology: Arc::clone(&self.ontology),
+            security_context: Some(self.security.clone()),
+            server_extensions,
+            phases: TypeMap::default(),
+        };
+        let mut obs = NoOpObserver;
+        let route = PipelineRunner::start(&mut ctx, &mut obs)
+            .then(&RoutingStage)
+            .await?
+            .finish();
+        if let Some(RoutingOutput::Schema(_)) = route {
+            return Err(PipelineError::custom("schema calls are not graph queries"));
+        }
+        PipelineRunner::start(&mut ctx, &mut obs)
+            .then(&CompilationStage)
+            .await?
+            .then(&ClickHouseExecutor {
+                migration_version: 0,
+            })
+            .await?
+            .then(&ExtractionStage)
+            .await?
+            .then(&MockAuthorizationStage(&self.redaction))
+            .await?
+            .then(&RedactionStage)
+            .await?
+            .then(&HydrationStage)
+            .await?
+            .then(&OutputStage)
+            .await?
+            .finish()
+            .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
     }
 }
 
@@ -289,123 +306,6 @@ pub(super) fn step_label(name: &str, index: usize, steps: usize) -> String {
         format!("{name} step {}", index + 1)
     } else {
         name.to_string()
-    }
-}
-
-async fn compile_like_server(
-    query: &str,
-    frontend: Frontend,
-    (data_model, ontology): (
-        &Arc<query_data_model::ClickHouseDataModel>,
-        &Arc<ontology::Ontology>,
-    ),
-    security: &SecurityContext,
-) -> Result<Arc<CompiledQueryContext>, PipelineError> {
-    let mut server_extensions = TypeMap::default();
-    server_extensions.insert(Arc::clone(data_model));
-    let mut pipeline_ctx = QueryPipelineContext {
-        frontend,
-        query_json: query.to_owned(),
-        compiled: None,
-        ontology: Arc::clone(ontology),
-        security_context: Some(security.clone()),
-        server_extensions,
-        phases: TypeMap::default(),
-    };
-    let mut obs = NoOpObserver;
-    if let RoutingOutput::Schema(_) = RoutingStage.execute(&mut pipeline_ctx, &mut obs).await? {
-        return Err(PipelineError::custom("schema calls are not graph queries"));
-    }
-    CompilationStage
-        .execute(&mut pipeline_ctx, &mut obs)
-        .await?;
-    pipeline_ctx
-        .compiled
-        .ok_or_else(|| PipelineError::custom("CompilationStage produced no query"))
-}
-
-async fn execute_output(
-    ctx: &TestContext,
-    frontend: Frontend,
-    compiled: &Arc<CompiledQueryContext>,
-    (data_model, ontology): (
-        &Arc<query_data_model::ClickHouseDataModel>,
-        &Arc<ontology::Ontology>,
-    ),
-    security: &SecurityContext,
-    redaction: &MockRedactionService,
-) -> PipelineOutput {
-    let batches = ctx.query_parameterized(&compiled.base).await;
-    let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
-
-    let resolver = Arc::new(SeededColumnResolver::from_seed_file());
-    let mut resolver_registry = ColumnResolverRegistry::new();
-    resolver_registry.register("gitaly", resolver as _);
-
-    let client = Arc::new(ctx.create_client());
-    let mut server_extensions = TypeMap::default();
-    server_extensions.insert(client);
-    server_extensions.insert(Arc::clone(data_model));
-    server_extensions.insert(resolver_registry);
-
-    let mut pipeline_ctx = QueryPipelineContext {
-        frontend,
-        query_json: String::new(),
-        compiled: Some(Arc::clone(compiled)),
-        ontology: Arc::clone(ontology),
-        security_context: Some(security.clone()),
-        server_extensions,
-        phases: TypeMap::default(),
-    };
-
-    HydrationStage::resolve_owners(&mut pipeline_ctx, &mut result)
-        .await
-        .expect("owner lookup should succeed");
-    let checks = result.resource_checks();
-    let authorizations = redaction.check(&checks);
-    let redacted_count = result.apply_authorizations(&authorizations);
-
-    pipeline_ctx.phases.insert(RedactionOutput {
-        query_result: result,
-        redacted_count,
-    });
-    let mut obs = NoOpObserver;
-
-    let hydration_output = HydrationStage
-        .execute(&mut pipeline_ctx, &mut obs)
-        .await
-        .expect("hydration should succeed");
-
-    pipeline_output(
-        compiled,
-        hydration_output.query_result,
-        hydration_output.redacted_count,
-        hydration_output.result_context,
-        compiled.base.sql.clone(),
-    )
-}
-
-fn pipeline_output(
-    compiled: &Arc<CompiledQueryContext>,
-    mut query_result: QueryResult,
-    redacted_count: usize,
-    result_context: ResultContext,
-    sql: String,
-) -> PipelineOutput {
-    let pagination = Some(query_engine::shared::paginate(
-        &mut query_result,
-        &compiled.input,
-    ));
-    PipelineOutput {
-        row_count: query_result.authorized_count(),
-        redacted_count,
-        query_type: compiled.query_type.to_string(),
-        raw_query_strings: vec![sql],
-        compiled: Arc::clone(compiled),
-        query_result,
-        result_context,
-        execution_log: vec![],
-        pagination,
     }
 }
 
