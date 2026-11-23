@@ -4,8 +4,8 @@
 
 use std::sync::Arc;
 
+use code_graph_incremental::backend::tables::{self, Scope, Tables};
 use code_graph_incremental::driver::{self, Report};
-use code_graph_incremental::export::{self, Scope, Tables};
 use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Env, Envelope, Killed, Limits, Scalar, Sentinel, State};
 use ontology::Ontology;
@@ -193,7 +193,7 @@ fn check(
     ]);
     let db = create_test_db().expect("in-memory DuckDB");
     let plan = Tables::load(env, ontology).expect("export rules");
-    let tables = export::export(
+    let tables = tables::export(
         env,
         &mut state,
         &plan,

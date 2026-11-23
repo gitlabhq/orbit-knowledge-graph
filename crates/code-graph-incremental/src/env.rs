@@ -11,7 +11,7 @@ use crate::language::SupportLang;
 use crate::sentinel::Limits;
 
 pub struct Env {
-    pub export_config: crate::export::ExportConfig,
+    pub export_config: crate::backend::tables::ExportConfig,
     pub lang: Lang,
     pub lang_id: SupportLang,
     pub members: Vec<SupportLang>,
@@ -75,7 +75,7 @@ impl Env {
         let pipeline = crate::engine::Pipeline::load(&lang, &sources)?;
         let project = project(&pipeline, &lang, sources.len())?;
         Ok(Self {
-            export_config: crate::export::ExportConfig::default(),
+            export_config: crate::backend::tables::ExportConfig::default(),
             pipeline,
             project,
             lang,

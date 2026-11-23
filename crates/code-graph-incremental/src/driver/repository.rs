@@ -29,7 +29,7 @@ pub fn repository<E: std::fmt::Display>(
     options: Options,
     envelope: &Envelope<'_>,
     ontology: &ontology::Ontology,
-    export_config: &crate::export::ExportConfig,
+    export_config: &crate::backend::tables::ExportConfig,
     emit: impl Fn(Vec<(String, RecordBatch)>) -> Result<(), E> + Sync,
 ) -> Result<Report, Error> {
     let limits = options.limits;
@@ -84,14 +84,14 @@ pub fn repository<E: std::fmt::Display>(
                     crate::tree::Tree::unparsed(&env.lang, &file.path, file.size, &reason).into()
                 })
                 .collect();
-            let mut tables = crate::export::Tables::load(&env, ontology)?;
+            let mut tables = crate::backend::tables::Tables::load(&env, ontology)?;
             tables.batch_bytes = options.batch_bytes;
-            emit(crate::export::export(
+            emit(crate::backend::tables::export(
                 &env,
                 &mut state,
                 &tables,
                 envelope,
-                &crate::export::Scope::all(),
+                &crate::backend::tables::Scope::all(),
                 &run,
             )?)
         })?;
@@ -138,15 +138,16 @@ pub fn repository<E: std::fmt::Display>(
                                 let (mut graph, mut report) = super::index(&env, repository, run)?;
                                 report.unread_files.retain(|path| owns(family, path));
                                 run.check()?;
-                                let mut tables = crate::export::Tables::load(&env, ontology)?;
+                                let mut tables =
+                                    crate::backend::tables::Tables::load(&env, ontology)?;
                                 tables.batch_bytes = options.batch_bytes;
                                 phase_started(family, "export", file_count);
-                                let scope = crate::export::Scope {
+                                let scope = crate::backend::tables::Scope {
                                     include_directories: family == first,
                                     owns_file: &|path| owns(family, path),
                                     only: None,
                                 };
-                                let batches = crate::export::export(
+                                let batches = crate::backend::tables::export(
                                     &env, &mut graph, &tables, envelope, &scope, run,
                                 )?;
                                 (report, batches)

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use arrow::record_batch::RecordBatch;
-use code_graph_incremental::export::{self, Scope, Tables};
+use code_graph_incremental::backend::tables::{self, Scope, Tables};
 use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Env, Envelope, Error, Limits, Scalar, Sentinel, driver};
 mod common;
@@ -24,7 +24,7 @@ fn export_with(
     envelope: Envelope,
 ) -> Result<Exported, Error> {
     let (mut state, _) = driver::index(env, repository, &Sentinel::disabled())?;
-    let tables = export::export(
+    let tables = tables::export(
         env,
         &mut state,
         &Tables::load(env, ontology)?,
@@ -71,7 +71,7 @@ fn envelope() -> Envelope<'static> {
 
 #[test]
 fn export_config_emits_typed_metadata_and_envelope_overrides() {
-    use code_graph_incremental::export::ExportConfig;
+    use code_graph_incremental::backend::tables::ExportConfig;
     use orbit_arrow::{ColumnSpec, ColumnType};
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
@@ -240,7 +240,7 @@ fn families_follow_the_worker_budget_and_the_family_cap() {
             },
             &envelope(),
             &ontology,
-            &code_graph_incremental::export::ExportConfig::default(),
+            &code_graph_incremental::backend::tables::ExportConfig::default(),
             |_| -> Result<(), String> {
                 let mut guard = state.lock().unwrap();
                 let (active, _, peak, pools) = &mut *guard;
@@ -289,7 +289,7 @@ fn a_family_panic_ends_the_run_with_a_typed_error() {
         },
         &envelope(),
         &ontology,
-        &code_graph_incremental::export::ExportConfig::default(),
+        &code_graph_incremental::backend::tables::ExportConfig::default(),
         |_| -> Result<(), String> {
             emitted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             panic!("emit failed");
@@ -320,7 +320,7 @@ fn tables_over_the_batch_byte_budget_split_into_batches() {
             },
             &envelope(),
             &ontology,
-            &code_graph_incremental::export::ExportConfig::default(),
+            &code_graph_incremental::backend::tables::ExportConfig::default(),
             |batches| -> Result<(), String> {
                 let mut tables = tables.lock().unwrap();
                 for (name, batch) in batches {
@@ -384,7 +384,7 @@ fn cross_file_timeout_still_exports_every_family() {
         },
         &envelope(),
         &ontology,
-        &code_graph_incremental::export::ExportConfig::default(),
+        &code_graph_incremental::backend::tables::ExportConfig::default(),
         |batches| -> Result<(), String> {
             for (name, batch) in batches {
                 if name == "gl_definition" {
@@ -625,7 +625,7 @@ fn exporting_deeply_nested_definitions_grows_linearly() {
         let mut state = index(&env, repo.path());
         let tables = Tables::load(&env, &ontology).unwrap();
         let started = Instant::now();
-        export::export(
+        tables::export(
             &env,
             &mut state,
             &tables,
@@ -666,7 +666,7 @@ fn exporting_some_trees_matches_the_full_export_of_those_files() {
         .position(|tree| tree.label == "main.py")
         .unwrap() as u32;
     let mut export = |only: Option<&rustc_hash::FxHashSet<u32>>| Exported {
-        tables: export::export(
+        tables: tables::export(
             &env,
             &mut state,
             &tables,

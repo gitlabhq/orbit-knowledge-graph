@@ -1,11 +1,11 @@
 #[macro_use]
 mod roles;
+pub mod backend;
 pub mod constants;
 pub mod driver;
 pub mod edge;
 pub mod engine;
 pub mod env;
-pub mod export;
 pub mod file_tree;
 pub mod frontend;
 pub mod intern;
@@ -18,6 +18,6 @@ pub use shared::error::{Error, LoadError};
 pub use shared::sentinel::{Killed, Limits, Sentinel};
 pub use shared::{error, sentinel};
 
+pub use backend::tables::{Envelope, Scalar, export};
 pub use driver::{Report, State};
 pub use env::Env;
-pub use export::{Envelope, Scalar, export};

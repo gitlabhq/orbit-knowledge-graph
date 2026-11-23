@@ -1,8 +1,8 @@
 use anyhow::Result;
 use arrow::array::{BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
+use code_graph_incremental::backend::tables::{Scope, Tables};
 use code_graph_incremental::driver::{FileStats, Report};
-use code_graph_incremental::export::{Scope, Tables};
 use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Env, Envelope, Scalar, State};
 use orbit_arrow::ArrowUtils;
@@ -68,7 +68,7 @@ impl<'a> Exporter<'a> {
         report: &Report,
         stats: bool,
     ) -> Result<FamilyOutput> {
-        let tables = code_graph_incremental::export::export(
+        let tables = code_graph_incremental::backend::tables::export(
             env,
             state,
             &Tables::load(env, self.ontology)?,
@@ -204,7 +204,7 @@ pub(super) fn replacement(
         owns_file: &|_| true,
         only: Some(&only),
     };
-    for (table, batch) in code_graph_incremental::export::export(
+    for (table, batch) in code_graph_incremental::backend::tables::export(
         env,
         state,
         &tables,
@@ -270,7 +270,7 @@ pub(super) fn directory_rows(
     ontology: &ontology::Ontology,
     paths: &[&str],
 ) -> Result<Vec<(String, RecordBatch)>> {
-    Ok(code_graph_incremental::export::export_directories(
+    Ok(code_graph_incremental::backend::tables::export_directories(
         paths,
         ontology,
         &envelope(git),
