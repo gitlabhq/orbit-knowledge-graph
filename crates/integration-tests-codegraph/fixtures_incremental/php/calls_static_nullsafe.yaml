@@ -132,7 +132,6 @@ fixtures:
       }
 
 tests:
-  # ── Definitions ────────────────────────────────────────────────
   - name: "Static method definitions captured with correct FQNs"
     query: |
       MATCH (d:Definition)
@@ -158,7 +157,6 @@ tests:
       - { row_count: 3 }
       - { unique: fqn }
 
-  # ── Static calls (scoped_call_expression) ──────────────────────
   - name: "Unqualified static call: CallSites.staticUnqualified -> Logger.default"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -177,7 +175,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── self::/parent::/static:: ───────────────────────────────────
   - name: "self:: call: Base.describe -> Base.tag"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -213,7 +210,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Chained instance calls (no nullsafe) ───────────────────────
   - name: "Chained call head resolves through typed property: UserRepo.find -> Builder.where"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -241,9 +237,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # KNOWN GAP: inline `(new Builder())->where()` does not resolve (needs
-  # constructor type-flow through the chain walker). The non-inline form
-  # `$b = new Builder(); $b->where()` for imported names DOES resolve.
   - name: "Known gap: chained call on inline new (new Builder())->where()"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -253,7 +246,6 @@ tests:
     assert:
       - { empty: true }
 
-  # ── Nullsafe (?->) calls (PHP 8.0) ─────────────────────────────
   - name: "Nullsafe call head: UserRepo.findSafe -> Builder.where"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -308,7 +300,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── First-class callable syntax (PHP 8.1) ──────────────────────
   - name: "First-class static callable: CallSites.firstClassStatic -> Logger.default"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -327,7 +318,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── ::class constant ───────────────────────────────────────────
   - name: "Foo::class is a constant expression, not a call (no Calls edge from classConstant to Logger.default)"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -337,7 +327,6 @@ tests:
     assert:
       - { row_count: 0 }
 
-  # ── Files ──────────────────────────────────────────────────────
   - name: "All five PHP fixture files discovered"
     query: |
       MATCH (f:File) RETURN f.path AS path

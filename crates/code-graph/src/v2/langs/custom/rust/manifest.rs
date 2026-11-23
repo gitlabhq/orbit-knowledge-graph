@@ -2,8 +2,6 @@ use super::sysroot::EmbeddedSysroot;
 use super::workspace::{discover_manifest_paths_for_root, normalize_existing_path};
 use super::*;
 
-/// Upper bound on a Cargo.toml file we will read off disk. Real manifests are
-/// well under this; anything larger is rejected before the read allocates.
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 
 pub(super) struct ManifestCache {
@@ -102,9 +100,6 @@ impl ManifestCache {
         };
 
         if !self.parsed.contains_key(&manifest_path) {
-            // Cargo manifests are human-authored config. Anything multi-megabyte is
-            // almost certainly adversarial or malformed; bail before `read_to_string`
-            // allocates unbounded memory on the indexer.
             if let Ok(meta) = std::fs::metadata(&manifest_path)
                 && meta.len() > MAX_MANIFEST_BYTES
             {
@@ -457,8 +452,6 @@ fn workspace_path_is_excluded(
     Ok(path_has_prefix(&relative_path, exclude_entries))
 }
 
-// Cargo's `workspace.exclude` is a list of directory prefixes, not glob patterns.
-// `exclude = ["vendor"]` must exclude both `vendor` and `vendor/sub`.
 fn path_has_prefix(relative_path: &str, exclude_entries: &[String]) -> bool {
     let normalized = relative_path.trim_end_matches('/');
     exclude_entries.iter().any(|entry| {
@@ -930,8 +923,6 @@ fn cfg_key_value(key: &str, value: &str) -> CfgAtom {
     }
 }
 
-// Pins cfg atoms to linux/x86_64 to match the server indexing environment.
-// Trades local-platform accuracy for reproducibility across indexer runs.
 fn server_rustc_cfg() -> Vec<CfgAtom> {
     vec![
         cfg_flag("unix"),
@@ -1535,10 +1526,6 @@ fn rename_field(dependency: &ResolvedDependencyCandidate) -> Option<String> {
         .filter(|rename| rename != &dependency.target_package_name)
 }
 
-// An optional dependency is considered activated only when it is named by a
-// feature that is transitively reachable from `default`. We do not track the
-// full feature resolution that Cargo performs; the conservative rule keeps
-// rust-analyzer from pulling in optional crates that the user has disabled.
 fn is_dep_feature_activated(
     package: &LocalWorkspacePackage,
     dependency: &ResolvedDependencyCandidate,

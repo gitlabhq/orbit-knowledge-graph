@@ -1,5 +1,3 @@
-//! Pre-order traversal over tree-sitter's cursor API without extra heap allocation.
-
 use tree_sitter as ts;
 
 pub struct TsPre<'tree> {
@@ -45,7 +43,6 @@ impl<'tree> TsPre<'tree> {
     }
 }
 
-/// Amortized time complexity is O(NlgN), depending on branching factor.
 impl<'tree> Iterator for TsPre<'tree> {
     type Item = ts::Node<'tree>;
 

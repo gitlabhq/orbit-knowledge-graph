@@ -25,7 +25,6 @@ fixtures:
 
 tests:
   - name: "the function is defined in the first module"
-    # Known gap: Haskell has no extraction rules in langs/, so the engine emits no definitions for it.
     skip: true
     query: |
       MATCH (d:Definition)
@@ -36,7 +35,6 @@ tests:
       - { row: { file: src/A.hs } }
 
   - name: "a reference through the re-export links to the definition"
-    # Known gap: Haskell has no extraction rules in langs/, so the engine emits no definitions for it.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

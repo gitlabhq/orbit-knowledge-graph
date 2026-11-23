@@ -59,7 +59,6 @@ tests:
       - { row: { type: "Use" } }
 
   - name: "colliding trait-impl methods are disambiguated with trait name"
-    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (d:Definition)

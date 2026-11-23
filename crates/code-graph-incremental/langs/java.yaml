@@ -1,17 +1,3 @@
-# Java rewrite rules.
-# Handles: package, imports (named, wildcard, static), class/interface/enum/
-# record/annotation defs, fields, constructors, methods, this./super. calls,
-# unqualified calls as implicit this-calls, control flow, bindings.
-#
-# Import resolution is path-based: `import a.b.C` resolves to a/b/C.java under
-# the repo root or a marked source root (src, java).
-#
-# Known gaps (engine, not rules):
-# - Same-package siblings without an import need a package scope; the
-#   resolver is import-driven.
-# - Wildcard imports (`import a.b.*`) name a directory; the resolver resolves
-#   only files and index files.
-
 config:
   stdlib: [
       { module: java, precedence: runtime },
@@ -45,25 +31,20 @@ config:
 stages:
   - name: imports
     rules:
-      # import static a.b.C.*;
       - match: '(import_declaration (static) $S:scoped_identifier (asterisk))'
         replace: '(__import (__source @$S $S) (__source_path @$S|replace(".", "/")) (__name "*"))'
         tag: { import_type: StaticImport, callable: "true" }
-      # import static a.b.C.m;
       - match: '(import_declaration (static) $S:scoped_identifier)'
         replace: '(__import (__source @$S|regex_replace("\.[^.]+$", "") $S) (__source_path @$S|regex_replace("\.[^.]+$", "")|replace(".", "/")) (__name @$S|split_last(".")))'
         tag: { import_type: StaticImport, callable: "true" }
-      # import a.b.*;
       - match: '(import_declaration $S:scoped_identifier (asterisk))'
         replace: '(__import (__source @$S $S) (__source_path @$S|replace(".", "/")) (__name "*"))'
         tag: { import_type: WildcardImport }
-      # import a.b.C;
       - match: '(import_declaration $S:scoped_identifier)'
         replace: '(__import (__source @$S|regex_replace("\.[^.]+$", "") $S) (__source_path @$S|replace(".", "/")) (__name @$S|split_last(".")))'
 
   - name: normalize
     rules:
-      # `var x = (T) v` declares x as T
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: (cast_expression type: $T:type_identifier value: $V)))'
         replace: '(local_variable_declaration type: $T declarator: (variable_declarator name: $N value: $V))'
       - match: '(program $P:java_pkg $$$C)'
@@ -96,7 +77,6 @@ stages:
       - match: '(array_type element: $T:type_identifier)'
         replace: '(type_identifier @$T)'
 
-      # Annotations → decorators (arguments kept for calls inside them)
       - match: '(marker_annotation name: $N:identifier)'
         replace: '(__decorator @$N)'
       - match: '(permits (type_list $$$T:type_identifier))'
@@ -104,7 +84,6 @@ stages:
       - match: '(annotation name: $N:identifier arguments: $A)'
         replace: '(__decorator @$N (__args $A))'
 
-      # x instanceof T [name] → type reference plus a typed pattern binding
       - match: '(instanceof_expression left: $L right: $T:type_identifier name: $N:identifier)'
         replace: '(instanceof_expression $L (__call (__callee @$T $T)) (__binding @$N (__ssa_typed @$T)))'
       - match: '(instanceof_expression left: $L right: $T:type_identifier)'
@@ -122,11 +101,9 @@ stages:
       - match: '(record_pattern $T:identifier (record_pattern_body $$$S))'
         replace: '(__destructure (__call (__callee @$T $T)) $$$S)'
 
-      # this.x → __ivar
       - match: '(field_access object: (this) field: $F:identifier)'
         replace: '(__ivar @$F)'
 
-      # extends / implements → __supertype
       - match: '(superclass $T:__member)'
         replace: '(__supertype $T)'
       - match: '(superclass $T:type_identifier)'
@@ -136,7 +113,6 @@ stages:
       - match: '(extends_interfaces (type_list $$$T:type_identifier|__member))'
         replace: '(java_supertypes $$$T->__supertype)'
 
-      # Parameters: typed → SSA-typed binding that references its type
       - match: '(formal_parameter type: $T:__member name: $N:identifier)'
         replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
       - match: '(formal_parameter type: $T:type_identifier name: $N:identifier)'
@@ -166,7 +142,6 @@ stages:
 
   - name: retag-expressions
     rules:
-      # `(T) f()` and `(f())` carry the value of the call they wrap
       - match: '(cast_expression value: $V:__call)'
         replace: '$V'
       - match: '(parenthesized_expression $V:__call)'
@@ -178,12 +153,10 @@ stages:
       - match: '(field_access object: $O field: $F:identifier)'
         replace: '(__member @$F (__object @$O $O))'
 
-      # this.m() / m() — implicit this
       - match: '(method_invocation object: (this) name: $N:identifier arguments: $A)'
         replace: '(__call (__callee (__ivar @$N)) $A)'
       - match: '(method_invocation object: (super) name: $N:identifier arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object (__ivar "super")))) $A)'
-      # x.m() / this.f.m() / a.b.m() / f().m()
       - match: '(method_invocation object: $O:__ivar name: $N:identifier arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object $O))) $A)'
       - match: '(method_invocation object: $O:__member name: $N:identifier arguments: $A)'
@@ -195,7 +168,6 @@ stages:
       - match: '(method_invocation name: $N:identifier arguments: $A)'
         replace: '(__call (__callee @$N $N) $A)'
         tag: { implicit_self: "true" }
-      # new T(...) [with optional anonymous body]
       - match: '(object_creation_expression type: $T:__member arguments: $A $$$B:class_body)'
         replace: '(__call (__callee $T) $A $$$B)'
       - match: '(object_creation_expression type: $T:type_identifier arguments: $A $$$B:class_body)'
@@ -205,7 +177,6 @@ stages:
     rules:
       - match: '(local_variable_declaration type: $T:__member declarator: (variable_declarator name: $N:identifier value:? $V))'
         replace: '(java_local $V (__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__type) (__callee $T)))))'
-      # Local variables
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__call))'
         replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__member))'
@@ -229,7 +200,6 @@ stages:
       - match: '(local_variable_declaration declarator: (variable_declarator name: $N:identifier))'
         replace: '(__binding @$N (__declaration))'
 
-      # Assignments
       - match: '(assignment_expression left: $N:__ivar right: $R:__call)'
         replace: '(__binding $N (__rhs $R))'
       - match: '(assignment_expression left: $N:__ivar right: $R)'
@@ -239,7 +209,6 @@ stages:
       - match: '(assignment_expression left: $N:identifier right: $R)'
         replace: '(__binding @$N (__rhs @$R $R))'
 
-      # Control flow
       - match: '(if_statement condition: $C consequence: $Q alternative:? $A)'
         replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
       - match: '(switch_expression condition: $C body: (switch_block $$$ARMS:switch_rule|switch_block_statement_group))'
@@ -263,7 +232,6 @@ stages:
 
       - match: '(field_declaration type: $T:__member declarator: (variable_declarator name: $N:identifier value:? $V))'
         replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee $T)))) $V)'
-      # Fields: typed class fields seed this.x dispatch
       - match: '(field_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value:? $V))'
         replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))) $V)'
       - match: '(field_declaration declarator: (variable_declarator name: $N:identifier value:? $V))'
@@ -275,7 +243,6 @@ stages:
 
       - match: '(method_declaration $M?:modifiers type: $RT:__member name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type $RT) $M $P $B)'
-      # Callables
       - match: '(method_declaration $M?:modifiers type: $RT:type_identifier name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $M $P (__call (__callee @$RT $RT)) $B)'
       - match: '(method_declaration $M?:modifiers name: $N:identifier parameters: $P body:? $B)'
@@ -285,12 +252,10 @@ stages:
       - match: '(compact_constructor_declaration $M?:modifiers name: $N:identifier body: $B)'
         replace: '(__def (__defname @$N) (__method) $M $B)'
 
-      # Types (after members)
       - match: '(class_declaration $M?:modifiers name: $N:identifier $$$PRE superclass: $S:__supertype $$$ANN body: (class_body $$$B))'
         replace: '(__def (__defname @$N) (__class) $M $$$PRE $S $$$ANN (__binding (__ivar "super") (__rhs (__call @$S->__callee))) $$$B)'
       - match: '(class_declaration $M?:modifiers name: $N:identifier $$$ANN body: (class_body $$$B))'
         replace: '(__def (__defname @$N) (__class) $M $$$ANN $$$B)'
-      # Record components become implicit accessor methods (see the records stage)
       - match: '(record_declaration $M?:modifiers name: $N:identifier parameters: (formal_parameters $$$P:__binding) $$$ANN body: (class_body $$$B))'
         replace: '(__def (__defname @$N) (__class) $M $$$ANN (__positional $$$P) $$$B $$$P->record_component (record_component "equals") (record_component "hashCode") (record_component "toString"))'
       - match: '(interface_declaration $M?:modifiers name: $N:identifier $$$ANN body: (interface_body $$$B))'

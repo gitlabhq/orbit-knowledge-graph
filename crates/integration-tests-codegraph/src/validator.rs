@@ -20,8 +20,6 @@ pub struct Failure {
     pub message: String,
 }
 
-/// With `probe_skipped`, the queries of skipped tests still run, without
-/// their assertions.
 pub fn run_suite(
     suite: &TestSuite,
     client: &DuckDbClient,
@@ -107,8 +105,6 @@ fn run_test(test: &TestCase, client: &DuckDbClient, ontology: &Arc<Ontology>) ->
     failures
 }
 
-/// A skipped test's queries without its assertions, so a query that no
-/// longer runs or needs a LIMIT fails the suite while it stays skipped.
 fn probe_test(test: &TestCase, client: &DuckDbClient, ontology: &Arc<Ontology>) -> Vec<Failure> {
     test.all_queries()
         .iter()
@@ -146,10 +142,6 @@ fn execute_cypher(
     Ok((apply_aliases(batch, &compiled.input, &aliases), has_more))
 }
 
-/// Rewrite a fixture Cypher query for the Orbit GQL compiler:
-/// - Strip `AS alias` from RETURN property items and collect the mapping
-/// - Rewrite `ORDER BY alias` to `ORDER BY node.prop`
-/// - Escape backslashes inside single-quoted string literals
 fn rewrite_query(cypher: &str) -> (String, Vec<(String, String, String)>) {
     let alias_re = regex::Regex::new(r"(?i)\b(\w+)\.(\w+)\s+AS\s+(\w+)").unwrap();
     let mut aliases = Vec::new();
@@ -195,10 +187,6 @@ fn rewrite_query(cypher: &str) -> (String, Vec<(String, String, String)>) {
     (result, aliases)
 }
 
-/// Rename result columns using the alias map from `rewrite_query`.
-/// Columns with an explicit alias get renamed (e.g. `caller_fqn` → `caller`).
-/// Columns without an alias keep the `{node}_{prop}` name to avoid collisions
-/// when multiple nodes project the same property.
 fn apply_aliases(
     batch: RecordBatch,
     _input: &compiler::Input,
@@ -648,7 +636,6 @@ fn fail(test: &str, severity: Severity, message: String) -> Failure {
     }
 }
 
-/// Parses a suite; `None` when every test is skipped and there is nothing to run.
 pub fn load_suite(yaml: &str) -> Option<TestSuite> {
     let suite: TestSuite = orbit_utils::yaml::from_str(yaml).expect("Failed to parse YAML suite");
     if suite.tests.iter().all(|t| t.skip) && suite.steps.is_empty() {
@@ -686,7 +673,6 @@ pub fn write_suite_files(suite: &TestSuite, root: &std::path::Path) -> Vec<(Stri
         .collect()
 }
 
-/// Writes inline fixtures under `root`; returns each path with its size.
 pub fn write_fixtures(fixtures: &[FixtureFile], root: &std::path::Path) -> Vec<(String, u64)> {
     fixtures
         .iter()
@@ -703,7 +689,6 @@ pub fn write_fixtures(fixtures: &[FixtureFile], root: &std::path::Path) -> Vec<(
         .collect()
 }
 
-/// Prints the outcome; panics when any failure is an error.
 pub fn report(suite: &TestSuite, failures: &[Failure]) {
     if failures.is_empty() {
         eprintln!("[PASS] Suite: {} ({} tests)", suite.name, suite.tests.len());

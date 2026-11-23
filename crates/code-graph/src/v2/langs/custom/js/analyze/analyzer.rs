@@ -220,9 +220,6 @@ fn classify_symbol_kind(
         if matches!(nodes.parent_kind(decl_node_id), AstKind::FormalParameter(_)) {
             return None;
         }
-        // Promote arrow functions and function expressions to Function.
-        // OXC's SymbolFlags marks these as Variable (technically correct for the
-        // const binding), but semantically they are callable functions.
         if let AstKind::VariableDeclarator(decl) = nodes.kind(decl_node_id)
             && decl.init.as_ref().is_some_and(|init| {
                 matches!(
@@ -296,10 +293,6 @@ fn extract_class_members(
             invocation_support: Some(JsInvocationSupport::function()),
         };
 
-        // One raw AST walk covers every method. OXC's class table applies the same
-        // constructor and TypeScript-syntax gates but drops abstract methods, whose
-        // bodies are None. Abstract methods take static_name() because `static
-        // abstract` is illegal (TS1243) and private abstract members cannot exist.
         for element in &class_ast.body.body {
             if let oxc::ast::ast::ClassElement::MethodDefinition(method) = element
                 && !method.kind.is_constructor()
@@ -332,12 +325,6 @@ fn extract_class_members(
     (member_defs, classes)
 }
 
-/// Collects the class fields whose type annotation gives the resolver the receiver
-/// type it needs to take the middle hop of a `this.field.method()` chain.
-///
-/// The class table holds no type annotations, so the fields are read off the raw
-/// AST. Constructor parameter properties (`constructor(private readonly x: T)`)
-/// declare a field without appearing in the class body, so they count too.
 fn collect_receiver_type_fields(
     ctx: &Ctx,
     class_ast: &oxc::ast::ast::Class<'_>,
@@ -809,8 +796,6 @@ impl JsAnalyzer {
         relative_path: &str,
     ) -> Result<JsFileAnalysis, crate::v2::error::AnalyzerError> {
         use crate::v2::error::{AnalyzerError, FileFault};
-        // Minified and long-line bundles are filtered upstream by `CodeFilter`
-        // (the file stream) before reaching the parser.
         let source_type = SourceType::from_path(file_path).map_err(|_| {
             AnalyzerError::fault(
                 FileFault::UnknownSourceType,
@@ -839,17 +824,11 @@ impl JsAnalyzer {
         }
 
         let semantic_ret = stacker::maybe_grow(128 * 1024, 8 * 1024 * 1024, || {
-            // oxc 0.137 flipped the default to off; the analyzer relies on
-            // random access to `semantic.nodes()` (e.g. nodes.kind(decl_node_id)).
             SemanticBuilder::new()
                 .with_build_nodes(true)
                 .with_check_syntax_error(true)
                 .build(&parsed.program)
         });
-        // A file that failed semantic analysis has an inconsistent
-        // scoping/symbols view; downstream SSA and class extraction
-        // assume the view is valid. Skip these files rather than
-        // emitting misleading definitions based on partial state.
         if !semantic_ret.diagnostics.is_empty() {
             return Err(AnalyzerError::fault(
                 FileFault::OxcSemantic,
@@ -894,7 +873,6 @@ impl JsAnalyzer {
         );
 
         let imports = extract_imports(&ctx, &parsed);
-        // Grow the stack on demand: the recursive CallExtractor walk overflows the 2 MiB worker stack on deep expressions (uncatchable SIGSEGV).
         let (local_calls, calls) = stacker::maybe_grow(128 * 1024, 8 * 1024 * 1024, || {
             extract_call_edges(&ctx, &parsed.program, &defs, &imports, &class_hierarchy)
         });
@@ -913,8 +891,6 @@ impl JsAnalyzer {
         );
         module_info.cjs_exports = cjs_exports;
 
-        // OXC's module_record may not include `export default { ... }` for anonymous
-        // object expressions, so we synthesize the binding if a Vue virtual class exists.
         if is_vue_like_path(relative_path)
             && let Some(default_range) = module_info.exports.get("default").map(|b| b.range)
             && let Some(vc) = vue_default_component_def(&defs, default_range)

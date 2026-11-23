@@ -124,8 +124,6 @@ impl DslLanguage for CSharpDsl {
             } else if text.contains('=') {
                 "AliasedImport"
             } else {
-                // Regular using directives are namespace-level wildcards:
-                // `using MyApp.Models;` makes all types in MyApp.Models available.
                 "WildcardImport"
             }
         }
@@ -138,8 +136,6 @@ impl DslLanguage for CSharpDsl {
                 ))
                 .alias_from(field("name"))
                 .classify(csharp_import_classify)
-                // C# using directives import all types from a namespace.
-                // `using MyApp.Models;` ≈ Java's `import MyApp.Models.*;`
                 .always_wildcard(),
         ]
     }
@@ -147,8 +143,8 @@ impl DslLanguage for CSharpDsl {
     fn chain_config() -> Option<ChainConfig> {
         Some(ChainConfig {
             ident_kinds: &["identifier"],
-            this_kinds: &[],  // 'this' is anonymous in C# tree-sitter
-            super_kinds: &[], // 'base' is anonymous
+            this_kinds: &[],
+            super_kinds: &[],
             field_access: vec![FieldAccessEntry {
                 kind: "member_access_expression",
                 object: field("expression"),
@@ -160,9 +156,6 @@ impl DslLanguage for CSharpDsl {
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
-        // C# namespaces are scopes, not package declarations. The FQN
-        // is built from scope nesting (namespace → class → method).
-        // No separate package_node needed.
         None
     }
 
@@ -183,15 +176,10 @@ impl DslLanguage for CSharpDsl {
         };
         use treesitter_visit::extract::child_of_kind;
         vec![
-            // variable_declaration covers both local vars and fields.
             csharp_type(
                 binding("variable_declaration", BindingKind::Assignment)
                     .name_from_extract(child_of_kind("variable_declarator").field("name"))
-                    .value_from_extract(
-                        // The initializer is the last named child of variable_declarator
-                        // (after identifier and anonymous "=").
-                        child_of_kind("variable_declarator").nth(Child, Named, -1),
-                    )
+                    .value_from_extract(child_of_kind("variable_declarator").nth(Child, Named, -1))
                     .instance_attrs(&["this."]),
             ),
             csharp_type(
@@ -433,7 +421,6 @@ mod tests {
     #[test]
     fn static_import_extracted() {
         let result = parse("using static System.Math;\n\npublic class Test {}\n").unwrap();
-        // using static may parse differently — verify we get at least the basic form
         assert!(!result.imports.is_empty(), "should extract static import");
     }
 

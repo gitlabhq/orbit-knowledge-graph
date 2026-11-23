@@ -45,8 +45,6 @@ pub enum CallResolution {
     #[default]
     Unknown,
     Callable,
-    /// On a TypeFlow edge: the producing call's callee root has a local
-    /// value, so wave 2 does not type the call by its name.
     NonCallable,
     Reference,
 }

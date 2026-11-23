@@ -205,7 +205,6 @@ fixtures:
       }
 
 tests:
-  # ── Definitions: nested/deep namespaces produce correct FQNs ────
   - name: "Deep namespace nests the class FQN correctly"
     query: |
       MATCH (d:Definition)
@@ -244,7 +243,6 @@ tests:
     assert:
       - { row_count: 2 }
 
-  # ── Grouped use ─────────────────────────────────────────────────
   - name: "Grouped use: unaliased entry resolves (A)"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -272,7 +270,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── use function / use const ────────────────────────────────────
   - name: "use function: bare call resolves to namespaced function"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -291,7 +288,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Multiple use aliases for same-named classes ─────────────────
   - name: "Two aliases for same-named class disambiguate to different FQNs"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -302,7 +298,6 @@ tests:
       - { row_count: 2 }
       - { unique: callee }
 
-  # ── Leading-backslash fully-qualified references ────────────────
   - name: "Leading-backslash static call resolves: \\Vendor\\Other\\Bare::call()"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -312,8 +307,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # A fully qualified type on a parameter acts as an inline import, so the
-  # typed local resolves like a `use`-imported type.
   - name: "Leading-backslash typed-parameter $bare->run() resolves"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -323,7 +316,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── FQN reference without import ────────────────────────────────
   - name: "Static call by fully-qualified name without use: \\Vendor\\Other\\Bare::call()"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -333,8 +325,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # `new \Vendor\Other\Bare()` acts as an inline import, so the local it is
-  # assigned to resolves like an imported-name `new`.
   - name: "new \\Vendor\\Other\\Bare via local then $b->run() resolves"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -344,7 +334,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Cross-file: deep-namespace inheritance + call ───────────────
   - name: "Deep-namespace child extends imported base across files"
     query: |
       MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
@@ -363,7 +352,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Cross-file static call across deep namespaces via use ───────
   - name: "Deep-namespace static call via use: DeepCaller::go -> Thing::make"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

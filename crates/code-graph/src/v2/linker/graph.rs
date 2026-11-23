@@ -108,15 +108,10 @@ impl GraphOutput {
     }
 }
 
-/// Precomputed include-graph lookup tables for C/C++ resolution.
-/// Built once before Phase 2 resolve, shared across all file resolvers.
 #[derive(Default)]
 pub struct IncludeIndex {
-    /// file_path -> list of normalized include paths for that file
     pub include_map: rustc_hash::FxHashMap<String, Vec<String>>,
-    /// suffix -> list of file NodeIndex values whose path ends with that suffix
     pub suffix_map: rustc_hash::FxHashMap<String, Vec<NodeIndex>>,
-    /// file NodeIndex -> file path
     pub path_by_idx: rustc_hash::FxHashMap<NodeIndex, String>,
 }
 
@@ -158,9 +153,6 @@ impl IncludeIndex {
     }
 }
 
-/// Language-agnostic re-export lookup; a language hook decides what counts as a
-/// re-export. `named`: `module -> { bound_name -> (target_module, target_name) }`.
-/// `wildcard`: `module -> [starred source modules]`.
 #[derive(Default)]
 pub struct ReexportIndex {
     named: rustc_hash::FxHashMap<String, rustc_hash::FxHashMap<String, (String, String)>>,
@@ -208,8 +200,6 @@ pub struct CodeGraph {
     pub rules: Option<std::sync::Arc<super::rules::ResolutionRules>>,
 }
 
-/// Distinct tag sets plus one index per node. The ontology declares a closed set
-/// of values, so a `Vec<String>` per node would repeat a few hundred sets.
 pub struct NodeTags {
     sets: Vec<Vec<String>>,
     by_node: Vec<u32>,
@@ -252,7 +242,6 @@ impl CodeGraph {
         self.output = GraphOutput::ParsedOnly;
     }
 
-    /// FQN separator for this language. Falls back to `"."`.
     #[inline]
     pub fn sep(&self) -> &str {
         self.rules.as_ref().map(|r| r.fqn_separator).unwrap_or(".")
@@ -263,8 +252,6 @@ impl CodeGraph {
         self.strings.get(id)
     }
 
-    /// Pre-size every growable container from counts the caller already knows,
-    /// so the construction loop never pays amortized doubling.
     pub fn reserve_for(&mut self, files: usize, definitions: usize, imports: usize) {
         self.graph.reserve_exact_nodes(
             (files + definitions + imports).saturating_sub(self.graph.node_count()),
@@ -273,8 +260,6 @@ impl CodeGraph {
         self.imports.reserve_exact(imports);
     }
 
-    /// Drop what only the resolver read, before the converter holds the graph
-    /// across the Arrow build. Sealing stops the pool deduping, so call it once.
     pub fn release_resolution_state(&mut self) {
         self.indexes.drop_resolution_indexes();
         self.strings.seal();
@@ -282,8 +267,6 @@ impl CodeGraph {
         self.graph.shrink_to_fit_edges();
     }
 
-    /// Drop what the edge build no longer reads. Only valid once the definition
-    /// and import batches and the tag cache exist.
     pub fn release_node_payloads(&mut self) {
         self.defs = Vec::new();
         self.imports = Vec::new();
@@ -310,9 +293,6 @@ impl CodeGraph {
         )
     }
 
-    /// Add a file that should be represented in the graph but is not parsed by
-    /// any language pipeline. `reason` is the file's skip/fault outcome (or
-    /// `FileReason::None` for files indexed successfully).
     pub fn add_unparsed_file(
         &mut self,
         path: &str,
@@ -583,18 +563,7 @@ impl CodeGraph {
         }
     }
 
-    /// Build extends edges and ancestor chains. Must be called after all
-    /// files are added and before resolution.
-    ///
-    /// NOTE: `link_extends` resolves super types via `by_name` index which
-    /// can return multiple nodes for the same name. When files are added via
-    /// `par_iter`, insertion order is non-deterministic, so the `by_name`
-    /// iteration order varies across runs. This causes flaky resolution when
-    /// two classes share a name (e.g. `kotlin_v1_same_class_name`).
     pub fn finalize(&mut self, tracer: &crate::v2::trace::Tracer) {
-        // Stabilize index order so lookups are deterministic regardless
-        // of par_iter file processing order. Sort by FQN since NodeIndex
-        // assignment is also insertion-order-dependent.
         let defs = &self.defs;
         let strings = &self.strings;
         let graph = &self.graph;
@@ -719,7 +688,6 @@ impl CodeGraph {
             .to_string()
     }
 
-    /// Pre-resolve all imports for a file into a name → defs map.
     pub fn pre_resolve_file_imports(
         &self,
         file_node: NodeIndex,
@@ -964,7 +932,6 @@ impl CodeGraph {
         self.def(idx).kind
     }
 
-    /// Look up by FQN string. Returns empty if the string is not interned.
     pub fn lookup_fqn(&self, key: &str) -> &[NodeIndex] {
         match self.strings.find(key) {
             Some(id) => self.indexes.by_fqn.lookup(id),
@@ -972,7 +939,6 @@ impl CodeGraph {
         }
     }
 
-    /// Look up by bare name string. Returns empty if the string is not interned.
     pub fn lookup_name(&self, key: &str) -> &[NodeIndex] {
         match self.strings.find(key) {
             Some(id) => self.indexes.by_name.lookup(id),
@@ -1003,9 +969,6 @@ impl CodeGraph {
             .filter_map(|idx| self.graph[idx].as_file().map(|f| (idx, f)))
     }
 
-    /// Look up a named property on a graph node. Returns `None` when
-    /// the property is unknown or its value is empty (e.g. extension-less
-    /// files like Makefile).
     fn node_property(&self, idx: NodeIndex, property: &str) -> Option<std::borrow::Cow<'_, str>> {
         use std::borrow::Cow;
         let value = match &self.graph[idx] {
@@ -1028,8 +991,6 @@ impl CodeGraph {
         value.filter(|v| !v.is_empty())
     }
 
-    /// `tag_properties` maps node kind name (e.g. `"File"`) to
-    /// `(tag_key, property_name)` pairs, from `ontology.denormalized_properties()`.
     pub fn build_node_tags(
         &self,
         tag_properties: &std::collections::HashMap<String, Vec<(String, String)>>,
@@ -1054,8 +1015,6 @@ impl CodeGraph {
             };
             let props = node_kind.and_then(|kind| tag_properties.get(kind));
 
-            // Keyed on the raw values, not the formatted tags: formatting first
-            // would allocate per node before discovering the set already exists.
             values.clear();
             if let Some(props) = props {
                 for (i, (_, prop_name)) in props.iter().enumerate() {
@@ -1064,8 +1023,6 @@ impl CodeGraph {
                     }
                 }
             }
-            // The node kind is part of the key because the same property index
-            // means a different tag name for each kind.
             let key: TagKey<'_> = (node_kind.unwrap_or(""), values.clone());
 
             let id = match seen.get(&key) {
@@ -1138,9 +1095,6 @@ impl CodeGraph {
                     let super_name = self.strings.get(super_id);
                     let mut targets = self.resolve_scope_nodes(super_name);
                     targets.retain(|t| *t != idx);
-                    // Disambiguate: when multiple candidates share a name,
-                    // prefer the one closest to the child's scope (longest
-                    // common FQN prefix) that isn't nested under the child.
                     if targets.len() > 1 {
                         let child_prefix = format!("{}.", child_fqn);
                         targets.sort_by(|&a, &b| {
@@ -1253,8 +1207,6 @@ impl CodeGraph {
         SmallVec::new()
     }
 
-    /// Compute stable IDs for all nodes. Returns a dense Vec indexed by
-    /// `NodeIndex::index()` — O(1) lookup, more compact than FxHashMap.
     pub fn assign_ids(&self, project_id: i64, branch: &str) -> Vec<i64> {
         use std::fmt::Write as _;
         let pid = project_id.to_string();
@@ -1322,7 +1274,6 @@ fn dir_to_string(dir: &Path) -> String {
 fn compute_id(components: &[&str]) -> i64 {
     let mut hasher = FxHasher::default();
     components.hash(&mut hasher);
-    // Mask clears the sign bit so the result is always a positive i64.
     (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
 
@@ -1710,11 +1661,6 @@ mod tests {
 
     #[test]
     fn assign_ids_distinguishes_definitions_sharing_fqn_in_same_file() {
-        // Regression: v2 Definition ids previously hashed only
-        // (project_id, branch, file_path, fqn). Two methods that share
-        // an fqn (e.g. Go methods on different receivers, or generated
-        // protobuf methods with the same synthesized fqn) collapsed to
-        // one id and dedup'd on insert.
         let cg = build_graph(
             "/repo/main.go",
             vec![
@@ -1735,8 +1681,6 @@ mod tests {
 
     #[test]
     fn compute_id_is_always_non_negative() {
-        // Inputs hand-picked because their unmasked FxHash output has
-        // the high bit set, which used to produce negative i64 ids.
         let cases: &[&[&str]] = &[
             &[
                 "1",
@@ -1765,10 +1709,6 @@ mod tests {
 
     #[test]
     fn assign_ids_distinguishes_imports_sharing_path_in_same_file() {
-        // Regression: v2 Import ids previously hashed only
-        // (project_id, branch, file_path, import_path, name|"*"),
-        // so repeated `use foo::bar` style imports in one file
-        // (common in tonic-generated Rust) collapsed to one id.
         let import_a = CanonicalImport {
             import_type: "Use",
             binding_kind: ImportBindingKind::Namespace,

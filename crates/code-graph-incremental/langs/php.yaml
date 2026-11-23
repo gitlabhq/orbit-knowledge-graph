@@ -1,20 +1,3 @@
-# PHP rewrite rules.
-# Handles: namespace, use imports (single, grouped, aliased, function, const),
-# class/interface/trait/enum defs, properties (typed and promoted), constants,
-# methods, $this-> and self::/static:: calls, member/static/function calls,
-# new, control flow, bindings.
-#
-# Import resolution is path-based. Namespaces map to files with the PSR-4
-# convention: drop the vendor root segment and look the rest up under a
-# source root (src, app, lib). A fully qualified reference (\Vendor\X\Y::f())
-# acts as an inline import of Vendor\X\Y.
-#
-# Known gaps (engine, not rules):
-# - Same-namespace siblings resolve only through `use`; the resolver is
-#   import-driven and has no namespace scope.
-# - `use function` / `use const` resolve only when the namespace path is a
-#   file; functions and constants usually live in helper files.
-
 config:
   stdlib: [
     { availability: implicit, symbols: [abs, array_filter, array_keys, array_map, array_merge, array_pop,
@@ -42,23 +25,19 @@ config:
 stages:
   - name: imports
     rules:
-      # use A\B\C as D;  /  use function A\B\f;  /  use const A\B\K;
       - match: '(namespace_use_clause $Q:(qualified_name $N:name) alias: $A:name)'
         replace: '(__import (__source @$Q $Q) (__source_path @$Q|replace("\", "/")) (__name @$N (__alias @$A)))'
       - match: '(namespace_use_clause $Q:(qualified_name $N:name))'
         replace: '(__import (__source @$Q $Q) (__source_path @$Q|replace("\", "/")) (__name @$N))'
 
-      # Grouped clause entries: keep the name, carry the alias
       - match: '(namespace_use_clause $N:name alias: $A:name)'
         replace: '(namespace_use_clause @$N (__alias @$A))'
       - match: '(namespace_use_clause $N:name)'
         replace: '(namespace_use_clause @$N)'
 
-      # use A\B\{C, D as E};
       - match: '(namespace_use_declaration $P:namespace_name body: (namespace_use_group $$$CLAUSES:namespace_use_clause))'
         replace: '(__import (__source @$P $P) (__source_path @$P|replace("\", "/")) $$$CLAUSES->__name)'
 
-      # \Vendor\X\Y::f() and new \Vendor\X\Y() — a fully qualified reference imports Y
       - match: '(scoped_call_expression scope: $Q:(qualified_name $N:name) name: $M arguments: $A)'
         replace: '(php_fqn_ref (__import (__source @$Q $Q) (__source_path @$Q|replace("\", "/")|regex_replace("^/", "")) (__name @$N)) (scoped_call_expression scope: (name @$N) name: (name @$M) $A))'
       - match: '(object_creation_expression $Q:(qualified_name $N:name) $A:arguments)'
@@ -77,7 +56,6 @@ stages:
       - match: '(return_statement $$$V)'
         replace: '(__ssa_return $$$V)'
 
-      # Types collapse to a bare name: ?T, \A\B\T, T
       - match: '(qualified_name $N:name)'
         replace: '(name @$N)'
       - match: '(named_type $N:name)'
@@ -91,15 +69,12 @@ stages:
       - match: '(disjunctive_normal_form_type $T:named_type $$$R)'
         replace: '(named_type @$T)'
 
-      # Attributes → decorators
       - match: '(attribute $N:name parameters:? $P)'
         replace: '(__decorator @$N $P)'
 
-      # $this->x → __ivar
       - match: '(member_access_expression object: (variable_name (name "this")) name: $N:name)'
         replace: '(__ivar @$N)'
 
-      # extends / implements / trait use → __supertype
       - match: '(base_clause $$$S:name)'
         replace: '(base_clause $$$S=>__supertype)'
       - match: '(class_interface_clause $$$S:name)'
@@ -107,7 +82,6 @@ stages:
       - match: '(use_declaration $$$S:name)'
         replace: '(use_declaration $$$S=>__supertype)'
 
-      # Parameters
       - match: '(property_promotion_parameter type: $T:named_type name: (variable_name $N:name))'
         replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))))'
       - match: '(property_promotion_parameter name: (variable_name $N:name))'
@@ -119,11 +93,9 @@ stages:
       - match: '(variadic_parameter name: $N:variable_name)'
         replace: '(__binding @$N $N)'
 
-      # catch (T $e)
       - match: '(catch_clause type: (type_list $T:named_type) name: $N:variable_name body: $B)'
         replace: '(catch_clause (__binding @$N $N (__ssa_typed @$T) (__rhs (__member (__object @$T $T)))) $B)'
 
-      # $x instanceof T references T
       - match: '(binary_expression left: $L (instanceof) right: $T:name)'
         replace: '(binary_expression $L (__member (__object @$T $T)))'
 
@@ -146,7 +118,6 @@ stages:
       - match: '(scoped_property_access_expression scope: $S:name name: $P:variable_name)'
         replace: '(__member @$P (__object @$S $S))'
 
-      # $this->m() / self::m() / static::m()
       - match: '(member_call_expression object: (variable_name (name "this")) name: $M:name arguments: $A)'
         replace: '(__call (__callee (__ivar @$M)) $A)'
       - match: '(nullsafe_member_call_expression object: (variable_name (name "this")) name: $M:name arguments: $A)'
@@ -160,7 +131,6 @@ stages:
       - match: '(scoped_call_expression scope: (relative_scope) name: $M:name arguments: $A)'
         replace: '(__call (__callee (__ivar @$M)) $A)'
 
-      # $x->m() / $this->p->m() / $a->b->m() / f()->m()
       - match: '(member_call_expression object: $O:__call name: $M:name arguments: $A)'
         replace: '(__call (__callee (__member @$M (__object $O))) $A)'
       - match: '(nullsafe_member_call_expression object: $O:__call name: $M:name arguments: $A)'
@@ -178,11 +148,9 @@ stages:
       - match: '(nullsafe_member_call_expression object: $O name: $M:name arguments: $A)'
         replace: '(__call (__callee (__member @$M (__object @$O $O))) $A)'
 
-      # Foo::m()
       - match: '(scoped_call_expression scope: $S:name name: $M:name arguments: $A)'
         replace: '(__call (__callee (__member @$M (__object @$S $S))) $A)'
 
-      # f() / new Foo()
       - match: '(function_call_expression function: $F:name arguments: $A)'
         replace: '(__call (__callee @$F $F) $A)'
       - match: '(object_creation_expression $C:name $A:arguments)'
@@ -192,7 +160,6 @@ stages:
 
   - name: classify
     rules:
-      # Bindings
       - match: '(assignment_expression left: $N:__ivar right: $R:__call)'
         replace: '(__binding $N (__rhs $R))'
       - match: '(assignment_expression left: $N:__ivar right: $R)'
@@ -214,7 +181,6 @@ stages:
       - match: '(static_variable_declaration name: $N:variable_name value: $V)'
         replace: '(__binding @$N (__rhs @$V $V))'
 
-      # Control flow
       - match: '(if_statement condition: $C body: $B $$$ALTS:else_if_clause|else_clause)'
         replace: '(__ssa_branch $C (__ssa_arm $B) $$$ALTS->__ssa_arm)'
       - match: '(switch_statement condition: $C body: $B)'
@@ -234,7 +200,6 @@ stages:
       - match: '(do_statement body: $B)'
         replace: '(__ssa_loop $B)'
 
-      # Members
       - match: '(const_element $N:name)'
         replace: '(__def (__defname @$N) (__constant))'
       - match: '(property_declaration type: $T:named_type (property_element name: (variable_name $N:name)))'
@@ -244,7 +209,6 @@ stages:
       - match: '(enum_case name: $N:name)'
         replace: '(__def (__defname @$N) (__enum_variant))'
 
-      # Methods (with and without body) and functions
       - match: '(method_declaration $$$PRE name: $N:name parameters: $P return_type:? $R:named_type body: $B)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R) $$$PRE $P $B)'
       - match: '(method_declaration $$$PRE name: $N:name parameters: $P return_type:? $R:named_type)'
@@ -252,7 +216,6 @@ stages:
       - match: '(function_definition $$$PRE name: $N:name parameters: $P return_type:? $R:named_type body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$PRE $P $B)'
 
-      # Class-likes (after members)
       - match: '(class_declaration $$$PRE name: $N:name (base_clause $S:__supertype) $$$ANN body: (declaration_list $$$B))'
         replace: '(__def (__defname @$N) (__class @$N) (__alias "self") (__alias "static") $$$PRE $S $$$ANN (__binding "parent" (__rhs (__call (__callee @$S)))) (__binding (__ivar "parent") (__rhs (__call (__callee @$S)))) $$$B)'
       - match: '(class_declaration $$$PRE name: $N:name $$$ANN body: (declaration_list $$$B))'
@@ -357,7 +320,6 @@ display:
       - match: '(__def (__enum))'
         tag:
           class_fqn: '@$ROOT|tag("fqn")'
-      # Promoted constructor parameters are properties of the class
       - match: '(__def (__property))'
         tag:
           fqn: '@$ROOT|concat("\", "ancestor_tag:class_fqn", "child_sym:__defname")|keep_last("\", "64", "4096")'

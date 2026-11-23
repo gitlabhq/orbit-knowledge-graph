@@ -1,8 +1,3 @@
-//! SSA engine (Braun et al., CC 2013).
-//!
-//! Builds reaching-def information during a single pass over annotations.
-//! Variable names are `u32` symbol ids from the Lang interner.
-
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
@@ -489,7 +484,6 @@ impl SsaEngine {
             }
         }
 
-        // Tarjan's SCC (inline, no petgraph dependency)
         let sccs = tarjan_scc(&adj);
 
         for scc_indices in &sccs {
@@ -610,7 +604,6 @@ impl Default for SsaEngine {
     }
 }
 
-/// Inline Tarjan's SCC (no petgraph dependency).
 fn tarjan_scc(adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
     let n = adj.len();
     let mut index_counter = 0usize;

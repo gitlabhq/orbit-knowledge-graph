@@ -1,6 +1,3 @@
-//! What flows through the pipeline. Each artifact is a checkpoint: holding
-//! one says which phases may follow.
-
 use std::sync::Arc;
 
 use arrow::record_batch::RecordBatch;
@@ -36,8 +33,6 @@ pub struct ReindexInput {
     pub removed: Vec<String>,
 }
 
-/// The graph so far plus the items still moving through the per-item
-/// phases; `dirty` is every file the resolver must revisit.
 pub struct Workset<C> {
     pub state: State,
     pub items: C,
@@ -48,13 +43,10 @@ pub struct SourcePaths {
     pub paths: Vec<String>,
 }
 
-/// The tree-sitter tree, source attached.
 pub struct Parsed(pub Tree, pub Option<Killed>);
 
-/// Rewrite rules applied; language nodes still present.
 pub struct Rewritten(pub Tree, pub Option<Killed>);
 
-/// Only canonical nodes remain; the source text is gone.
 pub struct Canonical(pub Tree<Compact>, pub Option<Killed>);
 
 pub struct LinkedFile {
@@ -66,16 +58,12 @@ pub struct LinkedFile {
 pub struct DirtyGraph {
     pub state: State,
     pub dirty: FxHashSet<u32>,
-    /// The trees this run added: everything it read, parsed or not.
     pub inserted: std::ops::Range<u32>,
 }
 
 pub struct Resolved {
     pub state: State,
     pub resolved: Vec<u32>,
-    /// Every file whose graph this run may have changed: the ones it added,
-    /// resolved again, or gave other project tags. The others are as the
-    /// snapshot had them.
     pub touched: FxHashSet<u32>,
 }
 

@@ -138,7 +138,6 @@ tests:
       - { column_values: { field: callee, values: ["Box.b", "Box.x"] } }
 
   - name: an inherited read of x types the receiver by the field
-    # Known gap: a bare read of an inherited field is not bound in the subclass scope, on main too.
     skip: true
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
@@ -166,7 +165,6 @@ tests:
       - { row: { callee: "Set.first", kind: "Method" } }
 
   - name: a bare call inside the anonymous class targets the method, not the field of the same name
-    # Known gap: inside the anonymous class the bare name resolves through the value of the field of its name, so the call has no edge, on main too.
     skip: true
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
@@ -177,7 +175,6 @@ tests:
       - { row: { callee: "Set.first", kind: "Method" } }
 
   - name: a chained call on a method of a nested class types by its return
-    # Known gap: a return type that names a nested class is not resolved, on main too.
     skip: true
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)

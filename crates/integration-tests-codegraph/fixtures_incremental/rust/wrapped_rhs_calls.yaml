@@ -110,7 +110,6 @@ tests:
       - { column_values: { field: caller, values: ["assign_try", "let_try", "reset"] } }
 
   - name: "a call behind a question mark types the local"
-    # Known gap: the local takes the callee's return type Result<Item, ()>, the wrapper, not its argument, so item.touch() has no edge.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -144,7 +143,6 @@ tests:
       - { column_values: { field: callee, values: ["pick", "touch"] } }
 
   - name: "an awaited builder types the local by the IntoFuture output"
-    # Known gap: the awaited value takes the declared return type Builder, not the IntoFuture output Item, so item.touch() links Builder::touch.
     skip: true
     query: |
       MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)

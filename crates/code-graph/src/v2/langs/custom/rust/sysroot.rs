@@ -7,9 +7,6 @@ use tempfile::TempDir;
 
 use super::*;
 
-/// Pinned for reproducible indexing across machines/releases. Std APIs newer
-/// than this version won't resolve until this constant and the checked-in
-/// assets under `assets/rust-sysroot-<version>/` are bumped in lockstep.
 pub(super) const EMBEDDED_RUST_SYSROOT_VERSION: &str = "1.95.0";
 
 const EMBEDDED_RUST_PROJECT_JSON: &str = "rust-project.json";

@@ -18,17 +18,11 @@ use crate::v2::linker::rules::{
     ResolverHooks,
 };
 
-// ── DSL parser spec ─────────────────────────────────────────────
-
 #[derive(Default)]
 pub struct ScalaDsl;
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-/// Classify a `class_definition` node into the appropriate Scala kind.
-/// tree-sitter-scala represents case classes, traits, objects all via
-/// related but distinct node types — only plain `class_definition` needs
-/// sub-classification (case class vs plain class).
 fn classify_scala_class(node: &N<'_>) -> &'static str {
     if node.children().any(|c| c.text().as_ref() == "case") {
         return "CaseClass";
@@ -36,8 +30,6 @@ fn classify_scala_class(node: &N<'_>) -> &'static str {
     "Class"
 }
 
-/// Extract super-types from a Scala class/trait definition.
-/// Scala uses `extends Foo with Bar with Baz` syntax.
 fn scala_super_types(node: &N<'_>) -> Vec<String> {
     let mut result = Vec::new();
     for child in node.children() {
@@ -340,8 +332,6 @@ impl DslLanguage for ScalaDsl {
         }
     }
 }
-
-// ── Resolution rules ────────────────────────────────────────────
 
 pub struct ScalaRules;
 

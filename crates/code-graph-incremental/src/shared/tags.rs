@@ -1,6 +1,3 @@
-//! The only tag keys the linker and resolver branch on; every other tag a
-//! language sets is passed through to export untouched.
-
 use crate::intern::Lang;
 
 #[derive(Clone, Copy)]

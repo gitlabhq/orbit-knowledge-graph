@@ -1,10 +1,5 @@
-/// Minimum stack space (128 KiB) that must remain before recursing into
-/// tree-sitter visitors. Guards against stack overflow on deeply nested ASTs.
 pub const MINIMUM_STACK_REMAINING: usize = 128 * 1024;
 
-/// oxc has no recursion limit and aborts the process past depth 4000-8000, where
-/// tree-sitter walkers check [`MINIMUM_STACK_REMAINING`] and survive instead.
-/// Deepest real file seen was 131.
 pub const MAX_NESTING_DEPTH: usize = 1000;
 
 pub fn exceeds_nesting_cap(source: &str) -> bool {
@@ -108,18 +103,6 @@ impl std::fmt::Display for Range {
     }
 }
 
-/// Scope-climb prefixes of a fully-qualified name, stripping the trailing
-/// `sep`-delimited segment one level at a time: `net.http.Client` yields
-/// `net.http.Client`, `net.http`, `net`. Lazy and right-to-left, so a caller
-/// that resolves at an outer scope stops without scanning the rest of the name.
-///
-/// Non-overlapping like a repeated `rfind(sep)` + truncate-to-match-start climb,
-/// byte-for-byte, including the adjacent-separator case (`a::::b` climbs
-/// `a::::b`, `a::`, `a`). An empty `sep` yields only the full string.
-///
-/// The single-byte separator (`.`, `\`) is the hot path on real corpora and
-/// takes a SIMD `memrchr` scan; multi-byte separators (`::`) fall back to the
-/// std substring searcher.
 pub fn fqn_scopes<'a>(fqn: &'a str, sep: &'a str) -> impl Iterator<Item = &'a str> + 'a {
     let hay = fqn.as_bytes();
     let mut end = fqn.len();

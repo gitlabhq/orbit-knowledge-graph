@@ -1,7 +1,3 @@
-//! One family's compiled environment: every member's rules in one interner,
-//! the project-level resolve config as their union, and the budgets.
-//! Long-lived and shared between runs.
-
 use rustc_hash::FxHashMap;
 
 use crate::error::LoadError;
@@ -22,8 +18,6 @@ pub struct Env {
     compiled: Vec<LangConfig>,
 }
 
-/// What the resolver reads for the whole project: the members' resolve
-/// config merged and their stages in member order, one rule file counted once.
 #[derive(Default)]
 pub struct FamilyResolve {
     pub config: ResolveConfig,
@@ -39,8 +33,6 @@ impl Env {
         Self::with_lang(lang_id, Lang::new(), limits)
     }
 
-    /// Compiles the family's rules into an existing interner, so ids in a
-    /// graph restored from a snapshot and ids in the rules agree.
     pub fn with_lang(lang_id: SupportLang, lang: Lang, limits: Limits) -> Result<Self, LoadError> {
         let members = lang_id.family_members();
         let mut rules: FxHashMap<SupportLang, usize> = FxHashMap::default();
@@ -84,8 +76,6 @@ impl Env {
         self.members.contains(&lang)
     }
 
-    /// The file-level rules for a path: rewrite, link and display come from
-    /// the file's own language.
     pub fn rules_for(&self, path: &str) -> &LangConfig {
         let lang = SupportLang::from_path(path)
             .filter(|l| self.in_family(*l))

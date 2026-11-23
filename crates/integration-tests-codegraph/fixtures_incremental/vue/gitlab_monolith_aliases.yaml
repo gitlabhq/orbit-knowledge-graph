@@ -120,7 +120,6 @@ fixtures:
 
 tests:
   - name: ee_else_ce alias named import targets EE export proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -133,7 +132,6 @@ tests:
       - { row: { import_type: "NamedImport", target: "dropdowni18nText" } }
 
   - name: Vue computed property resolves ee_else_ce helper call
-    # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -145,7 +143,6 @@ tests:
       - { row: { caller: "title", callee: "dropdowni18nText" } }
 
   - name: Vue default import of CE component targets primary export proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -157,7 +154,6 @@ tests:
       - { row: { import_type: "DefaultImport", target: "CeBlobOverflowMenu" } }
 
   - name: GraphQL import through ee_else_ce targets primary export proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -169,7 +165,6 @@ tests:
       - { row: { import_type: "DefaultImport", target: "ee/app/assets/javascripts/repository/queries/project_info.query.graphql::default" } }
 
   - name: Asset alias import targets JS helper module
-    # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -181,7 +176,6 @@ tests:
       - { row: { import_type: "DefaultImport", target: "app/assets/javascripts/lib/utils/icons_path.js::default" } }
 
   - name: Vue monolith helper import from tilde alias resolves to concrete definition
-    # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

@@ -19,8 +19,6 @@ fixtures:
       }
 
 tests:
-  # ── J3: test_java_reference_resolution_same_class_name_in_same_package ──
-
   - name: "ServerFilter.Filter.apply -> Filter.apply (disambiguated)"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)

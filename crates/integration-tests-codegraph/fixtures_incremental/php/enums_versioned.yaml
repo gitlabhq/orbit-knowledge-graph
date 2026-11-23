@@ -144,7 +144,6 @@ fixtures:
       }
 
 tests:
-  # ── Enum and case definitions ──────────────────────────────────
   - name: "All enums indexed with Enum definition_type"
     query: |
       MATCH (d:Definition)
@@ -206,7 +205,6 @@ tests:
     assert:
       - { row_count: 2 }
 
-  # ── Inheritance edges ─────────────────────────────────────────
   - name: "Enum implementing an interface produces an Extends edge"
     query: |
       MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
@@ -223,7 +221,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Calls inside enum methods (self::, $this->, match) ────────
   - name: "Enum method self:: static call: Status.label -> Status.format"
     query: |
       MATCH (a:Definition)-[e:CALLS]->(b:Definition)
@@ -248,7 +245,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Cross-file enum usage from typed parameter ────────────────
   - name: "Typed enum parameter dispatch: Controller.showStatus -> Status.label"
     query: |
       MATCH (a:Definition)-[e:CALLS]->(b:Definition)

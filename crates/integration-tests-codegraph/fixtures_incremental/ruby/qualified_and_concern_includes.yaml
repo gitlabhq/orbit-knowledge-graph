@@ -15,14 +15,11 @@ fixtures:
         end
       end
 
-  # Direct child written with a leading `::` scope operator.
   - path: app/policies/abuse_report_policy.rb
     content: |
       class AbuseReportPolicy < ::BasePolicy
       end
 
-  # Namespaced intermediate parent, plus a grandchild that reaches the root
-  # through it.
   - path: app/policies/namespaces/shared_policy.rb
     content: |
       module Namespaces
@@ -35,14 +32,12 @@ fixtures:
       class GroupPolicy < Namespaces::SharedPolicy
       end
 
-  # A module (not a class) that includes another module.
   - path: app/helpers/projects_helper.rb
     content: |
       module ProjectsHelper
         include Gitlab::Allowable
       end
 
-  # ActiveSupport::Concern: the include lives inside an `included do` block.
   - path: app/serializers/request_aware_entity.rb
     content: |
       module RequestAwareEntity

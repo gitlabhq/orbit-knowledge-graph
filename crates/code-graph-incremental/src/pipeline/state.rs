@@ -1,6 +1,3 @@
-//! The graph a run builds: one tree per file, the edges between them, and
-//! the resolver's memory of how it linked them; and its snapshot on disk.
-
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -32,7 +29,6 @@ pub struct State {
     pub trees: Vec<Tree<Compact>>,
     pub edges: Vec<Edge>,
     pub resolver: Resolver,
-    /// Manifest files (`parse_files`) the resolver reads for module roots.
     pub configs: Vec<SourceFile>,
 }
 
@@ -240,9 +236,6 @@ impl From<TreeSnapshot> for Tree<Compact> {
     }
 }
 
-/// One file as a block stores it. Every file it refers to, itself
-/// included, is an index into the block's `paths`, so the block does not
-/// change when other files move in the tree list.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 struct StoredFile {
     tree: TreeSnapshot,
@@ -257,8 +250,6 @@ struct Block {
     files: Vec<StoredFile>,
 }
 
-/// The tree order and the blocks that hold the trees; read on its own by
-/// [`State::labels`].
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 struct Index {
     labels: Vec<String>,
@@ -273,8 +264,6 @@ struct Shared {
     configs: Vec<(String, String)>,
 }
 
-/// Bump when any snapshot struct changes shape; an older file then fails
-/// with a clear message instead of a decode error.
 pub const SNAPSHOT_VERSION: u32 = 19;
 
 const FILES_PER_BLOCK: usize = 64;
@@ -314,12 +303,10 @@ fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 
-/// The block files of the snapshot at `path`, in a directory beside it.
 fn blocks_dir(path: &Path) -> PathBuf {
     path.with_extension("blocks")
 }
 
-/// Writes through a temporary file, so a reader never sees half a file.
 fn write_atomically(
     path: &Path,
     write: impl FnOnce(&mut std::fs::File) -> io::Result<()>,
@@ -349,21 +336,11 @@ fn open_index(
 }
 
 impl State {
-    /// Saves the graph as a small index file at `path` plus blocks of about
-    /// [`FILES_PER_BLOCK`] files, grouped by a hash of their path. A block is
-    /// named by the hash of its content, so a save writes only the blocks
-    /// whose files changed and removes the ones nothing refers to any more.
     pub fn save(&self, env: &Env, path: &Path) -> io::Result<()> {
         self.write(env, path, path, None)?;
         remove_unreferenced_blocks(path)
     }
 
-    /// Writes the blocks beside the snapshot at `path` and the index to
-    /// `staged`; the snapshot at `path` stays as it was until
-    /// [`State::commit_staged`] puts the staged one in its place. With
-    /// `touched`, the files that changed since the graph was loaded from
-    /// `path`, a block with none of them, and the same files as before, keeps
-    /// its file without being serialised.
     pub fn stage(
         &self,
         env: &Env,
@@ -374,8 +351,6 @@ impl State {
         self.write(env, path, staged, touched)
     }
 
-    /// Puts the index staged for `path` in place and removes the blocks the
-    /// old one alone referred to.
     pub fn commit_staged(staged: &Path, path: &Path) -> io::Result<()> {
         std::fs::rename(staged, path)?;
         remove_unreferenced_blocks(path)
@@ -432,8 +407,6 @@ impl State {
         })
     }
 
-    /// The blocks of the saved snapshot at `path` that still hold exactly
-    /// the same files, none of them touched, by bucket.
     fn unchanged_blocks(
         &self,
         path: &Path,
@@ -462,7 +435,6 @@ impl State {
             .collect()
     }
 
-    /// The file indices of each non-empty bucket.
     fn blocks(&self, buckets: u32) -> Vec<(u32, Vec<u32>)> {
         let mut blocks: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
         for (fi, tree) in self.trees.iter().enumerate() {
@@ -552,8 +524,6 @@ impl State {
         names
     }
 
-    /// The labels of the snapshot at `path`, in tree order, without reading
-    /// its blocks.
     pub fn labels(path: &Path) -> io::Result<Vec<String>> {
         Ok(open_index(path)?.1.labels)
     }
@@ -650,7 +620,6 @@ fn bucket(label: &str, buckets: u32) -> u32 {
     (twox_hash::XxHash3_64::oneshot(label.as_bytes()) % u64::from(buckets)) as u32
 }
 
-/// Removes the blocks beside `path` that its index does not refer to.
 fn remove_unreferenced_blocks(path: &Path) -> io::Result<()> {
     let (_, index) = open_index(path)?;
     let referenced: FxHashSet<&str> = index.blocks.iter().map(|(_, name)| name.as_str()).collect();
@@ -677,7 +646,6 @@ fn read_block(path: &Path) -> io::Result<Block> {
     rkyv::from_bytes::<Block, Error>(&bytes).map_err(io::Error::other)
 }
 
-/// Every file `file` refers to.
 fn references(file: &StoredFile) -> impl Iterator<Item = u32> + '_ {
     let edges = file.edges.iter().flat_map(|e| [e.from_tree, e.to_tree]);
     let names = file.visible.iter().map(|(_, loc)| loc.fi);
@@ -685,8 +653,6 @@ fn references(file: &StoredFile) -> impl Iterator<Item = u32> + '_ {
     edges.chain(names).chain(reqs)
 }
 
-/// Rewrites every file reference in `file` through `to`.
-/// `None` when `to` has no number for one of them.
 fn renumber(file: &mut StoredFile, to: impl Fn(u32) -> Option<u32>) -> Option<()> {
     for edge in &mut file.edges {
         edge.from_tree = to(edge.from_tree)?;

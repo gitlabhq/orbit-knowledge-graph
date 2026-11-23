@@ -189,8 +189,6 @@ stages:
     }
 }
 
-/// The rules compiled against a restored interner must agree with the ids in
-/// the graph, or the first reindex after a load displays the wrong names.
 #[test]
 fn reindex_after_load_keeps_resolution_and_names() {
     let repo = tempfile::tempdir().unwrap();
