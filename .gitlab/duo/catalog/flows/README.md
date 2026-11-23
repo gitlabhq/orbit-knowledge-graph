@@ -23,7 +23,7 @@ update this table.
 
 | Setting | Value |
 |---|---|
-| `SKILLS_REF` in both files | `f52ac80ee0354e9a5728eb1c3e7a1a549fc44bc7`, the head of `team/skills` branch `docs-write/event-runs`, stacked on MR 40 and MR 38 (all unmerged). Re-pin both files to the squash commit on `main` once they merge. |
+| `SKILLS_REF` in both files | `6505b6cc7142b1a7913112e0de3187996e0c6701`, the head of team/skills!38 (branch `docs-write/issue-403`, unmerged). Re-pin both files to its squash commit on `main` once it merges. |
 | `MODE` in both files | `full` |
 | `FLOW_USER` in `docs-write.yml` | `44621578`, the user ID of `ai-docs-write-gitlab-org_510eee`, the service account that authors the flow's notes. Under composite identity `GET /user` returns the person who triggered the run, so the skills need it. An ID survives a rename. |
 | `REVIEW_USER` in `docs-write.yml` | Empty until the docs-review service account exists, then its user ID. docs-write trusts that account's review threads and its summary note. While it is empty, docs-write finds no review, so a mention on a docs MR with a green pipeline ends without a fix or a handoff. |
