@@ -112,24 +112,99 @@ pub fn compile(
     compile_model(raw, fe, &data_model, ctx)
 }
 
-pub fn compile_model(
-    raw: &str,
-    fe: Frontend,
-    data_model: &Arc<query_data_model::ClickHouseDataModel>,
-    ctx: &SecurityContext,
-) -> Result<CompiledQueryContext> {
-    match fe {
-        Frontend::JsonDsl => {
-            let mut ctx = config::ClickhouseJsonDslCtx::new(ctx.clone(), Arc::clone(data_model));
-            ctx.set_raw(raw.to_string());
-            finish(&mut ctx, config::run_clickhouse_json_dsl)
-        }
-        Frontend::Gql => {
-            let mut ctx = config::ClickhouseGqlCtx::new(ctx.clone(), Arc::clone(data_model));
-            ctx.set_raw(raw.to_string());
-            finish(&mut ctx, config::run_clickhouse_gql)
+pub enum CompileSource<'a> {
+    Raw(&'a str),
+    Parsed(gql::ParsedQuery),
+}
+
+impl CompileSource<'_> {
+    fn frontend(&self, requested: Frontend) -> Frontend {
+        match self {
+            Self::Raw(_) => requested,
+            Self::Parsed(_) => Frontend::Gql,
         }
     }
+
+    fn load(self, ctx: &mut impl config::CompilerCtx) {
+        match self {
+            Self::Raw(raw) => ctx.set_raw(raw.to_string()),
+            Self::Parsed(query) => query.load(ctx),
+        }
+    }
+}
+
+pub trait CompileTarget: Sized {
+    fn compile(
+        source: CompileSource,
+        fe: Frontend,
+        model: &Arc<Self>,
+        security: Option<&SecurityContext>,
+    ) -> Result<CompiledQueryContext>;
+}
+
+impl CompileTarget for query_data_model::ClickHouseDataModel {
+    fn compile(
+        source: CompileSource,
+        fe: Frontend,
+        model: &Arc<Self>,
+        security: Option<&SecurityContext>,
+    ) -> Result<CompiledQueryContext> {
+        let security = security
+            .ok_or_else(|| QueryError::PipelineInvariant("security context is required".into()))?
+            .clone();
+        match source.frontend(fe) {
+            Frontend::JsonDsl => {
+                let mut ctx = config::ClickhouseJsonDslCtx::new(security, Arc::clone(model));
+                source.load(&mut ctx);
+                finish(&mut ctx, config::run_clickhouse_json_dsl)
+            }
+            Frontend::Gql => {
+                let mut ctx = config::ClickhouseGqlCtx::new(security, Arc::clone(model));
+                source.load(&mut ctx);
+                finish(&mut ctx, config::run_clickhouse_gql)
+            }
+        }
+    }
+}
+
+impl CompileTarget for query_data_model::DuckDbDataModel {
+    fn compile(
+        source: CompileSource,
+        fe: Frontend,
+        model: &Arc<Self>,
+        _security: Option<&SecurityContext>,
+    ) -> Result<CompiledQueryContext> {
+        match source.frontend(fe) {
+            Frontend::JsonDsl => {
+                let mut ctx = config::DuckdbJsonDslCtx::new(Arc::clone(model));
+                source.load(&mut ctx);
+                finish(&mut ctx, config::run_duckdb_json_dsl)
+            }
+            Frontend::Gql => {
+                let mut ctx = config::DuckdbGqlCtx::new(Arc::clone(model));
+                source.load(&mut ctx);
+                finish(&mut ctx, config::run_duckdb_gql)
+            }
+        }
+    }
+}
+
+pub fn compile_source<'a, M: CompileTarget>(
+    source: CompileSource<'a>,
+    fe: Frontend,
+    model: &Arc<M>,
+    security: impl Into<Option<&'a SecurityContext>>,
+) -> Result<CompiledQueryContext> {
+    M::compile(source, fe, model, security.into())
+}
+
+pub fn compile_model<'a, M: CompileTarget>(
+    raw: &'a str,
+    fe: Frontend,
+    model: &Arc<M>,
+    security: impl Into<Option<&'a SecurityContext>>,
+) -> Result<CompiledQueryContext> {
+    compile_source(CompileSource::Raw(raw), fe, model, security)
 }
 
 /// Compile a graph query into DuckDB SQL for local execution.
@@ -147,18 +222,7 @@ pub fn compile_local(
     let ontology = Arc::new(ontology);
     let data_model = data_model::duckdb(Arc::clone(&ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    match fe {
-        Frontend::JsonDsl => {
-            let mut c = config::DuckdbJsonDslCtx::new(Arc::clone(&data_model));
-            c.set_raw(raw.to_string());
-            finish(&mut c, config::run_duckdb_json_dsl)
-        }
-        Frontend::Gql => {
-            let mut c = config::DuckdbGqlCtx::new(Arc::clone(&data_model));
-            c.set_raw(raw.to_string());
-            finish(&mut c, config::run_duckdb_gql)
-        }
-    }
+    compile_model(raw, fe, &data_model, None)
 }
 
 /// Run only `validate` + `normalize`, returning the normalized [`Input`].
@@ -419,5 +483,25 @@ mod tests {
             (1000..3000).contains(&wide_page),
             "wide page got {wide_page} chars"
         );
+    }
+
+    #[test]
+    fn compile_targets_select_the_pipeline_by_data_model() {
+        let query = r#"{"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[1],"columns":["name"]}]}"#;
+        let clickhouse = data_model::clickhouse(Arc::clone(&ONTOLOGY)).unwrap();
+        let duckdb = data_model::duckdb(Arc::clone(&ONTOLOGY)).unwrap();
+
+        let error = compile_model(query, Frontend::JsonDsl, &clickhouse, None).unwrap_err();
+        assert!(error.to_string().contains("security context is required"));
+        let local = compile_model(query, Frontend::JsonDsl, &duckdb, None).unwrap();
+        assert_eq!(local.base.dialect, SqlDialect::DuckDb);
+        let remote = compile_model(
+            query,
+            Frontend::JsonDsl,
+            &clickhouse,
+            &testkit::non_admin_ctx(),
+        )
+        .unwrap();
+        assert_eq!(remote.base.dialect, SqlDialect::ClickHouse);
     }
 }
