@@ -276,7 +276,7 @@ fn sources(
     };
     let mut files = Vec::new();
     for file in candidates(repository, env.limits.max_files) {
-        if !SupportLang::from_path(&file.path).is_some_and(|l| env.in_family(l)) {
+        if !env.reads(&file.path) {
             continue;
         }
         match read(&file.path) {

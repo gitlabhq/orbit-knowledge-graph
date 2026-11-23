@@ -2,8 +2,6 @@
 //! interner, its mounted frontends, the project settings as the members'
 //! union, and the budgets. Built once and shared between runs.
 
-use rustc_hash::FxHashMap;
-
 use crate::engine::Registration;
 use crate::engine::lang::DataSpec;
 use crate::error::LoadError;
@@ -12,15 +10,19 @@ use crate::language::SupportLang;
 use crate::sentinel::Limits;
 
 pub struct Engine {
-    /// The mounted frontends, the env's own language first.
-    pub frontends: Vec<Box<dyn crate::frontend::Frontend>>,
+    /// The mounted frontends, the engine's own language first.
+    pub frontends: Vec<Mounted>,
     pub lang: Lang,
     pub lang_id: SupportLang,
-    pub members: Vec<SupportLang>,
     pub project: Project,
     pub limits: Limits,
     pub pipeline: crate::engine::Pipeline,
-    rules: FxHashMap<SupportLang, usize>,
+}
+
+/// A mounted frontend and the rules the trees it parses run.
+pub struct Mounted {
+    pub frontend: Box<dyn crate::frontend::Frontend>,
+    pub rules: usize,
 }
 
 #[derive(Clone)]
@@ -99,7 +101,7 @@ impl Engine {
         modules: &'static [Registration],
     ) -> Result<Self, LoadError> {
         let members = lang_id.family_members();
-        let mut rules: FxHashMap<SupportLang, usize> = FxHashMap::default();
+        let mut frontends = Vec::new();
         let mut sources: Vec<Option<&'static str>> = Vec::new();
         for &member in &members {
             let yaml = crate::language::lang_yaml(member);
@@ -113,8 +115,17 @@ impl Engine {
                     sources.len() - 1
                 }
             };
-            rules.insert(member, index);
+            let frontend = crate::frontend::for_language(member, limits.max_tree_depth);
+            frontends.push((
+                member,
+                Mounted {
+                    frontend,
+                    rules: index,
+                },
+            ));
         }
+        frontends.sort_by_key(|(member, _)| *member != lang_id);
+        let frontends = frontends.into_iter().map(|(_, m)| m).collect();
         let pipeline = crate::engine::Pipeline::load(
             &lang,
             &crate::engine::lang::Sources {
@@ -126,36 +137,31 @@ impl Engine {
             modules,
         )?;
         let project = project(&pipeline, &lang, sources.len())?;
-        let mut frontends = vec![crate::frontend::for_language(
-            lang_id,
-            limits.max_tree_depth,
-        )];
-        for &member in members.iter().filter(|&&m| m != lang_id) {
-            frontends.push(crate::frontend::for_language(member, limits.max_tree_depth));
-        }
         Ok(Self {
             frontends,
             pipeline,
             project,
             lang,
             lang_id,
-            members,
             limits,
-            rules,
         })
     }
 
-    pub fn in_family(&self, lang: SupportLang) -> bool {
-        self.members.contains(&lang)
+    /// The mounted frontend that reads `path`, if any.
+    pub fn frontend_for(&self, path: &str) -> Option<&Mounted> {
+        self.frontends.iter().find(|m| m.frontend.accepts(path))
     }
 
-    /// The index of a path's language rules; languages that share a rule
-    /// file share an index.
+    /// Whether a mounted frontend reads `path`.
+    pub fn reads(&self, path: &str) -> bool {
+        self.frontend_for(path).is_some()
+    }
+
+    /// The rules a tree labelled `path` runs: its frontend's, or the
+    /// engine's own language's; frontends that share a rule file share an
+    /// index.
     pub fn rules_index(&self, path: &str) -> usize {
-        let lang = SupportLang::from_path(path)
-            .filter(|l| self.in_family(*l))
-            .unwrap_or(self.lang_id);
-        self.rules[&lang]
+        self.frontend_for(path).unwrap_or(&self.frontends[0]).rules
     }
 }
 

@@ -100,12 +100,7 @@ pub fn parse(
     source: &str,
     run: &Sentinel,
 ) -> Result<(Tree, Option<Killed>), Killed> {
-    let frontend = env
-        .frontends
-        .iter()
-        .find(|f| f.accepts(path))
-        .or(env.frontends.first())
-        .expect("an env mounts a frontend for its language");
+    let frontend = &env.frontend_for(path).unwrap_or(&env.frontends[0]).frontend;
     let budget = run
         .child(PARSE, path, env.limits.file_parse_ms)
         .on_thread_cpu();
