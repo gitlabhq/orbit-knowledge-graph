@@ -32,7 +32,7 @@ pub(crate) async fn submit_task(ports: &Ports, message: TaskMessage) -> anyhow::
 
     let task = pending.task;
     let now = ports.clock.now().await;
-    ports.tasks.publish(pending).await?;
+    ports.queue.publish(pending).await?;
     ports.log.record(now, ProtocolEvent::Published(task));
     Ok(task)
 }

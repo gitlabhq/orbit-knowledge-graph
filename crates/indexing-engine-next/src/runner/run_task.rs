@@ -31,7 +31,7 @@ impl Runner {
     async fn run_with_lease(&self, worker: &dyn ErasedWorker, delivery: Delivery) {
         let task = delivery.message.task;
         let key = delivery.message.worker_key();
-        let mut hold = self.leases.wait_for_lease(&key, task).await;
+        let mut hold = self.leases.acquire(&key, task).await;
         if let Err(error) = self.start_task(&key, task).await {
             return self.abandon_run(task, error).await;
         }
@@ -40,7 +40,7 @@ impl Runner {
         let in_flight = delivery.in_flight.as_ref();
         let outcome = tokio::select! {
             biased;
-            () = self.leases.extend_running_lease(&mut hold, &key, in_flight) => return,
+            () = self.leases.renew_while_running(&mut hold, &key, in_flight) => return,
             outcome = worker.run(&ctx, &delivery.message.input) => outcome,
         };
         match outcome {
@@ -99,7 +99,7 @@ impl Runner {
         let released = match hold {
             Some(hold) => self
                 .leases
-                .release_lease(hold, &message.worker_key())
+                .release(hold, &message.worker_key())
                 .await
                 .unwrap_or_else(|error| {
                     warn_port_failure("lease_release_failed", &error);

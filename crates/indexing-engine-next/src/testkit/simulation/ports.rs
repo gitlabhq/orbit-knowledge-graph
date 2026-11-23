@@ -12,7 +12,7 @@ use crate::lease::{Fence, Lease, LeaseEntry, Revision};
 use crate::lease::{LeaseStore, LeaseWrite};
 use crate::pending::{PendingEntry, PendingStore, PendingWrite};
 use crate::ports::Ports;
-use crate::task::{Delivery, InFlight, TaskMessage, TaskStream, WorkerKey};
+use crate::task::{Delivery, InFlight, TaskMessage, TaskQueue, WorkerKey};
 
 use super::world::{Actor, SharedWorld, StepKind};
 
@@ -35,7 +35,7 @@ pub(super) fn build_ports(world: &SharedWorld, actor: Actor) -> Ports {
     });
     Ports {
         clock: ports.clone(),
-        tasks: ports.clone(),
+        queue: ports.clone(),
         leases: ports.clone(),
         pending: ports.clone(),
         log: ports,
@@ -56,7 +56,7 @@ impl Clock for SimulatedPorts {
 }
 
 #[async_trait]
-impl TaskStream for SimulatedPorts {
+impl TaskQueue for SimulatedPorts {
     async fn publish(&self, message: TaskMessage) -> anyhow::Result<()> {
         self.world.stop_unless_allowed(self.actor).await;
         {

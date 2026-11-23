@@ -44,11 +44,11 @@ impl Leases {
         }
     }
 
-    pub(crate) async fn wait_for_lease(&self, key: &WorkerKey, task: TaskId) -> Hold {
+    pub(crate) async fn acquire(&self, key: &WorkerKey, task: TaskId) -> Hold {
         let claim = Claim::new(self.holder.clone(), task);
         loop {
             let now = self.clock.now().await;
-            match self.take_lease_if_free(&claim, key, now).await {
+            match self.take_if_free(&claim, key, now).await {
                 Ok(Some(hold)) => return hold,
                 Ok(None) => {}
                 Err(error) => warn_port_failure("lease_take_failed", &error),
@@ -58,7 +58,7 @@ impl Leases {
         }
     }
 
-    pub(crate) async fn extend_running_lease(
+    pub(crate) async fn renew_while_running(
         &self,
         hold: &mut Hold,
         key: &WorkerKey,
@@ -67,7 +67,7 @@ impl Leases {
         loop {
             self.clock.sleep_until(hold.renew_at()).await;
             let now = self.clock.now().await;
-            match self.extend_lease_if_ours(hold, key, now).await {
+            match self.extend_if_ours(hold, key, now).await {
                 Ok(true) => {
                     if let Err(error) = in_flight.acknowledge_progress().await {
                         warn_port_failure("progress_ack_failed", &error);
@@ -89,7 +89,7 @@ impl Leases {
         }
     }
 
-    pub(crate) async fn release_lease(&self, hold: &Hold, key: &WorkerKey) -> anyhow::Result<bool> {
+    pub(crate) async fn release(&self, hold: &Hold, key: &WorkerKey) -> anyhow::Result<bool> {
         let entry = self.store.read(key).await?;
         let Some(revision) = hold.revision_to_release(&entry) else {
             return Ok(false);
@@ -98,7 +98,7 @@ impl Leases {
         Ok(matches!(written, LeaseWrite::Written(_)))
     }
 
-    async fn take_lease_if_free(
+    async fn take_if_free(
         &self,
         claim: &Claim,
         key: &WorkerKey,
@@ -119,7 +119,7 @@ impl Leases {
         Ok(Some(hold))
     }
 
-    async fn extend_lease_if_ours(
+    async fn extend_if_ours(
         &self,
         hold: &mut Hold,
         key: &WorkerKey,

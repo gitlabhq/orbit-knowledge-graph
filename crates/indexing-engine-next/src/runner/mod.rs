@@ -59,7 +59,7 @@ async fn serve_lane(runner: Arc<Runner>, lane_id: String, slots: NonZeroU32) {
         }
 
         let now = runner.ports.clock.now().await;
-        let deliveries = match runner.ports.tasks.pull(&lane_id, free).await {
+        let deliveries = match runner.ports.queue.pull(&lane_id, free).await {
             Ok(deliveries) => deliveries,
             Err(error) => {
                 orbit_log_fields::warn!(
@@ -75,7 +75,7 @@ async fn serve_lane(runner: Arc<Runner>, lane_id: String, slots: NonZeroU32) {
             tokio::select! {
                 biased;
                 Some(joined) = runs.join_next() => resume_if_panicked(joined),
-                () = runner.ports.tasks.wait_for_ready(&lane_id) => {}
+                () = runner.ports.queue.wait_for_ready(&lane_id) => {}
             }
             continue;
         }

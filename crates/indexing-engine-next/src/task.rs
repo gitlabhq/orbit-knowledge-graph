@@ -29,7 +29,7 @@ pub(crate) struct Delivery {
 }
 
 #[async_trait]
-pub(crate) trait TaskStream: Send + Sync {
+pub(crate) trait TaskQueue: Send + Sync {
     async fn publish(&self, message: TaskMessage) -> anyhow::Result<()>;
     async fn pull(&self, lane_id: &str, max: usize) -> anyhow::Result<Vec<Delivery>>;
     async fn wait_for_ready(&self, lane_id: &str);

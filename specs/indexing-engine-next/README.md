@@ -42,7 +42,7 @@ So far, TLC found 7 ways to break the rules and one gap in the recovery after a 
 | `src/testkit/simulation/` in the crate | A simulated tick clock, key-value store, broker and database, with the ports on one seeded world |
 | `tests/protocol/` in the crate | A simulated cluster with one method for each spec action |
 | `LeaseDedupeTraceCheck.tla` | The trace check: TLC follows each recorded run step by step |
-| `src/ports.rs` in the crate | The ports that an adapter implements: clock, task stream, lease store, pending store, protocol log. Each port trait lives with its concept. |
+| `src/ports.rs` in the crate | The ports that an adapter implements: clock, task queue, lease store, pending store, protocol log. Each port trait lives with its concept. |
 | `src/runner/`, `src/lease/store.rs`, `src/pending.rs` in the crate | The runner and the submit path, written against the ports |
 | `tests/simulation.rs` in the crate | The rules of the simulated parts, the seeds, the coverage of each fault, and the trace writer for TLC |
 

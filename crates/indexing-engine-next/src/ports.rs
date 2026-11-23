@@ -4,12 +4,12 @@ use crate::clock::Clock;
 use crate::event::ProtocolLog;
 use crate::lease::LeaseStore;
 use crate::pending::PendingStore;
-use crate::task::TaskStream;
+use crate::task::TaskQueue;
 
 #[derive(Clone)]
 pub(crate) struct Ports {
     pub(crate) clock: Arc<dyn Clock>,
-    pub(crate) tasks: Arc<dyn TaskStream>,
+    pub(crate) queue: Arc<dyn TaskQueue>,
     pub(crate) leases: Arc<dyn LeaseStore>,
     pub(crate) pending: Arc<dyn PendingStore>,
     pub(crate) log: Arc<dyn ProtocolLog>,
