@@ -638,6 +638,8 @@ pub struct Run<'t, S: Store = Compact> {
     project: Option<u32>,
     indexed: Option<&'t Indexed<'t, S>>,
     fns: &'t [program::Def],
+    /// Per definition: the module states it reaches under the phase's binds.
+    def_deps: &'t [u64],
     overrides: Option<&'t std::collections::HashMap<u16, u16>>,
     enclosing_kinds: &'t [u16],
     graph_fi: u32,
@@ -686,6 +688,7 @@ impl<'t, S: Store> Run<'t, S> {
         run.lang = rules;
         run.data = phase.data.get(rules).map_or(&[], Vec::as_slice);
         run.fns = &phase.defs;
+        run.def_deps = &phase.def_deps;
         run.overrides = phase.overrides.get(rules);
         run.enclosing_kinds = &phase.enclosing;
         run.roles = &phase.roles;
@@ -719,6 +722,7 @@ impl<'t, S: Store> Run<'t, S> {
             project: None,
             indexed: None,
             fns: &[],
+            def_deps: &[],
             overrides: None,
             enclosing_kinds: &[],
             graph_fi: 0,
@@ -922,6 +926,11 @@ impl Links {
 
     pub(crate) fn to(&self, id: FnId) -> FnId {
         self.to[usize::from(id.0)]
+    }
+
+    /// The definition a required function is bound to, if it is.
+    pub(crate) fn def_of(&self, id: FnId) -> Option<u16> {
+        self.defs[usize::from(id.0)]
     }
 }
 

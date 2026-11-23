@@ -162,7 +162,6 @@ pub struct Def {
     pub(super) name: Box<str>,
     pub(super) params: usize,
     pub(super) body: DefImpl,
-    pub(super) deps: u64,
     pub(super) slots: usize,
 }
 
@@ -230,14 +229,17 @@ pub struct Phase {
     pub(super) modules: Vec<u8>,
     pub(super) links: super::Links,
     pub(super) data: Vec<Vec<Vals>>,
-    pub(super) defs: Vec<Def>,
+    /// Every definition, compiled once for the pipeline and shared.
+    pub(super) defs: std::sync::Arc<[Def]>,
+    /// Per definition: the module states it reaches under this phase's binds.
+    pub(super) def_deps: Vec<u64>,
     /// Per language: a redefined definition's id to the language's own.
-    pub(super) overrides: Vec<HashMap<u16, u16>>,
+    pub(super) overrides: std::sync::Arc<[HashMap<u16, u16>]>,
     pub(super) index_count: usize,
     pub(super) enclosing: Vec<u16>,
     pub(super) roles: Vec<Roles>,
     pub rows: Vec<RowShape>,
-    pub(super) indexers: Vec<Indexer>,
+    pub(super) indexers: std::sync::Arc<[Indexer]>,
     pub(super) passes: Vec<Pass>,
     /// Per language: its passes, in order.
     pub(super) by_lang: Vec<Vec<u16>>,

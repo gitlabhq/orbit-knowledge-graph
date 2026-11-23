@@ -379,7 +379,7 @@ impl<'e, S: Store> Machine<'e, S> {
                 let d = &fns[usize::from(def)];
                 (
                     (FnId(u16::MAX - def), d.key(&args)),
-                    d.deps,
+                    run.def_deps[usize::from(def)],
                     Callee::Def(def),
                 )
             }

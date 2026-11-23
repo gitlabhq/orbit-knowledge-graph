@@ -88,12 +88,14 @@ impl Pipeline {
         let roles = roles(&registry, &spec, lang)?;
         let (rows, tables) = tables(&files.shared.tables)?;
         let indexes = RefCell::new(Vec::new());
+        let loader = Loader::new(&registry, &files, &names, &tables, lang, &indexes)?;
+        let (defs, overrides) = loader.defs(&files)?;
+        let (defs, overrides): (std::sync::Arc<[Def]>, _) = (defs.into(), overrides.into());
         let mut phases = spec
             .phases
             .iter()
             .map(|p| {
-                let mut phase =
-                    compile_phase(&registry, p, &files, &names, &tables, lang, &indexes)?;
+                let mut phase = compile_phase(&loader, p, &files, &defs, &overrides)?;
                 phase.rows = rows.clone();
                 phase.data = values.clone();
                 phase.enclosing = enclosing.clone();
@@ -101,10 +103,12 @@ impl Pipeline {
                 Ok(phase)
             })
             .collect::<Result<Vec<_>, LoadError>>()?;
+        let indexers: std::sync::Arc<[Indexer]> = indexers(&loader, &files)?.into();
+        drop(loader);
         let indexes = indexes.into_inner();
         for phase in &mut phases {
             phase.index_count = indexes.len();
-            phase.indexers = indexers(&registry, phase, &files, &names, &tables, lang, &indexes)?;
+            phase.indexers = indexers.clone();
         }
         let settings = merged_data(&files);
         Ok(Self {
@@ -250,19 +254,17 @@ fn walk_of(spec: &PhaseSpec) -> Result<(bool, bool), LoadError> {
 }
 
 fn compile_phase(
-    registry: &Registry,
+    loader: &Loader,
     spec: &PhaseSpec,
     files: &RuleFiles,
-    names: &HashMap<String, u16>,
-    tables: &Tables,
-    lang: &Lang,
-    indexes: &RefCell<Vec<IndexSpec>>,
+    defs: &std::sync::Arc<[Def]>,
+    overrides: &std::sync::Arc<[HashMap<u16, u16>]>,
 ) -> Result<Phase, LoadError> {
+    let registry = loader.registry;
     let (post, until_stable) = walk_of(spec)?;
     let (binds, def_binds) = binds(registry, spec, &files.shared.defs)?;
     let links = super::Links::load(registry, &binds, &def_binds)?;
-    let loader = Loader::new(registry, files, names, tables, lang, &links, indexes)?;
-    let (defs, overrides) = loader.defs(files)?;
+    let def_deps = def_deps(defs, &links);
     let stages_of = |rules: Option<&Vec<StageSpec>>| rules.cloned().unwrap_or_default();
     let shared = stages_of(files.shared.phases.get(&spec.name));
     let langs: Vec<Vec<StageSpec>> = files
@@ -303,7 +305,7 @@ fn compile_phase(
             (vec![pass], vec![vec![0]; langs.len()])
         }
     };
-    let used = modules_reached(registry, &passes, &defs);
+    let used = modules_reached(registry, &links, &passes, defs);
     let bound: Vec<FnId> = binds
         .iter()
         .map(|b| b.0)
@@ -315,7 +317,6 @@ fn compile_phase(
         .label
         .clone()
         .unwrap_or_else(|| spec.name.clone());
-    drop(loader);
     Ok(Phase {
         name: spec.name.clone(),
         label: Box::leak(label.into_boxed_str()),
@@ -325,38 +326,61 @@ fn compile_phase(
         modules: used,
         links,
         data: Vec::new(),
-        defs,
-        overrides,
+        defs: defs.clone(),
+        def_deps,
+        overrides: overrides.clone(),
         index_count: 0,
         enclosing: Vec::new(),
         roles: Vec::new(),
         rows: Vec::new(),
-        indexers: Vec::new(),
+        indexers: Vec::new().into(),
         passes,
         by_lang,
     })
 }
 
-/// Every declared index, compiled for a phase's languages.
-fn indexers(
-    registry: &Registry,
-    phase: &Phase,
-    files: &RuleFiles,
-    names: &HashMap<String, u16>,
-    tables: &Tables,
-    lang: &Lang,
-    indexes: &[IndexSpec],
-) -> Result<Vec<Indexer>, LoadError> {
-    let declared = RefCell::new(indexes.to_vec());
-    let loader = Loader::new(
-        registry,
-        files,
-        names,
-        tables,
-        lang,
-        &phase.links,
-        &declared,
-    )?;
+/// Each definition's dependencies under a phase's binds: the states of every
+/// module function it can reach through other definitions.
+fn def_deps(defs: &[Def], links: &super::Links) -> Vec<u64> {
+    let calls: Vec<Vec<Result<FnId, u16>>> = defs
+        .iter()
+        .map(|def| {
+            let mut used = Vec::new();
+            def.calls(&mut |c| used.push(c));
+            used
+        })
+        .collect();
+    let mut deps: Vec<u64> = calls
+        .iter()
+        .map(|used| {
+            used.iter()
+                .filter_map(|c| c.ok())
+                .fold(0, |acc, id| acc | links.deps_of(id))
+        })
+        .collect();
+    loop {
+        let mut changed = false;
+        for (at, used) in calls.iter().enumerate() {
+            for &c in used {
+                if let Err(def) = c {
+                    let add = deps[usize::from(def)];
+                    if deps[at] | add != deps[at] {
+                        deps[at] |= add;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if !changed {
+            return deps;
+        }
+    }
+}
+
+/// Every declared index, compiled for every language. Compiling a key can
+/// declare no further index.
+fn indexers(loader: &Loader, files: &RuleFiles) -> Result<Vec<Indexer>, LoadError> {
+    let indexes = loader.indexes.borrow().clone();
     let mut out = Vec::new();
     for (id, index) in indexes.iter().enumerate() {
         let owners: Vec<Option<u8>> = match index.pattern.contains('%') {
@@ -445,7 +469,12 @@ fn binds(registry: &Registry, spec: &PhaseSpec, defs: &[DefSpec]) -> Result<Bind
 
 /// The modules a phase's rules call, directly or through the definitions
 /// they reach.
-fn modules_reached(registry: &Registry, passes: &[Pass], defs: &[Def]) -> Vec<u8> {
+fn modules_reached(
+    registry: &Registry,
+    links: &super::Links,
+    passes: &[Pass],
+    defs: &[Def],
+) -> Vec<u8> {
     let mut calls: Vec<Result<FnId, u16>> = Vec::new();
     for pass in passes {
         pass.cases.calls(&mut |c| calls.push(c));
@@ -455,7 +484,11 @@ fn modules_reached(registry: &Registry, passes: &[Pass], defs: &[Def]) -> Vec<u8
     while let Some(c) = calls.pop() {
         match c {
             Ok(id) => {
-                let slot = registry.function(id).slot;
+                if let Some(def) = links.def_of(id) {
+                    calls.push(Err(def));
+                    continue;
+                }
+                let slot = registry.function(links.to(id)).slot;
                 if !used.contains(&slot) {
                     used.push(slot);
                 }
@@ -499,7 +532,6 @@ fn check_binds(
 struct Loader<'a> {
     registry: &'a Registry,
     modules: Vec<String>,
-    links: &'a super::Links,
     names: &'a HashMap<String, u16>,
     defs: HashMap<String, (u16, usize)>,
     data: &'a BTreeMap<String, DataSpec>,
@@ -516,7 +548,6 @@ impl<'a> Loader<'a> {
         names: &'a HashMap<String, u16>,
         tables: &'a Tables,
         lang: &'a Lang,
-        links: &'a super::Links,
         indexes: &'a RefCell<Vec<IndexSpec>>,
     ) -> Result<Self, LoadError> {
         let mut defs = HashMap::new();
@@ -531,7 +562,6 @@ impl<'a> Loader<'a> {
         Ok(Self {
             registry,
             modules: registry.modules.iter().map(|m| m.name.to_owned()).collect(),
-            links,
             names,
             defs,
             data: &files.shared.data,
@@ -552,7 +582,6 @@ impl<'a> Loader<'a> {
             slots,
             modules: &self.modules,
             registry: self.registry,
-            links: self.links,
             lang: self.lang,
             data: self.names,
             defs: &self.defs,
@@ -649,10 +678,6 @@ impl<'a> Loader<'a> {
             }
             overrides.push(own);
         }
-        let deps = self.deps(&defs);
-        for (def, deps) in defs.iter_mut().zip(deps) {
-            def.deps = deps;
-        }
         Ok((defs, overrides))
     }
 
@@ -712,47 +737,8 @@ impl<'a> Loader<'a> {
             name,
             params: d.params.len(),
             body,
-            deps: 0,
             slots,
         })
-    }
-
-    /// Each definition's dependencies: the states of every module function
-    /// it can reach through other definitions.
-    fn deps(&self, defs: &[Def]) -> Vec<u64> {
-        let calls: Vec<Vec<Result<FnId, u16>>> = defs
-            .iter()
-            .map(|def| {
-                let mut used = Vec::new();
-                def.calls(&mut |c| used.push(c));
-                used
-            })
-            .collect();
-        let mut deps: Vec<u64> = calls
-            .iter()
-            .map(|used| {
-                used.iter()
-                    .filter_map(|c| c.ok())
-                    .fold(0, |acc, id| acc | self.links.deps_of(id))
-            })
-            .collect();
-        loop {
-            let mut changed = false;
-            for (at, used) in calls.iter().enumerate() {
-                for &c in used {
-                    if let Err(def) = c {
-                        let add = deps[usize::from(def)];
-                        if deps[at] | add != deps[at] {
-                            deps[at] |= add;
-                            changed = true;
-                        }
-                    }
-                }
-            }
-            if !changed {
-                return deps;
-            }
-        }
     }
 
     /// A rewrite or tags stage as a pass: every pair its own group, a

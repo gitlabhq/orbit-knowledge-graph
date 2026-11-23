@@ -33,7 +33,6 @@ pub struct Scope<'a> {
     pub slots: &'a RefCell<Slots>,
     pub modules: &'a [String],
     pub registry: &'a Registry,
-    pub links: &'a super::Links,
     pub lang: &'a Lang,
     pub data: &'a HashMap<String, u16>,
     pub defs: &'a HashMap<String, (u16, usize)>,
@@ -288,7 +287,6 @@ impl<'s> Parser<'s, '_> {
         {
             return Err(self.error(&format!("module {module} is not allowed in this phase")));
         }
-        let id = self.scope.links.to(id);
         let f = registry.function(id);
         if f.kind == Kind::Effect && !self.scope.effects {
             return Err(self.error(&format!("{module}.{name} has effects")));
