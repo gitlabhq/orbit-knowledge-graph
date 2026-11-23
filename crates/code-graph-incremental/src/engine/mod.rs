@@ -16,7 +16,7 @@ use crate::constants::{RED_ZONE, STACK_SEGMENT};
 use crate::env::Env;
 use crate::modules;
 use crate::sentinel::{Killed, Sentinel};
-use crate::tree::{Compact, Edge, EdgeKind, Mutable, Node, Storage};
+use crate::tree::{CallResolution, Compact, Edge, EdgeKind, Mutable, Node, Storage};
 pub use program::{Def, Part, Phase, Pipeline, RowShape, Walk, resolution};
 
 pub type Tree<S = Compact> = crate::tree::Tree<S>;
@@ -566,6 +566,8 @@ pub struct Run<'t, S: Store = Compact> {
     data: &'t [Vals],
     edges: Vec<Edge>,
     rows: Vec<Row>,
+    /// The stage cases that fired at the node, each with what its value wrote.
+    fired: Vec<(u16, Vec<Option<u32>>)>,
     defs: Vec<u32>,
     states: Box<[Box<dyn Any>]>,
     epochs: [u64; WALK + 1],
@@ -635,6 +637,7 @@ impl<'t, S: Store> Run<'t, S> {
             data: &[],
             edges: Vec::new(),
             rows: Vec::new(),
+            fired: Vec::new(),
             defs: Vec::new(),
             states: modules::ALL.iter().map(|m| (m.state)()).collect(),
             epochs: [0; WALK + 1],
@@ -846,8 +849,64 @@ impl<'t, S: Store> Run<'t, S> {
                     push(&mut out, Val::Node(Loc { fi: at.fi, node: 0 }));
                 }
             }
+            Op::Enclosing => out.push(Val::Node(self.enclosing_loc())),
+            Op::Edge(kind, fixed) => {
+                let site = args[2].first().and_then(|v| v.loc()).map(|l| l.node);
+                let call_resolution = match args.get(3).and_then(|v| v.first()) {
+                    Some(&Val::Sym(name)) => {
+                        program::resolution(self.lang_ref.syms.resolve(name)).unwrap_or_default()
+                    }
+                    Some(_) => CallResolution::default(),
+                    None => fixed,
+                };
+                for from in nodes(&args[0]) {
+                    for to in nodes(&args[1]) {
+                        self.edges.push(Edge {
+                            site,
+                            call_resolution,
+                            ..Edge::new(from.fi, from.node, to.fi, to.node, kind)
+                        });
+                    }
+                }
+            }
+            Op::Row(shape) => self.row(shape, args),
+            Op::Fired(case) => {
+                let writes = args
+                    .iter()
+                    .map(|vals| {
+                        vals.iter().find_map(|&v| match v {
+                            Val::Sym(s) => Some(s),
+                            Val::Node(loc) => Some(self.sym_at(loc)).filter(|&s| s != 0),
+                            _ => None,
+                        })
+                    })
+                    .collect();
+                self.fired.push((case, writes));
+            }
         }
         out
+    }
+
+    /// One row per combination of the column values; a column with no value
+    /// is empty.
+    fn row(&mut self, shape: u16, args: &[Vals]) {
+        let Some(at) = args[0].first().and_then(|v| v.loc()) else {
+            return;
+        };
+        let cols = &args[1..];
+        let total: usize = cols.iter().map(|v| v.len().max(1)).product();
+        for mut n in 0..total {
+            let values = cols
+                .iter()
+                .map(|v| {
+                    let len = v.len().max(1);
+                    let value = v.get(n % len).copied();
+                    n /= len;
+                    value
+                })
+                .collect();
+            self.rows.push(Row { shape, at, values });
+        }
     }
 
     fn enter_def(&mut self, node: u32) {

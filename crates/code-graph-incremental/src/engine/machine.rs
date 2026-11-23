@@ -8,8 +8,12 @@ use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
 use super::expr::{Expr, Op, apply};
-use super::program::{DefCase, DefImpl, Scratch};
-use super::{Cursor, FnId, Key, MAX_FIXPOINT_ROUNDS, Memo, Run, Store, Vals, WALK, truthy};
+use std::time::{Duration, Instant};
+
+use super::program::{Case, Cases, DefImpl, Scratch};
+use super::{
+    Cursor, FnId, Key, Loc, MAX_FIXPOINT_ROUNDS, Memo, Run, Store, Val, Vals, WALK, truthy,
+};
 
 type Args = SmallVec<[Vals; 3]>;
 
@@ -27,16 +31,21 @@ struct Pending {
     started: Option<std::time::Instant>,
 }
 
-/// Where a definition's cases stand: the candidates for its argument, the
-/// next to try, and whether a guard or a value is being evaluated.
+/// Where a set of cases stands: the candidates for its argument, the next to
+/// try, whether a guard or a value is being evaluated, the groups that have
+/// fired and the union of their values.
 struct Trying<'e, S: Store> {
     list: &'e [u16],
-    cases: &'e [DefCase],
+    cases: &'e Cases<Case>,
     at: usize,
     args: Args,
     w: Scratch<S>,
     env: usize,
     step: Step,
+    fired: SmallVec<[u16; 4]>,
+    out: Vals,
+    started: Option<Instant>,
+    matched: Option<Duration>,
 }
 
 #[derive(Clone, Copy)]
@@ -136,6 +145,25 @@ pub(super) fn call_def<'t, S: Store>(run: &mut Run<'t, S>, def: u16, args: &[Val
     m.release_envs();
     run.machine = Some(m);
     found
+}
+
+/// Fires `cases` at `node`: each group's first case that holds.
+pub(super) fn fire<'t, S: Store>(
+    run: &mut Run<'t, S>,
+    cases: &'t Cases<Case>,
+    slots: usize,
+    node: Loc,
+) {
+    let mut m = run.machine.take().unwrap_or_default();
+    m.try_cases(
+        run,
+        cases,
+        slots,
+        SmallVec::from_elem(SmallVec::from_elem(Val::Node(node), 1), 1),
+    );
+    m.run(run);
+    m.release_envs();
+    run.machine = Some(m);
 }
 
 impl<'e, S: Store> Machine<'e, S> {
@@ -500,25 +528,38 @@ impl<'e, S: Store> Machine<'e, S> {
                     out: Vals::new(),
                 });
             }
-            DefImpl::Cases(cases) => {
-                let node = args[0].first().and_then(|v| v.loc());
-                let kind = node.map(|h| Cursor::new(run.trees, h.fi, h.node).kind());
-                let list = kind
-                    .and_then(|k| cases.by_kind.get(&k))
-                    .unwrap_or(&cases.any);
-                let mut w = self.scratch.pop().unwrap_or_else(|| Scratch::new(0));
-                w.reset(d.slots.max(args.len()));
-                self.frame(Frame::Cases(Trying {
-                    list,
-                    cases: &cases.items,
-                    at: 0,
-                    w,
-                    args,
-                    env: 0,
-                    step: Step::Next,
-                }));
-            }
+            DefImpl::Cases(cases) => self.try_cases(run, cases, d.slots, args),
         }
+    }
+
+    /// Queues trying `cases` on `args`, whose first set holds one value.
+    fn try_cases<'t>(
+        &mut self,
+        run: &mut Run<'t, S>,
+        cases: &'e Cases<Case>,
+        slots: usize,
+        args: Args,
+    ) {
+        let node = args[0].first().and_then(|v| v.loc());
+        let kind = node.map(|h| Cursor::new(run.trees, h.fi, h.node).kind());
+        let list = kind
+            .and_then(|k| cases.by_kind.get(&k))
+            .unwrap_or(&cases.any);
+        let mut w = self.scratch.pop().unwrap_or_else(|| Scratch::new(0));
+        w.reset(slots.max(args.len()));
+        self.frame(Frame::Cases(Trying {
+            list,
+            cases,
+            at: 0,
+            w,
+            args,
+            env: 0,
+            step: Step::Next,
+            fired: SmallVec::new(),
+            out: Vals::new(),
+            started: None,
+            matched: None,
+        }));
     }
 
     /// Takes a body's value: runs the body again while a cycle through this
@@ -563,32 +604,51 @@ impl<'e, S: Store> Machine<'e, S> {
         self.values.push(found);
     }
 
-    /// Tries a definition's cases in order: the first whose pattern matches
-    /// and whose guard holds gives the value.
+    /// Tries cases in order: in each group, the first whose pattern matches
+    /// and whose guard holds gives its value.
     fn cases<'t>(&mut self, run: &mut Run<'t, S>, mut t: Trying<'e, S>) {
         match t.step {
             Step::Guard => {
-                let holds = truthy(&self.values.pop().unwrap_or_default());
-                if holds {
-                    let (_, _, value) = &t.cases[usize::from(t.list[t.at])];
-                    let env = t.env;
-                    t.step = Step::Value;
-                    self.frame(Frame::Cases(t));
-                    self.tasks.push(Task::Eval(value, env));
+                if truthy(&self.values.pop().unwrap_or_default()) {
+                    t.matched = t.started.map(|s| s.elapsed());
+                    self.value(t);
                     return;
                 }
                 self.pop_env();
+                attempted(run, &t, false);
                 t.at += 1;
             }
             Step::Value => {
+                let found = self.values.pop().unwrap_or_default();
                 self.pop_env();
-                self.scratch.push(t.w);
-                return;
+                attempted(run, &t, true);
+                match t.out.is_empty() {
+                    true => t.out = found,
+                    false => found.into_iter().for_each(|v| {
+                        if !t.out.contains(&v) {
+                            t.out.push(v);
+                        }
+                    }),
+                }
+                let at = t.list[t.at];
+                t.fired.push(t.cases.group(at));
+                t.at = match t.cases.stops[usize::from(at)] {
+                    true => t.list.len(),
+                    false => t.at + 1,
+                };
             }
             Step::Next => {}
         }
-        while let Some(&at) = t.list.get(t.at) {
-            let (pat, guard, value) = &t.cases[usize::from(at)];
+        while t.fired.len() < t.cases.width
+            && let Some(&at) = t.list.get(t.at)
+        {
+            let (pat, guard, _) = &t.cases.items[usize::from(at)];
+            if t.fired.contains(&t.cases.group(at)) {
+                t.at += 1;
+                continue;
+            }
+            t.started = run.profiling().then(Instant::now);
+            t.matched = None;
             let matched = match (pat, t.args[0].first().and_then(|v| v.loc())) {
                 (Some(m), Some(h)) => t.w.matches(run, m, Cursor::new(run.trees, h.fi, h.node)),
                 (Some(_), None) => false,
@@ -598,6 +658,7 @@ impl<'e, S: Store> Machine<'e, S> {
                 }
             };
             if !matched {
+                attempted(run, &t, false);
                 t.at += 1;
                 continue;
             }
@@ -613,17 +674,38 @@ impl<'e, S: Store> Machine<'e, S> {
                     self.tasks.push(Task::Eval(g, env));
                 }
                 None => {
-                    t.step = Step::Value;
-                    let env = t.env;
-                    self.frame(Frame::Cases(t));
-                    self.tasks.push(Task::Eval(value, env));
+                    t.matched = t.started.map(|s| s.elapsed());
+                    self.value(t);
                 }
             }
             return;
         }
         self.scratch.push(t.w);
-        self.values.push(Vals::new());
+        self.values.push(t.out);
     }
+
+    fn value(&mut self, mut t: Trying<'e, S>) {
+        let (_, _, value) = &t.cases.items[usize::from(t.list[t.at])];
+        let env = t.env;
+        t.step = Step::Value;
+        self.frame(Frame::Cases(t));
+        self.tasks.push(Task::Eval(value, env));
+    }
+}
+
+/// Profiles one attempt of the case at `t.at`.
+fn attempted<S: Store>(run: &mut Run<'_, S>, t: &Trying<'_, S>, fired: bool) {
+    let (Some(started), Some(m)) = (t.started, &t.cases.items[usize::from(t.list[t.at])].0) else {
+        return;
+    };
+    let total = started.elapsed();
+    run.profile_rule(
+        m as *const _ as usize,
+        m.src(),
+        fired,
+        t.matched.unwrap_or(total),
+        total,
+    );
 }
 
 fn is_leaf(expr: &Expr) -> bool {

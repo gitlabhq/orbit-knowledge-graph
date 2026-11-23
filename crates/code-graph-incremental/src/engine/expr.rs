@@ -8,8 +8,9 @@ use super::pattern::Slots;
 use super::{Arg, FnId, Kind, Run, Store, Val, Vals, function, lookup, module_of};
 use crate::error::LoadError;
 use crate::intern::Lang;
-use crate::tree::EdgeKind;
+use crate::tree::{CallResolution, EdgeKind};
 
+#[derive(Clone)]
 pub enum Expr {
     Var(u16),
     Lit(Val),
@@ -53,6 +54,17 @@ pub enum Op {
     Nodes,
     /// The last value of a set.
     Last,
+    /// The innermost scope the walk is in, or the file root.
+    Enclosing,
+    /// Writes an edge from each node of the first set to each of the second,
+    /// at the third's first node; a fourth set names the call resolution.
+    Edge(EdgeKind, CallResolution),
+    /// Writes one row of a shape at the first set's node per combination of
+    /// the other sets' values.
+    Row(u16),
+    /// Records that case `n` of a stage fired, with the first symbol of each
+    /// set.
+    Fired(u16),
 }
 
 /// A `select` pattern and its key, shared by every phase so trees can keep

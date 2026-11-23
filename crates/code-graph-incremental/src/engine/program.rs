@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 use serde_json::Value;
 use smallvec::SmallVec;
 
-use super::expr::{Expr, IndexSpec, Scope};
+use super::expr::{Expr, IndexSpec, Op, Scope};
 use super::lang::{DataSpec, DefBody, Pair, RuleFiles, StageSpec};
 use super::pattern::{self, Cap, Pat, Slots, Tpl};
 use indextree::NodeId;
@@ -18,7 +18,7 @@ use crate::env::Env;
 use crate::error::LoadError;
 use crate::intern::Lang;
 use crate::sentinel::{Killed, Sentinel};
-use crate::tree::{CallResolution, Edge, EdgeKind, Mutable, Storage};
+use crate::tree::{CallResolution, EdgeKind, Mutable, Storage};
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -92,23 +92,6 @@ pub(super) struct Match {
     lang: Option<u8>,
 }
 
-/// One edge a pair emits: from the innermost enclosing scope unless it says
-/// otherwise, at the site it names, if any.
-struct Emit {
-    kind: EdgeKind,
-    from: Option<Expr>,
-    to: Expr,
-    site: Option<Expr>,
-    resolution: Resolution,
-}
-
-/// An edge's call resolution: fixed, or an expression over the target, which
-/// it reads as `TARGET`.
-enum Resolution {
-    Fixed(CallResolution),
-    Of { slot: u16, expr: Expr },
-}
-
 /// The rows one pair emits: its table, its column names, and how its id is
 /// made. Values arrive in column order, then the extra id parts.
 pub struct RowShape {
@@ -125,28 +108,38 @@ pub enum Part {
     Value(usize),
 }
 
-struct RowRule {
-    shape: u16,
-    exprs: Box<[Expr]>,
-}
-
 enum Out {
     Replace(Tpl<Expr>),
     Append(Vec<Tpl<Expr>>),
     Tag,
 }
 
-enum TagVal {
-    Lit(u32),
-    Expr(Expr),
+impl Match {
+    pub(super) fn src(&self) -> &str {
+        &self.src
+    }
 }
 
-/// A rewrite or tag pair: its template, and the tags it sets on the node it
-/// builds or on the first node of `tag_on`'s kind under it.
+impl Rewrite {
+    /// The tags a firing sets, from the symbols its value wrote; a tag with
+    /// no symbol is not set.
+    fn tag_values(&self, writes: &[Option<u32>]) -> Vec<(u32, u32)> {
+        self.tags
+            .iter()
+            .zip(writes)
+            .filter_map(|(&key, &val)| Some((key, val?)))
+            .collect()
+    }
+}
+
+/// What a rewrite or tag case builds once it fires: its template, and the
+/// tags it sets on the node it builds or on the first node of `tag_on`'s kind
+/// under it. Its case's value writes the tag values, then each template's
+/// texts.
 struct Rewrite {
-    at: Match,
     out: Out,
-    tags: Vec<(u32, TagVal)>,
+    tags: Vec<u32>,
+    texts: Vec<usize>,
     tag_on: Option<u16>,
     unique: Option<(Pat, u16, usize)>,
 }
@@ -158,6 +151,10 @@ pub(super) struct Cases<T> {
     pub(super) items: Vec<T>,
     /// Each case's group: at a node, only a group's first matching case fires.
     groups: Vec<u16>,
+    /// How many groups there are.
+    pub(super) width: usize,
+    /// The cases after which nothing more fires at the node.
+    pub(super) stops: Vec<bool>,
     pub(super) by_kind: HashMap<u16, Vec<u16>>,
     pub(super) any: Vec<u16>,
 }
@@ -188,12 +185,19 @@ impl<T> Cases<T> {
             list.sort_unstable();
             list.dedup();
         }
+        let width = groups.iter().max().map_or(0, |&g| usize::from(g) + 1);
         Self {
+            stops: vec![false; items.len()],
             items,
             groups,
+            width,
             by_kind,
             any,
         }
+    }
+
+    pub(super) fn group(&self, at: u16) -> u16 {
+        self.groups[usize::from(at)]
     }
 
     fn is_empty(&self) -> bool {
@@ -206,98 +210,6 @@ impl<T> Cases<T> {
     }
 }
 
-/// A case anchored by a pattern.
-/// A case: its pattern, none for `_`, which takes any value, and a guard
-/// read after the arguments are bound.
-pub(super) trait Anchored {
-    fn at(&self) -> Option<&Match>;
-    fn guard(&self) -> Option<&Expr> {
-        None
-    }
-}
-
-impl<B> Anchored for (Match, B) {
-    fn at(&self) -> Option<&Match> {
-        Some(&self.0)
-    }
-}
-
-impl Anchored for Rewrite {
-    fn at(&self) -> Option<&Match> {
-        Some(&self.at)
-    }
-}
-
-impl Anchored for DefCase {
-    fn at(&self) -> Option<&Match> {
-        self.0.as_ref()
-    }
-    fn guard(&self) -> Option<&Expr> {
-        self.1.as_ref()
-    }
-}
-
-impl<T: Anchored> Cases<T> {
-    /// Each group's first case that holds, in case order: its pattern matches
-    /// `node` (a case with none takes `args[0]` whatever it is), then, with
-    /// the rest of `args` bound after the captures, its guard is true. `fire`
-    /// applies the case and returns false to stop. Each attempt is profiled
-    /// by the case's pattern.
-    fn fire<'c: 't, 't, S: Store>(
-        &'c self,
-        run: &mut Run<'t, S>,
-        w: &mut Scratch<S>,
-        node: Option<Cursor<'_, S>>,
-        args: &[Vals],
-        mut fire: impl FnMut(&mut Run<'t, S>, &Scratch<S>, &'c T) -> bool,
-    ) {
-        let mut fired: SmallVec<[u16; 8]> = SmallVec::new();
-        let list = node
-            .and_then(|c| self.by_kind.get(&c.kind()))
-            .unwrap_or(&self.any);
-        for &at in list {
-            let group = self.groups[usize::from(at)];
-            if fired.contains(&group) {
-                continue;
-            }
-            let case = &self.items[usize::from(at)];
-            let started = run.profiling().then(std::time::Instant::now);
-            let matched = match (case.at(), node) {
-                (Some(m), Some(c)) => w.matches(run, m, c) && w.holds(run, m),
-                (Some(_), None) => false,
-                (None, _) => {
-                    w.vals[0] = args[0].clone();
-                    true
-                }
-            };
-            let holds = matched && {
-                if args.len() > 1 {
-                    w.vals[1..args.len()].clone_from_slice(&args[1..]);
-                }
-                case.guard()
-                    .is_none_or(|g| super::truthy(&g.eval(run, &w.vals)))
-            };
-            let spent = started.map(|s| s.elapsed());
-            let go_on = !holds || {
-                fired.push(group);
-                fire(run, w, case)
-            };
-            if let (Some(s), Some(matching), Some(m)) = (started, spent, case.at()) {
-                run.profile_rule(
-                    m as *const Match as usize,
-                    &m.src,
-                    holds,
-                    matching,
-                    s.elapsed(),
-                );
-            }
-            if !go_on {
-                return;
-            }
-        }
-    }
-}
-
 impl<'a, T> IntoIterator for &'a Cases<T> {
     type Item = &'a T;
     type IntoIter = std::slice::Iter<'a, T>;
@@ -306,18 +218,16 @@ impl<'a, T> IntoIterator for &'a Cases<T> {
     }
 }
 
+/// A stage's cases, each its own group; a replace stops its node.
 struct Stage {
-    rules: Cases<Rewrite>,
+    rules: Cases<Case>,
+    rewrites: Vec<Rewrite>,
+    slots: usize,
     repeat: bool,
 }
 
-/// A group's pairs, tried in order on each node; the first that matches
-/// emits every edge its value names.
-type EdgeRules = Cases<(Match, Vec<Emit>)>;
-type RowRules = Cases<(Match, Vec<RowRule>)>;
-
-/// A definition case: its match (none for `_`, which takes any value), guard and value.
-pub(super) type DefCase = (Option<Match>, Option<Expr>, Expr);
+/// A case: its match (none for `_`, which takes any value), guard and value.
+pub(super) type Case = (Option<Match>, Option<Expr>, Expr);
 
 /// A declared index compiled for one language, or for all.
 struct Indexer {
@@ -328,9 +238,10 @@ struct Indexer {
 
 enum Body {
     Rewrite(Vec<Vec<Stage>>),
-    Edges(EdgeRules),
     Tags(Vec<Vec<Stage>>),
-    Rows(RowRules),
+    /// Edge or row groups: each group's first case that holds writes its
+    /// edges or rows.
+    Rules(Cases<Case>, usize),
 }
 
 /// A named expression; with cases, tried in order on each value of its first
@@ -345,7 +256,7 @@ pub struct Def {
 
 pub(super) enum DefImpl {
     Expr(Expr),
-    Cases(Cases<DefCase>),
+    Cases(Cases<Case>),
 }
 
 impl Def {
@@ -728,18 +639,18 @@ impl Phase {
                     _ => Body::Tags(per_lang),
                 }
             }
-            Does::Edges => Body::Edges(loader.edges(&shared, &langs)?),
-            Does::Rows => Body::Rows(loader.rows_of(&shared, &langs)?),
+            Does::Edges => {
+                let (rules, slots) = loader.rules(&shared, &langs, |l, v, c| l.edges(v, c))?;
+                Body::Rules(rules, slots)
+            }
+            Does::Rows => {
+                let (rules, slots) = loader.rules(&shared, &langs, |l, v, c| l.rows(v, c))?;
+                Body::Rules(rules, slots)
+            }
         };
         let slots = match &body {
-            Body::Rewrite(s) | Body::Tags(s) => s
-                .iter()
-                .flatten()
-                .flat_map(|s| &s.rules)
-                .map(|r| r.at.slots.len())
-                .max(),
-            Body::Edges(rules) => rules.items.iter().map(|(m, _)| m.slots.len()).max(),
-            Body::Rows(rules) => rules.items.iter().map(|(m, _)| m.slots.len()).max(),
+            Body::Rewrite(s) | Body::Tags(s) => s.iter().flatten().map(|s| s.slots).max(),
+            Body::Rules(_, slots) => Some(*slots),
         }
         .unwrap_or(1);
         let used = modules_reached(&body, &compiled);
@@ -846,47 +757,17 @@ impl Phase {
 
 impl Body {
     fn calls(&self, f: &mut dyn FnMut(Result<FnId, u16>)) {
-        let on_match = |m: &Match, f: &mut dyn FnMut(Result<FnId, u16>)| {
-            if let Some(w) = &m.when {
-                w.calls(f);
-            }
-        };
-        match self {
+        let cases = match self {
             Body::Rewrite(stages) | Body::Tags(stages) => {
-                for r in stages.iter().flatten().flat_map(|s| &s.rules) {
-                    on_match(&r.at, f);
-                    for (_, v) in &r.tags {
-                        if let TagVal::Expr(e) = v {
-                            e.calls(f);
-                        }
-                    }
-                }
+                stages.iter().flatten().map(|s| &s.rules).collect()
             }
-            Body::Edges(rules) => {
-                for (m, emits) in rules {
-                    on_match(m, f);
-                    for e in emits {
-                        if let Resolution::Of { expr, .. } = &e.resolution {
-                            expr.calls(f);
-                        }
-                        e.to.calls(f);
-                        if let Some(from) = &e.from {
-                            from.calls(f);
-                        }
-                        if let Some(site) = &e.site {
-                            site.calls(f);
-                        }
-                    }
-                }
+            Body::Rules(rules, _) => vec![rules],
+        };
+        for (_, guard, body) in cases.into_iter().flatten() {
+            if let Some(g) = guard {
+                g.calls(f);
             }
-            Body::Rows(rules) => {
-                for (m, rs) in rules {
-                    on_match(m, f);
-                    rs.iter()
-                        .flat_map(|r| r.exprs.iter())
-                        .for_each(|e| e.calls(f));
-                }
-            }
+            body.calls(f);
         }
     }
 }
@@ -1127,7 +1008,7 @@ impl Loader<'_> {
                 Ok(Def {
                     name: def_name(d, lang),
                     params: d.params.len(),
-                    body: DefImpl::Cases(Cases::new(compiled, |(m, _, _): &DefCase| {
+                    body: DefImpl::Cases(Cases::new(compiled, |(m, _, _): &Case| {
                         m.as_ref().map_or(&[0][..], |m| &m.kinds)
                     })),
                     deps: 0,
@@ -1175,37 +1056,45 @@ impl Loader<'_> {
     }
 
     fn stage(&self, spec: &StageSpec, lang: u8, tags_only: bool) -> Result<Stage, LoadError> {
-        let mut rules = Vec::new();
-        for pair in &spec.pairs {
-            let at =
+        let mut cases = Vec::new();
+        let mut rewrites = Vec::new();
+        let mut stops = Vec::new();
+        let mut slots = 1;
+        for (at, pair) in spec.pairs.iter().enumerate() {
+            let err =
                 |e: LoadError| LoadError(format!("{}: {:?}: {}", pair.origin, pair.pattern, e.0));
-            let rule = self.rewrite(pair, lang).map_err(at)?;
+            let (case, rule, used) = self.rewrite(pair, lang, at as u16).map_err(err)?;
             if tags_only && !matches!(rule.out, Out::Tag) {
-                return Err(at(LoadError("a tags phase only sets tags".into())));
+                return Err(err(LoadError("a tags phase only sets tags".into())));
             }
             if spec.repeat && matches!(rule.out, Out::Append(_)) {
-                return Err(at(LoadError("a repeat stage cannot append".into())));
+                return Err(err(LoadError("a repeat stage cannot append".into())));
             }
-            rules.push(rule);
+            stops.push(matches!(rule.out, Out::Replace(_)));
+            slots = slots.max(used);
+            cases.push((at as u16, case));
+            rewrites.push(rule);
         }
-        let rules = rules
-            .into_iter()
-            .enumerate()
-            .map(|(at, r)| (at as u16, r))
-            .collect();
+        let mut rules = Cases::grouped(cases, |(m, _, _): &Case| {
+            m.as_ref().map_or(&[0][..], |m| &m.kinds)
+        });
+        rules.stops = stops;
         Ok(Stage {
-            rules: Cases::grouped(rules, |r: &Rewrite| &r.at.kinds),
+            rules,
+            rewrites,
+            slots,
             repeat: spec.repeat,
         })
     }
 
-    /// A rewrite or tag pair. Its value is `[template | + t1 + t2] [unique P]
-    /// [#key[@kind]=value]...`.
-    fn rewrite(&self, pair: &Pair, lang: u8) -> Result<Rewrite, LoadError> {
+    /// A rewrite or tag pair, as case `id` of its stage. Its value is
+    /// `[template | + t1 + t2] [unique P] [#key[@kind]=value]...`.
+    fn rewrite(&self, pair: &Pair, lang: u8, id: u16) -> Result<(Case, Rewrite, usize), LoadError> {
         let Value::String(value) = &pair.value else {
             return Err(LoadError("a rewrite is pattern: template".into()));
         };
-        let at = self.matcher(&pair.pattern, pair.when.as_deref(), Some(lang), &[])?;
+        let mut at = self.matcher(&pair.pattern, pair.when.as_deref(), Some(lang), &[])?;
+        let guard = at.when.take();
         let (body, notes) = split_notes(value);
         let (body, unique) = match body.find(" unique ") {
             Some(i) => (body[..i].trim(), Some(body[i + " unique ".len()..].trim())),
@@ -1229,6 +1118,7 @@ impl Loader<'_> {
         };
         let mut tag_on = None;
         let mut tags = Vec::new();
+        let mut writes = Vec::new();
         for (key, kind, val) in notes {
             if let Some(kind) = kind {
                 let kind = self.lang.intern_kind(kind);
@@ -1236,11 +1126,22 @@ impl Loader<'_> {
                     return Err(LoadError("tags go on one kind".into()));
                 }
             }
-            let val = match val.starts_with('$') || val.starts_with("@$") {
-                true => TagVal::Expr(Expr::parse(val, &scope)?),
-                false => TagVal::Lit(self.lang.syms.intern(val.trim_matches('\''))),
-            };
-            tags.push((self.lang.syms.intern(key), val));
+            writes.push(match val.starts_with('$') || val.starts_with("@$") {
+                true => Expr::parse(val, &scope)?,
+                false => Expr::Lit(Val::Sym(self.lang.syms.intern(val.trim_matches('\'')))),
+            });
+            tags.push(self.lang.syms.intern(key));
+        }
+        let tpls: Vec<&Tpl<Expr>> = match &out {
+            Out::Replace(tpl) => vec![tpl],
+            Out::Append(tpls) => tpls.iter().collect(),
+            Out::Tag => Vec::new(),
+        };
+        let mut texts = Vec::new();
+        for tpl in tpls {
+            let of = tpl.texts();
+            texts.push(of.len());
+            writes.extend(of.into_iter().cloned());
         }
         let unique = unique
             .map(|src| {
@@ -1251,22 +1152,28 @@ impl Loader<'_> {
                 Ok::<_, LoadError>((pat, kind, slots.len()))
             })
             .transpose()?;
-        Ok(Rewrite {
-            at,
+        let used = cell.borrow().len();
+        let case = (Some(at), guard, Expr::Op(Op::Fired(id), writes.into()));
+        let rule = Rewrite {
             out,
             tags,
+            texts,
             tag_on,
             unique,
-        })
+        };
+        Ok((case, rule, used))
     }
 
-    /// The edge groups: a language's pairs in a group come before the
-    /// shared ones.
-    fn edges(
+    /// The edge or row groups, and the slots their cases use: a language's
+    /// pairs in a group come before the shared ones, and a shared pattern
+    /// reading `%data` compiles once per language. `body` compiles a pair's
+    /// value into the expression that writes it.
+    fn rules(
         &self,
         shared: &[StageSpec],
         langs: &[Vec<StageSpec>],
-    ) -> Result<EdgeRules, LoadError> {
+        body: impl Fn(&Self, &Value, &RefCell<Slots>) -> Result<Expr, LoadError>,
+    ) -> Result<(Cases<Case>, usize), LoadError> {
         let mut groups: Vec<(&str, Vec<(Option<u8>, &Pair)>)> = Vec::new();
         let staged = langs
             .iter()
@@ -1284,6 +1191,7 @@ impl Loader<'_> {
             groups[at].1.extend(stage.pairs.iter().map(|p| (owner, p)));
         }
         let mut rules = Vec::new();
+        let mut slots = 1;
         for (group, (_, pairs)) in groups.into_iter().enumerate() {
             for (owner, pair) in pairs {
                 let owners: Vec<Option<u8>> = match (owner, pair.pattern.contains('%')) {
@@ -1294,26 +1202,34 @@ impl Loader<'_> {
                     let at = |e: LoadError| {
                         LoadError(format!("{}: {:?}: {}", pair.origin, pair.pattern, e.0))
                     };
-                    let m = self
+                    let mut m = self
                         .matcher(&pair.pattern, pair.when.as_deref(), owner, &[])
                         .map_err(at)?;
-                    let emits = self.emits(&pair.value, &m.slots).map_err(at)?;
-                    rules.push((group as u16, (m, emits)));
+                    let guard = m.when.take();
+                    let cell = RefCell::new(m.slots.clone());
+                    let value = body(self, &pair.value, &cell).map_err(at)?;
+                    slots = slots.max(cell.borrow().len());
+                    rules.push((group as u16, (Some(m), guard, value)));
                 }
             }
         }
-        Ok(Cases::grouped(rules, |(m, _): &(Match, Vec<Emit>)| {
-            &m.kinds
-        }))
+        let cases = Cases::grouped(rules, |(m, _, _): &Case| {
+            m.as_ref().map_or(&[0][..], |m| &m.kinds)
+        });
+        Ok((cases, slots))
+    }
+
+    fn parse(&self, src: &str, slots: &RefCell<Slots>) -> Result<Expr, LoadError> {
+        Expr::parse(src, &self.scope(slots, true, None))
     }
 
     /// `{ kind: targets, ... }`; targets are an expression, a map with
-    /// `to`/`from`/`site`/`resolution`, or a list of those. `none` stops the
-    /// group without emitting.
-    fn emits(&self, value: &Value, slots: &Slots) -> Result<Vec<Emit>, LoadError> {
+    /// `to`/`from`/`site`/`resolution`, or a list of those. `none` writes
+    /// nothing and stops the group.
+    fn edges(&self, value: &Value, slots: &RefCell<Slots>) -> Result<Expr, LoadError> {
         let map = match value {
             Value::Object(map) => map,
-            Value::String(s) if s == "none" => return Ok(Vec::new()),
+            Value::String(s) if s == "none" => return Ok(Expr::Empty),
             _ => return Err(LoadError("an edge pair maps edge kinds to targets".into())),
         };
         let mut out = Vec::new();
@@ -1324,16 +1240,24 @@ impl Loader<'_> {
             match spec {
                 Value::Array(items) => {
                     for item in items {
-                        out.push(self.emit(kind, item, slots)?);
+                        out.push(self.edge(kind, item, slots)?);
                     }
                 }
-                one => out.push(self.emit(kind, one, slots)?),
+                one => out.push(self.edge(kind, one, slots)?),
             }
         }
-        Ok(out)
+        Ok(union(out))
     }
 
-    fn emit(&self, kind: EdgeKind, value: &Value, slots: &Slots) -> Result<Emit, LoadError> {
+    /// An edge's write: from the innermost enclosing scope unless it says
+    /// otherwise, at the site it names, if any. A resolution that is not a
+    /// fixed name is an expression over each target, read as `TARGET`.
+    fn edge(
+        &self,
+        kind: EdgeKind,
+        value: &Value,
+        slots: &RefCell<Slots>,
+    ) -> Result<Expr, LoadError> {
         fn text(v: Option<&Value>) -> Option<&str> {
             match v {
                 Some(Value::String(s)) => Some(s.as_str()),
@@ -1362,90 +1286,61 @@ impl Loader<'_> {
                 ));
             }
         };
-        let resolution = match res {
-            None => Resolution::Fixed(CallResolution::default()),
-            Some(name) => match resolution(name) {
-                Some(fixed) => Resolution::Fixed(fixed),
-                None => {
-                    let mut with = slots.clone();
-                    let slot = with.slot("TARGET");
-                    Resolution::Of {
-                        slot,
-                        expr: self.expr(name, &with)?,
-                    }
-                }
-            },
+        let to = self.parse(to, slots)?;
+        let from = match from {
+            Some(f) => self.parse(f, slots)?,
+            None => Expr::Op(Op::Enclosing, Box::new([])),
         };
-        Ok(Emit {
-            kind,
-            to: self.expr(to, slots)?,
-            from: from.map(|f| self.expr(f, slots)).transpose()?,
-            site: site.map(|s| self.expr(s, slots)).transpose()?,
-            resolution,
+        let site = match site {
+            Some(s) => self.parse(s, slots)?,
+            None => Expr::Empty,
+        };
+        Ok(match res.filter(|name| resolution(name).is_none()) {
+            None => Expr::Op(
+                Op::Edge(kind, res.and_then(resolution).unwrap_or_default()),
+                Box::new([from, to, site]),
+            ),
+            Some(name) => {
+                let slot = slots.borrow_mut().slot("TARGET");
+                let of = self.parse(name, slots)?;
+                Expr::Every(
+                    Box::new(to),
+                    slot,
+                    Box::new(Expr::Op(
+                        Op::Edge(kind, CallResolution::default()),
+                        Box::new([from, Expr::Var(slot), site, of]),
+                    )),
+                )
+            }
         })
     }
 
-    /// The row groups: a language's pairs in a group come before the shared
-    /// ones; the first pair of a group that matches emits its rows.
-    fn rows_of(
-        &self,
-        shared: &[StageSpec],
-        langs: &[Vec<StageSpec>],
-    ) -> Result<RowRules, LoadError> {
-        let mut groups: Vec<(&str, Vec<(Match, Vec<RowRule>)>)> = Vec::new();
-        let staged = langs
-            .iter()
-            .enumerate()
-            .flat_map(|(at, own)| own.iter().map(move |s| (s, Some(at as u8))))
-            .chain(shared.iter().map(|s| (s, None)));
-        for (stage, owner) in staged {
-            let at = match groups.iter().position(|(g, _)| *g == stage.name) {
-                Some(at) => at,
-                None => {
-                    groups.push((&stage.name, Vec::new()));
-                    groups.len() - 1
-                }
-            };
-            for pair in &stage.pairs {
-                let err = |e: LoadError| {
-                    LoadError(format!("{}: {:?}: {}", pair.origin, pair.pattern, e.0))
-                };
-                let m = self
-                    .matcher(&pair.pattern, pair.when.as_deref(), owner, &[])
-                    .map_err(err)?;
-                let specs: Vec<RowSpec> = match &pair.value {
-                    Value::String(s) if s == "none" => Vec::new(),
-                    Value::Array(_) => serde_json::from_value(pair.value.clone())
-                        .map_err(|e| err(LoadError(format!("row: {e}"))))?,
-                    _ => vec![
-                        serde_json::from_value(pair.value.clone())
-                            .map_err(|e| err(LoadError(format!("row: {e}"))))?,
-                    ],
-                };
-                let rules = specs
-                    .iter()
-                    .map(|s| self.row(&m.slots, s))
-                    .collect::<Result<_, _>>()
-                    .map_err(err)?;
-                groups[at].1.push((m, rules));
+    /// A row spec or a list of them; `none` writes nothing and stops the
+    /// group.
+    fn rows(&self, value: &Value, slots: &RefCell<Slots>) -> Result<Expr, LoadError> {
+        let specs: Vec<RowSpec> = match value {
+            Value::String(s) if s == "none" => Vec::new(),
+            Value::Array(_) => {
+                serde_json::from_value(value.clone()).map_err(|e| LoadError(format!("row: {e}")))?
             }
-        }
-        let rules = groups
-            .into_iter()
-            .enumerate()
-            .flat_map(|(group, (_, rules))| rules.into_iter().map(move |r| (group as u16, r)))
-            .collect();
-        Ok(Cases::grouped(rules, |(m, _): &(Match, Vec<RowRule>)| {
-            &m.kinds
-        }))
+            _ => vec![
+                serde_json::from_value(value.clone())
+                    .map_err(|e| LoadError(format!("row: {e}")))?,
+            ],
+        };
+        let rows = specs
+            .iter()
+            .map(|s| self.row(slots, s))
+            .collect::<Result<_, _>>()?;
+        Ok(union(rows))
     }
 
-    fn row(&self, slots: &Slots, spec: &RowSpec) -> Result<RowRule, LoadError> {
+    fn row(&self, slots: &RefCell<Slots>, spec: &RowSpec) -> Result<Expr, LoadError> {
         let columns: Vec<String> = spec.columns.keys().cloned().collect();
         let mut exprs = spec
             .columns
             .values()
-            .map(|src| self.expr(src, slots))
+            .map(|src| self.parse(src, slots))
             .collect::<Result<Vec<_>, _>>()?;
         let column = |name: &str| {
             columns
@@ -1461,7 +1356,7 @@ impl Loader<'_> {
                     parts.push(match columns.iter().position(|c| c == part) {
                         Some(at) => Part::Column(at),
                         None => {
-                            exprs.push(self.expr(part, slots)?);
+                            exprs.push(self.parse(part, slots)?);
                             Part::Value(exprs.len() - 1)
                         }
                     });
@@ -1483,11 +1378,11 @@ impl Loader<'_> {
             expect,
             follows,
         });
-        Ok(RowRule {
-            shape: u16::try_from(rows.len() - 1)
-                .map_err(|_| LoadError("more than 65536 row shapes".into()))?,
-            exprs: exprs.into(),
-        })
+        let shape = u16::try_from(rows.len() - 1)
+            .map_err(|_| LoadError("more than 65536 row shapes".into()))?;
+        let mut args = vec![Expr::Var(0)];
+        args.extend(exprs);
+        Ok(Expr::Op(Op::Row(shape), args.into()))
     }
 }
 
@@ -1539,74 +1434,6 @@ fn split_notes(value: &str) -> (&str, Vec<(&str, Option<&str>, &str)>) {
         })
         .collect();
     (body, notes)
-}
-
-impl Emit {
-    fn run<'t, S: Store>(&'t self, run: &mut Run<'t, S>, caps: &[Vals]) {
-        let sites = match &self.site {
-            Some(s) => s.eval(run, caps),
-            None => Vals::new(),
-        };
-        let site = sites.first().and_then(|v| v.loc()).map(|l| l.node);
-        let from = match &self.from {
-            Some(f) => f.eval(run, caps),
-            None => SmallVec::from_elem(Val::Node(run.enclosing_loc()), 1),
-        };
-        if from.is_empty() {
-            return;
-        }
-        let to = self.to.eval(run, caps);
-        for from in from.iter().filter_map(|v| v.loc()) {
-            for (&target, to) in to.iter().filter_map(|v| Some((v, v.loc()?))) {
-                let call_resolution = match &self.resolution {
-                    Resolution::Fixed(fixed) => *fixed,
-                    Resolution::Of { slot, expr } => {
-                        let mut with = caps.to_vec();
-                        with.resize(with.len().max(usize::from(*slot) + 1), Vals::new());
-                        with[usize::from(*slot)] = SmallVec::from_elem(target, 1);
-                        match expr.eval(run, &with).first() {
-                            Some(&Val::Sym(name)) => {
-                                resolution(run.lang_ref.syms.resolve(name)).unwrap_or_default()
-                            }
-                            _ => CallResolution::default(),
-                        }
-                    }
-                };
-                run.edges.push(Edge {
-                    site,
-                    call_resolution,
-                    ..Edge::new(from.fi, from.node, to.fi, to.node, self.kind)
-                });
-            }
-        }
-    }
-}
-
-impl RowRule {
-    /// One row per combination of the values; a column with no value is empty.
-    fn run<'t, S: Store>(&'t self, run: &mut Run<'t, S>, caps: &[Vals]) {
-        let Some(at) = caps[0].first().and_then(|v| v.loc()) else {
-            return;
-        };
-        let vals: Vec<Vals> = self.exprs.iter().map(|e| e.eval(run, caps)).collect();
-        let total: usize = vals.iter().map(|v| v.len().max(1)).product();
-        for mut n in 0..total {
-            let values = vals
-                .iter()
-                .map(|v| {
-                    let len = v.len().max(1);
-                    let value = v.get(n % len).copied();
-                    n /= len;
-                    value
-                })
-                .collect();
-            run.rows.push(super::Row {
-                shape: self.shape,
-                at,
-                values,
-            });
-        }
-    }
 }
 
 pub(super) struct Scratch<S: Store> {
@@ -1684,7 +1511,6 @@ impl Phase {
     /// Walks a tree in source order and runs the edges or rows rules at each
     /// node, with the innermost enclosing scope known. `all` visits the root.
     pub fn flow<'t, S: Store>(&'t self, run: &mut Run<'t, S>, root: Cursor<'_, S>, all: bool) {
-        let mut w = Scratch::<S>::new(self.slots);
         let mut stack: Vec<(u32, bool)> = match all {
             true => vec![(root.index(), false)],
             false => root.children_rev().map(|c| (c.index(), false)).collect(),
@@ -1698,18 +1524,11 @@ impl Phase {
                 continue;
             }
             let c = root.jump(root.fi(), node);
-            match &self.body {
-                Body::Edges(rules) => {
-                    rules.fire(run, &mut w, Some(c), &[], |run, w, (_, emits)| {
-                        emits.iter().for_each(|e| e.run(run, &w.vals));
-                        true
-                    })
-                }
-                Body::Rows(rules) => rules.fire(run, &mut w, Some(c), &[], |run, w, (_, rows)| {
-                    rows.iter().for_each(|r| r.run(run, &w.vals));
-                    true
-                }),
-                _ => return,
+            let Body::Rules(rules, slots) = &self.body else {
+                return;
+            };
+            if rules.tries(c.kind()) {
+                super::machine::fire(run, rules, *slots, c.into());
             }
             if self.enclosing.contains(&c.kind()) {
                 run.enter_def(c.index());
@@ -1773,8 +1592,8 @@ impl Phase {
     pub fn tag_keys(&self, rules: usize) -> Vec<u32> {
         self.stages_for(rules)
             .iter()
-            .flat_map(|s| &s.rules)
-            .flat_map(|r| r.tags.iter().map(|(key, _)| *key))
+            .flat_map(|s| &s.rewrites)
+            .flat_map(|r| r.tags.iter().copied())
             .collect()
     }
 
@@ -1823,7 +1642,6 @@ impl Phase {
     ) -> Result<(), Killed> {
         let sentinels = [budget, file];
         for stage in self.stages_for(env.rules_index(&tree.label)) {
-            let mut w = Scratch::<S>::new(self.slots);
             for target in order(tree, true) {
                 sentinels.iter().try_for_each(|s| s.check())?;
                 if !stage.rules.tries(tree.storage.node(target).kind) {
@@ -1833,18 +1651,16 @@ impl Phase {
                     let mut run = self.run(&*tree, env, budget, file);
                     run.graph = Some(graph);
                     run.graph_fi = fi;
-                    let c = Cursor::new(run.trees, run.fi, target);
-                    let mut fired = Vec::new();
-                    stage
-                        .rules
-                        .fire(&mut run, &mut w, Some(c), &[], |run, w, rule| {
-                            fired.push((rule, settle(run, w, rule).0));
-                            true
-                        });
-                    fired
+                    let at = Loc {
+                        fi: run.fi,
+                        node: target,
+                    };
+                    super::machine::fire(&mut run, &stage.rules, stage.slots, at);
+                    std::mem::take(&mut run.fired)
                 };
-                for (rule, tags) in fired {
-                    set_tags(tree, target, rule, &tags);
+                for (id, writes) in fired {
+                    let rule = &stage.rewrites[usize::from(id)];
+                    set_tags(tree, target, rule, &rule.tag_values(&writes));
                 }
             }
         }
@@ -1872,7 +1688,7 @@ impl Phase {
         let sentinels = [budget, file];
         let lang = &env.lang;
         let mut replaced = false;
-        let mut w = Scratch::<Mutable>::new(self.slots);
+        let mut w = Scratch::<Mutable>::new(stage.slots);
         for target in order(tree, false) {
             sentinels.iter().try_for_each(|s| s.check())?;
             if tree.storage.is_removed(tree.storage.id(target))
@@ -1883,17 +1699,27 @@ impl Phase {
             let fired = {
                 let mut run = self.run(&*tree, env, budget, file);
                 let c = Cursor::new(run.trees, run.fi, target);
-                let mut fired = Vec::new();
-                stage
-                    .rules
-                    .fire(&mut run, &mut w, Some(c), &[], |run, w, rule| {
-                        let (tags, texts) = settle(run, w, rule);
+                super::machine::fire(&mut run, &stage.rules, stage.slots, c.into());
+                let fired = std::mem::take(&mut run.fired);
+                fired
+                    .into_iter()
+                    .map(|(id, writes)| {
+                        let rule = &stage.rewrites[usize::from(id)];
+                        if let Some(m) = &stage.rules.items[usize::from(id)].0 {
+                            w.matches(&run, m, c);
+                        }
                         let mut caps = w.caps.clone();
                         caps[0] = SmallVec::from_elem(run.trees[0].storage.id(target), 1);
-                        fired.push((rule, Fired { caps, tags, texts }));
-                        !matches!(rule.out, Out::Replace(_))
-                    });
-                fired
+                        let tags = rule.tag_values(&writes);
+                        let mut rest = writes[rule.tags.len()..].iter();
+                        let texts = rule
+                            .texts
+                            .iter()
+                            .map(|&n| rest.by_ref().take(n).map(|t| t.unwrap_or(0)).collect())
+                            .collect();
+                        (rule, Fired { caps, tags, texts })
+                    })
+                    .collect::<Vec<_>>()
             };
             for (rule, fired) in fired {
                 let at = tree.storage.id(target);
@@ -1953,58 +1779,10 @@ impl Phase {
     }
 }
 
-/// A fired rewrite's tag values and template texts, from the captures in `w`.
-fn settle<'t, S: Store>(
-    run: &mut Run<'t, S>,
-    w: &Scratch<S>,
-    rule: &'t Rewrite,
-) -> (Vec<(u32, u32)>, Vec<Vec<u32>>) {
-    let tags = rule
-        .tags
-        .iter()
-        .filter_map(|(key, val)| {
-            let val = match val {
-                TagVal::Lit(sym) => *sym,
-                TagVal::Expr(expr) => {
-                    let vals = expr.eval(run, &w.vals);
-                    first_sym(run, &vals)?
-                }
-            };
-            Some((*key, val))
-        })
-        .collect();
-    let tpls: Vec<&Tpl<Expr>> = match &rule.out {
-        Out::Replace(tpl) => vec![tpl],
-        Out::Append(tpls) => tpls.iter().collect(),
-        Out::Tag => Vec::new(),
-    };
-    let texts = tpls
-        .into_iter()
-        .map(|tpl| {
-            tpl.texts()
-                .into_iter()
-                .map(|expr| {
-                    let vals = expr.eval(run, &w.vals);
-                    first_sym(run, &vals).unwrap_or(0)
-                })
-                .collect()
-        })
-        .collect();
-    (tags, texts)
-}
-
 struct Fired {
     caps: Vec<Cap<NodeId>>,
     tags: Vec<(u32, u32)>,
     texts: Vec<Vec<u32>>,
-}
-
-fn first_sym<S: Store>(run: &Run<S>, vals: &Vals) -> Option<u32> {
-    vals.iter().find_map(|v| match v {
-        Val::Sym(s) => Some(*s),
-        Val::Node(loc) => Some(run.sym_at(*loc)).filter(|&s| s != 0),
-        _ => None,
-    })
 }
 
 fn order<S: Store>(tree: &Tree<S>, preorder: bool) -> Vec<u32> {
@@ -2061,5 +1839,14 @@ fn def_name(d: &super::lang::DefSpec, lang: Option<u8>) -> Box<str> {
     match lang {
         Some(_) => format!("{} ({})", d.name, d.origin).into(),
         None => d.name.clone().into(),
+    }
+}
+
+/// One expression for several writes.
+fn union(mut parts: Vec<Expr>) -> Expr {
+    match parts.len() {
+        0 => Expr::Empty,
+        1 => parts.pop().unwrap_or(Expr::Empty),
+        _ => Expr::Union(parts.into()),
     }
 }
