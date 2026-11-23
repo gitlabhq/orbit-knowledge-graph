@@ -1,9 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use rustc_hash::FxHashSet;
-use smallvec::SmallVec;
-
 use super::pattern::Slots;
 use super::{Arg, FnId, Kind, Run, Store, Val, Vals, function, lookup, module_of};
 use crate::error::LoadError;
@@ -82,36 +79,6 @@ impl Expr {
     pub fn eval<'t, S: Store>(&'t self, cx: &mut Run<'t, S>, caps: &[Vals]) -> Vals {
         super::machine::eval(cx, self, caps)
     }
-}
-
-pub(super) fn apply<S: Store>(cx: &mut Run<S>, id: FnId, args: &[Vals]) -> Vals {
-    let sig = function(id).sig;
-    let spread = sig
-        .iter()
-        .zip(args)
-        .position(|(arg, vals)| *arg == Arg::One && vals.len() != 1);
-    let Some(at) = spread else {
-        return cx.call(id, args);
-    };
-    let mut out = Vals::new();
-    let mut seen: Option<FxHashSet<Val>> = None;
-    let mut each: SmallVec<[Vals; 3]> = SmallVec::from(args);
-    for val in &args[at] {
-        each[at] = SmallVec::from_elem(*val, 1);
-        for found in apply(cx, id, &each) {
-            let new = match &mut seen {
-                Some(seen) => seen.insert(found),
-                None => !out.contains(&found),
-            };
-            if new {
-                out.push(found);
-                if seen.is_none() && out.len() > 16 {
-                    seen = Some(out.iter().copied().collect());
-                }
-            }
-        }
-    }
-    out
 }
 
 struct Parser<'s, 'a> {

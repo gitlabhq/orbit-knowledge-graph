@@ -1,32 +1,43 @@
-//! Evaluates expressions and definition calls on explicit stacks: tasks still
-//! to do, the values they produce, and the slot vectors they read. A
-//! definition call is a frame here, not a Rust call, so recursion in the rules
-//! never grows the Rust stack; the fixpoint of a cycle is a frame that runs its
-//! body again.
+//! Evaluates expressions and calls on explicit stacks: tasks still to do,
+//! the values they produce, and the slot vectors they read. A cached call,
+//! to a definition or a module function, is a frame here: its value is
+//! looked up or computed, and a cycle through it reruns its body until its
+//! value stops growing.
+
+use std::time::{Duration, Instant};
 
 use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
-use super::expr::{Expr, apply};
-use std::time::{Duration, Instant};
-
-use super::program::{Cases, DefImpl, Scratch};
-use super::{Cursor, FnId, Key, Loc, MAX_FIXPOINT_ROUNDS, Memo, Run, Store, Val, Vals, truthy};
+use super::expr::Expr;
+use super::program::{Cases, Def, DefImpl, Scratch};
+use super::{
+    Arg, Cursor, FnId, Key, Kind, Loc, MAX_FIXPOINT_ROUNDS, Memo, Run, Store, Val, Vals, function,
+    truthy,
+};
+use crate::constants::{RED_ZONE, STACK_SEGMENT};
 
 type Args = SmallVec<[Vals; 3]>;
 
-/// A definition call whose body is running: what the fixpoint and the cache
+/// What a call runs: a definition, or a module function by its id.
+#[derive(Clone, Copy)]
+enum Callee {
+    Def(u16),
+    Native(FnId),
+}
+
+/// A cached call whose body is running: what the fixpoint and the cache
 /// need once its value arrives.
 struct Pending {
     key: Key,
-    def: u16,
+    callee: Callee,
     args: Args,
     deps: u8,
     epochs: [u64; super::SLOTS],
     outer: FxHashSet<Key>,
     reading: u8,
     rounds: u32,
-    started: Option<std::time::Instant>,
+    started: Option<Instant>,
 }
 
 /// Where a set of cases stands: the candidates for its argument, the next to
@@ -58,7 +69,7 @@ enum Step {
 enum Task<'e> {
     Eval(&'e Expr, usize),
     Union(usize),
-    Call(FnId, usize),
+    Call(Callee, usize),
     Or(&'e Expr, usize),
     LoopStart {
         every: bool,
@@ -66,7 +77,6 @@ enum Task<'e> {
         body: &'e Expr,
         env: usize,
     },
-    MapStart(u16, usize),
     PopEnv,
     /// Resumes the frame on top of the frame stack.
     Resume,
@@ -84,12 +94,15 @@ enum Frame<'e, S: Store> {
         saved: Vals,
         acc: Option<Vals>,
     },
-    Map {
-        def: u16,
+    /// A call made once per value of argument `at`, its values unioned.
+    Each {
+        callee: Callee,
         args: Args,
-        heads: Vals,
         at: usize,
+        list: Vals,
+        next: usize,
         out: Vals,
+        seen: Option<FxHashSet<Val>>,
     },
     Finish(Pending),
     Cases(Trying<'e, S>),
@@ -120,42 +133,42 @@ impl<S: Store> Default for Machine<'_, S> {
     }
 }
 
-/// The value of `expr` with `caps` as its slots.
-pub(super) fn eval<'t, S: Store>(run: &mut Run<'t, S>, expr: &'t Expr, caps: &[Vals]) -> Vals {
+/// Runs `start` on the run's machine, or on a fresh one when module code
+/// calls back in while the run's is busy; the value it leaves.
+fn on_machine<'t, S: Store>(
+    run: &mut Run<'t, S>,
+    start: impl FnOnce(&mut Machine<'t, S>, &mut Run<'t, S>),
+) -> Vals {
     let mut m = run.machine.take().unwrap_or_default();
-    let env = m.env(caps.iter().cloned());
-    m.tasks.push(Task::Eval(expr, env));
+    start(&mut m, run);
     let found = m.run(run);
     m.release_envs();
     run.machine = Some(m);
     found
 }
 
-/// The value of a call to definition `def`, cached and run to its fixpoint.
-pub(super) fn call_def<'t, S: Store>(run: &mut Run<'t, S>, def: u16, args: &[Vals]) -> Vals {
-    let fns = run.fns;
-    let mut m = run.machine.take().unwrap_or_default();
-    let found = match m.start(run, fns, def, args.iter().cloned().collect()) {
-        Some(vals) => vals,
-        None => m.run(run),
-    };
-    m.release_envs();
-    run.machine = Some(m);
-    found
+/// The value of `expr` with `caps` as its slots.
+pub(super) fn eval<'t, S: Store>(run: &mut Run<'t, S>, expr: &'t Expr, caps: &[Vals]) -> Vals {
+    on_machine(run, |m, _| {
+        let env = m.env(caps.iter().cloned());
+        m.tasks.push(Task::Eval(expr, env));
+    })
+}
+
+/// The value of a call to module function `id`, as module code makes it.
+pub(super) fn call<S: Store>(run: &mut Run<'_, S>, id: FnId, args: &[Vals]) -> Vals {
+    on_machine(run, |m, run| {
+        let fns = run.fns;
+        m.call(run, fns, Callee::Native(id), args.iter().cloned().collect())
+    })
 }
 
 /// Fires `cases` at `node`: each group's first case that holds.
 pub(super) fn fire<'t, S: Store>(run: &mut Run<'t, S>, cases: &'t Cases, slots: usize, node: Loc) {
-    let mut m = run.machine.take().unwrap_or_default();
-    m.try_cases(
-        run,
-        cases,
-        slots,
-        SmallVec::from_elem(SmallVec::from_elem(Val::Node(node), 1), 1),
-    );
-    m.run(run);
-    m.release_envs();
-    run.machine = Some(m);
+    on_machine(run, |m, run| {
+        let args = SmallVec::from_elem(SmallVec::from_elem(Val::Node(node), 1), 1);
+        m.try_cases(run, cases, slots, args);
+    });
 }
 
 impl<'e, S: Store> Machine<'e, S> {
@@ -163,14 +176,14 @@ impl<'e, S: Store> Machine<'e, S> {
     where
         't: 'e,
     {
-        let fns: &'e [super::program::Def] = run.fns;
+        let fns: &'e [Def] = run.fns;
         while let Some(task) = self.tasks.pop() {
             self.step(run, fns, task);
         }
         self.values.pop().unwrap_or_default()
     }
 
-    fn step<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [super::program::Def], task: Task<'e>) {
+    fn step<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [Def], task: Task<'e>) {
         match task {
             Task::Eval(expr, env) => self.eval(run, fns, expr, env),
             Task::Union(n) => {
@@ -181,10 +194,9 @@ impl<'e, S: Store> Machine<'e, S> {
                 }
                 self.values.push(out);
             }
-            Task::Call(id, n) => {
+            Task::Call(callee, n) => {
                 let args = self.take(n);
-                let found = apply(run, id, &args);
-                self.values.push(found);
+                self.spread(run, fns, callee, args);
             }
             Task::Or(b, env) => {
                 if self.values.last().is_some_and(|v| v.is_empty()) {
@@ -212,27 +224,16 @@ impl<'e, S: Store> Machine<'e, S> {
                 });
             }
             Task::Resume => self.resume(run, fns),
-            Task::MapStart(def, n) => {
-                let mut args = self.take(n);
-                let heads = std::mem::take(&mut args[0]);
-                self.frame(Frame::Map {
-                    def,
-                    args,
-                    heads,
-                    at: 0,
-                    out: Vals::new(),
-                });
-            }
             Task::PopEnv => self.pop_env(),
         }
     }
 
     /// Continues the frame on top of the frame stack, in place while it has
     /// more to do.
-    fn resume<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [super::program::Def]) {
+    fn resume<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [Def]) {
         match self.frames.last() {
             Some(Frame::Loop { .. }) => self.resume_loop(),
-            Some(Frame::Map { .. }) => self.resume_map(run, fns),
+            Some(Frame::Each { .. }) => self.resume_each(run, fns),
             Some(Frame::Finish(_)) => {
                 if let Some(Frame::Finish(pending)) = self.frames.pop() {
                     self.finish(run, fns, pending);
@@ -296,143 +297,112 @@ impl<'e, S: Store> Machine<'e, S> {
         }
     }
 
-    /// Calls a definition on each head in turn and unions the values.
-    fn resume_map<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [super::program::Def]) {
-        let Some(Frame::Map {
-            def,
+    /// Makes the next of a spread call's calls, after adding the last one's
+    /// values; a large union keeps a set to stay linear.
+    fn resume_each<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [Def]) {
+        let Some(Frame::Each {
+            callee,
             args,
-            heads,
             at,
+            list,
+            next,
             out,
+            seen,
         }) = self.frames.last_mut()
         else {
             return;
         };
-        if *at > 0 {
+        if *next > 0 {
             for found in self.values.pop().unwrap_or_default() {
-                if !out.contains(&found) {
+                let new = match seen {
+                    Some(seen) => seen.insert(found),
+                    None => !out.contains(&found),
+                };
+                if new {
                     out.push(found);
+                    if seen.is_none() && out.len() > 16 {
+                        *seen = Some(out.iter().copied().collect());
+                    }
                 }
             }
         }
-        let Some(&head) = heads.get(*at) else {
+        let Some(&val) = list.get(*next) else {
             let out = std::mem::take(out);
             self.frames.pop();
             self.values.push(out);
             return;
         };
-        *at += 1;
-        args[0] = SmallVec::from_elem(head, 1);
-        let (def, call) = (*def, args.clone());
+        *next += 1;
+        args[*at] = SmallVec::from_elem(val, 1);
+        let (callee, call) = (*callee, args.clone());
         self.tasks.push(Task::Resume);
-        if let Some(found) = self.start(run, fns, def, call) {
-            self.values.push(found);
-        }
+        self.spread(run, fns, callee, call);
     }
 
-    /// A new environment holding `slots`, on a reused vector.
-    fn env(&mut self, slots: impl IntoIterator<Item = Vals>) -> usize {
-        let mut env = self.spare.pop().unwrap_or_default();
-        env.clear();
-        env.extend(slots);
-        self.envs.push(env);
-        self.envs.len() - 1
-    }
-
-    fn pop_env(&mut self) {
-        if let Some(env) = self.envs.pop() {
-            self.spare.push(env);
-        }
-    }
-
-    fn release_envs(&mut self) {
-        while !self.envs.is_empty() {
-            self.pop_env();
-        }
-    }
-
-    fn frame(&mut self, frame: Frame<'e, S>) {
-        self.frames.push(frame);
-        self.tasks.push(Task::Resume);
-    }
-
-    fn take(&mut self, n: usize) -> Args {
-        let at = self.values.len() - n;
-        self.values.drain(at..).collect()
-    }
-
-    fn eval<'t>(
-        &mut self,
-        run: &mut Run<'t, S>,
-        fns: &'e [super::program::Def],
-        expr: &'e Expr,
-        env: usize,
-    ) {
-        if let Some(found) = self.leaf(run, expr, env) {
-            self.values.push(found);
-            return;
-        }
-        let (then, parts) = match expr {
-            Expr::Union(parts) => (Task::Union(parts.len()), parts),
-            Expr::Call(id, parts) => (Task::Call(*id, parts.len()), parts),
-            Expr::Def(def, parts) => (Task::MapStart(*def, parts.len()), parts),
-            Expr::Or(a, b) => {
-                self.tasks.push(Task::Or(b, env));
-                self.tasks.push(Task::Eval(a, env));
-                return;
-            }
-            Expr::First(list, slot, body) | Expr::Every(list, slot, body) => {
-                self.tasks.push(Task::LoopStart {
-                    every: matches!(expr, Expr::Every(..)),
-                    slot: usize::from(*slot),
-                    body,
-                    env,
-                });
-                self.tasks.push(Task::Eval(list, env));
-                return;
-            }
-            _ => return,
+    /// Calls `callee`, once per value of the first argument it takes one
+    /// value of but was given another number of.
+    fn spread<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [Def], callee: Callee, args: Args) {
+        let at = match callee {
+            Callee::Def(_) => (args.first().is_some_and(|a| a.len() != 1)).then_some(0),
+            Callee::Native(id) => function(id)
+                .sig
+                .iter()
+                .zip(&args)
+                .position(|(arg, vals)| *arg == Arg::One && vals.len() != 1),
         };
-        if parts.iter().all(is_leaf) {
-            for part in parts.iter() {
-                let found = self.leaf(run, part, env).unwrap_or_default();
-                self.values.push(found);
+        let Some(at) = at else {
+            return self.call(run, fns, callee, args);
+        };
+        let mut args = args;
+        let list = std::mem::take(&mut args[at]);
+        self.frame(Frame::Each {
+            callee,
+            args,
+            at,
+            list,
+            next: 0,
+            out: Vals::new(),
+            seen: None,
+        });
+    }
+
+    /// Queues a call, or pushes its value: a bound function's provider, an
+    /// uncached function's value, or a cached call's.
+    fn call<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [Def], callee: Callee, args: Args) {
+        let (key, deps, callee) = match callee {
+            Callee::Def(def) => {
+                let def = run
+                    .overrides
+                    .and_then(|o| o.get(&def).copied())
+                    .unwrap_or(def);
+                let d = &fns[usize::from(def)];
+                (
+                    (FnId(u16::MAX - def), d.key(&args)),
+                    d.deps,
+                    Callee::Def(def),
+                )
             }
-            self.step(run, fns, then);
-            return;
-        }
-        self.tasks.push(then);
-        for part in parts.iter().rev() {
-            self.tasks.push(Task::Eval(part, env));
-        }
-    }
-
-    /// The value of an expression that needs no further steps.
-    fn leaf<'t>(&self, run: &Run<'t, S>, expr: &Expr, env: usize) -> Option<Vals> {
-        Some(match expr {
-            Expr::Var(slot) => self.envs[env][usize::from(*slot)].clone(),
-            Expr::Lit(val) => SmallVec::from_elem(*val, 1),
-            Expr::Empty => Vals::new(),
-            Expr::Data(at) => run.data[usize::from(*at)].clone(),
-            _ => return None,
-        })
-    }
-
-    /// Starts a call: its cached value, or its body's tasks and a frame that
-    /// takes the body's value.
-    fn start<'t>(
-        &mut self,
-        run: &mut Run<'t, S>,
-        fns: &'e [super::program::Def],
-        def: u16,
-        args: Args,
-    ) -> Option<Vals> {
-        let def = run
-            .overrides
-            .and_then(|o| o.get(&def).copied())
-            .unwrap_or(def);
-        let d = &fns[usize::from(def)];
-        let key: Key = (FnId(u16::MAX - def), d.key(&args));
+            Callee::Native(id) => {
+                let links = run.links;
+                if let Some(def) = links.defs[usize::from(id.0)] {
+                    return self.call(run, fns, Callee::Def(def), args);
+                }
+                let deps = links.deps[usize::from(id.0)];
+                let id = links.to[usize::from(id.0)];
+                let f = function(id);
+                if matches!(f.kind, Kind::Effect | Kind::Inline) {
+                    let reading = match f.kind {
+                        Kind::Effect => std::mem::replace(&mut run.reading, u8::MAX),
+                        _ => run.reading,
+                    };
+                    let found = invoke(run, id, &args);
+                    run.reading = reading;
+                    self.values.push(found);
+                    return;
+                }
+                (run.key(id, f, &args), deps, Callee::Native(id))
+            }
+        };
         match run.memo.entries.get(&key) {
             Some(Memo::Busy(partial)) => {
                 let partial = partial.clone();
@@ -440,7 +410,8 @@ impl<'e, S: Store> Machine<'e, S> {
                     p.hit(key.0, true);
                 }
                 run.reads.insert(key);
-                return Some(partial);
+                self.values.push(partial);
+                return;
             }
             Some(Memo::Done {
                 vals,
@@ -458,7 +429,8 @@ impl<'e, S: Store> Machine<'e, S> {
                     let read = read.clone();
                     run.reads.extend(read);
                 }
-                return Some(vals);
+                self.values.push(vals);
+                return;
             }
             _ => {}
         }
@@ -470,51 +442,49 @@ impl<'e, S: Store> Machine<'e, S> {
             started: run.profile.as_mut().map(|p| p.enter(key.0)),
             epochs: run.epochs,
             outer: std::mem::take(&mut run.reads),
-            reading: std::mem::replace(&mut run.reading, d.deps),
-            deps: d.deps,
+            reading: std::mem::replace(&mut run.reading, deps),
+            deps,
             key,
-            def,
+            callee,
             args,
             rounds: 0,
         };
         self.body(run, fns, pending);
-        None
     }
 
-    /// Queues a definition's body, then the frame that takes its value.
-    fn body<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [super::program::Def], pending: Pending) {
-        let def = pending.def;
-        let d = &fns[usize::from(def)];
-        if let DefImpl::Expr(expr) = &d.body {
-            let blank = d.slots.max(d.params).saturating_sub(pending.args.len());
-            let env = self.env(
-                pending
-                    .args
-                    .iter()
-                    .cloned()
-                    .chain(std::iter::repeat_n(Vals::new(), blank)),
-            );
-            self.frame(Frame::Finish(pending));
-            self.tasks.push(Task::PopEnv);
-            self.tasks.push(Task::Eval(expr, env));
-            return;
-        }
-        let args = pending.args.clone();
-        self.frame(Frame::Finish(pending));
-        match &d.body {
-            DefImpl::Expr(_) => {}
-            DefImpl::Cases(_) if args[0].len() > 1 => {
-                let mut rest = args;
-                let heads = std::mem::take(&mut rest[0]);
-                self.frame(Frame::Map {
-                    def,
-                    args: rest,
-                    heads,
-                    at: 0,
-                    out: Vals::new(),
-                });
+    /// Queues a call's body, then the frame that takes its value; a module
+    /// function's body runs at once.
+    fn body<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [Def], pending: Pending) {
+        let def = match pending.callee {
+            Callee::Native(id) => {
+                let args = pending.args.clone();
+                self.frame(Frame::Finish(pending));
+                let found = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || invoke(run, id, &args));
+                self.values.push(found);
+                return;
             }
-            DefImpl::Cases(cases) => self.try_cases(run, cases, d.slots, args),
+            Callee::Def(def) => def,
+        };
+        let d = &fns[usize::from(def)];
+        match &d.body {
+            DefImpl::Expr(expr) => {
+                let blank = d.slots.max(d.params).saturating_sub(pending.args.len());
+                let env = self.env(
+                    pending
+                        .args
+                        .iter()
+                        .cloned()
+                        .chain(std::iter::repeat_n(Vals::new(), blank)),
+                );
+                self.frame(Frame::Finish(pending));
+                self.tasks.push(Task::PopEnv);
+                self.tasks.push(Task::Eval(expr, env));
+            }
+            DefImpl::Cases(cases) => {
+                let args = pending.args.clone();
+                self.frame(Frame::Finish(pending));
+                self.try_cases(run, cases, d.slots, args);
+            }
         }
     }
 
@@ -544,7 +514,7 @@ impl<'e, S: Store> Machine<'e, S> {
 
     /// Takes a body's value: runs the body again while a cycle through this
     /// call is still growing, then caches the value and hands it on.
-    fn finish<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [super::program::Def], mut p: Pending) {
+    fn finish<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [Def], mut p: Pending) {
         let found = self.values.pop().unwrap_or_default();
         let heads = run.reads.remove(&p.key);
         if heads && run.reads.is_empty() && p.rounds < MAX_FIXPOINT_ROUNDS {
@@ -671,6 +641,95 @@ impl<'e, S: Store> Machine<'e, S> {
         self.frame(Frame::Cases(t));
         self.tasks.push(Task::Eval(value, env));
     }
+
+    /// A new environment holding `slots`, on a reused vector.
+    fn env(&mut self, slots: impl IntoIterator<Item = Vals>) -> usize {
+        let mut env = self.spare.pop().unwrap_or_default();
+        env.clear();
+        env.extend(slots);
+        self.envs.push(env);
+        self.envs.len() - 1
+    }
+
+    fn pop_env(&mut self) {
+        if let Some(env) = self.envs.pop() {
+            self.spare.push(env);
+        }
+    }
+
+    fn release_envs(&mut self) {
+        while !self.envs.is_empty() {
+            self.pop_env();
+        }
+    }
+
+    fn frame(&mut self, frame: Frame<'e, S>) {
+        self.frames.push(frame);
+        self.tasks.push(Task::Resume);
+    }
+
+    fn take(&mut self, n: usize) -> Args {
+        let at = self.values.len() - n;
+        self.values.drain(at..).collect()
+    }
+
+    fn eval<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [Def], expr: &'e Expr, env: usize) {
+        if let Some(found) = self.leaf(run, expr, env) {
+            self.values.push(found);
+            return;
+        }
+        let (then, parts) = match expr {
+            Expr::Union(parts) => (Task::Union(parts.len()), parts),
+            Expr::Call(id, parts) => (Task::Call(Callee::Native(*id), parts.len()), parts),
+            Expr::Def(def, parts) => (Task::Call(Callee::Def(*def), parts.len()), parts),
+            Expr::Or(a, b) => {
+                self.tasks.push(Task::Or(b, env));
+                self.tasks.push(Task::Eval(a, env));
+                return;
+            }
+            Expr::First(list, slot, body) | Expr::Every(list, slot, body) => {
+                self.tasks.push(Task::LoopStart {
+                    every: matches!(expr, Expr::Every(..)),
+                    slot: usize::from(*slot),
+                    body,
+                    env,
+                });
+                self.tasks.push(Task::Eval(list, env));
+                return;
+            }
+            _ => return,
+        };
+        if parts.iter().all(is_leaf) {
+            for part in parts.iter() {
+                let found = self.leaf(run, part, env).unwrap_or_default();
+                self.values.push(found);
+            }
+            self.step(run, fns, then);
+            return;
+        }
+        self.tasks.push(then);
+        for part in parts.iter().rev() {
+            self.tasks.push(Task::Eval(part, env));
+        }
+    }
+
+    /// The value of an expression that needs no further steps.
+    fn leaf<'t>(&self, run: &Run<'t, S>, expr: &Expr, env: usize) -> Option<Vals> {
+        Some(match expr {
+            Expr::Var(slot) => self.envs[env][usize::from(*slot)].clone(),
+            Expr::Lit(val) => SmallVec::from_elem(*val, 1),
+            Expr::Empty => Vals::new(),
+            Expr::Data(at) => run.data[usize::from(*at)].clone(),
+            _ => return None,
+        })
+    }
+}
+
+/// Runs module function `id` natively.
+fn invoke<S: Store>(run: &mut Run<'_, S>, id: FnId, args: &[Vals]) -> Vals {
+    let f = function(id);
+    let hooks = S::hooks(&crate::modules::ALL[usize::from(f.slot)]);
+    (hooks.invoke)(run, f.slot, f.index, args)
 }
 
 /// Profiles one attempt of the case at `t.at`.

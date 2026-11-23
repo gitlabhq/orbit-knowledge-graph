@@ -14,7 +14,6 @@ use std::sync::LazyLock;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
-use crate::constants::{RED_ZONE, STACK_SEGMENT};
 use crate::env::Env;
 use crate::modules;
 use crate::sentinel::{Killed, Sentinel};
@@ -776,120 +775,7 @@ impl<'t, S: Store> Run<'t, S> {
     /// A module function's result, cached; it stays valid until a state the
     /// function can read is written.
     fn call(&mut self, id: FnId, args: &[Vals]) -> Vals {
-        let links = self.links;
-        if let Some(def) = links.defs[usize::from(id.0)] {
-            return self.call_def(def, args);
-        }
-        let (id, deps) = (links.to[usize::from(id.0)], links.deps[usize::from(id.0)]);
-        let f = function(id);
-        let invoke = S::hooks(&modules::ALL[usize::from(f.slot)]).invoke;
-        let reading = std::mem::replace(&mut self.reading, deps);
-        if matches!(f.kind, Kind::Effect | Kind::Inline) {
-            if f.kind == Kind::Effect {
-                self.reading = u8::MAX;
-            }
-            let found = invoke(self, f.slot, f.index, args);
-            self.reading = reading;
-            return found;
-        }
-        let key = self.key(id, f, args);
-        let found = self.memoized(key, deps, |run| invoke(run, f.slot, f.index, args));
-        self.reading = reading;
-        found
-    }
-
-    /// A YAML function's result, cached like a module function's.
-    pub(crate) fn call_def(&mut self, def: u16, args: &[Vals]) -> Vals {
-        machine::call_def(self, def, args)
-    }
-
-    /// Cached calls compute least fixpoints. A call already in progress
-    /// yields its value so far (empty at first) and is noted as read. The
-    /// outermost unfinished call of a cycle reruns with the union of its
-    /// results until nothing grows; an inner one that read an outer call
-    /// returns its partial value, which the outer rerun recomputes. A result that read an unfinished call is never
-    /// stored if Pure; a Flow one lives until its states change.
-    fn memoized(&mut self, key: Key, deps: u8, mut compute: impl FnMut(&mut Self) -> Vals) -> Vals {
-        match self.memo.entries.get(&key) {
-            Some(Memo::Busy(partial)) => {
-                let partial = partial.clone();
-                if let Some(p) = &mut self.profile {
-                    p.hit(key.0, true);
-                }
-                self.reads.insert(key);
-                return partial;
-            }
-            Some(Memo::Done {
-                vals,
-                deps,
-                stamp,
-                within,
-            }) if self.stamp(*deps) == *stamp
-                && within
-                    .as_ref()
-                    .is_none_or(|(round, _)| *round == self.round) =>
-            {
-                let vals = vals.clone();
-                if let Some(p) = &mut self.profile {
-                    p.hit(key.0, false);
-                }
-                if let Some((_, read)) = within {
-                    let read = read.clone();
-                    self.reads.extend(read);
-                }
-                return vals;
-            }
-            _ => {}
-        }
-        self.sweep();
-        self.memo
-            .entries
-            .insert(key.clone(), Memo::Busy(Vals::new()));
-        let epochs = self.epochs;
-        let started = self.profile.as_mut().map(|p| p.enter(key.0));
-        let outer = std::mem::take(&mut self.reads);
-        let mut found;
-        let mut rounds = 0;
-        loop {
-            found = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || compute(self));
-            let heads = self.reads.remove(&key);
-            if !heads || !self.reads.is_empty() || rounds == MAX_FIXPOINT_ROUNDS {
-                break;
-            }
-            let Some(Memo::Busy(partial)) = self.memo.entries.get(&key) else {
-                break;
-            };
-            if found.len() == partial.len() && found.iter().all(|v| partial.contains(v)) {
-                break;
-            }
-            self.memo
-                .entries
-                .insert(key.clone(), Memo::Busy(found.clone()));
-            self.round += 1;
-            rounds += 1;
-        }
-        if let (Some(p), Some(start)) = (&mut self.profile, started) {
-            p.leave(key.0, start, rounds);
-        }
-        let read: Vec<Key> = self.reads.iter().cloned().collect();
-        self.reads.extend(outer);
-        if epochs != self.epochs {
-            self.memo.entries.remove(&key);
-        } else {
-            let stamp = self.stamp(deps);
-            let within = (!read.is_empty()).then(|| (self.round, read));
-            let vals = found.clone();
-            self.memo.entries.insert(
-                key,
-                Memo::Done {
-                    vals,
-                    deps,
-                    stamp,
-                    within,
-                },
-            );
-        }
-        found
+        machine::call(self, id, args)
     }
 
     /// Starts the phase's modules on the run's tree.
