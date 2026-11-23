@@ -9,7 +9,7 @@ pub use context::{
     OrbitCliSetupContext, OrbitCodeIndexingContext, OrbitCommonContext, OrbitGraphStatsContext,
     OrbitNamespaceGraphStatsContext, OrbitQueryContext, OrbitSdlcIndexingContext, orbit_cli,
     orbit_cli_command, orbit_cli_setup, orbit_code_indexing, orbit_common, orbit_graph_stats,
-    orbit_namespace_graph_stats, orbit_query, orbit_sdlc_indexing, validation,
+    orbit_namespace_graph_stats, orbit_query, orbit_sdlc_indexing, parse_opt, validation,
 };
 pub use gitlab_instance::{ConsentGate, GitlabInstanceWatch};
 pub use tracker::{AnalyticsTracker, ComposedAnalyticsTracker, SnowplowAnalyticsTracker};

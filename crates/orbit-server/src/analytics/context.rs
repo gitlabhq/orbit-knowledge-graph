@@ -1,7 +1,10 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use orbit_analytics::{OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query};
+use labkit_events::Error as LabkitError;
+use orbit_analytics::{
+    OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query, parse_opt, validation,
+};
 use orbit_server_config::AnalyticsConfig;
 use orbit_versions::VERSIONS;
 use query_engine::compiler::ExecMetrics;
@@ -14,22 +17,34 @@ pub(crate) fn build_common(
     config: &AnalyticsConfig,
     claims: &Claims,
     schema_version: &str,
-) -> OrbitCommonContext {
+) -> Result<OrbitCommonContext, LabkitError> {
     let environment: &'static str = config.deployment.environment.into();
 
-    OrbitCommonContext::new(orbit_common::OrbitCommon {
+    Ok(OrbitCommonContext::new(orbit_common::OrbitCommon {
         deployment_type: Some(config.deployment.kind.into()),
         surface: Some(orbit_common::OrbitCommonSurface::Server),
-        environment: Some(environment.to_owned()),
-        correlation_id: labkit::correlation::current().as_deref().map(str::to_owned),
-        instance_id: claims.instance_id.clone(),
-        unique_instance_id: claims.unique_instance_id.clone(),
-        host_name: claims.host_name.clone(),
+        environment: Some(
+            environment
+                .parse::<orbit_common::OrbitCommonEnvironment>()
+                .map_err(validation("environment"))?,
+        ),
+        correlation_id: labkit::correlation::current()
+            .as_deref()
+            .map(str::parse::<orbit_common::OrbitCommonCorrelationId>)
+            .transpose()
+            .map_err(validation("correlation_id"))?,
+        instance_id: parse_opt(&claims.instance_id, "instance_id")?,
+        unique_instance_id: parse_opt(&claims.unique_instance_id, "unique_instance_id")?,
+        host_name: parse_opt(&claims.host_name, "host_name")?,
         organization_id: claims.organization_id.map(|id| id as i64),
         root_namespace_ids: claims.root_namespace_id.map(|ns| vec![ns]),
         coding_agent: None,
-        schema_version: Some(schema_version.to_owned()),
-    })
+        schema_version: Some(
+            schema_version
+                .parse::<orbit_common::OrbitCommonSchemaVersion>()
+                .map_err(validation("schema_version"))?,
+        ),
+    }))
 }
 
 pub(crate) fn build_query(
@@ -40,31 +55,40 @@ pub(crate) fn build_query(
     row_count: usize,
     redacted_count: usize,
     total_elapsed: Duration,
-) -> OrbitQueryContext {
+) -> Result<OrbitQueryContext, LabkitError> {
     let queried = leaf_namespace_ids(claims);
 
     let mut q = orbit_query::OrbitQuery {
         source_type: source_type(claims.source_type),
-        tool_name: Some(tool_name.to_owned()),
-        coding_agent: user_agent.coding_agent.clone(),
-        client_name: user_agent.client_name.clone(),
-        client_version: user_agent.client_version.clone(),
-        distribution: user_agent.distribution.clone(),
+        tool_name: Some(
+            tool_name
+                .parse::<orbit_query::OrbitQueryToolName>()
+                .map_err(validation("tool_name"))?,
+        ),
+        coding_agent: parse_or_drop(user_agent.coding_agent.as_deref()),
+        client_name: parse_or_drop(user_agent.client_name.as_deref()),
+        client_version: parse_or_drop(user_agent.client_version.as_deref()),
+        distribution: parse_or_drop(user_agent.distribution.as_deref()),
         queried_namespace_ids: if queried.is_empty() {
             None
         } else {
             Some(queried)
         },
         root_namespace_id: claims.root_namespace_id,
-        global_user_id: claims.global_user_id.clone(),
-        session_id: claims.ai_session_id.clone(),
+        global_user_id: parse_opt_query(&claims.global_user_id, "global_user_id")?,
+        session_id: claims
+            .ai_session_id
+            .as_deref()
+            .map(str::parse::<orbit_query::OrbitQuerySessionId>)
+            .transpose()
+            .map_err(validation("session_id"))?,
         is_gitlab_team_member: claims.is_gitlab_team_member,
-        user_type: claims.user_type.clone(),
-        token_type: claims.token_type.clone(),
+        user_type: parse_or_drop(claims.user_type.as_deref()),
+        token_type: parse_or_drop(claims.token_type.as_deref()),
         ..Default::default()
     };
     apply_metrics(&mut q, metrics, row_count, redacted_count, total_elapsed);
-    OrbitQueryContext::new(q)
+    Ok(OrbitQueryContext::new(q))
 }
 
 pub(crate) fn apply_outcome(q: &mut orbit_query::OrbitQuery, error: Option<&PipelineError>) {
@@ -76,7 +100,7 @@ pub(crate) fn apply_outcome(q: &mut orbit_query::OrbitQuery, error: Option<&Pipe
         Some(_) => Outcome::ServerError,
     });
     let Some(error) = error else { return };
-    q.failure_reason = Some(error.failure_reason().as_str().to_owned());
+    q.failure_reason = error.failure_reason().as_str().parse().ok();
     q.row_count = None;
     q.redacted_count = None;
     if q.execute_ms.is_none() {
@@ -112,7 +136,7 @@ fn apply_metrics(
 ) {
     if let Some(input) = &metrics.input {
         let query_type: &str = input.query_type.into();
-        q.query_type = Some(query_type.to_owned());
+        q.query_type = query_type.parse().ok();
         q.node_count = Some(input.nodes.len() as i64);
         q.relationship_count = Some(input.relationships.len() as i64);
         q.is_search = Some(input.is_search());
@@ -120,7 +144,7 @@ fn apply_metrics(
         q.has_order_by = Some(input.order_by.is_some());
         q.limit = Some(input.limit as i64);
         q.group_by_count = Some(input.aggregation.group_by.len() as i64);
-        q.dynamic_columns = Some(<&str>::from(input.options.dynamic_columns).to_owned());
+        q.dynamic_columns = <&str>::from(input.options.dynamic_columns).parse().ok();
         q.path_max_depth = input.path.as_ref().map(|p| p.max_depth as i64);
 
         let mut entities = BTreeSet::new();
@@ -170,10 +194,13 @@ fn apply_metrics(
             }
         }
 
-        q.entity_types = Some(entities.into_iter().collect());
-        q.relationship_types = Some(rel_types.into_iter().collect());
-        q.filter_fields = Some(fields.into_iter().collect());
-        q.filter_ops = Some(ops.into_iter().collect());
+        fn to_vec<T: std::str::FromStr>(set: BTreeSet<String>) -> Vec<T> {
+            set.into_iter().filter_map(|s| s.parse().ok()).collect()
+        }
+        q.entity_types = Some(to_vec(entities));
+        q.relationship_types = Some(to_vec(rel_types));
+        q.filter_fields = Some(to_vec(fields));
+        q.filter_ops = Some(to_vec(ops));
         q.agg_functions = Some(
             input
                 .aggregation
@@ -182,31 +209,33 @@ fn apply_metrics(
                 .map(|m| m.expr.function().to_string())
                 .collect::<BTreeSet<_>>()
                 .into_iter()
+                .filter_map(|s| s.parse().ok())
                 .collect(),
         );
         q.filter_count = Some(filter_count);
         q.max_hops = Some(max_hops);
         q.has_variable_hops = Some(variable_hops);
         q.has_virtual_columns = Some(metrics.has_virtual_columns);
-        let column_selection_mode = if has_star {
+        q.column_selection_mode = if has_star {
             "all"
         } else if !columns.is_empty() {
             "list"
         } else {
             "default"
-        };
-        q.column_selection_mode = Some(column_selection_mode.to_owned());
+        }
+        .parse()
+        .ok();
         q.requested_columns = if columns.is_empty() {
             None
         } else {
-            Some(columns.into_iter().collect())
+            Some(to_vec(columns))
         };
-        q.traversal_shape = traversal_shape(input);
+        q.traversal_shape = traversal_shape(input).and_then(|s| s.parse().ok());
         let label: &str = metrics
             .hydration
             .as_ref()
             .map_or("none", |h| h.kind().into());
-        q.hydration_plan = Some(label.to_owned());
+        q.hydration_plan = label.parse().ok();
     }
     q.duration_ms = Some(ExecMetrics::ms(total_elapsed) as i64);
     q.compile_ms = metrics.compile_ms.map(|v| v as i64);
@@ -219,8 +248,8 @@ fn apply_metrics(
     q.ch_read_bytes = Some(metrics.ch_read_bytes as i64);
     q.ch_memory_usage = Some(metrics.ch_memory_usage as i64);
 
-    q.query_dsl_version = Some(VERSIONS.query_dsl.to_string());
-    q.raw_output_format_version = Some(VERSIONS.raw_output_format.to_string());
+    q.query_dsl_version = VERSIONS.query_dsl.parse().ok();
+    q.raw_output_format_version = VERSIONS.raw_output_format.parse().ok();
 }
 
 /// Build a topology fingerprint like `User-[AUTHORED]->MergeRequest`.
@@ -250,6 +279,16 @@ fn traversal_shape(input: &query_engine::compiler::Input) -> Option<String> {
     Some(parts.join(", "))
 }
 
+/// Bounds are 255 chars for instance/host fields; exceeding that surfaces a
+/// typed validation error rather than truncating silently.
+/// Same as [`parse_opt`] but for orbit_query newtypes (maxLength 64).
+fn parse_opt_query(
+    value: &Option<String>,
+    field: &'static str,
+) -> Result<Option<orbit_query::OrbitQueryGlobalUserId>, LabkitError> {
+    parse_opt(value, field)
+}
+
 fn source_type(source: SourceType) -> orbit_query::OrbitQuerySourceType {
     use orbit_query::OrbitQuerySourceType as ST;
     match source {
@@ -260,6 +299,10 @@ fn source_type(source: SourceType) -> orbit_query::OrbitQuerySourceType {
         SourceType::Rest => ST::Rest,
         SourceType::CodeIntelligence => ST::CodeIntelligence,
     }
+}
+
+fn parse_or_drop<T: std::str::FromStr>(value: Option<&str>) -> Option<T> {
+    value.and_then(|v| v.parse().ok())
 }
 
 fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
@@ -318,7 +361,8 @@ mod tests {
             &orbit_server_config::AppConfig::embedded_defaults().analytics,
             claims,
             "33",
-        );
+        )
+        .unwrap();
         let query = build_query(
             claims,
             tool,
@@ -327,7 +371,8 @@ mod tests {
             0,
             0,
             Duration::ZERO,
-        );
+        )
+        .unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -341,7 +386,8 @@ mod tests {
             &orbit_server_config::AppConfig::embedded_defaults().analytics,
             claims,
             schema_version,
-        );
+        )
+        .unwrap();
         let query = build_query(
             claims,
             "query_graph",
@@ -350,7 +396,8 @@ mod tests {
             0,
             0,
             Duration::ZERO,
-        );
+        )
+        .unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -401,7 +448,8 @@ mod tests {
             &orbit_server_config::AppConfig::embedded_defaults().analytics,
             &claims,
             "33",
-        );
+        )
+        .unwrap();
         let query = build_query(
             &claims,
             "query_graph",
@@ -412,7 +460,8 @@ mod tests {
             0,
             0,
             Duration::ZERO,
-        );
+        )
+        .unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -436,11 +485,11 @@ mod tests {
     }
 
     #[test]
-    fn build_query_cuts_oversized_token_type_to_the_schema_limit() {
+    fn build_query_drops_oversized_token_type_but_keeps_the_event() {
         let mut claims = claims_with_paths(vec![]);
         claims.token_type = Some("x".repeat(65));
         let data = query_data(&claims, "query_graph");
-        assert_eq!(data["token_type"].as_str().unwrap().chars().count(), 64);
+        assert!(data.get("token_type").is_none());
         assert_eq!(data["tool_name"], "query_graph");
     }
 
@@ -452,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn build_query_cuts_oversized_coding_agent_to_the_schema_limit() {
+    fn build_query_drops_oversized_coding_agent() {
         let claims = claims_with_paths(vec![]);
         let query = build_query(
             &claims,
@@ -465,15 +514,9 @@ mod tests {
             0,
             0,
             Duration::ZERO,
-        );
-        assert_eq!(
-            query.data()["coding_agent"]
-                .as_str()
-                .unwrap()
-                .chars()
-                .count(),
-            64
-        );
+        )
+        .unwrap();
+        assert!(query.data().get("coding_agent").is_none());
     }
 
     #[test]
@@ -484,21 +527,24 @@ mod tests {
     }
 
     #[test]
-    fn build_common_cuts_oversized_instance_id_to_the_schema_limit() {
+    fn build_common_rejects_oversized_instance_id() {
         let mut claims = claims_with_paths(vec![]);
         claims.instance_id = Some("x".repeat(256));
-        let common = build_common(
+        let err = build_common(
             &orbit_server_config::AppConfig::embedded_defaults().analytics,
             &claims,
             "33",
-        );
-        assert_eq!(
-            common.data()["instance_id"]
-                .as_str()
-                .unwrap()
-                .chars()
-                .count(),
-            255
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                LabkitError::Validation {
+                    field: "instance_id",
+                    ..
+                }
+            ),
+            "expected Validation(instance_id), got: {err:?}"
         );
     }
 
@@ -536,30 +582,9 @@ mod tests {
                 &orbit_server_config::AppConfig::embedded_defaults().analytics,
                 &claims,
                 "33",
-            );
+            )
+            .unwrap();
             assert_valid(&ORBIT_COMMON_VALIDATOR, &common.data(), "orbit_common");
-        }
-
-        #[test]
-        fn over_long_values_validate_against_iglu_schema() {
-            let mut claims = claims_with_paths(vec![]);
-            claims.instance_id = Some("x".repeat(300));
-            claims.host_name = Some("x".repeat(300));
-            claims.token_type = Some("x".repeat(100));
-            let config = orbit_server_config::AppConfig::embedded_defaults().analytics;
-            let common = build_common(&config, &claims, &"9".repeat(40));
-            let query = build_query(
-                &claims,
-                &"x".repeat(100),
-                &UserAgent::default(),
-                &ExecMetrics::default(),
-                0,
-                0,
-                Duration::ZERO,
-            );
-
-            assert_valid(&ORBIT_COMMON_VALIDATOR, &common.data(), "orbit_common");
-            assert_valid(&ORBIT_QUERY_VALIDATOR, &query.data(), "orbit_query");
         }
 
         #[test]
@@ -569,7 +594,8 @@ mod tests {
                 &orbit_server_config::AppConfig::embedded_defaults().analytics,
                 &claims,
                 "33",
-            );
+            )
+            .unwrap();
             assert_valid(
                 &ORBIT_COMMON_VALIDATOR,
                 &common.data(),
@@ -592,7 +618,8 @@ mod tests {
                 0,
                 0,
                 Duration::ZERO,
-            );
+            )
+            .unwrap();
             assert_valid(&ORBIT_QUERY_VALIDATOR, &query.data(), "orbit_query");
         }
 
@@ -607,7 +634,8 @@ mod tests {
                 0,
                 0,
                 Duration::ZERO,
-            );
+            )
+            .unwrap();
             assert_valid(
                 &ORBIT_QUERY_VALIDATOR,
                 &query.data(),
@@ -627,7 +655,8 @@ mod tests {
                 0,
                 0,
                 Duration::ZERO,
-            );
+            )
+            .unwrap();
             assert_eq!(query.data()["source_type"], "code_intelligence");
             assert_valid(
                 &ORBIT_QUERY_VALIDATOR,
@@ -686,7 +715,8 @@ mod tests {
             0,
             0,
             Duration::ZERO,
-        );
+        )
+        .unwrap();
         let data = query.data();
 
         assert_eq!(data["source_type"], "mcp");

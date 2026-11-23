@@ -15,32 +15,6 @@ use orbit_server_config::DeploymentKind;
 
 include!(concat!(env!("OUT_DIR"), "/iglu_schemas.rs"));
 
-fn cut_to_max_lengths(
-    mut data: serde_json::Value,
-    max_lengths: &[(&str, usize)],
-) -> serde_json::Value {
-    for (field, max_length) in max_lengths {
-        match data.get_mut(*field) {
-            Some(serde_json::Value::String(value)) => cut_to_length(value, *max_length),
-            Some(serde_json::Value::Array(items)) => {
-                for item in items {
-                    if let serde_json::Value::String(value) = item {
-                        cut_to_length(value, *max_length);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    data
-}
-
-fn cut_to_length(value: &mut String, max_length: usize) {
-    if let Some((cut, _)) = value.char_indices().nth(max_length) {
-        value.truncate(cut);
-    }
-}
-
 impl From<DeploymentKind> for orbit_common::OrbitCommonDeploymentType {
     fn from(kind: DeploymentKind) -> Self {
         match kind {
@@ -60,6 +34,21 @@ pub fn validation<E: std::fmt::Display>(
     }
 }
 
+pub fn parse_opt<T>(
+    value: &Option<String>,
+    field: &'static str,
+) -> Result<Option<T>, labkit_events::Error>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    value
+        .as_deref()
+        .map(str::parse::<T>)
+        .transpose()
+        .map_err(validation(field))
+}
+
 #[derive(Debug, Clone)]
 pub struct OrbitCommonContext {
     pub data: orbit_common::OrbitCommon,
@@ -77,10 +66,7 @@ impl SnowplowContext for OrbitCommonContext {
     }
 
     fn data(&self) -> serde_json::Value {
-        cut_to_max_lengths(
-            serde_json::to_value(&self.data).expect("generated OrbitCommon is always serializable"),
-            orbit_common::MAX_LENGTHS,
-        )
+        serde_json::to_value(&self.data).expect("generated OrbitCommon is always serializable")
     }
 }
 
@@ -101,10 +87,7 @@ impl SnowplowContext for OrbitQueryContext {
     }
 
     fn data(&self) -> serde_json::Value {
-        cut_to_max_lengths(
-            serde_json::to_value(&self.data).expect("generated OrbitQuery is always serializable"),
-            orbit_query::MAX_LENGTHS,
-        )
+        serde_json::to_value(&self.data).expect("generated OrbitQuery is always serializable")
     }
 }
 
@@ -125,11 +108,8 @@ impl SnowplowContext for OrbitSdlcIndexingContext {
     }
 
     fn data(&self) -> serde_json::Value {
-        cut_to_max_lengths(
-            serde_json::to_value(&self.data)
-                .expect("generated OrbitSdlcIndexing is always serializable"),
-            orbit_sdlc_indexing::MAX_LENGTHS,
-        )
+        serde_json::to_value(&self.data)
+            .expect("generated OrbitSdlcIndexing is always serializable")
     }
 }
 
@@ -150,11 +130,8 @@ impl SnowplowContext for OrbitCodeIndexingContext {
     }
 
     fn data(&self) -> serde_json::Value {
-        cut_to_max_lengths(
-            serde_json::to_value(&self.data)
-                .expect("generated OrbitCodeIndexing is always serializable"),
-            orbit_code_indexing::MAX_LENGTHS,
-        )
+        serde_json::to_value(&self.data)
+            .expect("generated OrbitCodeIndexing is always serializable")
     }
 }
 
@@ -175,10 +152,7 @@ impl SnowplowContext for OrbitCliContext {
     }
 
     fn data(&self) -> serde_json::Value {
-        cut_to_max_lengths(
-            serde_json::to_value(&self.data).expect("generated OrbitCli is always serializable"),
-            orbit_cli::MAX_LENGTHS,
-        )
+        serde_json::to_value(&self.data).expect("generated OrbitCli is always serializable")
     }
 }
 
@@ -199,11 +173,7 @@ impl SnowplowContext for OrbitCliCommandContext {
     }
 
     fn data(&self) -> serde_json::Value {
-        cut_to_max_lengths(
-            serde_json::to_value(&self.data)
-                .expect("generated OrbitCliCommand is always serializable"),
-            orbit_cli_command::MAX_LENGTHS,
-        )
+        serde_json::to_value(&self.data).expect("generated OrbitCliCommand is always serializable")
     }
 }
 
@@ -224,11 +194,7 @@ impl SnowplowContext for OrbitCliSetupContext {
     }
 
     fn data(&self) -> serde_json::Value {
-        cut_to_max_lengths(
-            serde_json::to_value(&self.data)
-                .expect("generated OrbitCliSetup is always serializable"),
-            orbit_cli_setup::MAX_LENGTHS,
-        )
+        serde_json::to_value(&self.data).expect("generated OrbitCliSetup is always serializable")
     }
 }
 
@@ -249,11 +215,7 @@ impl SnowplowContext for OrbitGraphStatsContext {
     }
 
     fn data(&self) -> serde_json::Value {
-        cut_to_max_lengths(
-            serde_json::to_value(&self.data)
-                .expect("generated OrbitGraphStats is always serializable"),
-            orbit_graph_stats::MAX_LENGTHS,
-        )
+        serde_json::to_value(&self.data).expect("generated OrbitGraphStats is always serializable")
     }
 }
 
@@ -274,11 +236,8 @@ impl SnowplowContext for OrbitNamespaceGraphStatsContext {
     }
 
     fn data(&self) -> serde_json::Value {
-        cut_to_max_lengths(
-            serde_json::to_value(&self.data)
-                .expect("generated OrbitNamespaceGraphStats is always serializable"),
-            orbit_namespace_graph_stats::MAX_LENGTHS,
-        )
+        serde_json::to_value(&self.data)
+            .expect("generated OrbitNamespaceGraphStats is always serializable")
     }
 }
 
@@ -319,66 +278,4 @@ pub fn load_schema_json(name: &str) -> serde_json::Value {
         serde_json::from_str(raw).expect("vendored Iglu schema is valid JSON");
     schema["$schema"] = IGLU_SELF_DESCRIBING_BASE_DIALECT.into();
     schema
-}
-
-#[cfg(test)]
-mod tests {
-    use labkit_events::SnowplowContext;
-
-    use super::{OrbitQueryContext, OrbitSdlcIndexingContext, orbit_query, orbit_sdlc_indexing};
-
-    const OVER_LONG_ENTITY_TYPE: &str =
-        "HAS_IDENTIFIER_siphon_vulnerability_occurrence_identifiers_VulnerabilityIdentifier";
-
-    fn sdlc_context(entity_type: &str) -> OrbitSdlcIndexingContext {
-        OrbitSdlcIndexingContext::new(orbit_sdlc_indexing::OrbitSdlcIndexing {
-            namespace_id: None,
-            root_namespace_id: None,
-            entity_type: entity_type.to_owned(),
-            indexing_mode: orbit_sdlc_indexing::OrbitSdlcIndexingIndexingMode::Full,
-            dispatch_id: "00000000-0000-0000-0000-000000000000".to_owned(),
-            campaign_id: None,
-            read_rows: 0,
-            read_bytes: 0,
-            scanned_rows: 0,
-            scanned_bytes: 0,
-            written_rows: 0,
-            written_bytes: 0,
-            duration_ms: 0,
-        })
-    }
-
-    #[test]
-    fn over_long_value_is_cut_to_its_schema_limit() {
-        let data = sdlc_context(OVER_LONG_ENTITY_TYPE).data();
-
-        assert_eq!(data["entity_type"], OVER_LONG_ENTITY_TYPE[..64]);
-    }
-
-    #[test]
-    fn value_within_its_schema_limit_is_unchanged() {
-        let data = sdlc_context("VulnerabilityIdentifier").data();
-
-        assert_eq!(data["entity_type"], "VulnerabilityIdentifier");
-    }
-
-    #[test]
-    fn over_long_array_items_are_cut_to_their_schema_limit() {
-        let query = OrbitQueryContext::new(orbit_query::OrbitQuery {
-            entity_types: Some(vec!["x".repeat(100), "Project".to_owned()]),
-            ..Default::default()
-        });
-
-        let data = query.data();
-
-        assert_eq!(data["entity_types"][0], "x".repeat(64));
-        assert_eq!(data["entity_types"][1], "Project");
-    }
-
-    #[test]
-    fn multibyte_value_is_cut_on_a_character_boundary() {
-        let data = sdlc_context(&"é".repeat(70)).data();
-
-        assert_eq!(data["entity_type"], "é".repeat(64));
-    }
 }

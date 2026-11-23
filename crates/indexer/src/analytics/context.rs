@@ -4,9 +4,10 @@
 //! Rails serves, rather than JWT claims.
 
 use gitlab_client::InstanceIdentity;
+use labkit_events::Error as LabkitError;
 use orbit_analytics::{
     OrbitCodeIndexingContext, OrbitCommonContext, OrbitSdlcIndexingContext, orbit_code_indexing,
-    orbit_common, orbit_sdlc_indexing,
+    orbit_common, orbit_sdlc_indexing, parse_opt, validation,
 };
 use orbit_server_config::AnalyticsConfig;
 
@@ -31,23 +32,27 @@ pub(crate) fn build_common(
     config: &AnalyticsConfig,
     instance: Option<InstanceIdentity>,
     root_namespace_id: Option<i64>,
-) -> OrbitCommonContext {
+) -> Result<OrbitCommonContext, LabkitError> {
     let environment: &'static str = config.deployment.environment.into();
     let instance = instance.unwrap_or_default();
 
-    OrbitCommonContext::new(orbit_common::OrbitCommon {
+    Ok(OrbitCommonContext::new(orbit_common::OrbitCommon {
         deployment_type: Some(config.deployment.kind.into()),
         surface: Some(orbit_common::OrbitCommonSurface::Server),
-        environment: Some(environment.to_owned()),
+        environment: Some(
+            environment
+                .parse::<orbit_common::OrbitCommonEnvironment>()
+                .map_err(validation("environment"))?,
+        ),
         correlation_id: None,
-        instance_id: instance.instance_id,
-        unique_instance_id: instance.unique_instance_id,
-        host_name: instance.host_name,
+        instance_id: parse_opt(&instance.instance_id, "instance_id")?,
+        unique_instance_id: parse_opt(&instance.unique_instance_id, "unique_instance_id")?,
+        host_name: parse_opt(&instance.host_name, "host_name")?,
         organization_id: None,
         root_namespace_ids: root_namespace_id.map(|id| vec![id]),
         coding_agent: None,
         schema_version: None,
-    })
+    }))
 }
 
 pub(crate) struct SdlcInputs {
@@ -66,27 +71,40 @@ pub(crate) struct SdlcInputs {
     pub duration_ms: u64,
 }
 
-pub(crate) fn build_sdlc(inputs: SdlcInputs) -> OrbitSdlcIndexingContext {
+pub(crate) fn build_sdlc(inputs: SdlcInputs) -> Result<OrbitSdlcIndexingContext, LabkitError> {
     use orbit_sdlc_indexing::OrbitSdlcIndexingIndexingMode as Mode;
 
-    OrbitSdlcIndexingContext::new(orbit_sdlc_indexing::OrbitSdlcIndexing {
-        namespace_id: inputs.namespace_id,
-        root_namespace_id: inputs.root_namespace_id,
-        entity_type: inputs.entity_type,
-        indexing_mode: match inputs.indexing_mode {
-            IndexingMode::Full => Mode::Full,
-            IndexingMode::Incremental => Mode::Incremental,
+    Ok(OrbitSdlcIndexingContext::new(
+        orbit_sdlc_indexing::OrbitSdlcIndexing {
+            namespace_id: inputs.namespace_id,
+            root_namespace_id: inputs.root_namespace_id,
+            entity_type: inputs
+                .entity_type
+                .parse()
+                .map_err(validation("entity_type"))?,
+            indexing_mode: match inputs.indexing_mode {
+                IndexingMode::Full => Mode::Full,
+                IndexingMode::Incremental => Mode::Incremental,
+            },
+            dispatch_id: inputs
+                .dispatch_id
+                .parse()
+                .map_err(validation("dispatch_id"))?,
+            campaign_id: inputs
+                .campaign_id
+                .as_deref()
+                .map(str::parse)
+                .transpose()
+                .map_err(validation("campaign_id"))?,
+            read_rows: saturating_i64(inputs.read_rows),
+            read_bytes: saturating_i64(inputs.read_bytes),
+            scanned_rows: saturating_i64(inputs.scanned_rows),
+            scanned_bytes: saturating_i64(inputs.scanned_bytes),
+            written_rows: saturating_i64(inputs.written_rows),
+            written_bytes: saturating_i64(inputs.written_bytes),
+            duration_ms: saturating_i64(inputs.duration_ms),
         },
-        dispatch_id: inputs.dispatch_id,
-        campaign_id: inputs.campaign_id,
-        read_rows: saturating_i64(inputs.read_rows),
-        read_bytes: saturating_i64(inputs.read_bytes),
-        scanned_rows: saturating_i64(inputs.scanned_rows),
-        scanned_bytes: saturating_i64(inputs.scanned_bytes),
-        written_rows: saturating_i64(inputs.written_rows),
-        written_bytes: saturating_i64(inputs.written_bytes),
-        duration_ms: saturating_i64(inputs.duration_ms),
-    })
+    ))
 }
 
 pub(crate) struct CodeInputs {
@@ -112,36 +130,56 @@ pub(crate) struct CodeInputs {
     pub duration_ms: u64,
 }
 
-pub(crate) fn build_code(inputs: CodeInputs) -> OrbitCodeIndexingContext {
+pub(crate) fn build_code(inputs: CodeInputs) -> Result<OrbitCodeIndexingContext, LabkitError> {
     use orbit_code_indexing::OrbitCodeIndexingIndexingMode as Mode;
     use orbit_code_indexing::OrbitCodeIndexingTriggerType as Trigger;
 
-    OrbitCodeIndexingContext::new(orbit_code_indexing::OrbitCodeIndexing {
-        project_id: inputs.project_id,
-        namespace_id: inputs.namespace_id,
-        root_namespace_id: inputs.root_namespace_id,
-        branch: inputs.branch,
-        commit_sha: inputs.commit_sha,
-        trigger_type: match inputs.trigger_type {
-            TriggerType::Push => Trigger::Push,
-            TriggerType::Scheduled => Trigger::Scheduled,
+    Ok(OrbitCodeIndexingContext::new(
+        orbit_code_indexing::OrbitCodeIndexing {
+            project_id: inputs.project_id,
+            namespace_id: inputs.namespace_id,
+            root_namespace_id: inputs.root_namespace_id,
+            branch: inputs
+                .branch
+                .as_deref()
+                .map(str::parse)
+                .transpose()
+                .map_err(validation("branch"))?,
+            commit_sha: inputs
+                .commit_sha
+                .as_deref()
+                .map(str::parse)
+                .transpose()
+                .map_err(validation("commit_sha"))?,
+            trigger_type: match inputs.trigger_type {
+                TriggerType::Push => Trigger::Push,
+                TriggerType::Scheduled => Trigger::Scheduled,
+            },
+            indexing_mode: match inputs.indexing_mode {
+                IndexingMode::Full => Mode::Full,
+                IndexingMode::Incremental => Mode::Incremental,
+            },
+            dispatch_id: inputs
+                .dispatch_id
+                .parse()
+                .map_err(validation("dispatch_id"))?,
+            campaign_id: inputs
+                .campaign_id
+                .as_deref()
+                .map(str::parse)
+                .transpose()
+                .map_err(validation("campaign_id"))?,
+            files_discovered: saturating_i64(inputs.files_discovered),
+            files_parsed: saturating_i64(inputs.files_parsed),
+            files_skipped: saturating_i64(inputs.files_skipped),
+            bytes_discovered: saturating_i64(inputs.bytes_discovered),
+            directories_indexed: saturating_i64(inputs.directories_indexed),
+            definitions_indexed: saturating_i64(inputs.definitions_indexed),
+            imported_symbols_indexed: saturating_i64(inputs.imported_symbols_indexed),
+            edges_indexed: saturating_i64(inputs.edges_indexed),
+            written_rows: saturating_i64(inputs.written_rows),
+            written_bytes: saturating_i64(inputs.written_bytes),
+            duration_ms: saturating_i64(inputs.duration_ms),
         },
-        indexing_mode: match inputs.indexing_mode {
-            IndexingMode::Full => Mode::Full,
-            IndexingMode::Incremental => Mode::Incremental,
-        },
-        dispatch_id: inputs.dispatch_id,
-        campaign_id: inputs.campaign_id,
-        files_discovered: saturating_i64(inputs.files_discovered),
-        files_parsed: saturating_i64(inputs.files_parsed),
-        files_skipped: saturating_i64(inputs.files_skipped),
-        bytes_discovered: saturating_i64(inputs.bytes_discovered),
-        directories_indexed: saturating_i64(inputs.directories_indexed),
-        definitions_indexed: saturating_i64(inputs.definitions_indexed),
-        imported_symbols_indexed: saturating_i64(inputs.imported_symbols_indexed),
-        edges_indexed: saturating_i64(inputs.edges_indexed),
-        written_rows: saturating_i64(inputs.written_rows),
-        written_bytes: saturating_i64(inputs.written_bytes),
-        duration_ms: saturating_i64(inputs.duration_ms),
-    })
+    ))
 }

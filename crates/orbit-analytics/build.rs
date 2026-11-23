@@ -101,7 +101,6 @@ fn render_module(iglu_dir: &Path, schema_name: &str, type_name: &str) -> String 
     }
     inject_defaults(&mut parsed, schema_name);
     promote_defaults_on_required(&mut parsed);
-    let max_lengths = take_max_lengths(&mut parsed, schema_name);
 
     let mut type_space = TypeSpace::new(
         TypeSpaceSettings::default()
@@ -143,54 +142,8 @@ fn render_module(iglu_dir: &Path, schema_name: &str, type_name: &str) -> String 
     out.push_str(&format!(
         "    pub const SCHEMA_JSON: &str = {schema_raw:?};\n"
     ));
-    out.push_str("    pub const MAX_LENGTHS: &[(&str, usize)] = &[\n");
-    for (field, max_length) in &max_lengths {
-        out.push_str(&format!("        ({field:?}, {max_length}),\n"));
-    }
-    out.push_str("    ];\n");
     out.push_str("}\n\n");
     out
-}
-
-/// Take `maxLength` out of the schema, so the runtime cuts a value instead of rejecting it.
-fn take_max_lengths(schema: &mut Value, schema_name: &str) -> Vec<(String, usize)> {
-    let mut max_lengths = Vec::new();
-    if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
-        for (field, property) in properties {
-            let constrained = if property.get("items").is_some() {
-                &mut property["items"]
-            } else {
-                property
-            };
-            if let Some(max_length) = constrained
-                .as_object_mut()
-                .and_then(|constraints| constraints.remove("maxLength"))
-            {
-                let max_length = max_length
-                    .as_u64()
-                    .and_then(|max_length| usize::try_from(max_length).ok())
-                    .unwrap_or_else(|| {
-                        panic!("{schema_name}.{field}: maxLength must be an integer")
-                    });
-                max_lengths.push((field.clone(), max_length));
-            }
-        }
-    }
-    assert!(
-        !contains_max_length(schema),
-        "{schema_name}: maxLength is supported only on a property or on its array items"
-    );
-    max_lengths
-}
-
-fn contains_max_length(schema: &Value) -> bool {
-    match schema {
-        Value::Object(object) => {
-            object.contains_key("maxLength") || object.values().any(contains_max_length)
-        }
-        Value::Array(items) => items.iter().any(contains_max_length),
-        _ => false,
-    }
 }
 
 /// Inject property defaults that GKG needs for `derive(Default)` but that
