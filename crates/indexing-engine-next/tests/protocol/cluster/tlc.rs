@@ -101,7 +101,7 @@ pub(super) fn state_lines(cluster: &Cluster) -> Vec<String> {
             ),
         ),
         (
-            "pending",
+            "marker",
             cluster
                 .pending
                 .get()

@@ -4,7 +4,6 @@ mod faults;
 mod key_value;
 mod ports;
 mod tick_clock;
-mod trace;
 mod worker;
 mod world;
 
@@ -57,7 +56,6 @@ pub struct SimulationReport {
     seed: u64,
     broken: Option<String>,
     timeline: Vec<String>,
-    trace: Vec<String>,
     counts: BTreeMap<String, usize>,
 }
 
@@ -130,10 +128,6 @@ impl Simulation {
             }
         }
         cluster.stop_and_report()
-    }
-
-    pub(super) fn count_ticks(&self) -> u32 {
-        FAULT_TICKS + HEAL_TICKS
     }
 }
 
@@ -228,7 +222,6 @@ impl Cluster {
             seed: outcome.seed,
             broken: outcome.broken,
             timeline: outcome.timeline,
-            trace: outcome.trace,
             counts: outcome.counts,
         }
     }

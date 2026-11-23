@@ -11,7 +11,6 @@ CONSTANTS
     RenewEvery,
     SkewMargin,
     AckWait,
-    GiveBackDelay,
     MaxTime,
     MaxEvents,
     MaxStalls,
@@ -19,8 +18,8 @@ CONSTANTS
     MaxWipes,
     MaxDuplicates,
     MaxLosses,
-    StartClearsOnlyOwnPending,
-    SubmitRepublishesFoundPending,
+    StartClearsOnlyOwnMarker,
+    SubmitRepublishesFoundMarker,
     HolderStopsBeforeExpiry,
     WritesFencedByLeaseRevision,
     FenceHasGeneration
@@ -29,7 +28,7 @@ VARIABLES
     now,
     offset,
     lease,
-    pending,
+    marker,
     nextId,
     copies,
     planner,
@@ -55,17 +54,17 @@ VARIABLES
     lossesLeft,
     lostInWipe
 
-vars == <<now, offset, lease, pending, nextId, copies, planner, submitted, cover,
+vars == <<now, offset, lease, marker, nextId, copies, planner, submitted, cover,
           started, pc, held, token, seenRev, expiry, renewAt, stalled,
           stallsLeft, crashesLeft, storeFence, staleWrite, rejectedCurrent,
           generation, natsGeneration, wipesLeft, duplicatesLeft, lossesLeft, lostInWipe>>
 
 podVars == <<pc, held, token, seenRev, expiry, renewAt, stalled>>
-plannerVars == <<pending, nextId, planner, submitted, cover>>
+plannerVars == <<marker, nextId, planner, submitted, cover>>
 storeVars == <<storeFence, staleWrite, rejectedCurrent, generation>>
 natsVars == <<natsGeneration, wipesLeft, duplicatesLeft, lossesLeft, lostInWipe>>
 
-NoId == 0
+NoMarker == 0
 MaxIds == MaxEvents + MaxCrashes
 Ids == 1..MaxIds
 HoldingPhases == {"leased", "running", "writing", "done"}
@@ -102,12 +101,12 @@ Init ==
     /\ now = 0
     /\ offset \in [Pods -> Offsets]
     /\ lease = [holder |-> NoPod, expiresAt |-> 0, rev |-> 0]
-    /\ pending = NoId
+    /\ marker = NoMarker
     /\ nextId = 1
     /\ copies = <<>>
-    /\ planner = [phase |-> "idle", id |-> NoId]
+    /\ planner = [phase |-> "idle", id |-> NoMarker]
     /\ submitted = 0
-    /\ cover = [e \in 1..MaxEvents |-> NoId]
+    /\ cover = [e \in 1..MaxEvents |-> NoMarker]
     /\ started = {}
     /\ pc = [p \in Pods |-> "idle"]
     /\ held = [p \in Pods |-> 0]
@@ -139,17 +138,17 @@ Tick ==
 Submit ==
     /\ planner.phase = "idle"
     /\ submitted < MaxEvents
-    /\ IF pending = NoId
-         THEN /\ pending' = nextId
+    /\ IF marker = NoMarker
+         THEN /\ marker' = nextId
               /\ nextId' = nextId + 1
               /\ planner' = [phase |-> "publishing", id |-> nextId]
               /\ UNCHANGED <<submitted, cover>>
-         ELSE IF SubmitRepublishesFoundPending
-           THEN /\ planner' = [phase |-> "publishing", id |-> pending]
-                /\ UNCHANGED <<pending, nextId, submitted, cover>>
+         ELSE IF SubmitRepublishesFoundMarker
+           THEN /\ planner' = [phase |-> "publishing", id |-> marker]
+                /\ UNCHANGED <<marker, nextId, submitted, cover>>
            ELSE /\ submitted' = submitted + 1
-                /\ cover' = [cover EXCEPT ![submitted + 1] = pending]
-                /\ UNCHANGED <<pending, nextId, planner>>
+                /\ cover' = [cover EXCEPT ![submitted + 1] = marker]
+                /\ UNCHANGED <<marker, nextId, planner>>
     /\ UNCHANGED <<now, offset, lease, copies, started, stallsLeft, crashesLeft>>
     /\ UNCHANGED <<podVars, storeVars>>
     /\ UNCHANGED natsVars
@@ -162,8 +161,8 @@ Publish ==
                                         deadline |-> 0, pod |-> NoPod])
     /\ submitted' = submitted + 1
     /\ cover' = [cover EXCEPT ![submitted + 1] = planner.id]
-    /\ planner' = [phase |-> "idle", id |-> NoId]
-    /\ UNCHANGED <<now, offset, lease, pending, nextId, started, stallsLeft, crashesLeft>>
+    /\ planner' = [phase |-> "idle", id |-> NoMarker]
+    /\ UNCHANGED <<now, offset, lease, marker, nextId, started, stallsLeft, crashesLeft>>
     /\ UNCHANGED <<podVars, storeVars>>
     /\ UNCHANGED natsVars
 
@@ -171,8 +170,8 @@ PlannerCrash ==
     /\ planner.phase = "publishing"
     /\ crashesLeft > 0
     /\ crashesLeft' = crashesLeft - 1
-    /\ planner' = [phase |-> "idle", id |-> NoId]
-    /\ UNCHANGED <<now, offset, lease, pending, nextId, copies, submitted, cover, started, stallsLeft>>
+    /\ planner' = [phase |-> "idle", id |-> NoMarker]
+    /\ UNCHANGED <<now, offset, lease, marker, nextId, copies, submitted, cover, started, stallsLeft>>
     /\ UNCHANGED <<podVars, storeVars>>
     /\ UNCHANGED natsVars
 
@@ -211,26 +210,12 @@ AcquireLease(p) ==
     /\ UNCHANGED <<held, stalled, plannerVars, storeVars>>
     /\ UNCHANGED natsVars
 
-\* why: a pod that finds the lease of its key held gives the message back to the broker with a delay, so it frees its slot and doesn't wait for the lease.
-GiveBack(p) ==
-    LET c == held[p] IN
-    /\ pc[p] = "leasing"
-    /\ Awake(p)
-    /\ ~(LeaseAcquirable(p) /\ (FenceHasGeneration => natsGeneration # 0))
-    /\ copies' = IF copies[c].state = "inflight"
-                   THEN [copies EXCEPT ![c].pod = NoPod, ![c].deadline = now + GiveBackDelay]
-                   ELSE copies
-    /\ DropRun(p)
-    /\ UNCHANGED <<now, offset, lease, started, stallsLeft, crashesLeft>>
-    /\ UNCHANGED <<token, seenRev, expiry, renewAt, stalled, plannerVars, storeVars>>
-    /\ UNCHANGED natsVars
-
 StartTask(p) ==
     LET id == copies[held[p]].id IN
     /\ pc[p] = "leased"
     /\ Awake(p)
     /\ started' = started \cup {id}
-    /\ pending' = IF StartClearsOnlyOwnPending /\ pending # id THEN pending ELSE NoId
+    /\ marker' = IF StartClearsOnlyOwnMarker /\ marker # id THEN marker ELSE NoMarker
     /\ pc' = [pc EXCEPT ![p] = "running"]
     /\ UNCHANGED <<now, offset, lease, nextId, copies, planner, submitted, cover, stallsLeft, crashesLeft>>
     /\ UNCHANGED <<held, token, seenRev, expiry, renewAt, stalled, storeVars>>
@@ -340,7 +325,7 @@ NatsWipe ==
     /\ wipesLeft > 0
     /\ wipesLeft' = wipesLeft - 1
     /\ lease' = [holder |-> NoPod, expiresAt |-> 0, rev |-> 0]
-    /\ pending' = NoId
+    /\ marker' = NoMarker
     /\ copies' = [c \in DOMAIN copies |-> LoseCopy(c)]
     /\ lostInWipe' = lostInWipe \cup {id \in 1..(nextId - 1) : ~IsDone(id)}
     /\ natsGeneration' = IF FenceHasGeneration THEN 0 ELSE natsGeneration
@@ -352,7 +337,7 @@ RecoverNats ==
     /\ natsGeneration = 0
     /\ generation' = generation + 1
     /\ natsGeneration' = generation + 1
-    /\ UNCHANGED <<now, offset, lease, pending, nextId, copies, planner, submitted, cover, started>>
+    /\ UNCHANGED <<now, offset, lease, marker, nextId, copies, planner, submitted, cover, started>>
     /\ UNCHANGED <<stallsLeft, crashesLeft, storeFence, staleWrite, rejectedCurrent>>
     /\ UNCHANGED <<wipesLeft, duplicatesLeft, lossesLeft, lostInWipe, podVars>>
 
@@ -385,7 +370,6 @@ Next ==
     \/ \E p \in Pods :
         \/ \E c \in DOMAIN copies : Deliver(p, c)
         \/ AcquireLease(p)
-        \/ GiveBack(p)
         \/ StartTask(p)
         \/ Renew(p)
         \/ RenewFails(p)
@@ -401,7 +385,7 @@ Spec == Init /\ [][Next]_vars
 TypeOK ==
     /\ now \in 0..MaxTime
     /\ lease.holder \in Pods \cup {NoPod}
-    /\ pending \in {NoId} \cup Ids
+    /\ marker \in {NoMarker} \cup Ids
     /\ nextId \in 1..(MaxIds + 1)
     /\ Len(copies) <= MaxIds + MaxDuplicates
     /\ submitted \in 0..MaxEvents
@@ -417,7 +401,7 @@ NoOverlap == Cardinality({p \in Pods : pc[p] \in RunPhases}) <= 1
 \* why: after a wipe, the recovery campaign of ADR 023 owns every task from before the wipe. A submit in flight during the wipe can leave one extra pending task, and the key then runs once more.
 PendingIds == {id \in Ids : id \notin started /\ id \notin lostInWipe /\ HasLiveCopy(id)}
 
-AtMostOnePending == PendingIds \subseteq {pending}
+AtMostOnePending == PendingIds \subseteq {marker}
 
 Covered(id) ==
     \/ id \in started

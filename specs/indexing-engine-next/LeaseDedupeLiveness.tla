@@ -17,7 +17,6 @@ EngineStep ==
     \/ \E p \in Pods :
         \/ \E c \in DOMAIN copies : Deliver(p, c)
         \/ AcquireLease(p)
-        \/ GiveBack(p)
         \/ StartTask(p)
         \/ Renew(p)
         \/ BeginWrite(p)
@@ -36,7 +35,7 @@ FaultsStop ==
     /\ ~quiet
     /\ quiet' = TRUE
     /\ now' = Horizon
-    /\ UNCHANGED <<offset, lease, pending, nextId, copies, planner, submitted, cover, started>>
+    /\ UNCHANGED <<offset, lease, marker, nextId, copies, planner, submitted, cover, started>>
     /\ UNCHANGED <<stallsLeft, crashesLeft, podVars, storeVars, natsVars>>
 
 LiveInit == Init /\ quiet = FALSE
@@ -56,7 +55,6 @@ LiveSpec ==
     /\ \A p \in Pods :
         /\ WF_allVars(\E c \in DOMAIN copies : Deliver(p, c) /\ UNCHANGED quiet)
         /\ WF_allVars(AcquireLease(p) /\ UNCHANGED quiet)
-        /\ WF_allVars(GiveBack(p) /\ UNCHANGED quiet)
         /\ WF_allVars(StartTask(p) /\ UNCHANGED quiet)
         /\ WF_allVars(Renew(p) /\ UNCHANGED quiet)
         /\ WF_allVars(BeginWrite(p) /\ UNCHANGED quiet)

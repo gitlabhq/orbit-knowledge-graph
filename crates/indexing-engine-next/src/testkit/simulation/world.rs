@@ -60,7 +60,6 @@ pub(super) struct World {
     pub(super) planner_crash_armed: bool,
     pub(super) rejected_current: bool,
     pub(super) submits: usize,
-    trace: Vec<String>,
     timeline: Vec<String>,
     broken: Option<String>,
     counts: BTreeMap<String, usize>,
@@ -106,7 +105,6 @@ pub(super) struct WorldOutcome {
     pub(super) seed: u64,
     pub(super) broken: Option<String>,
     pub(super) timeline: Vec<String>,
-    pub(super) trace: Vec<String>,
     pub(super) counts: BTreeMap<String, usize>,
 }
 
@@ -147,7 +145,6 @@ impl SharedWorld {
             planner_crash_armed: false,
             rejected_current: false,
             submits,
-            trace: Vec::new(),
             timeline: Vec::new(),
             broken: None,
             counts: BTreeMap::new(),
@@ -217,7 +214,6 @@ impl SharedWorld {
             seed: world.seed,
             broken: world.broken.take(),
             timeline: std::mem::take(&mut world.timeline),
-            trace: std::mem::take(&mut world.trace),
             counts: std::mem::take(&mut world.counts),
         }
     }
@@ -241,10 +237,6 @@ impl World {
     pub(super) fn now_tick(&self) -> u64 {
         let elapsed = Instant::now().duration_since(self.started_at);
         u64::try_from(elapsed.as_millis() / TICK.as_millis()).unwrap_or(u64::MAX)
-    }
-
-    pub(super) fn seen_tick(&self) -> u64 {
-        self.seen_tick
     }
 
     pub(super) fn local_time(&self, actor: Actor) -> SystemTime {
@@ -450,12 +442,6 @@ impl World {
             self.timeline
                 .push(format!("t{} {name}{detail}", self.seen_tick));
         }
-        if self.step_order == StepOrder::Atomic {
-            let state = self.format_spec_state();
-            if self.trace.last() != Some(&state) {
-                self.trace.push(state);
-            }
-        }
         if let Some(rule) = self.find_broken_rule() {
             self.break_rule(rule.to_owned());
         }
@@ -492,9 +478,6 @@ impl World {
 
     fn record_initial_state(&mut self) {
         self.timeline.push("t0 Init".to_owned());
-        if self.step_order == StepOrder::Atomic {
-            self.trace.push(self.format_spec_state());
-        }
     }
 
     fn record_passed_ticks(&mut self) {
@@ -563,17 +546,6 @@ impl Phase {
         match self {
             Phase::Leased | Phase::Running | Phase::Writing | Phase::Done => true,
             Phase::Idle | Phase::Leasing => false,
-        }
-    }
-
-    pub(super) fn spec_name(self) -> &'static str {
-        match self {
-            Phase::Idle => "idle",
-            Phase::Leasing => "leasing",
-            Phase::Leased => "leased",
-            Phase::Running => "running",
-            Phase::Writing => "writing",
-            Phase::Done => "done",
         }
     }
 }

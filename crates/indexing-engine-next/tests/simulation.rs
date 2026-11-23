@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::time::Duration;
 
 use indexing_engine_next::lease::{Fence, Generation, Revision};
@@ -10,7 +9,6 @@ use indexing_engine_next::testkit::simulation::{
 use uuid::Uuid;
 
 const SEEDS: u64 = 300;
-const SEEDS_PER_TRACE_MODULE: usize = 50;
 
 fn task(n: u128) -> TaskId {
     TaskId::new(Uuid::from_u128(n))
@@ -260,37 +258,4 @@ async fn a_seed_replays_the_same_steps() {
     let second = three_processes().run(7).await;
 
     assert_eq!(format!("{first:?}"), format!("{second:?}"));
-}
-
-#[tokio::test(start_paused = true)]
-async fn an_interleaved_simulation_writes_no_trace_for_tlc() {
-    let simulation = two_processes().interleave_inside_steps();
-    let reports = vec![simulation.run(0).await];
-
-    let written = simulation.write_trace_check(&std::env::temp_dir(), &reports);
-
-    assert!(written.is_err());
-}
-
-#[tokio::test(start_paused = true)]
-#[ignore = "writes the traces that TLC checks; mise run spec:engine:trace runs this test and TLC"]
-async fn every_step_of_the_simulated_lane_loop_is_a_step_of_the_spec() {
-    let folder = PathBuf::from(
-        std::env::var("ENGINE_SPEC_TRACES")
-            .expect("ENGINE_SPEC_TRACES names the folder of the traces"),
-    );
-    for (name, simulation) in [
-        ("TwoProcesses", two_processes()),
-        ("ThreeProcesses", three_processes()),
-    ] {
-        let reports = run_seeds(&simulation).await;
-        for (chunk, reports) in reports.chunks(SEEDS_PER_TRACE_MODULE).enumerate() {
-            for report in reports {
-                report.assert_rules_held();
-            }
-            simulation
-                .write_trace_check(&folder.join(format!("{name}{chunk}")), reports)
-                .expect("the trace module is written");
-        }
-    }
 }

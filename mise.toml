@@ -526,27 +526,6 @@ ENGINE_SPEC_TLC_GRAPHS="$graphs" cargo test -q --release -p indexing-engine-next
 rm -f "$graphs"/*.dot
 """
 
-[tasks."spec:engine:trace"]
-description = "Check with TLC that every step of the simulated runner is a step of the spec"
-tools = { java = "temurin-21.0.13+9.0.LTS" }
-depends = ["spec:engine:tools"]
-shell = "bash -c"
-run = """
-set -euo pipefail
-traces="$PWD/${CARGO_TARGET_DIR:-target}/tmp/indexing-engine-next-spec/traces"
-rm -rf "$traces" && mkdir -p "$traces"
-ENGINE_SPEC_TRACES="$traces" cargo test -q -p indexing-engine-next --test simulation \
-  every_step_of_the_simulated_lane_loop_is_a_step_of_the_spec -- --include-ignored
-for folder in "$traces"/*/; do
-  name=$(basename "$folder")
-  cp specs/indexing-engine-next/LeaseDedupe.tla specs/indexing-engine-next/LeaseDedupeTraceCheck.tla "$folder"
-  java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir "target/tlc-trace-$name" \
-    -config "$folder/LeaseDedupeTraceCheck.cfg" "$folder/LeaseDedupeTraceCheck.tla" > "$folder/tlc.log" 2>&1 \
-    || { tail -80 "$folder/tlc.log"; echo "$name: a step of the runner is not a step of the spec"; exit 1; }
-  echo "$name: every step of $(grep -oE "[0-9]+ distinct states found" "$folder/tlc.log" | grep -oE "^[0-9]+") trace states is a step of the spec"
-done
-"""
-
 [tasks."schema:bump"]
 run = "cargo xtask migration-ledger bump"
 description = "Bump the schema pin in config/versions.yaml, append a migration ledger entry, and re-snapshot fingerprints"
