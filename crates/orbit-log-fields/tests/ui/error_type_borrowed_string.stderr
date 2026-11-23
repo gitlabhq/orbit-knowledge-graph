@@ -1,0 +1,12 @@
+error[E0597]: `error` does not live long enough
+ --> tests/ui/error_type_borrowed_string.rs:3:48
+  |
+2 |     let error = String::from("customer text");
+  |         ----- binding `error` declared here
+3 |     orbit_log_fields::warn!(safe(ERROR_TYPE) = error.as_str(), "rejected");
+  |     -------------------------------------------^^^^^----------------------
+  |     |                                          |
+  |     |                                          borrowed value does not live long enough
+  |     argument requires that `error` is borrowed for `'static`
+4 | }
+  | - `error` dropped here while still borrowed
