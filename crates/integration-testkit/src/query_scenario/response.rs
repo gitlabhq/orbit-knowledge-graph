@@ -114,7 +114,10 @@ pub(super) fn assert_compilation<T>(
         (Ok(_), Some(reason)) => {
             panic!("{label}: expected a {reason} rejection but the query compiled")
         }
-        (Err(error), None) => panic!("{label}: unexpected compile error: {error}"),
+        (Err(error), None) => panic!(
+            "{label}: unexpected {} failure: {error}",
+            error.failure_reason().as_str()
+        ),
         (Err(error), Some(reason)) => {
             let actual = error.failure_reason().as_str();
             assert!(

@@ -141,15 +141,15 @@ async fn run_frontend<E: Engine>(
     let label = &format!("{name} [{key} on {backend}]");
     expect.validate_pages_exclusive(label);
 
+    if !expect.pages.is_empty() && expect.compile_error.is_none() {
+        run_pages(engine, frontend, query, expect, label).await;
+        return;
+    }
+
     let result = engine.run(query, frontend).await;
     let Some(output) = assert_compilation(result, expect, (backend, key), label) else {
         return;
     };
-
-    if !expect.pages.is_empty() {
-        run_pages(engine, frontend, query, expect, label).await;
-        return;
-    }
 
     let baseline = assert_output(&output, expect, label);
     for run in 2..=repeat_count(expect, label) {
