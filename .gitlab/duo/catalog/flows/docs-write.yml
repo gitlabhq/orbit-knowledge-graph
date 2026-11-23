@@ -11,7 +11,7 @@ components:
     inputs:
       - from: >-
           SKILLS_REPO=gitlab-org/orbit/team/skills;
-          SKILLS_REF=57b60329164c80757e00f51c67d1b5488850d568;
+          SKILLS_REF=d5730abdd459575e8b59bd51ce588576da587276;
           MODE=full;
           DOCS_REVIEWERS=fneill,z_painter;
           FLOW_USER=44621578;
