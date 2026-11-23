@@ -21,10 +21,10 @@ migrations:
   entities:
   - Pipeline
   note: >-
-    Pipeline gains a name property, left-joined from siphon_ci_pipeline_metadata in a new
-    pipeline.sql.j2 extract. Only gl_pipeline changes shape (new name column and text index),
-    so only the Pipeline entity re-indexes; the deriver now maps a node .sql.j2 change to its
-    owning node.
+    Pipeline gains a name property, left-joined from siphon_ci_pipeline_metadata in
+    a new pipeline.sql.j2 extract. The extract selects the page of pipelines first,
+    then reads metadata only for those pipelines. Only gl_pipeline changes shape (new
+    name column and text index), so only the Pipeline entity re-indexes.
 - version: 126
   scope: "*"
   note: >-
