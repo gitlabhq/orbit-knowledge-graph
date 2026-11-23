@@ -29,7 +29,7 @@ use service::ProfilerPipelineService;
 )]
 struct Cli {
     #[arg(
-        help = "Query string or @filepath. Named JSON objects map names to JSON queries, or to GQL strings when used with --gql."
+        help = "Query string or @filepath. Named JSON objects map names to JSON queries, or to GQL strings when used with --gql"
     )]
     query: String,
 
@@ -83,7 +83,7 @@ struct Cli {
 
     #[arg(
         long,
-        help = "Schema version prefix for table names (e.g. 24 → v24_gl_project). Defaults to the embedded SCHEMA_VERSION from config/SCHEMA_VERSION."
+        help = "Schema version prefix for table names (e.g. 24 → v24_gl_project). Defaults to the embedded SCHEMA_VERSION from config/SCHEMA_VERSION"
     )]
     schema_version: Option<u32>,
 
@@ -116,21 +116,21 @@ struct Cli {
 
     #[arg(
         long,
-        help = "Send raw SQL directly to ClickHouse (skip DSL compilation). Supports @filepath for SQL files."
+        help = "Send raw SQL directly to ClickHouse (skip DSL compilation). Supports @filepath for SQL files"
     )]
     raw_sql: bool,
 
     #[arg(
         long,
         value_enum,
-        help = "Compile only: print rendered SQL without executing."
+        help = "Compile only: print rendered SQL without executing"
     )]
     compile_only: Option<CompileShow>,
 
     #[arg(
         long,
         value_enum,
-        help = "Include the formatted response agents receive (`toon` = llm format, `json` = raw graph) as a `response` field in the profiler output."
+        help = "Include the formatted response agents receive (`toon` = llm format, `json` = raw graph) as a `response` field in the profiler output"
     )]
     emit_response: Option<ResponseFormat>,
 }
