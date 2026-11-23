@@ -1509,4 +1509,58 @@ mod tests {
         assert_eq!(dates.values().as_ref(), [19_000, 0]);
         assert!(dates.is_null(1));
     }
+
+    #[test]
+    fn batch_builder_fills_declared_columns() {
+        struct Node {
+            id: i64,
+            path: String,
+        }
+        let nodes = vec![
+            Node {
+                id: 1,
+                path: "a.rs".into(),
+            },
+            Node {
+                id: 2,
+                path: "b.rs".into(),
+            },
+        ];
+        let specs = vec![
+            ColumnSpec {
+                name: "id".into(),
+                col_type: ColumnType::Int,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "path".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+        ];
+        let batch = BatchBuilder::new(&specs, nodes.len())
+            .unwrap()
+            .build(&nodes, |n, b| {
+                b.col("id")?.push_int(n.id)?;
+                b.col("path")?.push_str(&n.path)?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(batch.num_rows(), 2);
+        assert_eq!(batch.schema().field(0).name(), "id");
+        assert_eq!(batch.schema().field(1).name(), "path");
+        let ids = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        assert_eq!(ids.values(), &[1, 2]);
+        let paths = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(paths.value(1), "b.rs");
+    }
 }
