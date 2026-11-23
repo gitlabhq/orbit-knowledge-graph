@@ -196,15 +196,6 @@ impl<T> Cases<T> {
         }
     }
 
-    /// The cases a node of `kind` tries, in order; `None` for a value that is
-    /// not a node, which tries only the cases for any kind.
-    fn tried(&self, kind: Option<u16>) -> impl Iterator<Item = &T> {
-        kind.and_then(|k| self.by_kind.get(&k))
-            .unwrap_or(&self.any)
-            .iter()
-            .map(|&at| &self.items[usize::from(at)])
-    }
-
     fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
@@ -216,50 +207,82 @@ impl<T> Cases<T> {
 }
 
 /// A case anchored by a pattern.
+/// A case: its pattern, none for `_`, which takes any value, and a guard
+/// read after the arguments are bound.
 trait Anchored {
-    fn at(&self) -> &Match;
+    fn at(&self) -> Option<&Match>;
+    fn guard(&self) -> Option<&Expr> {
+        None
+    }
 }
 
 impl<B> Anchored for (Match, B) {
-    fn at(&self) -> &Match {
-        &self.0
+    fn at(&self) -> Option<&Match> {
+        Some(&self.0)
     }
 }
 
 impl Anchored for Rewrite {
-    fn at(&self) -> &Match {
-        &self.at
+    fn at(&self) -> Option<&Match> {
+        Some(&self.at)
+    }
+}
+
+impl Anchored for DefCase {
+    fn at(&self) -> Option<&Match> {
+        self.0.as_ref()
+    }
+    fn guard(&self) -> Option<&Expr> {
+        self.1.as_ref()
     }
 }
 
 impl<T: Anchored> Cases<T> {
-    /// At `c`, each group's first case whose pattern and guard hold, in case
-    /// order; `fire` applies it and returns false to stop at this node. Each
-    /// attempt is profiled by the case's pattern.
+    /// Each group's first case that holds, in case order: its pattern matches
+    /// `node` (a case with none takes `args[0]` whatever it is), then, with
+    /// the rest of `args` bound after the captures, its guard is true. `fire`
+    /// applies the case and returns false to stop. Each attempt is profiled
+    /// by the case's pattern.
     fn fire<'c, S: Store>(
         &'c self,
         run: &mut Run<S>,
         w: &mut Scratch<S>,
-        c: Cursor<'_, S>,
+        node: Option<Cursor<'_, S>>,
+        args: &[Vals],
         mut fire: impl FnMut(&mut Run<S>, &Scratch<S>, &'c T) -> bool,
     ) {
         let mut fired: SmallVec<[u16; 8]> = SmallVec::new();
-        let list = self.by_kind.get(&c.kind()).unwrap_or(&self.any);
+        let list = node
+            .and_then(|c| self.by_kind.get(&c.kind()))
+            .unwrap_or(&self.any);
         for &at in list {
             let group = self.groups[usize::from(at)];
             if fired.contains(&group) {
                 continue;
             }
             let case = &self.items[usize::from(at)];
-            let m = case.at();
             let started = run.profiling().then(std::time::Instant::now);
-            let holds = w.matches(run, m, c) && w.holds(run, m);
-            let matched = started.map(|s| s.elapsed());
+            let matched = match (case.at(), node) {
+                (Some(m), Some(c)) => w.matches(run, m, c) && w.holds(run, m),
+                (Some(_), None) => false,
+                (None, _) => {
+                    w.vals[0] = args[0].clone();
+                    true
+                }
+            };
+            let holds = matched && {
+                if args.len() > 1 {
+                    w.vals[1..args.len()].clone_from_slice(&args[1..]);
+                }
+                case.guard()
+                    .is_none_or(|g| super::truthy(&g.eval(run, &w.vals)))
+            };
+            let spent = started.map(|s| s.elapsed());
             let go_on = !holds || {
                 fired.push(group);
                 fire(run, w, case)
             };
-            if let (Some(s), Some(matching)) = (started, matched) {
+            if let (Some(s), Some(matching), Some(m)) = (started, spent, case.at()) {
                 run.profile_rule(
                     m as *const Match as usize,
                     &m.src,
@@ -356,29 +379,17 @@ impl Def {
                 out
             }
             DefImpl::Cases(cases) => {
-                let head = args[0].first().and_then(|v| v.loc());
-                let kind = head.map(|h| Cursor::new(run.trees, h.fi, h.node).kind());
+                let node = args[0]
+                    .first()
+                    .and_then(|v| v.loc())
+                    .map(|h| Cursor::new(run.trees, h.fi, h.node));
                 let mut w = Scratch::<S>::new(self.slots.max(args.len()));
-                for (at, when, value) in cases.tried(kind) {
-                    match (at, head) {
-                        (Some(at), Some(head)) => {
-                            if !w.matches(run, at, Cursor::new(run.trees, head.fi, head.node)) {
-                                continue;
-                            }
-                        }
-                        (Some(_), None) => continue,
-                        (None, _) => w.vals[0] = args[0].clone(),
-                    }
-                    w.vals[1..args.len()].clone_from_slice(&args[1..]);
-                    if when
-                        .as_ref()
-                        .is_some_and(|e| !super::truthy(&e.eval(run, &w.vals)))
-                    {
-                        continue;
-                    }
-                    return value.eval(run, &w.vals);
-                }
-                Vals::new()
+                let mut found = Vals::new();
+                cases.fire(run, &mut w, node, args, |run, w, (_, _, value)| {
+                    found = value.eval(run, &w.vals);
+                    false
+                });
+                found
             }
         }
     }
@@ -1714,11 +1725,13 @@ impl Phase {
             }
             let c = root.jump(root.fi(), node);
             match &self.body {
-                Body::Edges(rules) => rules.fire(run, &mut w, c, |run, w, (_, emits)| {
-                    emits.iter().for_each(|e| e.run(run, &w.vals));
-                    true
-                }),
-                Body::Rows(rules) => rules.fire(run, &mut w, c, |run, w, (_, rows)| {
+                Body::Edges(rules) => {
+                    rules.fire(run, &mut w, Some(c), &[], |run, w, (_, emits)| {
+                        emits.iter().for_each(|e| e.run(run, &w.vals));
+                        true
+                    })
+                }
+                Body::Rows(rules) => rules.fire(run, &mut w, Some(c), &[], |run, w, (_, rows)| {
                     rows.iter().for_each(|r| r.run(run, &w.vals));
                     true
                 }),
@@ -1848,10 +1861,12 @@ impl Phase {
                     run.graph_fi = fi;
                     let c = Cursor::new(run.trees, run.fi, target);
                     let mut fired = Vec::new();
-                    stage.rules.fire(&mut run, &mut w, c, |run, w, rule| {
-                        fired.push((rule, settle(run, w, rule).0));
-                        true
-                    });
+                    stage
+                        .rules
+                        .fire(&mut run, &mut w, Some(c), &[], |run, w, rule| {
+                            fired.push((rule, settle(run, w, rule).0));
+                            true
+                        });
                     fired
                 };
                 for (rule, tags) in fired {
@@ -1895,13 +1910,15 @@ impl Phase {
                 let mut run = self.run(&*tree, env, budget, file);
                 let c = Cursor::new(run.trees, run.fi, target);
                 let mut fired = Vec::new();
-                stage.rules.fire(&mut run, &mut w, c, |run, w, rule| {
-                    let (tags, texts) = settle(run, w, rule);
-                    let mut caps = w.caps.clone();
-                    caps[0] = SmallVec::from_elem(run.trees[0].storage.id(target), 1);
-                    fired.push((rule, Fired { caps, tags, texts }));
-                    !matches!(rule.out, Out::Replace(_))
-                });
+                stage
+                    .rules
+                    .fire(&mut run, &mut w, Some(c), &[], |run, w, rule| {
+                        let (tags, texts) = settle(run, w, rule);
+                        let mut caps = w.caps.clone();
+                        caps[0] = SmallVec::from_elem(run.trees[0].storage.id(target), 1);
+                        fired.push((rule, Fired { caps, tags, texts }));
+                        !matches!(rule.out, Out::Replace(_))
+                    });
                 fired
             };
             for (rule, fired) in fired {
