@@ -156,12 +156,26 @@ struct Rewrite {
 /// own merged with `any`, the cases for every kind.
 struct Cases<T> {
     items: Vec<T>,
+    /// Each case's group: at a node, only a group's first matching case fires.
+    groups: Vec<u16>,
     by_kind: HashMap<u16, Vec<u16>>,
     any: Vec<u16>,
 }
 
 impl<T> Cases<T> {
+    /// Cases in one group.
     fn new(items: Vec<T>, kinds: impl Fn(&T) -> &[u16]) -> Self {
+        let groups = vec![0; items.len()];
+        Self::with_groups(items, groups, kinds)
+    }
+
+    /// Cases tagged with their group, in order.
+    fn grouped(items: Vec<(u16, T)>, kinds: impl Fn(&T) -> &[u16]) -> Self {
+        let (groups, items) = items.into_iter().unzip();
+        Self::with_groups(items, groups, kinds)
+    }
+
+    fn with_groups(items: Vec<T>, groups: Vec<u16>, kinds: impl Fn(&T) -> &[u16]) -> Self {
         let mut by_kind: HashMap<u16, Vec<u16>> = HashMap::new();
         for (at, item) in items.iter().enumerate() {
             for &kind in kinds(item) {
@@ -176,6 +190,7 @@ impl<T> Cases<T> {
         }
         Self {
             items,
+            groups,
             by_kind,
             any,
         }
@@ -213,24 +228,45 @@ impl Anchored for Rewrite {
 }
 
 impl<T: Anchored> Cases<T> {
-    /// The first case whose pattern and guard hold at `c`, its captures left
-    /// in `w`; each attempt is profiled by the case's pattern.
-    fn first<S: Store>(
+    /// At `c`, each group's first case whose pattern and guard hold, in case
+    /// order; `fire` applies it and returns false to stop at this node. Each
+    /// attempt is profiled by the case's pattern.
+    fn fire<S: Store>(
         &self,
         run: &mut Run<S>,
         w: &mut Scratch<S>,
         c: Cursor<'_, S>,
-    ) -> Option<&T> {
-        self.tried(Some(c.kind())).find(|case| {
+        mut fire: impl FnMut(&mut Run<S>, &Scratch<S>, &T) -> bool,
+    ) {
+        let mut fired: SmallVec<[u16; 8]> = SmallVec::new();
+        let list = self.by_kind.get(&c.kind()).unwrap_or(&self.any);
+        for &at in list {
+            let group = self.groups[usize::from(at)];
+            if fired.contains(&group) {
+                continue;
+            }
+            let case = &self.items[usize::from(at)];
             let m = case.at();
             let started = run.profiling().then(std::time::Instant::now);
-            let fired = w.matches(run, m, c) && w.holds(run, m);
-            if let Some(s) = started {
-                let spent = s.elapsed();
-                run.profile_rule(m as *const Match as usize, &m.src, fired, spent, spent);
+            let holds = w.matches(run, m, c) && w.holds(run, m);
+            let matched = started.map(|s| s.elapsed());
+            let go_on = !holds || {
+                fired.push(group);
+                fire(run, w, case)
+            };
+            if let (Some(s), Some(matching)) = (started, matched) {
+                run.profile_rule(
+                    m as *const Match as usize,
+                    &m.src,
+                    holds,
+                    matching,
+                    s.elapsed(),
+                );
             }
-            fired
-        })
+            if !go_on {
+                return;
+            }
+        }
     }
 }
 
@@ -250,6 +286,7 @@ struct Stage {
 /// A group's pairs, tried in order on each node; the first that matches
 /// emits every edge its value names.
 type EdgeRules = Cases<(Match, Vec<Emit>)>;
+type RowRules = Cases<(Match, Vec<RowRule>)>;
 
 /// A definition case: its match (none for `_`, which takes any value), guard and value.
 type DefCase = (Option<Match>, Option<Expr>, Expr);
@@ -263,9 +300,9 @@ struct Indexer {
 
 enum Body {
     Rewrite(Vec<Vec<Stage>>),
-    Edges(Vec<EdgeRules>),
+    Edges(EdgeRules),
     Tags(Vec<Vec<Stage>>),
-    Rows(Vec<Cases<(Match, Vec<RowRule>)>>),
+    Rows(RowRules),
 }
 
 /// A named expression; with cases, tried in order on each value of its first
@@ -721,16 +758,8 @@ impl Phase {
                 .flat_map(|s| &s.rules)
                 .map(|r| r.at.slots.len())
                 .max(),
-            Body::Edges(groups) => groups
-                .iter()
-                .flat_map(|k| k)
-                .map(|(m, _)| m.slots.len())
-                .max(),
-            Body::Rows(groups) => groups
-                .iter()
-                .flat_map(|g| g.items.iter())
-                .map(|(m, _)| m.slots.len())
-                .max(),
+            Body::Edges(rules) => rules.items.iter().map(|(m, _)| m.slots.len()).max(),
+            Body::Rows(rules) => rules.items.iter().map(|(m, _)| m.slots.len()).max(),
         }
         .unwrap_or(1);
         let used = modules_reached(&body, &compiled);
@@ -853,8 +882,8 @@ impl Body {
                     }
                 }
             }
-            Body::Edges(groups) => {
-                for (m, emits) in groups.iter().flat_map(|k| k) {
+            Body::Edges(rules) => {
+                for (m, emits) in rules {
                     on_match(m, f);
                     for e in emits {
                         if let Resolution::Of { expr, .. } = &e.resolution {
@@ -870,8 +899,8 @@ impl Body {
                     }
                 }
             }
-            Body::Rows(groups) => {
-                for (m, rs) in groups.iter().flat_map(|g| g.items.iter()) {
+            Body::Rows(rules) => {
+                for (m, rs) in rules {
                     on_match(m, f);
                     rs.iter()
                         .flat_map(|r| r.exprs.iter())
@@ -1252,7 +1281,7 @@ impl Loader<'_> {
         &self,
         shared: &[StageSpec],
         langs: &[Vec<StageSpec>],
-    ) -> Result<Vec<EdgeRules>, LoadError> {
+    ) -> Result<EdgeRules, LoadError> {
         let mut groups: Vec<(&str, Vec<(Option<u8>, &Pair)>)> = Vec::new();
         let staged = langs
             .iter()
@@ -1269,9 +1298,8 @@ impl Loader<'_> {
             };
             groups[at].1.extend(stage.pairs.iter().map(|p| (owner, p)));
         }
-        let mut out = Vec::new();
-        for (_, pairs) in groups {
-            let mut rules = Vec::new();
+        let mut rules = Vec::new();
+        for (group, (_, pairs)) in groups.into_iter().enumerate() {
             for (owner, pair) in pairs {
                 let owners: Vec<Option<u8>> = match (owner, pair.pattern.contains('%')) {
                     (None, true) => (0..langs.len()).map(|at| Some(at as u8)).collect(),
@@ -1285,12 +1313,13 @@ impl Loader<'_> {
                         .matcher(&pair.pattern, pair.when.as_deref(), owner, &[])
                         .map_err(at)?;
                     let emits = self.emits(&pair.value, &m.slots).map_err(at)?;
-                    rules.push((m, emits));
+                    rules.push((group as u16, (m, emits)));
                 }
             }
-            out.push(Cases::new(rules, |(m, _): &(Match, Vec<Emit>)| &m.kinds));
         }
-        Ok(out)
+        Ok(Cases::grouped(rules, |(m, _): &(Match, Vec<Emit>)| {
+            &m.kinds
+        }))
     }
 
     /// `{ kind: targets, ... }`; targets are an expression, a map with
@@ -1377,7 +1406,7 @@ impl Loader<'_> {
         &self,
         shared: &[StageSpec],
         langs: &[Vec<StageSpec>],
-    ) -> Result<Vec<Cases<(Match, Vec<RowRule>)>>, LoadError> {
+    ) -> Result<RowRules, LoadError> {
         let mut groups: Vec<(&str, Vec<(Match, Vec<RowRule>)>)> = Vec::new();
         let staged = langs
             .iter()
@@ -1416,10 +1445,14 @@ impl Loader<'_> {
                 groups[at].1.push((m, rules));
             }
         }
-        Ok(groups
+        let rules = groups
             .into_iter()
-            .map(|(_, rules)| Cases::new(rules, |(m, _): &(Match, Vec<RowRule>)| &m.kinds))
-            .collect())
+            .enumerate()
+            .flat_map(|(group, (_, rules))| rules.into_iter().map(move |r| (group as u16, r)))
+            .collect();
+        Ok(Cases::grouped(rules, |(m, _): &(Match, Vec<RowRule>)| {
+            &m.kinds
+        }))
     }
 
     fn row(&self, slots: &Slots, spec: &RowSpec) -> Result<RowRule, LoadError> {
@@ -1671,20 +1704,14 @@ impl Phase {
             }
             let c = root.jump(root.fi(), node);
             match &self.body {
-                Body::Edges(groups) => {
-                    for rules in groups {
-                        if let Some((_, emits)) = rules.first(run, &mut w, c) {
-                            emits.iter().for_each(|e| e.run(run, &w.vals));
-                        }
-                    }
-                }
-                Body::Rows(groups) => {
-                    for group in groups {
-                        if let Some((_, rules)) = group.first(run, &mut w, c) {
-                            rules.iter().for_each(|r| r.run(run, &w.vals));
-                        }
-                    }
-                }
+                Body::Edges(rules) => rules.fire(run, &mut w, c, |run, w, (_, emits)| {
+                    emits.iter().for_each(|e| e.run(run, &w.vals));
+                    true
+                }),
+                Body::Rows(rules) => rules.fire(run, &mut w, c, |run, w, (_, rows)| {
+                    rows.iter().for_each(|r| r.run(run, &w.vals));
+                    true
+                }),
                 _ => return,
             }
             if self.enclosing.contains(&c.kind()) {
