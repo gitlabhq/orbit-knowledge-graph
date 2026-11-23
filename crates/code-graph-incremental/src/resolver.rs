@@ -194,7 +194,9 @@ impl Resolver {
                     return true;
                 }
                 let mut found = resolve_glob(&req.target_path, &self.file_index, &lookup.prefixes);
-                if let (true, Some(fallback)) = (found.is_empty(), &req.fallback_path) {
+                if found.is_empty()
+                    && let Some(fallback) = &req.fallback_path
+                {
                     found = resolve_glob(fallback, &self.file_index, &lookup.prefixes);
                 }
                 !found.contains(&Loc::new(req.target_fi as usize, req.anchor))

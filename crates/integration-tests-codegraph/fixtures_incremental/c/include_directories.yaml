@@ -39,7 +39,7 @@ fixtures:
       #include "b.h"
       int stored(void) { return 4; }
 
-  - path: app/a.c
+  - path: db/a.c
     content: |
       #include "db/b.h"
       int fetch(void) { return stored(); }
@@ -64,7 +64,7 @@ tests:
     assert:
       - { row_count: 0 }
 
-  - name: "a repository-root-relative include still reaches the header definition"
+  - name: "a repository-root-relative include reaches the header definition"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'fetch'
