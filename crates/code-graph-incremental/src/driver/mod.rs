@@ -14,7 +14,7 @@ use rayon::prelude::*;
 pub use repository::{Options, WORKER_STACK_BYTES, repository};
 pub use state::{SNAPSHOT_VERSION, SourceFile, State};
 
-use crate::engine::{self, EdgeIndex, Phase};
+use crate::engine::{self, Graph, Phase};
 use crate::env::Env;
 use crate::error::Error;
 use crate::language::SupportLang;
@@ -154,7 +154,7 @@ fn one_file(
     let mut at = Stage::Mutable(tree);
     for phase in phases {
         let started = std::time::Instant::now();
-        let graph = EdgeIndex::new(&edges);
+        let graph = Graph::new(&edges);
         let found = match phase.builds() {
             true => {
                 let Stage::Mutable(tree) = &mut at else {
@@ -235,7 +235,7 @@ fn finish(env: &Env, state: &mut State, run: &Sentinel, report: &mut Report) -> 
                 state.edges.extend(found);
             }
             _ => {
-                let graph = EdgeIndex::new(&state.edges);
+                let graph = Graph::new(&state.edges);
                 if phase.builds() {
                     return Err(Error::Load(crate::LoadError::new(format!(
                         "phase {} rewrites after the trees are compact",

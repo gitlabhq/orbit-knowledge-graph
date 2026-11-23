@@ -71,11 +71,7 @@ static FUNCTIONS: &[Function<Core>] = &[
     }),
     function!(Inline, "sited", [set, edge], |cx, a| {
         let kind = edge_kind(&a[1]);
-        set(nodes(&a[0]).flat_map(|at| {
-            cx.at_site(kind, at.fi, at.node)
-                .iter()
-                .map(|&(_, to)| Val::Node(to))
-        }))
+        set(nodes(&a[0]).flat_map(|at| cx.at_site(kind, at).iter().map(|&(_, to)| Val::Node(to))))
     }),
     function!(Inline, "select", [set, pattern, set], |cx, a| select(
         cx, a, false

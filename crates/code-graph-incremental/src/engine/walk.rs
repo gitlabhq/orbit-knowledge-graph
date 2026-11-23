@@ -10,9 +10,7 @@ use smallvec::SmallVec;
 
 use super::pattern::{self, Cap, Pat};
 use super::program::{Pass, Phase, Scratch, Template, order};
-use super::{
-    Compact, Cursor, EdgeIndex, Indexed, Loc, Row, Run, Store, Tree, WHOLE, Write, machine,
-};
+use super::{Compact, Cursor, Graph, Indexed, Loc, Row, Run, Store, Tree, WHOLE, Write, machine};
 use crate::env::Env;
 use crate::intern::Lang;
 use crate::sentinel::{Killed, Sentinel};
@@ -26,7 +24,7 @@ pub fn run_tree<S: Store>(
     fi: u32,
     rules: Option<usize>,
     env: &Env,
-    graph: Option<&EdgeIndex>,
+    graph: Option<&Graph>,
     budget: &Sentinel,
 ) -> Result<Vec<Edge>, Killed> {
     let file = tree_budget(phase, env, &tree.label);
@@ -69,7 +67,7 @@ pub fn run_family(
     let known: FxHashSet<Edge> = base.iter().copied().collect();
     let (mut found, mut last, mut stopped) = (Vec::new(), FxHashSet::default(), None);
     settle(|| {
-        let graph = EdgeIndex::new(base.iter().chain(&found));
+        let graph = Graph::new(base.iter().chain(&found));
         let edges = match run_trees(
             phase,
             trees,
@@ -116,7 +114,7 @@ pub fn run_trees(
     trees: &[Tree<Compact>],
     walk: usize,
     project: Option<u32>,
-    graph: &EdgeIndex,
+    graph: &Graph,
     env: &Env,
     budget: &Sentinel,
 ) -> Result<(Vec<Edge>, Vec<Row>), Killed> {
@@ -155,7 +153,7 @@ struct On<'a> {
     phase: &'a Phase,
     rules: usize,
     env: &'a Env,
-    graph: Option<&'a EdgeIndex>,
+    graph: Option<&'a Graph>,
     fi: u32,
     budget: &'a Sentinel,
     file: &'a Sentinel,

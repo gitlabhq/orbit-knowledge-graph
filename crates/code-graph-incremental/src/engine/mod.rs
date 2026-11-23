@@ -1,5 +1,6 @@
 mod compile;
 mod expr;
+mod graph;
 pub mod lang;
 mod machine;
 pub mod pattern;
@@ -18,6 +19,7 @@ use crate::env::Env;
 use crate::modules;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Compact, Edge, EdgeKind, Mutable, Node, Storage};
+pub use graph::Graph;
 pub use program::{Def, Part, Phase, Pipeline, RowShape, resolution};
 pub use walk::{run_family, run_tree, run_trees, scope_budget};
 
@@ -530,7 +532,7 @@ pub struct Run<'t, S: Store = Compact> {
     file: &'t Sentinel,
     killed: Option<Killed>,
     max_edges: usize,
-    graph: Option<&'t EdgeIndex>,
+    graph: Option<&'t Graph>,
     files: u32,
     project: Option<u32>,
     indexed: Option<&'t Indexed<'t, S>>,
@@ -849,47 +851,6 @@ pub struct Row {
     pub values: Box<[Option<Val>]>,
 }
 
-/// Which nodes of the graph have an edge of each kind, by direction.
-pub struct EdgeIndex {
-    incoming: FxHashSet<EdgeKey>,
-    outgoing: FxHashMap<EdgeKey, SmallVec<[Loc; 2]>>,
-    unresolved: FxHashMap<EdgeKey, SmallVec<[Loc; 2]>>,
-    sites: FxHashMap<EdgeKey, SmallVec<[(Loc, Loc); 1]>>,
-}
-
-/// An edge kind and the file and node at one end.
-type EdgeKey = (EdgeKind, u32, u32);
-
-impl EdgeIndex {
-    pub fn new<'a>(edges: impl IntoIterator<Item = &'a Edge>) -> Self {
-        let mut incoming = FxHashSet::default();
-        let mut outgoing: FxHashMap<_, SmallVec<[Loc; 2]>> = FxHashMap::default();
-        let mut unresolved: FxHashMap<_, SmallVec<[Loc; 2]>> = FxHashMap::default();
-        let mut sites: FxHashMap<_, SmallVec<[(Loc, Loc); 1]>> = FxHashMap::default();
-        for e in edges {
-            incoming.insert((e.kind, e.to_tree, e.to_node));
-            let (from, to) = (e.from_loc(), e.to_loc());
-            let key = (e.kind, e.from_tree, e.from_node);
-            outgoing.entry(key).or_default().push(to);
-            if e.call_resolution == crate::tree::CallResolution::Unknown {
-                unresolved.entry(key).or_default().push(to);
-            }
-            if let Some(site) = e.site {
-                sites
-                    .entry((e.kind, e.from_tree, site))
-                    .or_default()
-                    .push((from, to));
-            }
-        }
-        Self {
-            incoming,
-            outgoing,
-            unresolved,
-            sites,
-        }
-    }
-}
-
 /// The only surface a module sees: navigation, its own state, calls through
 /// the engine, edges, and the budget.
 pub struct Cx<'r, 't, M: Module, S: Store = Compact> {
@@ -957,35 +918,26 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
 
     /// Whether `node` of this tree has an edge of `kind` in the phase's graph.
     pub fn has_edge(&self, kind: EdgeKind, incoming: bool, node: u32) -> bool {
-        let key = (kind, self.run.graph_fi, node);
-        self.run.graph.is_some_and(|g| match incoming {
-            true => g.incoming.contains(&key),
-            false => g.outgoing.contains_key(&key),
-        })
+        let at = Loc {
+            fi: self.run.graph_fi,
+            node,
+        };
+        self.run.graph.is_some_and(|g| g.has(kind, incoming, at))
     }
 
     /// The targets of `from`'s edges of `kind` in the graph so far.
     pub fn targets(&self, kind: EdgeKind, from: Loc) -> &'t [Loc] {
-        self.run
-            .graph
-            .and_then(|g| g.outgoing.get(&(kind, from.fi, from.node)))
-            .map_or(&[], |t| t.as_slice())
+        self.run.graph.map_or(&[], |g| g.targets(kind, from))
     }
 
     /// The targets of the edges of `kind` from `from` whose call resolution is unknown.
     pub fn unresolved_targets(&self, kind: EdgeKind, from: Loc) -> &'t [Loc] {
-        self.run
-            .graph
-            .and_then(|g| g.unresolved.get(&(kind, from.fi, from.node)))
-            .map_or(&[], |t| t.as_slice())
+        self.run.graph.map_or(&[], |g| g.unresolved(kind, from))
     }
 
-    /// The edges of `kind` whose site is `site` in file `fi`, as (from, to).
-    pub fn at_site(&self, kind: EdgeKind, fi: u32, site: u32) -> &'t [(Loc, Loc)] {
-        self.run
-            .graph
-            .and_then(|g| g.sites.get(&(kind, fi, site)))
-            .map_or(&[], |t| t.as_slice())
+    /// The edges of `kind` made at `site`, as (from, to).
+    pub fn at_site(&self, kind: EdgeKind, site: Loc) -> &'t [(Loc, Loc)] {
+        self.run.graph.map_or(&[], |g| g.at_site(kind, site))
     }
 
     /// How many files the run covers; file indexes are `0..files()`.
