@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use indexing_engine_next::protocol::{Fence, Generation, Revision, TaskId};
+use indexing_engine_next::lease::{Fence, Generation, Revision};
+use indexing_engine_next::task::TaskId;
 use indexing_engine_next::testkit::simulation::{
     DatabaseWrite, FaultBudget, MessageState, RevisionConflict, SimulatedBroker, SimulatedDatabase,
     SimulatedKeyValue, Simulation, SimulationReport, TickClock,

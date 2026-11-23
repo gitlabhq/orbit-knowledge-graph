@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::lease::Fence;
 use crate::payload::{Key, Payload};
-use crate::protocol::Fence;
 
 pub use error::TaskError;
 pub use outcome::Outcome;

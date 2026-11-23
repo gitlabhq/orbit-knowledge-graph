@@ -1,0 +1,126 @@
+use std::fmt::Display;
+use std::sync::Arc;
+
+use super::Runner;
+use crate::builder::ErasedWorker;
+use crate::event::ProtocolEvent;
+use crate::lease::Hold;
+use crate::pending::PendingWrite;
+use crate::ports::warn_port_failure;
+use crate::submit::submit_task;
+use crate::task::{Delivery, TaskId, TaskMessage, WorkerKey};
+use crate::worker::{EncodedOutcome, TaskContext};
+
+impl Runner {
+    pub(super) async fn run_delivered_task(self: Arc<Self>, delivery: Delivery) {
+        let worker_name = &delivery.message.worker;
+        let Some(worker) = self.registry.find_worker(worker_name).cloned() else {
+            orbit_log_fields::warn!(
+                safe(ERROR_TYPE) = "unknown_worker",
+                "no module registered the worker of a delivered task"
+            );
+            return;
+        };
+        if self.registry.is_exclusive(worker_name) {
+            self.run_with_lease(worker.as_ref(), delivery).await;
+        } else {
+            self.run_without_lease(worker.as_ref(), delivery).await;
+        }
+    }
+
+    async fn run_with_lease(&self, worker: &dyn ErasedWorker, delivery: Delivery) {
+        let task = delivery.message.task;
+        let key = delivery.message.worker_key();
+        let mut hold = self.leases.wait_for_lease(&key, task).await;
+        if let Err(error) = self.start_task(&key, task).await {
+            return self.abandon_run(task, error).await;
+        }
+
+        let ctx = TaskContext::new(Arc::clone(&self.pools), Some(hold.fence()));
+        let in_flight = delivery.in_flight.as_ref();
+        let outcome = tokio::select! {
+            biased;
+            () = self.leases.extend_running_lease(&mut hold, &key, in_flight) => return,
+            outcome = worker.run(&ctx, &delivery.message.input) => outcome,
+        };
+        match outcome {
+            Ok(outcome) => self.finish_task(&delivery, Some(&hold), outcome).await,
+            Err(error) => self.abandon_run(task, error).await,
+        }
+    }
+
+    async fn run_without_lease(&self, worker: &dyn ErasedWorker, delivery: Delivery) {
+        let task = delivery.message.task;
+        let key = delivery.message.worker_key();
+        if let Err(error) = self.start_task(&key, task).await {
+            return self.abandon_run(task, error).await;
+        }
+
+        let ctx = TaskContext::new(Arc::clone(&self.pools), None);
+        match worker.run(&ctx, &delivery.message.input).await {
+            Ok(outcome) => self.finish_task(&delivery, None, outcome).await,
+            Err(error) => self.abandon_run(task, error).await,
+        }
+    }
+
+    async fn start_task(&self, key: &WorkerKey, task: TaskId) -> anyhow::Result<()> {
+        let pending = &self.ports.pending;
+        let now = self.ports.clock.now().await;
+        let entry = pending.read(key).await?;
+        let pending_task = entry.task.map(|message| message.task);
+        let cleared_pending = pending_task == Some(task)
+            && matches!(
+                pending.write(key, entry.revision, None).await?,
+                PendingWrite::Written
+            );
+
+        let started = ProtocolEvent::Started {
+            task,
+            cleared_pending,
+        };
+        self.ports.log.record(now, started);
+        Ok(())
+    }
+
+    async fn finish_task(&self, delivery: &Delivery, hold: Option<&Hold>, outcome: EncodedOutcome) {
+        let message = &delivery.message;
+        for child in outcome.children {
+            let child =
+                TaskMessage::from_input(message.tenant.clone(), child, message.lane.clone());
+            if let Err(error) = submit_task(&self.ports, child).await {
+                return self.abandon_run(message.task, error).await;
+            }
+        }
+
+        let now = self.ports.clock.now().await;
+        if let Err(error) = delivery.in_flight.acknowledge().await {
+            warn_port_failure("ack_failed", &error);
+        }
+        let released = match hold {
+            Some(hold) => self
+                .leases
+                .release_lease(hold, &message.worker_key())
+                .await
+                .unwrap_or_else(|error| {
+                    warn_port_failure("lease_release_failed", &error);
+                    false
+                }),
+            None => false,
+        };
+        let finished = ProtocolEvent::Finished {
+            task: message.task,
+            released,
+        };
+        self.ports.log.record(now, finished);
+    }
+
+    async fn abandon_run(&self, task: TaskId, error: impl Display) {
+        let now = self.ports.clock.now().await;
+        orbit_log_fields::warn!(
+            safe(ERROR_TYPE) = "run_abandoned",
+            expanded(ERROR_MESSAGE) = %error,
+            "a run stopped without an ack, so the broker delivers its task again"
+        );
+        self.ports.log.record(now, ProtocolEvent::Abandoned(task));
+    }
+}

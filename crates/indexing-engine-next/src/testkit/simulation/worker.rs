@@ -2,8 +2,8 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use crate::lease::Fence;
 use crate::payload::Key;
-use crate::protocol::Fence;
 use crate::worker::{Outcome, TaskContext, TaskError, Worker};
 
 use super::world::{Actor, SharedWorld, StepKind, TICK};

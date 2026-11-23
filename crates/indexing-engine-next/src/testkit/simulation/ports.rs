@@ -5,11 +5,14 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use rand::RngExt;
 
-use crate::port::{
-    Clock, Delivery, InFlight, LeaseStore, LeaseWrite, MarkerEntry, MarkerStore, MarkerWrite,
-    Ports, ProtocolLog, TaskMessage, TaskStream, WorkerKey,
-};
-use crate::protocol::{Fence, Lease, LeaseEntry, ProtocolEvent, Revision};
+use crate::clock::Clock;
+use crate::event::ProtocolEvent;
+use crate::event::ProtocolLog;
+use crate::lease::{Fence, Lease, LeaseEntry, Revision};
+use crate::lease::{LeaseStore, LeaseWrite};
+use crate::pending::{PendingEntry, PendingStore, PendingWrite};
+use crate::ports::Ports;
+use crate::task::{Delivery, InFlight, TaskMessage, TaskStream, WorkerKey};
 
 use super::world::{Actor, SharedWorld, StepKind};
 
@@ -34,7 +37,7 @@ pub(super) fn build_ports(world: &SharedWorld, actor: Actor) -> Ports {
         clock: ports.clone(),
         tasks: ports.clone(),
         leases: ports.clone(),
-        markers: ports.clone(),
+        pending: ports.clone(),
         log: ports,
     }
 }
@@ -86,7 +89,7 @@ impl TaskStream for SimulatedPorts {
             };
             deliveries.push(Delivery {
                 message: payload,
-                handle: Box::new(SimulatedInFlight {
+                in_flight: Box::new(SimulatedInFlight {
                     world: self.world.clone(),
                     actor: self.actor,
                     message,
@@ -134,12 +137,12 @@ impl LeaseStore for SimulatedPorts {
         &self,
         _key: &WorkerKey,
         expected: Revision,
-        lease: Option<Lease>,
+        lease: Option<&Lease>,
     ) -> anyhow::Result<LeaseWrite> {
         self.world.interleave_inside_step(self.actor).await;
         let mut world = self.world.lock();
         if let Actor::Process { index, .. } = self.actor
-            && world.consume_renewal_failure(index, lease.as_ref())
+            && world.consume_renewal_failure(index, lease)
         {
             return Err(anyhow!("the renewal did not reach the key-value store"));
         }
@@ -147,7 +150,7 @@ impl LeaseStore for SimulatedPorts {
             world.count("LeaseConflict");
             return Ok(LeaseWrite::Conflict);
         };
-        match world.lease.put(expected, lease) {
+        match world.lease.put(expected, lease.cloned()) {
             Ok(revision) => Ok(LeaseWrite::Written(Fence {
                 generation,
                 revision,
@@ -161,13 +164,13 @@ impl LeaseStore for SimulatedPorts {
 }
 
 #[async_trait]
-impl MarkerStore for SimulatedPorts {
-    async fn read(&self, _key: &WorkerKey) -> anyhow::Result<MarkerEntry> {
+impl PendingStore for SimulatedPorts {
+    async fn read(&self, _key: &WorkerKey) -> anyhow::Result<PendingEntry> {
         self.world.interleave_inside_step(self.actor).await;
         let world = self.world.lock();
-        Ok(MarkerEntry {
-            pending: world.marker.get().cloned(),
-            revision: world.marker.revision(),
+        Ok(PendingEntry {
+            task: world.pending.get().cloned(),
+            revision: world.pending.revision(),
         })
     }
 
@@ -175,15 +178,15 @@ impl MarkerStore for SimulatedPorts {
         &self,
         _key: &WorkerKey,
         expected: Revision,
-        pending: Option<TaskMessage>,
-    ) -> anyhow::Result<MarkerWrite> {
+        task: Option<&TaskMessage>,
+    ) -> anyhow::Result<PendingWrite> {
         self.world.interleave_inside_step(self.actor).await;
         let mut world = self.world.lock();
-        match world.marker.put(expected, pending) {
-            Ok(_) => Ok(MarkerWrite::Written),
+        match world.pending.put(expected, task.cloned()) {
+            Ok(_) => Ok(PendingWrite::Written),
             Err(_) => {
-                world.count("MarkerConflict");
-                Ok(MarkerWrite::Conflict)
+                world.count("PendingConflict");
+                Ok(PendingWrite::Conflict)
             }
         }
     }

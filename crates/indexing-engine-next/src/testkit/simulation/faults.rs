@@ -1,6 +1,7 @@
 use rand::RngExt;
 
-use crate::protocol::{Lease, TaskId};
+use crate::lease::Lease;
+use crate::task::TaskId;
 
 use super::MessageState;
 use super::world::{Stall, StepKind, World};
@@ -214,7 +215,7 @@ impl World {
         }
         self.faults_left.wipes -= 1;
         self.lease.wipe();
-        self.marker.wipe();
+        self.pending.wipe();
         self.broker.wipe();
         self.nats_generation = None;
         self.recover_at = Some(self.now_tick() + recover_after);

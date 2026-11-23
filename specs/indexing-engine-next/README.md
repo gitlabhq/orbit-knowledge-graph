@@ -2,7 +2,7 @@
 
 ## Summary
 
-This folder holds a TLA+ spec of the lease and dedupe protocol of ADR 023. TLC checks every order of events in the spec, with pod faults and NATS faults. It also checks that every acked submit ends done once faults stop. A second check proves that the Rust code has the same state graph as the spec in 4 small clusters. A third check runs the real lane loop in a seeded simulator. TLC confirms that each step of each run is a step of the spec.
+This folder holds a TLA+ spec of the lease and dedupe protocol of ADR 023. TLC checks every order of events in the spec, with pod faults and NATS faults. It also checks that every acked submit ends done once faults stop. A second check proves that the Rust code has the same state graph as the spec in 4 small clusters. A third check runs the real runner in a seeded simulator. TLC confirms that each step of each run is a step of the spec.
 
 So far, TLC found 7 ways to break the rules and one gap in the recovery after a wipe. Four fixes close all but 2, and we keep those 2 open on purpose. The code matches the spec in 2.8 million states and 6 million steps.
 
@@ -18,13 +18,13 @@ So far, TLC found 7 ways to break the rules and one gap in the recovery after a 
 │ model check   │ │ counterexamples   │ │ code check         │ │ trace check          │
 │ every order   │ │ 8 configs that    │ │ the protocol code  │ │ every step of 600    │
 │ of events,    │ │ must break a rule │ │ and the spec have  │ │ simulated runs of    │
-│ + liveness    │ │                   │ │ the same graph     │ │ the real lane loop   │
+│ + liveness    │ │                   │ │ the same graph     │ │ the real runner      │
 └───────────────┘ └───────────────────┘ └─────────▲──────────┘ └──────────▲───────────┘
                                                   │                       │
                   ┌───────────────────────────────┴───────────────────────┴───┐
                   │ crates/indexing-engine-next                               │
-                  │  src/protocol/            the rules as code               │
-                  │  src/serve/               the lane loop, on ports         │
+                  │  src/lease/rules.rs       the lease rules as code         │
+                  │  src/runner/              the runner, on ports            │
                   │  src/testkit/simulation/  key-value store, broker, db,    │
                   │                           and the ports on a seeded world │
                   │  tests/protocol/          simulated cluster               │
@@ -38,12 +38,12 @@ So far, TLC found 7 ways to break the rules and one gap in the recovery after a 
 | `LeaseDedupeLiveness.tla`, `liveness/` | The liveness check and its 4 configs |
 | `counterexamples/`, `liveness/counterexamples/` | 8 configs that must break a rule |
 | `code-check/` | The 4 small clusters of the code check |
-| `src/protocol/` in the crate | The rules as code with no IO. The NATS lane loop of 1b calls it. |
+| `src/lease/rules.rs` in the crate | The lease rules as code with no IO. The runner calls them. |
 | `src/testkit/simulation/` in the crate | A simulated tick clock, key-value store, broker and database, with the ports on one seeded world |
 | `tests/protocol/` in the crate | A simulated cluster with one method for each spec action |
 | `LeaseDedupeTraceCheck.tla` | The trace check: TLC follows each recorded run step by step |
-| `src/port.rs` in the crate | The ports of the lane loop: clock, task stream, lease store, marker store, protocol log |
-| `src/serve/` in the crate | The lane loop and the submit path, written against the ports |
+| `src/ports.rs` in the crate | The ports that an adapter implements: clock, task stream, lease store, pending store, protocol log. Each port trait lives with its concept. |
+| `src/runner/`, `src/lease/store.rs`, `src/pending.rs` in the crate | The runner and the submit path, written against the ports |
 | `tests/simulation.rs` in the crate | The rules of the simulated parts, the seeds, the coverage of each fault, and the trace writer for TLC |
 
 ## Why
@@ -51,13 +51,13 @@ So far, TLC found 7 ways to break the rules and one gap in the recovery after a 
 We want two rules to hold, whatever happens to pods and to NATS:
 
 - One run of a key at a time writes to the database. This is the lease.
-- At most one task of a key waits in the queue. This is the marker.
+- At most one task of a key waits in the queue. This is the pending task.
 
 Pods stall, crash and see different clocks. NATS redelivers, delivers twice, loses messages and gets wiped. Tests that we write by hand rarely hit the bad orders of events. A model checker tries all of them.
 
 A proof of the spec says nothing about our code, though. So the code check ties the two together. If the code drifts from the spec, CI fails and shows the states that differ.
 
-The code check covers the decisions in `src/protocol/`. It doesn't cover the lane loop that calls them. That loop sets the order of the reads and the writes. It renews the lease next to the worker, and it acks and releases. The trace check covers that code. It runs the real lane loop, and TLC checks each step that the loop logs.
+The code check covers the decisions in `src/lease/rules.rs`. It doesn't cover the runner that calls them. That loop sets the order of the reads and the writes. It renews the lease next to the worker, and it acks and releases. The trace check covers that code. It runs the real runner, and TLC checks each step that the loop logs.
 
 ## What it guarantees
 
@@ -68,7 +68,7 @@ The code check covers the decisions in `src/protocol/`. It doesn't cover the lan
 | Counterexamples | Each known race still breaks a rule, so the checks can fail |
 | Code check | In 4 small clusters, the code and the spec have the same initial states, states and steps |
 | Unit tests | Each rule of the protocol code, including one case that the model can't show |
-| Trace check | Each step of 600 seeded runs of the real lane loop is a step of the spec, and the rules hold in each state |
+| Trace check | Each step of 600 seeded runs of the real runner is a step of the spec, and the rules hold in each state |
 | Simulation tests | In 1,200 seeded runs, the rules hold in each state, and every acked submit ends done once faults stop. Each fault happens in at least one seed. |
 
 Within the bounds of the 4 clusters, the code takes no step that the spec forbids. It also refuses no step that the spec allows. Beyond those bounds, we rely on the model check of the spec. Most protocol bugs show up with few pods.
@@ -83,7 +83,7 @@ What it doesn't prove:
 - The liveness check needs faults to stop at some point. A cluster that keeps failing forever makes no progress, and no protocol can fix that.
 - The recovery campaign, the sweeps and the reconcilers aren't in the spec. The spec hands their work to them and stops there.
 - The trace check samples runs. It doesn't explore every order of events, as the code check does.
-- In the simulator, each step of the lane loop is atomic in time. A stall can come between two steps, but not between the clock read and the write of one step. In production, a pod can stall there. Then the lease that it writes expires earlier than the spec says, and the fence keeps the writes safe.
+- In the simulator, each step of the runner is atomic in time. A stall can come between two steps, but not between the clock read and the write of one step. In production, a pod can stall there. Then the lease that it writes expires earlier than the spec says, and the fence keeps the writes safe.
 - Interleaved runs let other steps run inside a step, so a CAS write can lose its race. They check the rules and the liveness in Rust, but TLC can't follow them.
 - The simulator has one key, one lane, one slot for each process and one planner, the same shape as the spec. A worker that isn't exclusive skips the lease, and no check covers that path yet.
 - The simulator replaces NATS with the simulated parts in `src/testkit/simulation/`. The NATS adapters of the ports come in the next MR, with the same scenarios on a real NATS server.
@@ -112,7 +112,7 @@ LeaseDedupe.tla + code-check/<cluster>.cfg          tests/protocol/cluster.rs
         initial states, states, steps   ==   initial states, states, steps
 ```
 
-1. The cluster wires the simulator to the protocol code. Each spec action is one method with the same name. The simulator plays the environment, and the protocol code makes every decision about the lease, the marker and the fence.
+1. The cluster wires the simulator to the protocol code. Each spec action is one method with the same name. The simulator plays the environment, and the protocol code makes every decision about the lease, the pending task and the fence.
 2. Rust starts from every initial state and tries every action in every state. It prints each state the way TLC prints it.
 3. TLC model-checks the spec with the same bounds and dumps its graph as a DOT file.
 4. The test compares the initial states, the states and the steps. A state or a step that only one side has fails the test, with the states that differ.
@@ -124,15 +124,15 @@ Equal steps means every state has the same next states on both sides.
 ```text
 tests/simulation.rs                 src/testkit/simulation/             LeaseDedupeTraceCheck.tla
         │                                     │                                    │
- 300 seeds for each scenario     real lane loops on simulated       TLC starts at each trace and
+ 300 seeds for each scenario     real runners on simulated          TLC starts at each trace and
         │                        ports; after each step, the        follows it step by step
         ▼                        spec state of the world                           │
   run(seed) ───────────────────► is written in TLA+ ───────────────► a step that Next can't take
                                                                      is a deadlock: the check fails
 ```
 
-1. The lane loop talks to the outside only through the ports in `src/port.rs`. Each step reads the clock once at its start and logs one protocol event with that time.
-2. The simulator implements the ports on one world: a simulated key-value store, broker and database. It runs 2 or 3 real lane loops in one process on a paused clock. A seed picks the order of the steps, the faults and their targets.
+1. The runner talks to the outside only through the ports in `src/ports.rs`. Each step reads the clock once at its start and logs one protocol event with that time.
+2. The simulator implements the ports on one world: a simulated key-value store, broker and database. It runs 2 or 3 real runners in one process on a paused clock. A seed picks the order of the steps, the faults and their targets.
 3. After each step, the world writes its state in the variables of the spec. The pod state comes from the protocol events, and the rest comes from the simulated stores.
 4. TLC starts from the first state of each trace. For each next state, it looks for a step of `Next` that leads there. When it finds none, it stops with a deadlock and prints the trace and the step.
 
@@ -148,7 +148,7 @@ TLC checks these rules in every state:
 |---|---|
 | `NoStaleWrite` | The database never keeps a write of an older lease after a newer one |
 | `NoRejectedCurrentHolder` | The database never rejects the write of the pod that holds the current lease |
-| `AtMostOnePending` | Only the task in the marker waits in the queue |
+| `AtMostOnePending` | Only the pending task waits in the queue |
 | `EverySubmitCovered` | Every acked submit has a task that started, a live message, or a publish in progress |
 
 The liveness check adds 2 properties:
@@ -172,7 +172,7 @@ The liveness check adds 2 properties:
 | Stall | A pod freezes for any length of time, then resumes |
 | Crash | A pod drops its run |
 | Failed renewal | A renewal doesn't reach the key-value store |
-| Planner crash | The planner stops between the marker and the publish |
+| Planner crash | The planner stops between the pending write and the publish |
 | Clock skew | A pod's clock runs 1 unit ahead |
 | Redelivery | The broker delivers a message again after the ack wait |
 | NATS wipe | The key-value store and the broker lose all their state |
@@ -199,11 +199,11 @@ Each config switches one fix off, or adds one fault, and must break a rule:
 | `AsWritten_StaleWrite` | `NoStaleWrite` | A pod stalls after it sends its write. Another pod takes the expired lease and writes. Then the old write lands. |
 | `StopBeforeExpiry_StaleWrite` | `NoStaleWrite` | Same trace, with a pod that checks its expiry before the write. A check on the pod alone can't fix it. |
 | `Fenced_RunsOverlapInTime` | `NoOverlap` | With the fence, two pods still run at once. Only their writes are safe. |
-| `AsWritten_DoublePending` | `AtMostOnePending` | A redelivered task starts and clears the marker of a newer task. |
-| `AsWritten_LostSubmit` | `EverySubmitCovered` | The planner crashes after the marker and before the publish. Every later submit of the key is dropped. |
+| `AsWritten_DoublePending` | `AtMostOnePending` | A redelivered task starts and clears a newer pending task. |
+| `AsWritten_LostSubmit` | `EverySubmitCovered` | The planner crashes after the pending write and before the publish. Every later submit of the key is dropped. |
 | `NatsWipe_FenceWithoutGeneration` | `NoRejectedCurrentHolder` | A wipe restarts the revisions, so the database rejects the writes of the new holder. |
 | `NatsLosesMessage` | `EverySubmitCovered` | NATS loses an acked message, and nothing brings it back. |
-| `liveness/counterexamples/AsWritten_LostSubmit` | `EverySubmitIsDone` | Without F3, a stranded marker swallows a submit, and its task never runs. |
+| `liveness/counterexamples/AsWritten_LostSubmit` | `EverySubmitIsDone` | Without F3, a stranded pending task swallows a submit, and its task never runs. |
 
 ## Run it
 
@@ -213,7 +213,7 @@ Each config switches one fix off, or adds one fault, and must break a rule:
 | `mise run spec:engine:liveness` | Checks that every acked submit ends done | about 4 min |
 | `mise run spec:engine:counterexample` | Checks that each counterexample still breaks a rule | about 25 s |
 | `mise run spec:engine:code` | Compares the code and the spec in all 4 clusters | about 6 min |
-| `mise run spec:engine:trace` | Runs 600 seeds of the lane loop and checks each step with TLC | about 1 min |
+| `mise run spec:engine:trace` | Runs 600 seeds of the runner and checks each step with TLC | about 1 min |
 | `cargo test -p indexing-engine-next --test simulation` | Runs 1,200 seeds and checks the rules, the liveness and the coverage of each fault | about 10 s |
 | `cargo test -p indexing-engine-next --test protocol` | Runs the rule tests and the invariants of the first cluster | about 10 s |
 
@@ -228,7 +228,7 @@ In CI, the jobs live in `.gitlab/ci/indexing-engine-spec.yml`. The model check, 
 - A new variable in the spec: add it to `state_lines` in `tests/protocol/cluster/tlc.rs`.
 - A new action in the spec: add it to the `Action` enum and to the cluster. Until then, the spec has steps that the code lacks, and the code check fails.
 - A new fault: add a budget to `FaultBudget`, an action to the spec and to the cluster, and a counterexample if it breaks a rule.
-- A new step in the lane loop: read the clock at its start, and log one protocol event at its end. Then map the event to the spec state in `World::apply_protocol_event`. Until the spec has the step, the trace check fails.
+- A new step in the runner: read the clock at its start, and log one protocol event at its end. Then map the event to the spec state in `World::apply_protocol_event`. Until the spec has the step, the trace check fails.
 
 ## Results
 
@@ -240,14 +240,14 @@ The rules as ADR 023 wrote them break in 5 ways, and NATS faults add 2 more. The
 race                                   fix
 ────────────────────────────────────   ──────────────────────────────────────────
 old write lands after a newer one   →  F1  fence: the lease revision at take time
-start clears a newer task's marker  →  F2  the marker holds its task ID
-crash strands the marker forever    →  F3  a submit republishes the found task
+start clears a newer pending task   →  F2  pending holds its task ID
+crash strands the pending task      →  F3  a submit republishes the found task
 wipe sends revisions back to 1      →  F4  fence = (generation, revision)
 ```
 
 1. F1, a fence. A pod writes with the lease revision from when it took the lease. The database keeps a write only if its fence is the highest it has seen.
-2. F2, a marker that the task owns. The marker holds the task ID, and a start clears it only if it still holds that ID.
-3. F3, a republish. A submit that finds a marker publishes that task again, with the task ID as the message ID.
+2. F2, a pending entry that the task owns. It holds the task ID, and a start clears it only if it still holds that ID.
+3. F3, a republish. A submit that finds a pending task publishes that task again, with the task ID as the message ID.
 4. F4, a generation in the fence. No pod takes a lease until the recovery wrote the new generation.
 
 The liveness check found one more gap. A task that started before a wipe loses its message. If its pod then crashes, nothing runs it again. So a wipe hands every task that isn't done to the recovery campaign, not only the pending ones. The recovery campaign of ADR 023 must replan those keys.
@@ -260,7 +260,7 @@ Two cases stay open on purpose:
 ### What the code check found
 
 - We broke 12 rules in the protocol code one at a time. The code check catches 11, and a unit test catches the 12th.
-- A first version had 1 task in each cluster, and it missed a broken marker rule. That's why `two_tasks` exists.
+- A first version had 1 task in each cluster, and it missed a broken pending rule. That's why `two_tasks` exists.
 - 20,000 random runs found nothing. Each 1,000 runs added about 45,000 new states, so random runs never cover the space. We check every state of small clusters instead.
 
 ### What the trace check found
@@ -269,17 +269,17 @@ The trace check found a bug in the simulator before it passed. A crashed process
 
 The coverage test found 2 more gaps. After a stall, the renewal always ran before the write, so no seed reached a fence rejection. Now a process yields at random each time it wakes up, and half of the stalls wait for the next database write. A seed also hung when the loop made calls with no pause. Now too many port calls in one tick break a rule, so the run ends with a timeline and doesn't hang.
 
-We broke the lane loop in 9 ways, one at a time:
+We broke the runner in 9 ways, one at a time:
 
-| Broken rule in the lane loop | Rust rules | TLC trace check |
+| Broken rule in the runner | Rust rules | TLC trace check |
 |---|---|---|
-| A start clears any marker, not only its own | `AtMostOnePending` | fails |
-| A submit that finds a marker doesn't publish again | `EverySubmitIsDone` | fails |
+| A start clears any pending task, not only its own | `AtMostOnePending` | fails |
+| A submit that finds a pending task doesn't publish again | `EverySubmitIsDone` | fails |
 | A renewal skips the progress ack | passes | fails |
 | A lost renewal takes the lease anyway | `NoRejectedCurrentHolder` | fails |
 | The fence is the revision that the pod read, not the one that it wrote | `EverySubmitIsDone` | fails |
 | A finished run releases a lease that it doesn't hold | passes | fails |
-| The marker clears at delivery, before the lease | passes | fails |
+| The pending task clears at delivery, before the lease | passes | fails |
 | A take of the lease ignores the lease rules | passes | fails |
 | A failed run acks its task | passes | passes |
 

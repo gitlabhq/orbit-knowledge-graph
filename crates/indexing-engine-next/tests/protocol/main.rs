@@ -8,9 +8,10 @@ use cluster::{
     Bounds, SMALL_CLUSTER, SMALL_CLUSTER_WITH_DUPLICATE, SMALL_CLUSTER_WITH_NATS_WIPE,
     SMALL_CLUSTER_WITH_TWO_TASKS, StateGraph, explore_graph, read_spec_graph,
 };
-use indexing_engine_next::protocol::{
-    Claim, Fence, Generation, HolderId, Lease, LeaseEntry, LeaseRules, Renewal, Revision, TaskId,
+use indexing_engine_next::lease::{
+    Claim, Fence, Generation, HolderId, Lease, LeaseEntry, LeaseRules, Renewal, Revision,
 };
+use indexing_engine_next::task::TaskId;
 use uuid::Uuid;
 
 const SMALL_CLUSTERS: [(&str, Bounds); 4] = [

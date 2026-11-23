@@ -9,8 +9,10 @@ use tokio::sync::Notify;
 use tokio::time::Instant;
 
 use super::{DatabaseWrite, FaultBudget, SimulatedBroker, SimulatedDatabase, SimulatedKeyValue};
-use crate::port::TaskMessage;
-use crate::protocol::{Fence, Generation, HolderId, Lease, ProtocolEvent, Revision, TaskId};
+use crate::event::ProtocolEvent;
+use crate::lease::{Fence, Generation, HolderId, Lease, Revision};
+use crate::task::TaskId;
+use crate::task::TaskMessage;
 
 pub(super) const TICK: Duration = Duration::from_secs(20);
 pub(super) const ACKNOWLEDGE_WAIT_TICKS: u64 = 2;
@@ -42,7 +44,7 @@ pub(super) struct World {
     pub(super) rng: StdRng,
     step_order: StepOrder,
     pub(super) lease: SimulatedKeyValue<Lease>,
-    pub(super) marker: SimulatedKeyValue<TaskMessage>,
+    pub(super) pending: SimulatedKeyValue<TaskMessage>,
     pub(super) nats_generation: Option<Generation>,
     pub(super) recover_at: Option<u64>,
     pub(super) broker: SimulatedBroker,
@@ -129,7 +131,7 @@ impl SharedWorld {
             rng,
             step_order,
             lease: SimulatedKeyValue::default(),
-            marker: SimulatedKeyValue::default(),
+            pending: SimulatedKeyValue::default(),
             nats_generation: Some(Generation(1)),
             recover_at: None,
             broker: SimulatedBroker::new(ACKNOWLEDGE_WAIT_TICKS),
@@ -312,8 +314,14 @@ impl World {
             ));
         }
         match (actor, event) {
-            (Actor::Planner, ProtocolEvent::Submitted { task, found_marker }) => {
-                if !found_marker {
+            (
+                Actor::Planner,
+                ProtocolEvent::Submitted {
+                    task,
+                    found_pending,
+                },
+            ) => {
+                if !found_pending {
                     self.ids.push(task);
                 }
                 self.publishing = Some(task);
@@ -503,13 +511,13 @@ impl World {
         if self.rejected_current {
             return Some("NoRejectedCurrentHolder");
         }
-        let marker = self.marker.get().map(|pending| pending.task);
-        let pending_beside_marker = self
+        let pending_task = self.pending.get().map(|message| message.task);
+        let another_task_waits = self
             .ids
             .iter()
             .filter(|task| self.is_pending(**task))
-            .any(|task| Some(*task) != marker);
-        if pending_beside_marker {
+            .any(|task| Some(*task) != pending_task);
+        if another_task_waits {
             return Some("AtMostOnePending");
         }
         if !self.covers.iter().all(|task| self.is_covered(*task)) {

@@ -1,5 +1,4 @@
-mod run;
-mod submit;
+mod run_task;
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -8,20 +7,18 @@ use std::time::Duration;
 use tokio::task::{JoinError, JoinSet};
 
 use crate::builder::{Engine, Registry};
-use crate::port::Ports;
-use crate::protocol::{HolderId, LeaseRules, ProtocolEvent};
+use crate::event::ProtocolEvent;
+use crate::lease::{HolderId, LeaseRules, Leases};
+use crate::ports::Ports;
 use crate::worker::Pools;
-
-pub(crate) use submit::submit_task;
 
 const PULL_RETRY: Duration = Duration::from_secs(1);
 
-pub(crate) struct Process {
+struct Runner {
     registry: Arc<Registry>,
     pools: Arc<Pools>,
     ports: Ports,
-    holder: HolderId,
-    rules: LeaseRules,
+    leases: Leases,
 }
 
 pub(crate) async fn serve(engine: &Engine, ports: Ports, holder: HolderId, rules: LeaseRules) {
@@ -29,18 +26,17 @@ pub(crate) async fn serve(engine: &Engine, ports: Ports, holder: HolderId, rules
         engine.registry.list_registered_pools().clone(),
         engine.config.pools.clone(),
     );
-    let process = Arc::new(Process {
+    let runner = Arc::new(Runner {
         registry: Arc::clone(&engine.registry),
         pools: Arc::new(pools),
+        leases: Leases::new(&ports, holder, rules),
         ports,
-        holder,
-        rules,
     });
 
     let mut lanes = JoinSet::new();
     for (lane_id, config) in &engine.config.lanes {
         lanes.spawn(serve_lane(
-            Arc::clone(&process),
+            Arc::clone(&runner),
             lane_id.clone(),
             config.slots,
         ));
@@ -50,7 +46,7 @@ pub(crate) async fn serve(engine: &Engine, ports: Ports, holder: HolderId, rules
     }
 }
 
-async fn serve_lane(process: Arc<Process>, lane_id: String, slots: NonZeroU32) {
+async fn serve_lane(runner: Arc<Runner>, lane_id: String, slots: NonZeroU32) {
     let slots = usize::try_from(slots.get()).unwrap_or(usize::MAX);
     let mut runs = JoinSet::new();
     loop {
@@ -62,8 +58,8 @@ async fn serve_lane(process: Arc<Process>, lane_id: String, slots: NonZeroU32) {
             continue;
         }
 
-        let now = process.ports.clock.now().await;
-        let deliveries = match process.ports.tasks.pull(&lane_id, free).await {
+        let now = runner.ports.clock.now().await;
+        let deliveries = match runner.ports.tasks.pull(&lane_id, free).await {
             Ok(deliveries) => deliveries,
             Err(error) => {
                 orbit_log_fields::warn!(
@@ -71,7 +67,7 @@ async fn serve_lane(process: Arc<Process>, lane_id: String, slots: NonZeroU32) {
                     expanded(ERROR_MESSAGE) = %error,
                     "the pull of the lane failed"
                 );
-                process.ports.clock.sleep_until(now + PULL_RETRY).await;
+                runner.ports.clock.sleep_until(now + PULL_RETRY).await;
                 continue;
             }
         };
@@ -79,17 +75,17 @@ async fn serve_lane(process: Arc<Process>, lane_id: String, slots: NonZeroU32) {
             tokio::select! {
                 biased;
                 Some(joined) = runs.join_next() => resume_if_panicked(joined),
-                () = process.ports.tasks.wait_for_ready(&lane_id) => {}
+                () = runner.ports.tasks.wait_for_ready(&lane_id) => {}
             }
             continue;
         }
 
         for delivery in deliveries {
-            process
+            runner
                 .ports
                 .log
                 .record(now, ProtocolEvent::Delivered(delivery.message.task));
-            runs.spawn(Arc::clone(&process).run_delivered_task(delivery));
+            runs.spawn(Arc::clone(&runner).run_delivered_task(delivery));
         }
     }
 }

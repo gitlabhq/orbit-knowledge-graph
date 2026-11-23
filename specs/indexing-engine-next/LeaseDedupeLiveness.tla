@@ -35,7 +35,7 @@ FaultsStop ==
     /\ ~quiet
     /\ quiet' = TRUE
     /\ now' = Horizon
-    /\ UNCHANGED <<offset, lease, marker, nextId, copies, planner, submitted, cover, started>>
+    /\ UNCHANGED <<offset, lease, pending, nextId, copies, planner, submitted, cover, started>>
     /\ UNCHANGED <<stallsLeft, crashesLeft, podVars, storeVars, natsVars>>
 
 LiveInit == Init /\ quiet = FALSE

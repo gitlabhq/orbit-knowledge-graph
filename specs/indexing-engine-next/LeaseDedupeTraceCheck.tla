@@ -1,5 +1,5 @@
 ------------------------ MODULE LeaseDedupeTraceCheck ------------------------
-\* why: TLC follows each trace that the simulation records from the real lane loop. A step that LeaseDedupe can't take leaves no next state, and TLC reports a deadlock at that step.
+\* why: TLC follows each trace that the simulation records from the real runner. A step that LeaseDedupe can't take leaves no next state, and TLC reports a deadlock at that step.
 EXTENDS LeaseDedupeTraces
 
 VARIABLES trace, step
@@ -10,7 +10,7 @@ Matches(s) ==
     /\ now = s.now
     /\ offset = s.offset
     /\ lease = s.lease
-    /\ marker = s.marker
+    /\ pending = s.pending
     /\ nextId = s.nextId
     /\ copies = s.copies
     /\ planner = s.planner

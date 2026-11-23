@@ -4,7 +4,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use indexing_engine_next::protocol::TaskId;
+use indexing_engine_next::task::TaskId;
 use indexing_engine_next::testkit::simulation::MessageState;
 
 use super::{Cluster, Holder};
@@ -101,8 +101,13 @@ pub(super) fn state_lines(cluster: &Cluster) -> Vec<String> {
             ),
         ),
         (
-            "marker",
-            cluster.marker.get().copied().map_or(0, spec_id).to_string(),
+            "pending",
+            cluster
+                .pending
+                .get()
+                .copied()
+                .map_or(0, spec_id)
+                .to_string(),
         ),
         ("nextId", cluster.next_id.to_string()),
         ("copies", format!("<<{}>>", copies.join(", "))),

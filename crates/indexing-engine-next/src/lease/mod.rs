@@ -1,4 +1,11 @@
-use std::time::{Duration, SystemTime};
+mod rules;
+mod store;
+
+use std::time::SystemTime;
+
+pub use rules::{Claim, Hold, LeaseRules, Renewal};
+
+pub(crate) use store::{LeaseStore, LeaseWrite, Leases};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct HolderId(String);
@@ -39,33 +46,12 @@ pub struct LeaseEntry {
 }
 
 impl LeaseEntry {
-    pub(super) fn is_held_by(
-        &self,
-        holder: &HolderId,
-        generation: Generation,
-        revision: Revision,
-    ) -> bool {
+    fn is_held_by(&self, holder: &HolderId, generation: Generation, revision: Revision) -> bool {
         self.generation == Some(generation)
             && self.revision == revision
             && self
                 .lease
                 .as_ref()
                 .is_some_and(|lease| lease.holder == *holder)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LeaseRules {
-    pub ttl: Duration,
-    pub renew_every: Duration,
-    pub skew_margin: Duration,
-}
-
-impl LeaseRules {
-    pub(super) fn lease_for(&self, holder: &HolderId, local_now: SystemTime) -> Lease {
-        Lease {
-            holder: holder.clone(),
-            expires_at: local_now + self.ttl,
-        }
     }
 }

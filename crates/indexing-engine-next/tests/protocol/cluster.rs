@@ -3,9 +3,10 @@ mod tlc;
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::time::{Duration, SystemTime};
 
-use indexing_engine_next::protocol::{
-    Claim, Fence, Generation, Hold, HolderId, Lease, LeaseRules, Renewal, TaskId,
+use indexing_engine_next::lease::{
+    Claim, Fence, Generation, Hold, HolderId, Lease, LeaseRules, Renewal,
 };
+use indexing_engine_next::task::TaskId;
 use indexing_engine_next::testkit::simulation::{
     DatabaseWrite, FaultBudget, MessageState, SimulatedBroker, SimulatedDatabase,
     SimulatedKeyValue, TickClock,
@@ -224,7 +225,7 @@ struct Cluster {
     clock: TickClock,
     holders: Vec<Holder>,
     lease: SimulatedKeyValue<Lease>,
-    marker: SimulatedKeyValue<TaskId>,
+    pending: SimulatedKeyValue<TaskId>,
     generation: SimulatedKeyValue<Generation>,
     broker: SimulatedBroker,
     database: SimulatedDatabase,
@@ -269,7 +270,7 @@ impl Cluster {
             clock: TickClock::new(UNIT),
             holders,
             lease: SimulatedKeyValue::default(),
-            marker: SimulatedKeyValue::default(),
+            pending: SimulatedKeyValue::default(),
             generation,
             broker: SimulatedBroker::new(ACKNOWLEDGE_WAIT),
             database,
@@ -283,7 +284,7 @@ impl Cluster {
         }
     }
 
-    fn lease_entry(&self) -> indexing_engine_next::protocol::LeaseEntry {
+    fn lease_entry(&self) -> indexing_engine_next::lease::LeaseEntry {
         self.lease.entry(self.generation.get().copied())
     }
 
@@ -432,11 +433,11 @@ impl Cluster {
     }
 
     fn submit(&mut self) {
-        match self.marker.get().copied() {
+        match self.pending.get().copied() {
             Some(pending) => self.publishing = Some(pending),
             None => {
                 let task = task_id(self.next_id);
-                let created = self.marker.put(self.marker.revision(), Some(task));
+                let created = self.pending.put(self.pending.revision(), Some(task));
                 assert!(created.is_ok(), "a submit is atomic in the spec");
                 self.next_id += 1;
                 self.publishing = Some(task);
@@ -486,9 +487,8 @@ impl Cluster {
             return;
         };
         self.started.insert(hold.task());
-        let marker = self.marker.get().copied();
-        if marker == Some(hold.task()) {
-            let cleared = self.marker.put(self.marker.revision(), None);
+        if self.pending.get().copied() == Some(hold.task()) {
+            let cleared = self.pending.put(self.pending.revision(), None);
             assert!(cleared.is_ok(), "a start is atomic in the spec");
         }
         self.holders[h].step = Step::Running(hold);
@@ -563,7 +563,7 @@ impl Cluster {
     fn wipe_nats(&mut self) {
         self.faults.wipes -= 1;
         self.lease.wipe();
-        self.marker.wipe();
+        self.pending.wipe();
         self.generation.wipe();
         self.broker.wipe();
         let unfinished: Vec<TaskId> = (1..self.next_id)
@@ -603,15 +603,15 @@ impl Cluster {
             return Err("NoRejectedCurrentHolder: the database refused the write of the current lease holder".into());
         }
 
-        let marker = self.marker.get().copied();
-        let pending: Vec<TaskId> = self
+        let pending_task = self.pending.get().copied();
+        let waiting: Vec<TaskId> = self
             .broker
             .live_tasks()
             .filter(|task| !self.started.contains(task) && !self.lost_in_wipe.contains(task))
             .collect();
-        if pending.iter().any(|task| Some(*task) != marker) {
+        if waiting.iter().any(|task| Some(*task) != pending_task) {
             return Err(format!(
-                "AtMostOnePending: pending {pending:?}, marker {marker:?}"
+                "AtMostOnePending: waiting {waiting:?}, pending {pending_task:?}"
             ));
         }
 

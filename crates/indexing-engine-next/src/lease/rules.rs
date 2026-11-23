@@ -1,7 +1,23 @@
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
-use super::lease::{Fence, HolderId, Lease, LeaseEntry, LeaseRules, Revision};
-use super::marker::TaskId;
+use super::{Fence, HolderId, Lease, LeaseEntry, Revision};
+use crate::task::TaskId;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeaseRules {
+    pub ttl: Duration,
+    pub renew_every: Duration,
+    pub skew_margin: Duration,
+}
+
+impl LeaseRules {
+    fn lease_for(&self, holder: &HolderId, local_now: SystemTime) -> Lease {
+        Lease {
+            holder: holder.clone(),
+            expires_at: local_now + self.ttl,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Claim {

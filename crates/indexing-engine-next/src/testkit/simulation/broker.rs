@@ -1,4 +1,4 @@
-use crate::protocol::TaskId;
+use crate::task::TaskId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MessageState {

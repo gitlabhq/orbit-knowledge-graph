@@ -26,13 +26,13 @@ impl World {
             ", lease |-> [holder |-> {holder}, expiresAt |-> {expires_at}, rev |-> {}]",
             self.lease.revision().0
         );
-        let marker = self
-            .marker
+        let pending = self
+            .pending
             .get()
-            .map_or(0, |pending| self.find_spec_id(pending.task));
+            .map_or(0, |message| self.find_spec_id(message.task));
         let _ = write!(
             state,
-            ", marker |-> {marker}, nextId |-> {}",
+            ", pending |-> {pending}, nextId |-> {}",
             self.ids.len() + 1
         );
 
@@ -139,7 +139,7 @@ impl World {
         format!("({})", entries.join(" @@ "))
     }
 
-    fn format_id_set(&self, tasks: impl Iterator<Item = crate::protocol::TaskId>) -> String {
+    fn format_id_set(&self, tasks: impl Iterator<Item = crate::task::TaskId>) -> String {
         let mut ids: Vec<usize> = tasks.map(|task| self.find_spec_id(task)).collect();
         ids.sort_unstable();
         let ids: Vec<String> = ids.iter().map(usize::to_string).collect();
@@ -206,8 +206,8 @@ impl Simulation {
             ("MaxWipes", self.faults.wipes.to_string()),
             ("MaxDuplicates", self.faults.duplicates.to_string()),
             ("MaxLosses", self.faults.losses.to_string()),
-            ("StartClearsOnlyOwnMarker", "TRUE".to_owned()),
-            ("SubmitRepublishesFoundMarker", "TRUE".to_owned()),
+            ("StartClearsOnlyOwnPending", "TRUE".to_owned()),
+            ("SubmitRepublishesFoundPending", "TRUE".to_owned()),
             ("HolderStopsBeforeExpiry", "FALSE".to_owned()),
             ("WritesFencedByLeaseRevision", "TRUE".to_owned()),
             ("FenceHasGeneration", "TRUE".to_owned()),
