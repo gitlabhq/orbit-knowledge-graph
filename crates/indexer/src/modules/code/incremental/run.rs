@@ -180,7 +180,7 @@ fn skipped_file(killed: code_graph_incremental::Killed) -> code_graph::v2::error
         "resolve" if killed.path.is_empty() => FileSkip::CrossFileTimeout,
         "resolve" => FileSkip::ResolveTimeout,
         "names" => FileSkip::TooManyNames,
-        "tree-sitter" => FileSkip::Timeout(AbortPhase::Parse),
+        "parse" => FileSkip::Timeout(AbortPhase::Parse),
         "depth" => FileSkip::DeeplyNested,
         "stack" => FileSkip::StackLimit,
         "rewrite" => FileSkip::Timeout(AbortPhase::Walk),

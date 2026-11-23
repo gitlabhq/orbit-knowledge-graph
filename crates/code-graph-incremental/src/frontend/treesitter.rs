@@ -234,7 +234,7 @@ pub fn parse_with_sentinel(
             .parser
             .parse_with_options(&mut input, None, Some(options))
             .ok_or_else(|| {
-                stopped.unwrap_or_else(|| Killed::stopped("tree-sitter", label, Stop::Failed))
+                stopped.unwrap_or_else(|| Killed::stopped("parse", label, Stop::Failed))
             })?;
         sentinel.check()?;
         let (tree, truncated) = from_tree_sitter(
@@ -289,7 +289,7 @@ fn parse_guard() -> impl FnMut(usize) -> ControlFlow<(&'static str, Stop)> {
         stalled += 1;
         match stalled > MAX_STALL {
             true => ControlFlow::Break((
-                "tree-sitter",
+                "parse",
                 Stop::Reached {
                     observed: stalled,
                     cap: MAX_STALL,
@@ -375,7 +375,7 @@ mod tests {
     fn parsing_can_cancel_mid_file_and_reuse_the_parser() {
         let checks = Arc::new(AtomicUsize::new(0));
         let observed = checks.clone();
-        let sentinel = crate::sentinel::Sentinel::new("tree-sitter", "large.py", u64::MAX)
+        let sentinel = crate::sentinel::Sentinel::new("parse", "large.py", u64::MAX)
             .with_cancellation(Arc::new(move || {
                 observed.fetch_add(1, Ordering::Relaxed) > 0
             }));
@@ -391,7 +391,7 @@ mod tests {
         )
         .err()
         .unwrap();
-        assert_eq!(error.label, "tree-sitter");
+        assert_eq!(error.label, "parse");
         assert!(error.cancelled);
         assert_eq!(error.to_string(), "tree-sitter cancelled");
         assert_eq!(error.path, "large.py");

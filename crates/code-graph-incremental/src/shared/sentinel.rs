@@ -239,7 +239,7 @@ mod tests {
                     reserve: 2_000,
                 },
             ),
-            Killed::stopped("tree-sitter", "a.py", Stop::Failed),
+            Killed::stopped("parse", "a.py", Stop::Failed),
         ]
         .map(|killed| killed.to_string());
         assert_eq!(

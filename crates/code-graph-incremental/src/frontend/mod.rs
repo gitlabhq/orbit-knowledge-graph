@@ -12,7 +12,7 @@ use crate::sentinel::{Killed, Limits, Sentinel};
 use crate::tree::Tree;
 
 /// The parse budget's label, which reports name a parse timeout by.
-const PARSE: &str = "tree-sitter";
+const PARSE: &str = "parse";
 
 /// Turns one source file into a tree whose kinds are the pipeline's.
 pub trait Frontend: Send + Sync {

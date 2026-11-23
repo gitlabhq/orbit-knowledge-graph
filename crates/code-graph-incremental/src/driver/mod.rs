@@ -338,7 +338,7 @@ fn unparsed(
         let reason = match file.decision() {
             orbit_utils::vfs::Decision::List(reason) => format!("skip_{reason}"),
             _ => match skipped.get(path) {
-                Some(&"tree-sitter") => "skip_timeout_parse".into(),
+                Some(&"parse") => "skip_timeout_parse".into(),
                 Some(&"stack") => "skip_stack_limit".into(),
                 Some(&"edges") => "skip_too_many_edges".into(),
                 Some(label) => env
