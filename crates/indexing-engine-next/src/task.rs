@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
 use uuid::Uuid;
 
@@ -7,12 +9,6 @@ use crate::payload::{Key, TaskInput, Tenant};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaskId(Uuid);
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct WorkerKey {
-    pub(crate) worker: String,
-    pub(crate) key: Key,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TaskMessage {
     pub(crate) task: TaskId,
@@ -21,6 +17,12 @@ pub(crate) struct TaskMessage {
     pub(crate) key: Key,
     pub(crate) lane: Lane,
     pub(crate) input: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct WorkerKey {
+    pub(crate) worker: String,
+    pub(crate) key: Key,
 }
 
 pub(crate) struct Delivery {
@@ -39,6 +41,7 @@ pub(crate) trait TaskQueue: Send + Sync {
 pub(crate) trait InFlight: Send + Sync {
     async fn acknowledge(&self) -> anyhow::Result<()>;
     async fn acknowledge_progress(&self) -> anyhow::Result<()>;
+    async fn negative_acknowledge(&self, delay: Duration) -> anyhow::Result<()>;
 }
 
 impl TaskId {

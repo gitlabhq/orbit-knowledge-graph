@@ -109,6 +109,14 @@ impl SimulatedBroker {
         }
     }
 
+    pub fn negative_acknowledge(&mut self, message: usize, redeliver_at: u64) {
+        let held = &mut self.messages[message];
+        if held.state == MessageState::Inflight {
+            held.consumer = None;
+            held.deadline = redeliver_at;
+        }
+    }
+
     pub fn acknowledge(&mut self, message: usize) {
         if self.messages[message].state != MessageState::Lost {
             self.messages[message].state = MessageState::Acknowledged;

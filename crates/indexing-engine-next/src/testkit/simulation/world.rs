@@ -343,6 +343,10 @@ impl World {
                 process.renew_at = ticks_at(hold.renew_at());
                 self.record_step("AcquireLease", format!("(p{})", index + 1));
             }
+            (Actor::Process { index, .. }, ProtocolEvent::GivenBack(_)) => {
+                self.drop_run(index);
+                self.record_step("GiveBack", format!("(p{})", index + 1));
+            }
             (Actor::Process { index, .. }, ProtocolEvent::Started { task, .. }) => {
                 self.started.insert(task);
                 self.processes[index].phase = Phase::Running;
@@ -575,6 +579,9 @@ impl Phase {
 }
 
 pub(super) fn ticks_at(time: SystemTime) -> u64 {
-    let since_epoch = time.duration_since(UNIX_EPOCH).unwrap_or_default();
-    u64::try_from(since_epoch.as_millis() / TICK.as_millis()).unwrap_or(u64::MAX)
+    ticks_in(time.duration_since(UNIX_EPOCH).unwrap_or_default())
+}
+
+pub(super) fn ticks_in(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis() / TICK.as_millis()).unwrap_or(u64::MAX)
 }

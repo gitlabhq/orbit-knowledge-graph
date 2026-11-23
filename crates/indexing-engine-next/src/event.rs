@@ -9,6 +9,7 @@ pub(crate) enum ProtocolEvent {
     Published(TaskId),
     Delivered(TaskId),
     LeaseAcquired(Hold),
+    GivenBack(TaskId),
     Started { task: TaskId, cleared_pending: bool },
     Renewed(Hold),
     RenewalLost(TaskId),

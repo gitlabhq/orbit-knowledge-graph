@@ -44,16 +44,28 @@ impl Leases {
         }
     }
 
-    pub(crate) async fn acquire(&self, key: &WorkerKey, task: TaskId) -> Hold {
+    pub(crate) async fn acquire_or_give_back(
+        &self,
+        key: &WorkerKey,
+        task: TaskId,
+        in_flight: &dyn InFlight,
+    ) -> anyhow::Result<Option<Hold>> {
+        let now = self.clock.now().await;
         let claim = Claim::new(self.holder.clone(), task);
-        loop {
-            let now = self.clock.now().await;
-            match self.take_if_free(&claim, key, now).await {
-                Ok(Some(hold)) => return hold,
-                Ok(None) => {}
-                Err(error) => warn_port_failure("lease_take_failed", &error),
+        match self.take_if_free(claim, key, now).await? {
+            Some(hold) => {
+                self.log
+                    .record(now, ProtocolEvent::LeaseAcquired(hold.clone()));
+                Ok(Some(hold))
             }
-            self.clock.sleep(self.rules.renew_every).await;
+            None => {
+                let delay = self.rules.renew_every;
+                if let Err(error) = in_flight.negative_acknowledge(delay).await {
+                    warn_port_failure("negative_ack_failed", &error);
+                }
+                self.log.record(now, ProtocolEvent::GivenBack(task));
+                Ok(None)
+            }
         }
     }
 
@@ -66,7 +78,8 @@ impl Leases {
     ) {
         let mut now = started_at;
         loop {
-            self.clock.sleep(hold.time_until_renewal(now)).await;
+            let wait = hold.renew_at().duration_since(now).unwrap_or_default();
+            self.clock.sleep(wait).await;
             now = self.clock.now().await;
             match self.extend_if_ours(hold, key, now).await {
                 Ok(true) => {
@@ -101,7 +114,7 @@ impl Leases {
 
     async fn take_if_free(
         &self,
-        claim: &Claim,
+        claim: Claim,
         key: &WorkerKey,
         now: SystemTime,
     ) -> anyhow::Result<Option<Hold>> {
@@ -113,11 +126,7 @@ impl Leases {
         let LeaseWrite::Written(fence) = written else {
             return Ok(None);
         };
-
-        let hold = claim.clone().into_hold(&self.rules, &lease, fence, now);
-        self.log
-            .record(now, ProtocolEvent::LeaseAcquired(hold.clone()));
-        Ok(Some(hold))
+        Ok(Some(claim.into_hold(&self.rules, &lease, fence, now)))
     }
 
     async fn extend_if_ours(

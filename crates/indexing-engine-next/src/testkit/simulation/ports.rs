@@ -13,7 +13,7 @@ use crate::pending::{PendingEntry, PendingStore, PendingWrite};
 use crate::ports::Ports;
 use crate::task::{Delivery, InFlight, TaskMessage, TaskQueue, WorkerKey};
 
-use super::world::{Actor, SharedWorld, StepKind};
+use super::world::{Actor, SharedWorld, StepKind, ticks_in};
 
 struct SimulatedPorts {
     world: SharedWorld,
@@ -119,6 +119,16 @@ impl InFlight for SimulatedInFlight {
         world
             .broker
             .acknowledge_progress(self.message, self.consumer, now);
+        Ok(())
+    }
+
+    async fn negative_acknowledge(&self, delay: Duration) -> anyhow::Result<()> {
+        self.world.stop_unless_allowed(self.actor).await;
+        let mut world = self.world.lock();
+        let redeliver_at = world.now_tick() + ticks_in(delay);
+        world
+            .broker
+            .negative_acknowledge(self.message, redeliver_at);
         Ok(())
     }
 }

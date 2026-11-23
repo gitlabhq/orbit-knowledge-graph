@@ -199,6 +199,7 @@ impl Simulation {
             ("RenewEvery", "1".to_owned()),
             ("SkewMargin", "1".to_owned()),
             ("AckWait", ACKNOWLEDGE_WAIT_TICKS.to_string()),
+            ("GiveBackDelay", "1".to_owned()),
             ("MaxTime", self.count_ticks().to_string()),
             ("MaxEvents", self.submits.to_string()),
             ("MaxStalls", self.faults.stalls.to_string()),

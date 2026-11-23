@@ -32,19 +32,29 @@ impl Runner {
     async fn run_with_lease(&self, worker: &dyn ErasedWorker, delivery: Delivery) {
         let task = delivery.message.task;
         let key = delivery.message.worker_key();
-        let mut hold = self.leases.acquire(&key, task).await;
+        let in_flight = delivery.in_flight.as_ref();
+
+        let acquired = self
+            .leases
+            .acquire_or_give_back(&key, task, in_flight)
+            .await;
+        let mut hold = match acquired {
+            Ok(Some(hold)) => hold,
+            Ok(None) => return,
+            Err(error) => return self.abandon_run(task, error).await,
+        };
         let started_at = match self.start_task(&key, task).await {
             Ok(started_at) => started_at,
             Err(error) => return self.abandon_run(task, error).await,
         };
 
         let ctx = TaskContext::new(Arc::clone(&self.pools), Some(hold.fence()));
-        let in_flight = delivery.in_flight.as_ref();
         let outcome = tokio::select! {
             biased;
             () = self.leases.renew_while_running(&mut hold, &key, in_flight, started_at) => return,
             outcome = worker.run(&ctx, &delivery.message.input) => outcome,
         };
+
         match outcome {
             Ok(outcome) => self.finish_task(&delivery, Some(&hold), outcome).await,
             Err(error) => self.abandon_run(task, error).await,
@@ -66,15 +76,16 @@ impl Runner {
     }
 
     async fn start_task(&self, key: &WorkerKey, task: TaskId) -> anyhow::Result<SystemTime> {
-        let pending = &self.ports.pending;
         let now = self.ports.clock.now().await;
+        let pending = &self.ports.pending;
+
         let entry = pending.read(key).await?;
-        let pending_task = entry.task.map(|message| message.task);
-        let cleared_pending = pending_task == Some(task)
-            && matches!(
-                pending.write(key, entry.revision, None).await?,
-                PendingWrite::Written
-            );
+        let cleared_pending = if entry.task.is_some_and(|message| message.task == task) {
+            let written = pending.write(key, entry.revision, None).await?;
+            matches!(written, PendingWrite::Written)
+        } else {
+            false
+        };
 
         let started = ProtocolEvent::Started {
             task,
@@ -98,20 +109,17 @@ impl Runner {
         if let Err(error) = delivery.in_flight.acknowledge().await {
             warn_port_failure("ack_failed", &error);
         }
+
         let released = match hold {
-            Some(hold) => self
-                .leases
-                .release(hold, &message.worker_key())
-                .await
-                .unwrap_or_else(|error| {
-                    warn_port_failure("lease_release_failed", &error);
-                    false
-                }),
-            None => false,
+            Some(hold) => self.leases.release(hold, &message.worker_key()).await,
+            None => Ok(false),
         };
+        if let Err(error) = &released {
+            warn_port_failure("lease_release_failed", error);
+        }
         let finished = ProtocolEvent::Finished {
             task: message.task,
-            released,
+            released: released.unwrap_or(false),
         };
         self.ports.log.record(now, finished);
     }

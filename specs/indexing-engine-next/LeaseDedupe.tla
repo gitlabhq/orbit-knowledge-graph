@@ -11,6 +11,7 @@ CONSTANTS
     RenewEvery,
     SkewMargin,
     AckWait,
+    GiveBackDelay,
     MaxTime,
     MaxEvents,
     MaxStalls,
@@ -210,6 +211,20 @@ AcquireLease(p) ==
     /\ UNCHANGED <<held, stalled, plannerVars, storeVars>>
     /\ UNCHANGED natsVars
 
+\* why: a pod that finds the lease of its key held gives the message back to the broker with a delay, so it frees its slot and doesn't wait for the lease.
+GiveBack(p) ==
+    LET c == held[p] IN
+    /\ pc[p] = "leasing"
+    /\ Awake(p)
+    /\ ~(LeaseAcquirable(p) /\ (FenceHasGeneration => natsGeneration # 0))
+    /\ copies' = IF copies[c].state = "inflight"
+                   THEN [copies EXCEPT ![c].pod = NoPod, ![c].deadline = now + GiveBackDelay]
+                   ELSE copies
+    /\ DropRun(p)
+    /\ UNCHANGED <<now, offset, lease, started, stallsLeft, crashesLeft>>
+    /\ UNCHANGED <<token, seenRev, expiry, renewAt, stalled, plannerVars, storeVars>>
+    /\ UNCHANGED natsVars
+
 StartTask(p) ==
     LET id == copies[held[p]].id IN
     /\ pc[p] = "leased"
@@ -370,6 +385,7 @@ Next ==
     \/ \E p \in Pods :
         \/ \E c \in DOMAIN copies : Deliver(p, c)
         \/ AcquireLease(p)
+        \/ GiveBack(p)
         \/ StartTask(p)
         \/ Renew(p)
         \/ RenewFails(p)

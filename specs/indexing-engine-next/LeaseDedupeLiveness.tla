@@ -17,6 +17,7 @@ EngineStep ==
     \/ \E p \in Pods :
         \/ \E c \in DOMAIN copies : Deliver(p, c)
         \/ AcquireLease(p)
+        \/ GiveBack(p)
         \/ StartTask(p)
         \/ Renew(p)
         \/ BeginWrite(p)
@@ -55,6 +56,7 @@ LiveSpec ==
     /\ \A p \in Pods :
         /\ WF_allVars(\E c \in DOMAIN copies : Deliver(p, c) /\ UNCHANGED quiet)
         /\ WF_allVars(AcquireLease(p) /\ UNCHANGED quiet)
+        /\ WF_allVars(GiveBack(p) /\ UNCHANGED quiet)
         /\ WF_allVars(StartTask(p) /\ UNCHANGED quiet)
         /\ WF_allVars(Renew(p) /\ UNCHANGED quiet)
         /\ WF_allVars(BeginWrite(p) /\ UNCHANGED quiet)

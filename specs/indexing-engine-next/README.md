@@ -75,7 +75,8 @@ Within the bounds of the 4 clusters, the code takes no step that the spec forbid
 
 What it doesn't prove:
 
-- The NATS behaviors are assumptions. A probe against a local NATS 2.12.4 confirmed the 11 that the spec uses. The integration tests of 1b will check them in CI.
+- The NATS behaviors are assumptions. A probe against a local NATS 2.12.4 confirmed 11 of them. The integration tests of 1b will check all of them in CI.
+- The give-back adds 2 assumptions that the probe didn't cover: a negative ack with a delay brings the message back after the delay, and a negative ack of a message that NATS already delivered again frees that delivery too. The second one is the worst case, so the spec allows it.
 - A wipe and a duplicate together give 11M states or more, too many to compare as graphs.
 - Each pod has one slot, so the model can't show one pod with two runs of a key. A unit test covers the holder check for that case, before and after a wipe.
 - A pod reads the generation and takes the lease in one step. In NATS, the generation and the lease are two key-value entries, so a wipe can come between the read and the write. Two runs can then get the same fence. 1b must make it one step: the recovery writes the generation into the lease value, or a run ID goes beside the fence.
@@ -93,6 +94,8 @@ What it doesn't prove:
 ### The model
 
 The model has one key and 2 or 3 pods with one slot each. One time unit is 20 s. The lease lasts 3 units, a pod renews it every unit, and the skew margin and the ack wait are 1 and 2 units. Each pod has a clock offset of 0 or 1.
+
+A pod that finds the lease of its key held doesn't wait for it. It gives the message back to the broker with a delay of 1 unit, so its slot is free for other work. The broker delivers the message again after the delay. The liveness configs use a delay of 0, because there the clock jumps past every timer once faults stop.
 
 A wipe empties the key-value store and the broker. The database survives it. After a wipe, a recovery reads the generation from the database, adds 1, and writes it to the key-value store.
 
@@ -269,7 +272,7 @@ The trace check found a bug in the simulator before it passed. A crashed process
 
 The coverage test found 2 more gaps. After a stall, the renewal always ran before the write, so no seed reached a fence rejection. Now a process yields at random each time it wakes up, and half of the stalls wait for the next database write. A seed also hung when the loop made calls with no pause. Now too many port calls in one tick break a rule, so the run ends with a timeline and doesn't hang.
 
-We broke the runner in 9 ways, one at a time:
+We broke the runner in 11 ways, one at a time:
 
 | Broken rule in the runner | Rust rules | TLC trace check |
 |---|---|---|
@@ -281,9 +284,11 @@ We broke the runner in 9 ways, one at a time:
 | A finished run releases a lease that it doesn't hold | passes | fails |
 | The pending task clears at delivery, before the lease | passes | fails |
 | A take of the lease ignores the lease rules | passes | fails |
+| A give-back skips the negative ack | passes | fails |
+| A renewal waits a fixed period from the start of the run, not until its renewal time | passes | fails |
 | A failed run acks its task | passes | passes |
 
-The checks catch 8 of 9, and only TLC catches 4 of them. The last one is a gap. The simulated worker fails only on a fence rejection. By then, a newer run has acked the same message, so the extra ack changes nothing. The error table of the next MR adds other worker errors, and then the spec needs a step for each one.
+The checks catch 10 of 11, and only TLC catches 6 of them. The last one is a gap. The simulated worker fails only on a fence rejection. By then, a newer run has acked the same message, so the extra ack changes nothing. The error table of the next MR adds other worker errors, and then the spec needs a step for each one.
 
 ### What NATS confirmed
 

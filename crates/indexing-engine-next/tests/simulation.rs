@@ -68,6 +68,30 @@ fn a_message_comes_back_after_the_acknowledge_wait_unless_its_consumer_acknowled
 }
 
 #[test]
+fn a_negative_acknowledge_frees_the_message_and_brings_it_back_after_the_delay() {
+    let mut broker = SimulatedBroker::new(2);
+    broker.publish(task(1));
+    broker.deliver(0, 0, 10);
+
+    broker.negative_acknowledge(0, 11);
+
+    assert_eq!(broker.messages()[0].consumer, None);
+    assert_eq!(broker.expired_messages(10).count(), 0);
+    assert_eq!(broker.expired_messages(11).collect::<Vec<_>>(), [0]);
+}
+
+#[test]
+fn a_negative_acknowledge_of_a_message_that_is_not_in_flight_changes_nothing() {
+    let mut broker = SimulatedBroker::new(2);
+    broker.publish(task(1));
+
+    broker.negative_acknowledge(0, 11);
+
+    assert_eq!(broker.messages()[0].state, MessageState::Ready);
+    assert_eq!(broker.ready_messages().collect::<Vec<_>>(), [0]);
+}
+
+#[test]
 fn the_database_rejects_a_write_with_a_lower_fence_than_one_it_kept() {
     let mut database = SimulatedDatabase::default();
 
@@ -221,6 +245,7 @@ async fn the_seeds_reach_every_fault_and_every_fence_rejection() {
         "RecoverNats",
         "DuplicateCopy",
         "Redeliver",
+        "GiveBack",
         "RejectedWrite",
         "Renew",
         "Finish",
