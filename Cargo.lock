@@ -4295,8 +4295,13 @@ dependencies = [
  "arrow",
  "compiler",
  "duckdb-client",
+ "ontology",
+ "orbit-server-config",
+ "orbit-utils",
  "pipeline",
+ "serde_json",
  "shared",
+ "tokio",
 ]
 
 [[package]]

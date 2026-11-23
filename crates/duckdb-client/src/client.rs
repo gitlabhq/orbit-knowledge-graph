@@ -4,6 +4,7 @@ use std::time::Duration;
 use arrow::record_batch::RecordBatch;
 use duckdb::params;
 use duckdb::vtab::arrow::{ArrowBatchRegistration, ArrowVTab};
+use orbit_utils::query_types::{ParamValue, SqlType};
 use orbit_utils::strings::quote_ident;
 
 use crate::error::{DuckDbError, Result};
@@ -177,6 +178,14 @@ impl DuckDbClient {
         Ok(batches)
     }
 
+    pub fn query_arrow_bound(&self, sql: &str, params: &[ParamValue]) -> Result<Vec<RecordBatch>> {
+        let bound = params
+            .iter()
+            .map(param_to_sql)
+            .collect::<Result<Vec<_>>>()?;
+        self.query_arrow_params(sql, &bound)
+    }
+
     pub fn delete_all_data(&self, tables: &[&str]) -> Result<()> {
         for table in tables {
             self.conn
@@ -229,6 +238,34 @@ fn utc_time_zone_statement(conn: &duckdb::Connection) -> Result<&'static str> {
         return Ok("");
     }
     Ok("SET TimeZone = 'UTC';")
+}
+
+fn param_to_sql(param: &ParamValue) -> Result<Box<dyn duckdb::ToSql>> {
+    let mismatch = || {
+        DuckDbError::Bind(format!(
+            "{} does not fit {:?}",
+            param.value, param.data_type
+        ))
+    };
+    let value = &param.value;
+    if value.is_null() {
+        return Ok(Box::new(Option::<String>::None));
+    }
+    Ok(match param.data_type {
+        SqlType::Int64 => Box::new(value.as_i64().ok_or_else(mismatch)?),
+        SqlType::UInt32 => Box::new(
+            value
+                .as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(mismatch)?,
+        ),
+        SqlType::Float64 => Box::new(value.as_f64().ok_or_else(mismatch)?),
+        SqlType::Bool => Box::new(value.as_bool().ok_or_else(mismatch)?),
+        SqlType::String | SqlType::Date | SqlType::Timestamp { .. } => {
+            Box::new(value.as_str().ok_or_else(mismatch)?.to_owned())
+        }
+        SqlType::Array(_) => return Err(mismatch()),
+    })
 }
 
 fn json_params_to_sql(params: &[serde_json::Value]) -> Vec<Box<dyn duckdb::ToSql>> {

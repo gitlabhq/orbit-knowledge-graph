@@ -11,5 +11,12 @@ duckdb-client = { path = "../../duckdb-client" }
 pipeline = { path = "../pipeline" }
 shared = { path = "../shared" }
 
+[dev-dependencies]
+ontology = { path = "../../ontology" }
+orbit-server-config = { path = "../../orbit-server-config" }
+orbit-utils = { path = "../../utils" }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
 [lints]
 workspace = true
