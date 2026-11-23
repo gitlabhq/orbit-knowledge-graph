@@ -23,14 +23,14 @@ update this table.
 
 | Setting | Value |
 |---|---|
-| `SKILLS_REF` in both files | `098cebc83bc8b0409132c9a36030d112f9abd454`, the head of team/skills!38 (branch `docs-write/issue-403`, unmerged). Re-pin both files to its squash commit on `main` once it merges. |
+| `SKILLS_REF` in both files | `f67bb35288b6fc3fe3232f136d2cfa48395b74a4`, the head of team/skills!38 (branch `docs-write/issue-403`, unmerged). Re-pin both files to its squash commit on `main` once it merges. |
 | `MODE` in both files | `full` |
 | `FLOW_USER` in `docs-write.yml` | `44621578`, the user ID of `ai-docs-write-gitlab-org_510eee`, the service account that authors the flow's notes. Under composite identity `GET /user` returns the person who triggered the run, so the skills need it. An ID survives a rename. |
 | `REVIEW_USER` in `docs-write.yml` | Empty until the docs-review service account exists, then its user ID. docs-write trusts that account's review threads and its summary note. While it is empty, docs-write finds no review, so a mention on a docs MR with a green pipeline ends without a fix or a handoff. |
 | `DOCS_REVIEWERS` in `docs-write.yml` | `fneill,z_painter`: technical writers who approve and merge the docs MRs |
 | AI Catalog item `docs-write` | Item 1020976 in this project, private, enabled. Trigger: **Mention** only during rollout. Service account `ai-docs-write-gitlab-org_510eee`, Reporter in `team/skills`. |
 | `FLOW_USER` in `docs-review.yml` | Empty until the service account exists, then its user ID. While it is empty, every docs-review run ends in `setup` with no model call. |
-| `WRITE_USER` in `docs-review.yml` | Empty until the docs-review service account exists, then `ai-docs-write-gitlab-org_510eee`, the docs-write service account's username. On a docs-write MR, docs-review mentions it in the summary note, and in one note per head when the pipeline failed. The mention starts the next docs-write run. While it is empty, docs-review mentions nobody, and docs-write runs only when a person mentions it. |
+| `WRITE_USER` in `docs-review.yml` | Empty until the docs-review service account exists, then `ai-docs-write-gitlab-org_510eee`, the docs-write service account's username. On a docs-write MR, docs-review mentions it in the summary note, and in one note per head when a docs job failed. The mention starts the next docs-write run. While it is empty, docs-review mentions nobody, and docs-write runs only when a person mentions it. |
 | `MIN_IMPORTANCE` in `docs-review.yml` | `4`: post findings at importance 4 or 5, and every blocker. Live runs showed fixers that followed wording nits made docs worse. |
 | `REVIEW_PATHS` in `docs-review.yml` | `docs/docs-gitlab-com/,docs/navigation.yaml`, the user docs. See [Engineering docs](#engineering-docs). |
 | AI Catalog item `docs-review` | To be created: private, in this project. Its service account, `ai-docs-review-gitlab-org` or similar, needs the Reporter role in `team/skills`. Trigger: **Mention** and **Assign reviewer**, which docs-write's review request uses. **Pipeline** is optional, for docs MRs that people push. |
@@ -119,8 +119,8 @@ flowchart TD
    head's pipeline first. It ends the run when the goal is not an MR
    pipeline, a mention, or a review request; the pipeline is not green (a failed
    `docs-write-merge-order-check` alone counts as green), after one note
-   per head that asks docs-write to fix CI when the MR is an open
-   docs-write MR and `WRITE_USER` is set; the MR is closed,
+   per head that asks docs-write to fix CI when a docs job failed, the MR
+   is an open docs-write MR, and `WRITE_USER` is set; the MR is closed,
    from a fork, has `~"docs-factory::skip"`, or moved past the pipeline's
    commit; it changes nothing under `REVIEW_PATHS`; its head already has a
    docs-review summary; or `FLOW_USER` is empty. Every code-only MR pipeline
