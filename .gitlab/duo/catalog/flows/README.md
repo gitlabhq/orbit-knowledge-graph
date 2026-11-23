@@ -23,7 +23,7 @@ update this table.
 
 | Setting | Value |
 |---|---|
-| `SKILLS_REF` in both files | `d5b2cfd6fc18a128988c9d628da86d7a1c7a7718`, the head of team/skills!38 (branch `docs-write/issue-403`, unmerged). Re-pin both files to its squash commit on `main` once it merges. |
+| `SKILLS_REF` in both files | `098cebc83bc8b0409132c9a36030d112f9abd454`, the head of team/skills!38 (branch `docs-write/issue-403`, unmerged). Re-pin both files to its squash commit on `main` once it merges. |
 | `MODE` in both files | `full` |
 | `FLOW_USER` in `docs-write.yml` | `44621578`, the user ID of `ai-docs-write-gitlab-org_510eee`, the service account that authors the flow's notes. Under composite identity `GET /user` returns the person who triggered the run, so the skills need it. An ID survives a rename. |
 | `REVIEW_USER` in `docs-write.yml` | Empty until the docs-review service account exists, then its user ID. docs-write trusts that account's review threads and its summary note. While it is empty, docs-write finds no review, so a mention on a docs MR with a green pipeline ends without a fix or a handoff. |
@@ -33,7 +33,7 @@ update this table.
 | `WRITE_USER` in `docs-review.yml` | Empty until the docs-review service account exists, then `ai-docs-write-gitlab-org_510eee`, the docs-write service account's username. On a docs-write MR, docs-review mentions it in the summary note, and in one note per head when the pipeline failed. The mention starts the next docs-write run. While it is empty, docs-review mentions nobody, and docs-write runs only when a person mentions it. |
 | `MIN_IMPORTANCE` in `docs-review.yml` | `4`: post findings at importance 4 or 5, and every blocker. Live runs showed fixers that followed wording nits made docs worse. |
 | `REVIEW_PATHS` in `docs-review.yml` | `docs/docs-gitlab-com/,docs/navigation.yaml`, the user docs. See [Engineering docs](#engineering-docs). |
-| AI Catalog item `docs-review` | To be created: private, in this project. Its service account, `ai-docs-review-gitlab-org` or similar, needs the Reporter role in `team/skills`. Trigger: **Mention** during rollout, then **Pipeline**, which the docs-write chain needs. |
+| AI Catalog item `docs-review` | To be created: private, in this project. Its service account, `ai-docs-review-gitlab-org` or similar, needs the Reporter role in `team/skills`. Trigger: **Mention** and **Assign reviewer**, which docs-write's review request uses. **Pipeline** is optional, for docs MRs that people push. |
 
 ## How docs-write runs
 
@@ -81,7 +81,7 @@ update this table.
    cycles counts the flow's fix pushes since its last write push. Each hop
    is one level of GitLab's chain depth limit of 10: the write run, its
    review, and three fix and review pairs end with the handoff run at
-   depth 9. At the cap, docs-write hands off and holds the MR in draft
+   depth 8. At the cap, docs-write hands off and holds the MR in draft
    instead of fixing, and pushes nothing, so the loop stops. A person's
    mention starts a new chain.
 1. When CI is green, the head has a review, and only decision threads and
@@ -210,7 +210,7 @@ or brevity findings: `post` drops them even when a linter reports them.
 
 `.docs-write/` must stay readable: the flows' `read_file` steps read the
 route files there, and `read_file` refuses paths that Git ignores, so never add
-`.docs-write/` to `.gitignore`.
+`.docs-write/` to `.gitignore` or `.git/info/exclude`.
 
 Every agent in both flows, the docs-review reviewer included, has
 `run_command`, a shell in the same workload as the run's `GITLAB_TOKEN`. Tool options cannot restrict a shell, so an agent can read
@@ -344,7 +344,9 @@ so docs-write requests the docs-review account's review after each push
 starts docs-review as a child of the docs-write run, acting for the person
 who started the chain (`ai_flow_trigger_chaining`, on for GitLab.com). Setup
 waits up to 840 seconds for the head's pipeline, then reviews a green one or
-asks docs-write to fix failed docs jobs. GitLab limits a chain to depth 10,
+asks docs-write to fix failed docs jobs. When the pipeline still runs after
+840 seconds, the run ends with no review: mention the docs-review account on
+the docs MR to review that head. GitLab limits a chain to depth 10,
 which the fix-cycle cap of three fits.
 
 To also review docs MRs that people push, add **Pipeline** events
@@ -362,9 +364,9 @@ this trigger.
 
 `failed` is in the filter for two reasons. A docs-write MR pipeline fails on
 `docs-write-merge-order-check` until its feature MRs merge: `setup` reviews
-a failed pipeline when that job is its only failure. On any other failure
-of a docs-write MR head, `setup` asks docs-write to fix CI, and on other
-MRs it ends. The source rule keeps MR pipelines only: flow sessions run as
+a failed pipeline when that job is its only failure. When a docs job failed
+on a docs-write MR head, `setup` asks docs-write to fix CI. On any other
+failure, and on other MRs, it ends. The source rule keeps MR pipelines only: flow sessions run as
 pipelines too, and branch and default-branch pipelines have no MR to
 review. Every MR pipeline in the project starts a run, and every run on an
 MR that changes no docs ends in `setup`, with no model call, after about

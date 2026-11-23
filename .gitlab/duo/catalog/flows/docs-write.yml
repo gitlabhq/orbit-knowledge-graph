@@ -11,7 +11,7 @@ components:
     inputs:
       - from: >-
           SKILLS_REPO=gitlab-org/orbit/team/skills;
-          SKILLS_REF=d5b2cfd6fc18a128988c9d628da86d7a1c7a7718;
+          SKILLS_REF=098cebc83bc8b0409132c9a36030d112f9abd454;
           MODE=full;
           DOCS_REVIEWERS=fneill,z_painter;
           FLOW_USER=44621578;
@@ -100,11 +100,6 @@ components:
     prompt_id: dw_fix
     toolset: [read_file, read_files, find_files, grep, edit_file, create_file_with_contents, run_command]
     ui_log_events: [on_agent_final_answer, on_tool_execution_failed]
-  - name: fix4
-    type: AgentComponent
-    prompt_id: dw_fix
-    toolset: [read_file, read_files, find_files, grep, edit_file, create_file_with_contents, run_command]
-    ui_log_events: [on_agent_final_answer, on_tool_execution_failed]
   - name: handoff
     type: DeterministicStepComponent
     tool_name: run_command
@@ -169,21 +164,20 @@ routers:
   - from: read_publish
     condition:
       input: "context:read_publish.tool_responses"
-      routes: {fix1: fix1, fix2: fix2, fix3: fix3, fix4: fix4, handoff: handoff, default_route: end}
+      routes: {fix1: fix1, fix2: fix2, fix3: fix3, handoff: handoff, default_route: end}
   - {from: fix1, to: publish}
   - {from: fix2, to: publish}
   - {from: fix3, to: publish}
-  - {from: fix4, to: publish}
   - {from: ci, to: read_ci}
   - from: read_ci
     condition:
       input: "context:read_ci.tool_responses"
-      routes: {threads: threads, fix1: fix1, fix2: fix2, fix3: fix3, fix4: fix4, handoff: handoff, default_route: end}
+      routes: {threads: threads, fix1: fix1, fix2: fix2, fix3: fix3, handoff: handoff, default_route: end}
   - {from: threads, to: read_threads}
   - from: read_threads
     condition:
       input: "context:read_threads.tool_responses"
-      routes: {fix1: fix1, fix2: fix2, fix3: fix3, fix4: fix4, handoff: handoff, default_route: end}
+      routes: {fix1: fix1, fix2: fix2, fix3: fix3, handoff: handoff, default_route: end}
   - {from: handoff, to: end}
 flow:
   entry_point: setup
