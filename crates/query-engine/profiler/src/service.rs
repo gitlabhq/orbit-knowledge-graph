@@ -57,7 +57,7 @@ impl ProfilerPipelineService {
         };
 
         let output = PipelineRunner::start(&mut ctx, &mut obs)
-            .then(&CompilationStage)
+            .then(&CompilationStage::<query_data_model::ClickHouseDataModel>::new())
             .await?
             .then(&ProfilerExecutor)
             .await?

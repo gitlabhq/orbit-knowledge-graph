@@ -1,14 +1,13 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
+use arrow::record_batch::RecordBatch;
 use duckdb_client::DuckDbClient;
 use orbit_server::pipeline::HydrationStage;
-use query_engine::compiler::compile_local;
+use query_engine::compiler::ParameterizedQuery;
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
 };
-use query_engine::shared::{
-    AuthorizationOutput, ExecutionOutput, ExtractionOutput, HydrationOutput,
-};
+use query_engine::shared::{AuthorizationOutput, ExtractionOutput, HydrationOutput, QueryExecutor};
 
 use super::coverage::Coverage;
 use crate::mock_redaction::MockRedactionService;
@@ -36,50 +35,25 @@ impl PipelineStage for MockAuthorizationStage<'_> {
     }
 }
 
-pub(super) struct LocalCompilationStage;
-
-impl PipelineStage for LocalCompilationStage {
-    type Input = ();
-    type Output = ();
-
-    async fn execute(
-        &self,
-        ctx: &mut QueryPipelineContext,
-        _obs: &mut dyn PipelineObserver,
-    ) -> Result<Self::Output, PipelineError> {
-        let compiled = compile_local(&ctx.query_json, ctx.frontend, &ctx.ontology)?;
-        ctx.compiled = Some(Arc::new(compiled));
-        Ok(())
-    }
-}
-
-pub(super) struct LocalExecutionStage<'a> {
+pub(super) struct LocalExecutor<'a> {
     pub(super) database: &'a Mutex<DuckDbClient>,
     pub(super) coverage: &'a Mutex<Coverage>,
 }
 
-impl PipelineStage for LocalExecutionStage<'_> {
-    type Input = ();
-    type Output = ExecutionOutput;
-
-    async fn execute(
+impl QueryExecutor for LocalExecutor<'_> {
+    async fn run(
         &self,
+        query: &ParameterizedQuery,
         ctx: &mut QueryPipelineContext,
         _obs: &mut dyn PipelineObserver,
-    ) -> Result<Self::Output, PipelineError> {
-        let compiled = ctx.compiled()?;
-        self.coverage.lock().unwrap().record(&compiled.ast);
-        let sql = compiled.base.render();
-        let batches = self
-            .database
+    ) -> Result<Vec<RecordBatch>, PipelineError> {
+        self.coverage.lock().unwrap().record(&ctx.compiled()?.ast);
+        let sql = query.render();
+        self.database
             .lock()
             .unwrap()
             .query_arrow(&sql)
-            .map_err(|error| PipelineError::Execution(format!("{error}\n{sql}")))?;
-        Ok(ExecutionOutput {
-            batches,
-            result_context: compiled.base.result_context.clone(),
-        })
+            .map_err(|error| PipelineError::Execution(format!("{error}\n{sql}")))
     }
 }
 

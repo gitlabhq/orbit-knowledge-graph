@@ -13,7 +13,7 @@ use orbit_server::pipeline::{ClickHouseExecutor, SecurityStage};
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineRunner, QueryPipelineContext, TypeMap,
 };
-use query_engine::shared::{CompilationStage, QueryExecutionLog};
+use query_engine::shared::{CompilationStage, ExecutionStage, QueryExecutionLog};
 use tracing::Instrument;
 use tracing_subscriber::layer::SubscriberExt;
 
@@ -80,9 +80,9 @@ async fn execute_project_query(db: &TestContext) -> Result<String, PipelineError
     PipelineRunner::start(&mut ctx, &mut NoOpObserver)
         .then(&SecurityStage)
         .await?
-        .then(&CompilationStage)
+        .then(&CompilationStage::<query_data_model::ClickHouseDataModel>::new())
         .await?
-        .then(&executor)
+        .then(&ExecutionStage(executor))
         .await?;
 
     let log = ctx.phases.remove::<QueryExecutionLog>().unwrap_or_default();

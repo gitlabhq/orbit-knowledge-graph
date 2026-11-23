@@ -4,12 +4,10 @@ use std::time::Instant;
 
 use clickhouse_client::{ArrowClickHouseClient, QuerySummary};
 
-use query_engine::pipeline::{
-    PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
-};
-use query_engine::shared::{
-    ExecutionOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
-};
+use arrow::record_batch::RecordBatch;
+use query_engine::compiler::ParameterizedQuery;
+use query_engine::pipeline::{PipelineError, PipelineObserver, QueryPipelineContext};
+use query_engine::shared::{QueryExecution, QueryExecutionLog, QueryExecutionStats, QueryExecutor};
 
 use crate::pipeline::correlation;
 use crate::pipeline::service::QuerySettings;
@@ -27,15 +25,13 @@ pub struct ClickHouseExecutor {
     pub migration_version: u32,
 }
 
-impl PipelineStage for ClickHouseExecutor {
-    type Input = ();
-    type Output = ExecutionOutput;
-
-    async fn execute(
+impl QueryExecutor for ClickHouseExecutor {
+    async fn run(
         &self,
+        query: &ParameterizedQuery,
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
-    ) -> Result<Self::Output, PipelineError> {
+    ) -> Result<Vec<RecordBatch>, PipelineError> {
         let start = Instant::now();
         let client = ctx
             .server_extensions
@@ -55,24 +51,20 @@ impl PipelineStage for ClickHouseExecutor {
             self.migration_version,
         );
 
-        let (prepared, result_context) = {
-            let compiled = ctx.compiled().inspect_err(|e| obs.record_error(e))?;
-            let query_id = correlation::query_id("base");
-            let mut http_settings = vec![
-                ("query_id".to_string(), query_id.clone()),
-                ("log_comment".to_string(), log_comment),
-            ];
-            if let Some(QuerySettings(settings)) = ctx.phases.get::<QuerySettings>() {
-                http_settings.extend(settings.iter().cloned());
-            }
-            let prepared = PreparedQuery {
-                sql: compiled.base.sql.clone(),
-                params: compiled.base.params.clone(),
-                rendered_sql: compiled.base.render(),
-                http_settings,
-                query_id,
-            };
-            (prepared, compiled.base.result_context.clone())
+        let query_id = correlation::query_id("base");
+        let mut http_settings = vec![
+            ("query_id".to_string(), query_id.clone()),
+            ("log_comment".to_string(), log_comment),
+        ];
+        if let Some(QuerySettings(settings)) = ctx.phases.get::<QuerySettings>() {
+            http_settings.extend(settings.iter().cloned());
+        }
+        let prepared = PreparedQuery {
+            sql: query.sql.clone(),
+            params: query.params.clone(),
+            rendered_sql: query.render(),
+            http_settings,
+            query_id,
         };
 
         let (batches, execution) = execute_query(client, &prepared, start)
@@ -93,10 +85,7 @@ impl PipelineStage for ClickHouseExecutor {
             .0
             .push(execution);
 
-        Ok(ExecutionOutput {
-            batches,
-            result_context,
-        })
+        Ok(batches)
     }
 }
 

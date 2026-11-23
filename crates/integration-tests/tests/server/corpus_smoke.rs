@@ -38,7 +38,8 @@ use query_engine::pipeline::{
 use query_engine::shared::PipelineOutput;
 use query_engine::shared::content::{ColumnResolver, ColumnResolverRegistry};
 use query_engine::shared::{
-    AuthorizationOutput, CompilationStage, ExtractionOutput, ExtractionStage, OutputStage,
+    AuthorizationOutput, CompilationStage, ExecutionStage, ExtractionOutput, ExtractionStage,
+    OutputStage,
 };
 use serde::Deserialize;
 
@@ -479,9 +480,12 @@ async fn run_stages(ctx: &mut QueryPipelineContext) -> Result<PipelineOutput, Pi
     PipelineRunner::start(ctx, &mut obs)
         .then(&Traced(security, &SecurityStage))
         .await?
-        .then(&Traced(compilation, &CompilationStage))
+        .then(&Traced(
+            compilation,
+            &CompilationStage::<query_data_model::ClickHouseDataModel>::new(),
+        ))
         .await?
-        .then(&Traced(execution, &executor))
+        .then(&Traced(execution, &ExecutionStage(executor)))
         .await?
         .then(&Traced(extraction, &ExtractionStage))
         .await?

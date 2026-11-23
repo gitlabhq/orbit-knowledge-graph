@@ -18,7 +18,9 @@ use query_engine::compiler::Frontend;
 use query_engine::pipeline::{
     MultiObserver, PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext, TypeMap,
 };
-use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, PipelineOutput};
+use query_engine::shared::{
+    CompilationStage, ExecutionStage, ExtractionStage, OutputStage, PipelineOutput,
+};
 
 use super::helpers::send_query_result;
 use super::metrics::OTelPipelineObserver;
@@ -147,11 +149,11 @@ impl QueryPipelineService {
             let output = PipelineRunner::start(&mut ctx, &mut obs)
                 .then(&SecurityStage)
                 .await?
-                .then(&CompilationStage)
+                .then(&CompilationStage::<query_data_model::ClickHouseDataModel>::new())
                 .await?
-                .then(&ClickHouseExecutor {
+                .then(&ExecutionStage(ClickHouseExecutor {
                     migration_version: schema.migration_version,
-                })
+                }))
                 .await?
                 .then(&ExtractionStage)
                 .await?

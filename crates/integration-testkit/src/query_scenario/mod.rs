@@ -25,7 +25,9 @@ use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineRunner, QueryPipelineContext, TypeMap,
 };
 use query_engine::shared::content::ColumnResolverRegistry;
-use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, PipelineOutput};
+use query_engine::shared::{
+    CompilationStage, ExecutionStage, ExtractionStage, OutputStage, PipelineOutput,
+};
 use response::{
     assert_compilation, assert_output, assert_pagination, assert_repeated_response, repeat_count,
     validate_response,
@@ -241,11 +243,11 @@ impl engine::Engine for ClickhouseEngine<'_> {
             return Err(PipelineError::custom("schema calls are not graph queries"));
         }
         PipelineRunner::start(&mut ctx, &mut obs)
-            .then(&CompilationStage)
+            .then(&CompilationStage::<query_data_model::ClickHouseDataModel>::new())
             .await?
-            .then(&ClickHouseExecutor {
+            .then(&ExecutionStage(ClickHouseExecutor {
                 migration_version: 0,
-            })
+            }))
             .await?
             .then(&ExtractionStage)
             .await?

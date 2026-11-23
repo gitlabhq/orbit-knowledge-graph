@@ -207,6 +207,15 @@ pub fn compile_model<'a, M: CompileTarget>(
     compile_source(CompileSource::Raw(raw), fe, model, security)
 }
 
+pub fn local_data_model(
+    ontology: &Arc<Ontology>,
+) -> Result<Arc<query_data_model::DuckDbDataModel>> {
+    let mut ontology = ontology.as_ref().clone();
+    ontology.remove_data_model_optimizations();
+    data_model::duckdb(Arc::new(ontology))
+        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))
+}
+
 /// Compile a graph query into DuckDB SQL for local execution.
 ///
 /// Collapses edge tables to the local single-table layout before compiling.
@@ -217,12 +226,7 @@ pub fn compile_local(
     fe: Frontend,
     ontology: &Arc<Ontology>,
 ) -> Result<CompiledQueryContext> {
-    let mut ontology = ontology.as_ref().clone();
-    ontology.remove_data_model_optimizations();
-    let ontology = Arc::new(ontology);
-    let data_model = data_model::duckdb(Arc::clone(&ontology))
-        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    compile_model(raw, fe, &data_model, None)
+    compile_model(raw, fe, &local_data_model(ontology)?, None)
 }
 
 /// Run only `validate` + `normalize`, returning the normalized [`Input`].

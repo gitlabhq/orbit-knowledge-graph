@@ -1,12 +1,25 @@
+use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Instant;
 
+use compiler::{CompileSource, CompileTarget};
 use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 
-#[derive(Clone)]
-pub struct CompilationStage;
+pub struct CompilationStage<M>(PhantomData<fn() -> M>);
 
-impl PipelineStage for CompilationStage {
+impl<M> CompilationStage<M> {
+    pub const fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<M> Default for CompilationStage<M> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<M: CompileTarget + Send + Sync + 'static> PipelineStage for CompilationStage<M> {
     type Input = ();
     type Output = ();
 
@@ -16,33 +29,21 @@ impl PipelineStage for CompilationStage {
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
         let t = Instant::now();
-        let ontology = &ctx.ontology;
-        let security_context = ctx
-            .security_context()
-            .inspect_err(|e| obs.record_error(e))?;
-
         let data_model = ctx
             .server_extensions
-            .get::<Arc<query_data_model::ClickHouseDataModel>>();
-        let compiled = match ctx.phases.get::<compiler::gql::ParsedQuery>() {
-            Some(query) => match data_model {
-                Some(data_model) => {
-                    compiler::gql::compile_query_model(query.clone(), data_model, security_context)
-                }
-                None => compiler::gql::compile_query(query.clone(), ontology, security_context),
-            },
-            None => match data_model {
-                Some(data_model) => compiler::compile_model(
-                    &ctx.query_json,
-                    ctx.frontend,
-                    data_model,
-                    security_context,
-                ),
-                None => {
-                    compiler::compile(&ctx.query_json, ctx.frontend, ontology, security_context)
-                }
-            },
-        }
+            .get::<Arc<M>>()
+            .ok_or_else(|| PipelineError::custom("query data model missing"))
+            .inspect_err(|e| obs.record_error(e))?;
+        let source = match ctx.phases.get::<compiler::gql::ParsedQuery>() {
+            Some(query) => CompileSource::Parsed(Box::new(query.clone())),
+            None => CompileSource::Raw(&ctx.query_json),
+        };
+        let compiled = M::compile(
+            source,
+            ctx.frontend,
+            data_model,
+            ctx.security_context.as_ref(),
+        )
         .map_err(PipelineError::from)
         .inspect_err(|e| obs.record_error(e))?;
 
@@ -53,5 +54,54 @@ impl PipelineStage for CompilationStage {
 
         ctx.compiled = Some(Arc::new(compiled));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use compiler::{Frontend, SqlDialect};
+    use ontology::Ontology;
+    use pipeline::NoOpObserver;
+    use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
+
+    fn context(query: &str) -> QueryPipelineContext {
+        QueryPipelineContext {
+            frontend: Frontend::JsonDsl,
+            query_json: query.to_string(),
+            compiled: None,
+            ontology: Arc::new(Ontology::load_embedded().unwrap()),
+            security_context: None,
+            server_extensions: Default::default(),
+            phases: Default::default(),
+        }
+    }
+
+    const QUERY: &str = r#"{"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[1],"columns":["name"]}]}"#;
+
+    #[tokio::test]
+    async fn the_data_model_in_extensions_selects_the_compile_target() {
+        let mut ctx = context(QUERY);
+        let duckdb = compiler::data_model::duckdb(Arc::clone(&ctx.ontology)).unwrap();
+        ctx.server_extensions.insert(duckdb);
+
+        CompilationStage::<DuckDbDataModel>::new()
+            .execute(&mut ctx, &mut NoOpObserver)
+            .await
+            .unwrap();
+
+        assert_eq!(ctx.compiled().unwrap().base.dialect, SqlDialect::DuckDb);
+    }
+
+    #[tokio::test]
+    async fn a_stage_without_its_data_model_fails() {
+        let mut ctx = context(QUERY);
+
+        let error = CompilationStage::<ClickHouseDataModel>::new()
+            .execute(&mut ctx, &mut NoOpObserver)
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("query data model missing"));
     }
 }

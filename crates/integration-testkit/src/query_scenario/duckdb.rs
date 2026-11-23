@@ -3,16 +3,19 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use duckdb_client::DuckDbClient;
+use query_data_model::DuckDbDataModel;
 use query_engine::compiler::{Frontend, generate_local_ddl};
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineRunner, QueryPipelineContext, TypeMap,
 };
-use query_engine::shared::{ExtractionStage, OutputStage, PipelineOutput};
+use query_engine::shared::{
+    CompilationStage, ExecutionStage, ExtractionStage, OutputStage, PipelineOutput,
+};
 
 use super::coverage::Coverage;
 use super::engine::{Engine, Planned, run_all, run_steps};
 use super::seed_preset;
-use super::stages::{LocalCompilationStage, LocalExecutionStage, LocalFinishStage};
+use super::stages::{LocalExecutor, LocalFinishStage};
 use crate::scenario::seed::{group_by_columns, values_insert};
 use crate::scenario::{Backend, Seed};
 
@@ -41,6 +44,7 @@ struct DuckdbEnv {
 struct DuckdbEngine<'a> {
     database: Mutex<DuckDbClient>,
     ontology: Arc<ontology::Ontology>,
+    data_model: Arc<DuckDbDataModel>,
     coverage: &'a Mutex<Coverage>,
 }
 
@@ -54,23 +58,25 @@ impl Engine for DuckdbEngine<'_> {
     }
 
     async fn run(&self, query: &str, frontend: Frontend) -> Result<PipelineOutput, PipelineError> {
+        let mut server_extensions = TypeMap::default();
+        server_extensions.insert(Arc::clone(&self.data_model));
         let mut ctx = QueryPipelineContext {
             frontend,
             query_json: query.to_owned(),
             compiled: None,
             ontology: Arc::clone(&self.ontology),
             security_context: None,
-            server_extensions: TypeMap::default(),
+            server_extensions,
             phases: TypeMap::default(),
         };
         let mut obs = NoOpObserver;
         PipelineRunner::start(&mut ctx, &mut obs)
-            .then(&LocalCompilationStage)
+            .then(&CompilationStage::<DuckDbDataModel>::new())
             .await?
-            .then(&LocalExecutionStage {
+            .then(&ExecutionStage(LocalExecutor {
                 database: &self.database,
                 coverage: self.coverage,
-            })
+            }))
             .await?
             .then(&ExtractionStage)
             .await?
@@ -104,6 +110,8 @@ impl Engine for DuckdbEngine<'_> {
             .map(|preset| seed_preset(presets, preset));
         let engine = DuckdbEngine {
             database: Mutex::new(database),
+            data_model: query_engine::compiler::local_data_model(&ontology)
+                .unwrap_or_else(|e| panic!("{name}: local data model: {e}")),
             ontology,
             coverage: &env.coverage,
         };
