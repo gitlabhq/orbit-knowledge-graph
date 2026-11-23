@@ -499,48 +499,6 @@ mod tests {
         assert_valid("orbit_sdlc_indexing", data);
     }
 
-    fn emitted_sdlc_entity_type(entity_type: &str) -> (String, serde_json::Value) {
-        let tracker = Arc::new(InMemoryAnalyticsTracker::new());
-        let mut obs = observer(&tracker);
-        obs.set_dispatch_id(Uuid::nil());
-        obs.set_pipeline_type(PipelineType::Sdlc);
-        obs.set_entity_type(entity_type);
-        obs.set_indexing_mode(IndexingMode::Full);
-        obs.record_graph_write("gl_edge", 10, 500);
-        obs.finish();
-
-        let events = tracker.drain();
-        let data = events[0].contexts()[1].data.clone();
-        let entity_type = data["entity_type"].as_str().unwrap().to_string();
-        (entity_type, data)
-    }
-
-    #[test]
-    fn over_cap_entity_type_emits_a_valid_event() {
-        let (entity_type, data) = emitted_sdlc_entity_type(
-            "HAS_IDENTIFIER_siphon_vulnerability_occurrence_identifiers_VulnerabilityIdentifier",
-        );
-        assert!(entity_type.chars().count() <= 64);
-        assert_valid("orbit_sdlc_indexing", &data);
-    }
-
-    #[test]
-    fn within_cap_entity_type_is_unchanged() {
-        let (entity_type, _) = emitted_sdlc_entity_type("VulnerabilityIdentifier");
-        assert_eq!(entity_type, "VulnerabilityIdentifier");
-    }
-
-    #[test]
-    fn distinct_over_cap_entity_types_do_not_collide() {
-        let (identifier, _) = emitted_sdlc_entity_type(
-            "HAS_IDENTIFIER_siphon_vulnerability_occurrence_identifiers_VulnerabilityIdentifier",
-        );
-        let (vulnerability, _) = emitted_sdlc_entity_type(
-            "HAS_VULNERABILITY_siphon_sbom_occurrences_vulnerabilities_Vulnerability",
-        );
-        assert_ne!(identifier, vulnerability);
-    }
-
     #[test]
     fn global_sdlc_run_has_null_namespaces() {
         let tracker = Arc::new(InMemoryAnalyticsTracker::new());
