@@ -98,11 +98,13 @@ pub fn derive_scope(
         return None;
     }
 
-    let Some(changed_sources) =
-        replace_templates_with_their_yaml_files(source_contents, changed_sources)
-    else {
-        return Some(MigrationScope::Full);
-    };
+    let changed_sources: BTreeSet<String> = changed_sources
+        .iter()
+        .map(|path| match path.strip_suffix(".sql.j2") {
+            Some(stem) => format!("{stem}.yaml"),
+            None => path.clone(),
+        })
+        .collect();
 
     let mut sdlc_entities: BTreeSet<String> = BTreeSet::new();
     let mut code_changed = false;
@@ -238,46 +240,6 @@ struct DerivedNameYaml {
 fn parse_derived_name(content: &str) -> Option<String> {
     let parsed: DerivedNameYaml = orbit_utils::yaml::from_str(content).ok()?;
     Some(parsed.name)
-}
-
-fn replace_templates_with_their_yaml_files(
-    source_contents: &BTreeMap<String, String>,
-    changed_sources: &BTreeSet<String>,
-) -> Option<BTreeSet<String>> {
-    let mut resolved = BTreeSet::new();
-    for path in changed_sources {
-        let Some((template_dir, template_file)) =
-            path.strip_suffix(".sql.j2").and(path.rsplit_once('/'))
-        else {
-            resolved.insert(path.clone());
-            continue;
-        };
-        let yaml_files: BTreeSet<String> = source_contents
-            .iter()
-            .filter(|(yaml_path, content)| {
-                yaml_path
-                    .rsplit_once('/')
-                    .is_some_and(|(dir, file)| dir == template_dir && file.ends_with(".yaml"))
-                    && extracts_from(content, template_file)
-            })
-            .map(|(yaml_path, _)| yaml_path.clone())
-            .collect();
-        if yaml_files.is_empty() {
-            return None;
-        }
-        resolved.extend(yaml_files);
-    }
-    Some(resolved)
-}
-
-fn extracts_from(yaml_content: &str, template_file: &str) -> bool {
-    orbit_utils::yaml::from_str::<serde_json::Value>(yaml_content).is_ok_and(|yaml| {
-        yaml["pipelines"].as_array().is_some_and(|pipelines| {
-            pipelines
-                .iter()
-                .any(|pipeline| pipeline["extract"]["query"] == template_file)
-        })
-    })
 }
 
 /// `edges/<stem>.yaml` → the relationship kind, when it resolves in the ontology.
@@ -483,38 +445,7 @@ mod tests {
     }
 
     #[test]
-    fn derive_scope_shared_template_maps_to_every_owner() {
-        let ontology = Ontology::new();
-        let pipeline_yaml = |node: &str| {
-            format!(
-                "node_type: {node}\npipelines:\n  - name: {node}\n    extract:\n      query: shared.sql.j2\n"
-            )
-        };
-        let embedded = BTreeMap::from([
-            (
-                "nodes/ci/pipeline.yaml".to_string(),
-                pipeline_yaml("Pipeline"),
-            ),
-            ("nodes/ci/stage.yaml".to_string(), pipeline_yaml("Stage")),
-            (
-                "nodes/ci/shared.sql.j2".to_string(),
-                "SELECT 1\n".to_string(),
-            ),
-        ]);
-        let scope = derive_scope(
-            &ontology,
-            &embedded,
-            &entities(&["nodes/ci/shared.sql.j2"]),
-            &BTreeSet::new(),
-        );
-        assert_eq!(
-            scope,
-            Some(MigrationScope::Sdlc(entities(&["Pipeline", "Stage"])))
-        );
-    }
-
-    #[test]
-    fn derive_scope_unused_template_is_full() {
+    fn derive_scope_template_without_a_yaml_is_full() {
         let ontology = Ontology::new();
         let embedded = BTreeMap::from([(
             "nodes/ci/orphan.sql.j2".to_string(),
