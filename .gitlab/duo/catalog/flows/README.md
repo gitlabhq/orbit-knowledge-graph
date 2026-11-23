@@ -23,7 +23,7 @@ update this table.
 
 | Setting | Value |
 |---|---|
-| `SKILLS_REF` in both files | `8b35c2bdd840bc22758e8caec02784cdfe6f2c95`, the head of team/skills!38 (branch `docs-write/issue-403`, unmerged). Re-pin both files to its squash commit on `main` once it merges. |
+| `SKILLS_REF` in both files | `c77707d82f4efd34b4efe1358e0cad5539f63833`, the head of team/skills!38 (branch `docs-write/issue-403`, unmerged). Re-pin both files to its squash commit on `main` once it merges. |
 | `MODE` in both files | `full` |
 | `FLOW_USER` in `docs-write.yml` | `44621578`, the user ID of `ai-docs-write-gitlab-org_510eee`, the service account that authors the flow's notes. Under composite identity `GET /user` returns the person who triggered the run, so the skills need it. An ID survives a rename. |
 | `REVIEW_USER` in `docs-write.yml` | Empty until the docs-review service account exists, then its user ID. docs-write trusts that account's review threads and its summary note. While it is empty, docs-write finds no review, so a mention on a docs MR with a green pipeline ends without a fix or a handoff. |
@@ -324,6 +324,15 @@ MR and push pipelines a day. Each one starts a session that spends 90 to 100 sec
 
 During rollout, the trigger is **Mention** only (`eventTypes: [0]`) with the
 docs-review service account: mention it on a docs MR to review its head.
+
+For the docs-write chain, add **Assign reviewer** (`eventTypes: [0, 2]`).
+GitLab starts no flow for a pipeline that a service account's push created,
+so docs-write requests the docs-review account's review after each push
+(`REVIEW_USER`). Its API calls send `X-Gitlab-Duo-Workflow-Id`, so GitLab
+starts docs-review as a child of the docs-write run, acting for the person
+who started the chain (`ai_flow_trigger_chaining`, on for gitlab.com). Setup
+waits up to 840 seconds for the head's pipeline, then reviews a green one or
+asks docs-write to fix failed docs jobs. A chain allows at most 30 sessions.
 
 Then switch to **Pipeline** events (`eventTypes: [3]`), like Duo Code
 Review, once `FLOW_USER`, `REVIEW_USER`, and `WRITE_USER` are set and
