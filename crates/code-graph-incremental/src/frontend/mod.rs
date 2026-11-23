@@ -21,6 +21,9 @@ pub trait Frontend: Send + Sync {
     /// Whether this frontend reads the file at `path`.
     fn accepts(&self, path: &str) -> bool;
 
+    /// Whether `name`, such as a code fence's language, names this frontend.
+    fn is_named(&self, name: &str) -> bool;
+
     /// The file's tree, within `limits`, and why parsing stopped early, if
     /// it did.
     fn parse(
@@ -47,6 +50,10 @@ impl Frontend for TreeSitter {
         SupportLang::from_path(path) == Some(self.language)
     }
 
+    fn is_named(&self, name: &str) -> bool {
+        SupportLang::from_alias(name) == Some(self.language)
+    }
+
     fn parse(
         &self,
         source: &str,
@@ -70,6 +77,10 @@ impl Frontend for Markdown {
 
     fn accepts(&self, path: &str) -> bool {
         SupportLang::from_path(path) == Some(SupportLang::Markdown)
+    }
+
+    fn is_named(&self, name: &str) -> bool {
+        SupportLang::from_alias(name) == Some(SupportLang::Markdown)
     }
 
     fn parse(

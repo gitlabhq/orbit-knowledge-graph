@@ -249,11 +249,6 @@ impl Phase {
         self.passes.iter().any(|p| !p.templates.is_empty())
     }
 
-    /// How many rule sets the phase compiled, one per rule file.
-    pub fn rule_sets(&self) -> usize {
-        self.by_lang.len()
-    }
-
     pub fn has_rules(&self, rules: usize) -> bool {
         self.passes(rules).any(|p| !p.cases.items.is_empty())
     }

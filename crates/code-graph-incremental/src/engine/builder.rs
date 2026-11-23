@@ -18,10 +18,12 @@ pub struct Engine {
     pub pipeline: crate::engine::Pipeline,
 }
 
-/// A mounted frontend and the rules the trees it parses run.
+/// A mounted frontend, the rules the trees it parses run, and whether it
+/// reads files itself or only parses what rules hand it.
 pub struct Mounted {
     pub frontend: Box<dyn crate::frontend::Frontend>,
     pub rules: usize,
+    pub reads_files: bool,
 }
 
 /// The YAML an engine compiles: pipeline.yaml, the rule files every
@@ -37,7 +39,11 @@ pub struct PipelineSource {
 /// rule file its trees run, the pipeline, the modules, the budgets, and the
 /// interner it compiles into. The first frontend reads what no other does.
 pub struct EngineBuilder {
-    frontends: Vec<(Box<dyn crate::frontend::Frontend>, Option<&'static str>)>,
+    frontends: Vec<(
+        Box<dyn crate::frontend::Frontend>,
+        Option<&'static str>,
+        bool,
+    )>,
     pipeline: Option<PipelineSource>,
     modules: &'static [Registration],
     limits: Limits,
@@ -52,7 +58,18 @@ impl EngineBuilder {
         frontend: Box<dyn crate::frontend::Frontend>,
         rules: Option<&'static str>,
     ) -> Self {
-        self.frontends.push((frontend, rules));
+        self.frontends.push((frontend, rules, true));
+        self
+    }
+
+    /// Mounts a frontend that reads no files itself: rules parse nodes with
+    /// it, and the regions it builds run `rules`.
+    pub fn embedded(
+        mut self,
+        frontend: Box<dyn crate::frontend::Frontend>,
+        rules: Option<&'static str>,
+    ) -> Self {
+        self.frontends.push((frontend, rules, false));
         self
     }
 
@@ -92,7 +109,7 @@ impl EngineBuilder {
         let lang = self.lang.unwrap_or_default();
         let mut langs: Vec<Option<&'static str>> = Vec::new();
         let mut frontends = Vec::new();
-        for (frontend, yaml) in self.frontends {
+        for (frontend, yaml, reads_files) in self.frontends {
             let same = |s: &Option<&str>| s.map(str::as_ptr) == yaml.map(str::as_ptr);
             let rules = match langs.iter().position(same) {
                 Some(at) => at,
@@ -101,7 +118,11 @@ impl EngineBuilder {
                     langs.len() - 1
                 }
             };
-            frontends.push(Mounted { frontend, rules });
+            frontends.push(Mounted {
+                frontend,
+                rules,
+                reads_files,
+            });
         }
         let pipeline = crate::engine::Pipeline::load(
             &lang,
@@ -113,7 +134,8 @@ impl EngineBuilder {
             },
             self.modules,
         )?;
-        let project = Box::new(project(&pipeline, langs.len())?);
+        let reading = file_rules(&frontends);
+        let project = Box::new(project(&pipeline, &reading)?);
         Ok(Engine {
             frontends,
             pipeline,
@@ -137,7 +159,19 @@ impl Engine {
 
     /// The mounted frontend that reads `path`, if any.
     pub fn frontend_for(&self, path: &str) -> Option<&Mounted> {
-        self.frontends.iter().find(|m| m.frontend.accepts(path))
+        self.frontends
+            .iter()
+            .find(|m| m.reads_files && m.frontend.accepts(path))
+    }
+
+    /// The rule sets of the frontends that read files, each once, in order.
+    pub fn file_rules(&self) -> Vec<usize> {
+        file_rules(&self.frontends)
+    }
+
+    /// The mounted frontend `name` names, reading files or not.
+    pub fn frontend_named(&self, name: &str) -> Option<&Mounted> {
+        self.frontends.iter().find(|m| m.frontend.is_named(name))
     }
 
     /// Whether a mounted frontend reads `path`.
@@ -153,6 +187,17 @@ impl Engine {
     }
 }
 
+fn file_rules(frontends: &[Mounted]) -> Vec<usize> {
+    let mut rules = Vec::new();
+    for m in frontends.iter().filter(|m| m.reads_files) {
+        if !rules.contains(&m.rules) {
+            rules.push(m.rules);
+        }
+    }
+    rules.sort_unstable();
+    rules
+}
+
 fn texts(spec: Option<&DataSpec>) -> Vec<&str> {
     match spec {
         Some(DataSpec::Str(s)) => vec![s.as_str()],
@@ -161,14 +206,15 @@ fn texts(spec: Option<&DataSpec>) -> Vec<&str> {
     }
 }
 
-/// The project tree frontend, inlining every language's `parse_files`.
+/// The project tree frontend, inlining the `parse_files` of every language
+/// whose files the engine reads.
 fn project(
     pipeline: &crate::engine::Pipeline,
-    files: usize,
+    rule_sets: &[usize],
 ) -> Result<crate::frontend::project::ProjectTree, LoadError> {
     use crate::frontend::project::{ParseFile, ParseFormat, ProjectTree};
     let mut project = ProjectTree::default();
-    for index in 0..files {
+    for &index in rule_sets {
         let Some(DataSpec::List(entries)) = pipeline.setting(index, "parse_files") else {
             continue;
         };

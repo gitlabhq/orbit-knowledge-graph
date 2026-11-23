@@ -44,6 +44,9 @@ pub struct LangEntry {
     _package_markers: Vec<String>,
     #[serde(default)]
     index_names: Vec<String>,
+    /// Languages whose code the language's files carry, parsed in place.
+    #[serde(default)]
+    embeds: Vec<SupportLang>,
     #[serde(default, rename = "source_root")]
     _source_root: Option<String>,
 }
@@ -249,8 +252,8 @@ static DOTTED_EXTENSIONS: std::sync::LazyLock<std::collections::HashMap<&'static
 
 impl crate::engine::Engine {
     /// The code-indexing engine for a language's family: a frontend per
-    /// member, the language's own first, each with its rule file, over the
-    /// code pipeline.
+    /// member, the language's own first, each with its rule file, and one per
+    /// language the members embed, over the code pipeline.
     pub fn family(language: SupportLang) -> crate::engine::EngineBuilder {
         let mut members = language.family_members();
         members.sort_by_key(|&m| m != language);
@@ -259,11 +262,19 @@ impl crate::engine::Engine {
             rules: crate::config::RULES,
             libs: crate::config::LIBS,
         };
-        members.into_iter().fold(
+        let embedded: Vec<SupportLang> = members
+            .iter()
+            .flat_map(|m| LANG_CONFIG.languages[m].embeds.iter().copied())
+            .filter(|l| !members.contains(l))
+            .collect();
+        let builder = members.into_iter().fold(
             crate::engine::Engine::builder().pipeline(source),
             |builder, member| {
                 builder.frontend(crate::frontend::for_language(member), lang_yaml(member))
             },
-        )
+        );
+        embedded.into_iter().fold(builder, |builder, language| {
+            builder.embedded(crate::frontend::for_language(language), lang_yaml(language))
+        })
     }
 }

@@ -89,6 +89,7 @@ languages:
     extensions: [md, markdown]
     aliases: [md, markdown]
     grammar: comrak
+    embeds: [python, typescript, javascript, rust, go, java, ruby, bash]
     fqn_separator: "#"
 
   ocaml:

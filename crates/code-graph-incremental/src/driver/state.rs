@@ -46,12 +46,11 @@ impl State {
         let mut tree = engine.project.build(&paths, &self.configs, &engine.lang);
         let phase = engine.pipeline.phase_over("project");
         let run = crate::sentinel::Sentinel::disabled();
-        for rules in 0..phase.rule_sets() {
+        let rule_sets = engine.file_rules();
+        for &rules in &rule_sets {
             let _ = crate::engine::run_tree(phase, &mut tree, 0, Some(rules), engine, None, &run);
         }
-        let keys = (0..phase.rule_sets())
-            .flat_map(|r| phase.tag_keys(r))
-            .collect();
+        let keys = rule_sets.iter().flat_map(|&r| phase.tag_keys(r)).collect();
         let tags = file_tags(&tree, &engine.lang);
         (tree, tags, keys)
     }

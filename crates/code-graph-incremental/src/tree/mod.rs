@@ -93,4 +93,4 @@ impl<S: Storage> Tree<S> {
     }
 }
 
-crate::roles!(TreeKinds: u16 { source_file, root, dir, file, field, str, num, bool, obj, arr, anchor, link });
+crate::roles!(TreeKinds: u16 { source_file, root, dir, file, field, str, num, bool, obj, arr, anchor, link, region });
