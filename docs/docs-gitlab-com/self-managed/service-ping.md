@@ -19,7 +19,7 @@ On GitLab Self-Managed, two components next to GitLab Orbit do this:
 - The Data Insights Platform (DIP) receives the usage events from GitLab Orbit and stores them in ClickHouse on your cluster.
 - The Service Ping exporter counts them once a week and sends the counts to `version.gitlab.com`.
 
-Raw events never leave your cluster.
+Raw events are never sent to GitLab. They stay in the ClickHouse database that DIP writes to.
 The exporter follows the Service Ping settings of your GitLab instance, so nothing is sent while Service Ping is turned off.
 The Service Ping settings control only what the exporter sends.
 GitLab Orbit still sends its usage events to DIP, and ClickHouse stores them, until you [stop local collection](#point-gitlab-orbit-at-the-data-insights-platform).
@@ -35,6 +35,7 @@ Prerequisites:
 - Outbound access from the DIP pod to `iglucentral.com` and `gitlab-org.gitlab.io`, to resolve event schemas.
   The DIP chart reaches `gitlab-org.gitlab.io` over HTTPS and, by default, `iglucentral.com` over HTTP on port 80.
   To use HTTPS for both, set the Iglu Central entry in `single.pipeline.iglu.repositories` to `https://iglucentral.com`, or point it at an internal Iglu mirror.
+  The override replaces the whole list, so list the `Iglu GitLab` entry (`https://gitlab-org.gitlab.io/iglu`, vendor prefix `com.gitlab`) again.
 
 Set up Service Ping for GitLab Orbit in this order:
 
@@ -83,7 +84,7 @@ To create the Secrets:
 
    {{< tab title="Helm chart (Kubernetes)" >}}
 
-   The GitLab chart keeps the key in the Secret `<release>-gitlab-service-ping-secret` in the GitLab namespace, under the entry `secret`:
+   The GitLab chart keeps the key in the Secret `<release>-gitlab-service-ping-secret` in the GitLab namespace, under the entry `secret` by default:
 
    ```shell
    kubectl -n <gitlab_namespace> get secret <release>-gitlab-service-ping-secret -o jsonpath='{.data.secret}' | base64 -d
@@ -136,7 +137,7 @@ To install DIP:
    ```
 
    The install runs the ClickHouse migrations first.
-   They create the `snowplow` and `serviceping` databases, the `serviceping_exporter` user, and the view the exporter reads.
+   They create the `snowplow` and `serviceping` databases, the `serviceping_exporter` user, and the `serviceping.events` table the exporter reads, with the view that fills it.
 
 1. Confirm that the `platform-single-0` pod is `Running`:
 
@@ -144,7 +145,8 @@ To install DIP:
    kubectl -n dip get pods -l app=platform-single
    ```
 
-Adjust the values for your environment:
+Adjust the values for your environment.
+Put your changes in your own `dip-values.yaml` and add `--values dip-values.yaml` after `values-orbit.yaml`, so that a new download of the chart does not overwrite them:
 
 - If NATS requires TLS client certificates, mount them with `natsClientCertsSecretName` and set `single.pipeline.nats.caCertPath`, `clientCertPath`, and `clientKeyPath`.
   DIP mounts the Secret at `/etc/ssl/certs/custom`, so the paths are, for example, `/etc/ssl/certs/custom/ca.crt`, `tls.crt`, and `tls.key`.
@@ -251,7 +253,7 @@ To verify the setup:
    SELECT count() FROM serviceping.events WHERE app_id = 'gkg-server'
    ```
 
-   The count is greater than zero in a minute of the query.
+   The count is greater than zero about a minute after the query.
 
 1. Run the exporter once and read its log:
 
@@ -263,12 +265,13 @@ To verify the setup:
    In `dry-run` mode the log shows the JSON payload for each closed weekly window, followed by `dry run complete`.
    A window closes on Monday at 00:00 UTC, so the first payload appears after the first Monday that follows your first event.
    Until then, the log shows `nothing to send`.
-   If **Include optional data in Service Ping** is off in GitLab, the log shows `nothing to send, the Service Ping settings allow no metrics`, because every GitLab Orbit metric is optional.
+   If Service Ping or **Include optional data in Service Ping** is off in GitLab, the log shows `nothing to send, the Service Ping settings allow no metrics`, because every GitLab Orbit metric is optional.
    To change it, see [Usage statistics](https://docs.gitlab.com/administration/settings/usage_statistics/).
 
 ## Upgrade
 
-Upgrade the DIP and exporter releases with the `helm upgrade` commands above, and GitLab Orbit as in [Upgrade GitLab Orbit](orbit-setup.md#upgrade-gitlab-orbit).
+Upgrade the DIP and exporter releases with the `helm upgrade` commands above, with the new chart versions in `--version`, and GitLab Orbit as in [Upgrade GitLab Orbit](orbit-setup.md#upgrade-gitlab-orbit).
+Download the new DIP chart again to get its `values-orbit.yaml`.
 When you upgrade GitLab Orbit, set the new version as `image.tag` in `orbit-values.yaml`, because a pinned tag is not changed by a chart upgrade.
 Then set `component.version` in `exporter-values.yaml` to the same version and upgrade the exporter release.
 The DIP migrations run again on every upgrade.
@@ -285,7 +288,13 @@ To remove Service Ping for GitLab Orbit:
    helm uninstall dip --namespace dip
    ```
 
-The `snowplow` and `serviceping` databases and the `serviceping_exporter` user stay in ClickHouse.
+1. Delete the namespace, which removes the Secrets and the migration Job and ConfigMap that Helm leaves behind:
+
+   ```shell
+   kubectl delete namespace dip
+   ```
+
+The `snowplow` and `serviceping` databases, the `serviceping_exporter` user, and the `serviceping_reader` role stay in ClickHouse.
 If you no longer need them, drop them with your ClickHouse client.
 
 ## Troubleshooting
@@ -312,6 +321,14 @@ If the GitLab chart's `webservice` NetworkPolicy is on, allow the exporter's nam
    ```shell
    kubectl -n dip logs platform-single-0
    ```
+
+1. Count the events DIP rejected, with your ClickHouse client:
+
+   ```sql
+   SELECT count() FROM snowplow.bad_events
+   ```
+
+   If the count is greater than zero, check that the DIP pod can reach the schema registries listed in the prerequisites.
 
 ## Related topics
 
