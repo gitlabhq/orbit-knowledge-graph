@@ -22,8 +22,8 @@ pub struct GrpcConfig {
     pub max_connection_age_secs: Option<u64>,
     // Must stay paired with max_connection_age_secs: without a grace value,
     // tonic 0.14.5 panics with "async fn resumed after completion" when the
-    // connection-age timer fires (hyperium/tonic#2522). Ignored when
-    // max_connection_age_secs is unset, since no timer fires then.
+    // connection-age timer fires (hyperium/tonic#2522). The server ignores it
+    // when max_connection_age_secs is unset, but it must still be at least 1.
     #[schemars(range(min = 1))]
     pub max_connection_age_grace_secs: u64,
     pub stream_timeout_secs: u64,
