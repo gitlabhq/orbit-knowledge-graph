@@ -111,8 +111,19 @@ impl DuckDbClient {
                 )
             })
             .unwrap_or_default();
+        // Bundled builds ship without ICU, so DuckDB has no TimeZone setting (it renders UTC).
+        let has_time_zone: bool = conn.query_row(
+            "SELECT count(*) > 0 FROM duckdb_settings() WHERE name = 'TimeZone'",
+            [],
+            |row| row.get(0),
+        )?;
+        let time_zone = if has_time_zone {
+            "SET TimeZone = 'UTC';"
+        } else {
+            ""
+        };
         conn.execute_batch(&format!(
-            "{allowed} SET TimeZone = 'UTC'; SET enable_external_access = false; SET lock_configuration = true;"
+            "{allowed} {time_zone} SET enable_external_access = false; SET lock_configuration = true;"
         ))
         .map_err(|e| DuckDbError::Schema(e.to_string()))?;
         Ok(Self { conn })
@@ -499,13 +510,15 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 
     #[test]
     fn sessions_render_timestamps_in_utc() {
-        let render = "SELECT CAST(TIMESTAMPTZ '2026-10-04 00:00:00+00' AS VARCHAR) AS t, current_setting('TimeZone') AS zone";
+        let render = "SELECT CAST(TIMESTAMPTZ '2026-10-04 00:00:00+00' AS VARCHAR) AS t";
         let shifted = duckdb::Connection::open_in_memory().unwrap();
-        shifted
+        let has_icu = shifted
             .execute_batch("SET TimeZone = 'America/Los_Angeles'")
-            .unwrap();
-        let local: String = shifted.query_row(render, [], |row| row.get(0)).unwrap();
-        assert_eq!(local, "2026-10-03 17:00:00-07");
+            .is_ok();
+        if has_icu {
+            let local: String = shifted.query_row(render, [], |row| row.get(0)).unwrap();
+            assert_eq!(local, "2026-10-03 17:00:00-07");
+        }
 
         let client = DuckDbClient::open(OpenMode::InMemory).unwrap();
         let batches = client.query_arrow(render).unwrap();
@@ -513,6 +526,11 @@ CREATE TABLE IF NOT EXISTS gl_edge (
             crate::string_column(&batches, "t"),
             ["2026-10-04 00:00:00+00"]
         );
-        assert_eq!(crate::string_column(&batches, "zone"), ["UTC"]);
+        if has_icu {
+            let zone = client
+                .query_arrow("SELECT current_setting('TimeZone') AS zone")
+                .unwrap();
+            assert_eq!(crate::string_column(&zone, "zone"), ["UTC"]);
+        }
     }
 }
