@@ -13,7 +13,6 @@ pub struct Engine {
     /// The mounted frontends, the engine's own language first.
     pub frontends: Vec<Mounted>,
     pub lang: Lang,
-    pub lang_id: SupportLang,
     pub project: Project,
     pub limits: Limits,
     pub pipeline: crate::engine::Pipeline,
@@ -142,7 +141,6 @@ impl Engine {
             pipeline,
             project,
             lang,
-            lang_id,
             limits,
         })
     }

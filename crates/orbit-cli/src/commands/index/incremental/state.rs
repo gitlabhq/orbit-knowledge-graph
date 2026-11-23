@@ -58,7 +58,7 @@ impl Project<'_> {
                 env.limits.total_ms = self.budget_ms;
                 let (mut state, report) = self.indexing(&env, paths)?.index(&env)?;
                 let snapshot = self.snapshot_path(family);
-                staged.push(stage(&env, &state, &snapshot, None, read_at)?);
+                staged.push(stage(family, &env, &state, &snapshot, None, read_at)?);
                 outputs.push(exporter.write(family, &env, &mut state, &report, self.stats)?);
             }
             Ok(outputs)
@@ -311,6 +311,7 @@ fn pending_file(snapshot: &std::path::Path) -> PathBuf {
 /// `touched` names the files that changed since that one was read; without
 /// it every block is written.
 fn stage(
+    family: SupportLang,
     env: &Engine,
     state: &State,
     snapshot: &std::path::Path,
@@ -327,9 +328,9 @@ fn stage(
         return Err(error);
     }
     Ok(Refreshed {
-        family: env.lang_id,
+        family,
         replacement: None,
-        output: output::family_output(env.lang_id, state.trees.len(), &Report::default(), false),
+        output: output::family_output(family, state.trees.len(), &Report::default(), false),
         pending,
         snapshot: snapshot.to_path_buf(),
     })
@@ -529,7 +530,7 @@ impl Reader<'_> {
         // Every phase after the per-file ones runs on every tree, so any file's rows can change.
         let files: FxHashSet<String> = labels.iter().cloned().chain(removed).collect();
         let replacement = output::replacement(self.git, self.ontology, &env, &mut state, &files)?;
-        let mut staged = stage(&env, &state, &snapshot, None, read_at)?;
+        let mut staged = stage(family, &env, &state, &snapshot, None, read_at)?;
         staged.replacement = Some(replacement);
         staged.output = output::family_output(family, state.trees.len(), &report, self.stats);
         Ok((staged, labels, added || state.trees.len() != before))

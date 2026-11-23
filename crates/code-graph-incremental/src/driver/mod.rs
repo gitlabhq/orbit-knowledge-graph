@@ -117,7 +117,8 @@ fn insert(
         .collect();
     run.check()?;
     for (file, elapsed, result) in done {
-        let language = SupportLang::from_path(&file.path).unwrap_or(env.lang_id);
+        let language =
+            SupportLang::from_path(&file.path).expect("a file the engine reads has a language");
         report.files.insert(
             file.path.clone(),
             FileStats {

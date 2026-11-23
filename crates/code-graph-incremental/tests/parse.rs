@@ -17,7 +17,7 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
 fn parse_repo(env: &Engine, root: &Path) -> Vec<Tree> {
     let repository = common::walk(root);
     driver::candidates(&repository, 0)
-        .filter(|file| SupportLang::from_path(&file.path).is_some_and(|l| env.in_family(l)))
+        .filter(|file| env.reads(&file.path))
         .map(|file| {
             let source = String::from_utf8(repository.read(&file.path).unwrap().to_vec()).unwrap();
             frontend::parse(env, &file.path, &source, &Sentinel::disabled())
@@ -201,10 +201,14 @@ fn a_family_parses_each_member_with_its_own_grammar() {
         .limits(Limits::UNLIMITED)
         .build()
         .unwrap();
-    assert_eq!(
-        env.members,
-        [SupportLang::Java, SupportLang::Kotlin, SupportLang::Scala]
-    );
+    for (path, read) in [
+        ("A.java", true),
+        ("Service.kt", true),
+        ("B.scala", true),
+        ("main.py", false),
+    ] {
+        assert_eq!(env.reads(path), read, "{path}");
+    }
 
     let parsed = parse_repo(&env, repo.path());
 
