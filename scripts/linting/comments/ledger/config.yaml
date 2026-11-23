@@ -48,12 +48,6 @@
   preview: "# Temporary: aligned with source-code entities so Project + code traver…"
   hash: 7a141bf858682697
   lines: 4
-"config/schema-migrations.yaml":
-- category: contract
-  reason: "Hand-edited migration file; scope none bypasses the under-declaration guard and needs an audited note."
-  preview: "#"
-  hash: 674c08eceb0e4bde
-  lines: 16
 "config/setup/agents/duo.yaml":
 - category: upstream
   reason: "Duo creates its config dir only on first run, so the glab-installed binary path must also count."

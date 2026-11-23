@@ -81,9 +81,3 @@
   preview: "# Tarballs are published to the project's Generic Package Registry under"
   hash: 2beb44f2bd600367
   lines: 2
-"lefthook.yml":
-- category: upstream
-  reason: "Lefthook has no per-job allow_failure; the trailing || true is the intended advisory workaround."
-  preview: "# Advisory/non-blocking: narration lint prints warnings but must not bl…"
-  hash: 37fadea12e5405a1
-  lines: 5
