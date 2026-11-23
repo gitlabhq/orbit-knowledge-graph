@@ -6,13 +6,14 @@ use serde_json::Value;
 
 use super::{IndexAssertion, Scenario, hydration_input, read_fixtures};
 use crate::context::TestContext;
+use crate::scenario::Backend;
 
 pub async fn run_index_explains(ctx: &TestContext, directory: &Path) {
     let model = crate::derive_clickhouse_data_model(&crate::load_ontology());
     let fixtures = read_fixtures(directory);
     let tables: std::collections::BTreeSet<&str> = fixtures
         .iter()
-        .flat_map(|(_, scenario)| indexes(scenario))
+        .flat_map(|(_, scenario)| Backend::ClickHouse.indexes(scenario))
         .map(|index| index.table.as_str())
         .collect();
     for table in tables {
@@ -21,7 +22,7 @@ pub async fn run_index_explains(ctx: &TestContext, directory: &Path) {
     let mut checked = 0;
     let mut failures = Vec::new();
     for (path, scenario) in fixtures {
-        let indexes = indexes(&scenario);
+        let indexes = Backend::ClickHouse.indexes(&scenario);
         if indexes.is_empty() {
             continue;
         }
@@ -61,17 +62,6 @@ pub async fn run_index_explains(ctx: &TestContext, directory: &Path) {
         failures.len(),
         failures.join("\n\n")
     );
-}
-
-fn indexes(scenario: &Scenario) -> Vec<&IndexAssertion> {
-    scenario
-        .physical
-        .get(&crate::scenario::Backend::ClickHouse)
-        .into_iter()
-        .flat_map(|phases| phases.values())
-        .filter_map(|fields| fields.output.as_ref())
-        .flat_map(|output| &output.indexes)
-        .collect()
 }
 
 fn compile(

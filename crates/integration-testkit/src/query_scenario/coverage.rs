@@ -19,7 +19,11 @@ impl Coverage {
 
     pub fn problems(&self, compiler_fixtures: &std::path::Path) -> Vec<String> {
         let mut fixtures = Coverage::default();
-        crate::compiler::record_duckdb_fixtures(compiler_fixtures, &mut fixtures);
+        crate::compiler::record_fixtures(
+            crate::scenario::Backend::DuckDb,
+            compiler_fixtures,
+            &mut fixtures,
+        );
         let renderable = renderable();
         let excluded = |construct: &str| EXCLUDED.iter().any(|(name, _)| *name == construct);
         let unreached = renderable

@@ -928,7 +928,7 @@ impl Expectations<'_> {
             check(
                 "query_config",
                 ctx.query_config().as_ref().map(|config| {
-                    let settings = config.to_clickhouse_settings()?;
+                    let settings = self.backend.settings(config)?;
                     assertions.check(&settings, &format!("{label}.query_config"))
                 }),
             );
@@ -1083,28 +1083,21 @@ impl SettingsAssertions {
 pub use clickhouse::run_index_explains;
 pub use schema::run_schema_dir;
 
-pub(crate) fn record_duckdb_fixtures(
+pub(crate) fn record_fixtures(
+    backend: Backend,
     directory: &Path,
     coverage: &mut crate::query_scenario::coverage::Coverage,
 ) {
     let base = Arc::new(ontology::Ontology::load_embedded().unwrap());
     for (_, scenario) in read_fixtures(directory) {
-        if !scenario.physical.contains_key(&Backend::DuckDb) {
+        if !scenario.physical.contains_key(&backend) {
             continue;
         }
         let ontology = scenario.ontology_overlay.as_deref().map_or_else(
             || Arc::clone(&base),
             |name| Arc::new(crate::load_ontology_overlay(name)),
         );
-        for (language, raw) in &scenario.query {
-            let frontend = match language.as_str() {
-                "json" => compiler::Frontend::JsonDsl,
-                _ => compiler::Frontend::Gql,
-            };
-            if let Ok(compiled) = compiler::compile_local(raw, frontend, &ontology) {
-                coverage.record(&compiled.ast);
-            }
-        }
+        backend.record_coverage(&scenario, &ontology, coverage);
     }
 }
 
