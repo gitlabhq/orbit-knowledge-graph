@@ -2,7 +2,7 @@
 //! and declared indexes, and the writes a rule makes. Literal arguments
 //! (edge kinds, index, row shape and template ids) arrive as numbers.
 
-use crate::engine::{Cx, Function, Loc, Module, Row, Store, Val, Vals, WHOLE, Write, one};
+use crate::engine::{Cx, Function, Loc, Module, Store, Val, Vals, WHOLE, Write, one};
 use crate::modules::function;
 use crate::tree::{Edge, EdgeKind};
 
@@ -111,27 +111,6 @@ static FUNCTIONS: &[Function<Core>] = &[
                     ..Edge::new(from.fi, from.node, to.fi, to.node, kind)
                 });
             }
-        }
-        Vals::new()
-    }),
-    function!(Effect, "row", [shape, set, rest], |cx, a| {
-        let Some(at) = a[1].first().and_then(|v| v.loc()) else {
-            return Vals::new();
-        };
-        let shape = number(&a[0]) as u16;
-        let cols = &a[2..];
-        let total: usize = cols.iter().map(|v| v.len().max(1)).product();
-        for mut n in 0..total {
-            let values = cols
-                .iter()
-                .map(|v| {
-                    let len = v.len().max(1);
-                    let value = v.get(n % len).copied();
-                    n /= len;
-                    value
-                })
-                .collect();
-            cx.row(Row { shape, at, values });
         }
         Vals::new()
     }),

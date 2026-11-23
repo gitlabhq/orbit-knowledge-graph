@@ -10,6 +10,7 @@ pub static ALL: &[Registration] = &[
     register::<names::Names>(),
     register::<ssa::Ssa>(),
     register::<text::Text>(),
+    register::<crate::backend::tables::Rows>(),
 ];
 
 fn node<'t, M: Module, S: Store>(cx: &Cx<'_, 't, M, S>, args: &[Vals], at: usize) -> Cursor<'t, S> {
@@ -64,4 +65,4 @@ macro_rules! function {
     (@arg rest) => { $crate::engine::Arg::Rest };
     (@arg shape) => { $crate::engine::Arg::Shape };
 }
-use function;
+pub(crate) use function;

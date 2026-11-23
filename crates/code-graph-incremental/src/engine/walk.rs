@@ -10,7 +10,7 @@ use smallvec::SmallVec;
 
 use super::pattern::{self, Cap, Pat};
 use super::program::{Pass, Phase, Scratch, Template, order};
-use super::{Compact, Cursor, Graph, Indexed, Loc, Row, Run, Store, Tree, WHOLE, Write, machine};
+use super::{Compact, Cursor, Graph, Indexed, Loc, Run, Store, Tree, WHOLE, Write, machine};
 use crate::env::Env;
 use crate::intern::Lang;
 use crate::sentinel::{Killed, Sentinel};
@@ -76,6 +76,7 @@ pub fn run_family(
             &graph,
             env,
             budget,
+            |_| (),
         ) {
             Ok((edges, _)) => edges,
             Err(killed) if !killed.cancelled => {
@@ -107,9 +108,11 @@ fn settle<E>(mut round: impl FnMut() -> Result<bool, E>) -> Result<(), E> {
 }
 
 /// Runs a phase on the first `walk` trees of a family in parallel, over all
-/// its trees and the graph so far; returns the edges and rows it wrote.
+/// its trees and the graph so far; returns the edges it wrote and what
+/// `collect` takes from each file's finished run, such as a backend's state.
 /// `project` is the project tree's file, if the family has one.
-pub fn run_trees(
+#[allow(clippy::too_many_arguments)]
+pub fn run_trees<T: Send>(
     phase: &Phase,
     trees: &[Tree<Compact>],
     walk: usize,
@@ -117,11 +120,12 @@ pub fn run_trees(
     graph: &Graph,
     env: &Env,
     budget: &Sentinel,
-) -> Result<(Vec<Edge>, Vec<Row>), Killed> {
+    collect: impl Fn(&mut Run<'_, Compact>) -> T + Sync,
+) -> Result<(Vec<Edge>, Vec<T>), Killed> {
     let scope = scope_budget(phase, env, budget);
     let files = project.unwrap_or(trees.len() as u32);
     let indexed = Indexed::new(phase, trees, files as usize, env, &scope);
-    let found: Vec<Result<(Vec<Edge>, Vec<Row>), Killed>> = (0..walk)
+    let found: Vec<Result<(Vec<Edge>, T), Killed>> = (0..walk)
         .into_par_iter()
         .map(|fi| {
             let file = tree_budget(phase, env, &trees[fi].label);
@@ -136,16 +140,17 @@ pub fn run_trees(
             for pass in phase.passes(rules) {
                 fire_from(&mut run, pass, &order(&trees[fi], pass.post), 0);
             }
-            run.end()
+            let edges = run.end()?;
+            Ok((edges, collect(&mut run)))
         })
         .collect();
-    let (mut edges, mut rows) = (Vec::new(), Vec::new());
+    let (mut edges, mut taken) = (Vec::new(), Vec::new());
     for result in found {
-        let (e, r) = result?;
+        let (e, t) = result?;
         edges.extend(e);
-        rows.extend(r);
+        taken.push(t);
     }
-    Ok((edges, rows))
+    Ok((edges, taken))
 }
 
 /// What a walk over one tree reads besides the tree.
@@ -190,7 +195,7 @@ impl On<'_> {
                 run.start_modules();
                 at = fire_from(&mut run, pass, &nodes, at);
                 let writes = std::mem::take(&mut run.writes);
-                edges.extend(run.end()?.0);
+                edges.extend(run.end()?);
                 writes
             };
             replaced |= commit(tree, pass, &self.env.lang, writes);

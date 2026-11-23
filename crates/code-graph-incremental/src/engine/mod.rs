@@ -543,7 +543,6 @@ pub struct Run<'t, S: Store = Compact> {
     lang: usize,
     data: &'t [Vals],
     edges: Vec<Edge>,
-    rows: Vec<Row>,
     /// The tree writes of the node being fired, applied once it is done.
     writes: Vec<Write>,
     states: Box<[Box<dyn Any>]>,
@@ -614,7 +613,6 @@ impl<'t, S: Store> Run<'t, S> {
             lang: 0,
             data: &[],
             edges: Vec::new(),
-            rows: Vec::new(),
             writes: Vec::new(),
             states: modules::ALL.iter().map(|m| (m.state)()).collect(),
             epochs: [0; SLOTS],
@@ -727,14 +725,14 @@ impl<'t, S: Store> Run<'t, S> {
         }
     }
 
-    /// Finishes the phase's modules; the edges, without repeats, and rows
-    /// the run wrote, unless it was stopped.
-    fn end(mut self) -> Result<(Vec<Edge>, Vec<Row>), Killed> {
+    /// Finishes the phase's modules; the edges the run wrote, without
+    /// repeats, unless it was stopped.
+    fn end(&mut self) -> Result<Vec<Edge>, Killed> {
         if let Some(killed) = self.killed.take() {
             return Err(killed);
         }
         for &slot in self.phase_modules.iter().rev() {
-            (S::hooks(&modules::ALL[usize::from(slot)]).finish)(&mut self, slot);
+            (S::hooks(&modules::ALL[usize::from(slot)]).finish)(self, slot);
         }
         if let Some(killed) = self.killed.take() {
             return Err(killed);
@@ -742,10 +740,16 @@ impl<'t, S: Store> Run<'t, S> {
         let mut seen = FxHashSet::default();
         self.edges
             .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.call_resolution)));
-        Ok((
-            std::mem::take(&mut self.edges),
-            std::mem::take(&mut self.rows),
-        ))
+        Ok(std::mem::take(&mut self.edges))
+    }
+
+    /// Takes module `M`'s state from the run, leaving a fresh one.
+    pub fn take_state<M: Module>(&mut self) -> M::State {
+        let slot = slot_of(M::NAME).expect("every module is registered");
+        let state = self.states[usize::from(slot)]
+            .downcast_mut::<M::State>()
+            .expect("each slot holds its module's state");
+        std::mem::take(state)
     }
 
     pub(crate) fn profiling(&self) -> bool {
@@ -841,14 +845,6 @@ pub enum Write {
         at: u32,
         syms: Vec<Option<u32>>,
     },
-}
-
-/// A row a `row:` hook emitted at `at`: the values of its shape's columns,
-/// then its extra id parts.
-pub struct Row {
-    pub shape: u16,
-    pub at: Loc,
-    pub values: Box<[Option<Val>]>,
 }
 
 /// The only surface a module sees: navigation, its own state, calls through
@@ -990,10 +986,6 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
 
     pub fn emit(&mut self, edge: Edge) {
         self.run.edges.push(edge);
-    }
-
-    pub fn row(&mut self, row: Row) {
-        self.run.rows.push(row);
     }
 
     /// Writes the run's tree once the node being fired is done.

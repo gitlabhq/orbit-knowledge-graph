@@ -11,11 +11,73 @@ use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 use crate::driver::State;
 use crate::engine::lang::DataSpec;
-use crate::engine::{Loc, Part, Phase, Row, RowShape, Val};
+use crate::engine::{Cx, Function, Loc, Module, Part, Phase, RowShape, Store, Val, Vals};
 use crate::env::Env;
 use crate::error::{Error, LoadError};
+use crate::modules::function;
 use crate::sentinel::Sentinel;
 use crate::tree::{Compact, Tree};
+
+/// A row a rule wrote at `at`: the values of its shape's columns, then the
+/// values only its id reads.
+pub struct Row {
+    pub shape: u16,
+    pub at: Loc,
+    pub values: Box<[Option<Val>]>,
+}
+
+/// The rows backend: rules write rows with `row(shape, node, column: value,
+/// ...)`, and each run keeps them until the export takes them.
+pub struct Rows;
+
+#[derive(Default)]
+pub struct Written {
+    pub rows: Vec<Row>,
+}
+
+impl Module for Rows {
+    const NAME: &'static str = "tables";
+    type State = Written;
+
+    fn functions() -> &'static [Function<Self>] {
+        FUNCTIONS
+    }
+}
+
+static FUNCTIONS: &[Function<Rows>] = &[function!(Effect, "row", [shape, set, rest], |cx, a| {
+    write_rows(cx, a);
+    Vals::new()
+})];
+
+/// One row per combination of the column values; a column with no value is
+/// empty.
+fn write_rows<S: Store>(cx: &mut Cx<'_, '_, Rows, S>, a: &[Vals]) {
+    let Some(at) = a[1].first().and_then(|v| v.loc()) else {
+        return;
+    };
+    let Some(&Val::Sym(shape)) = a[0].first() else {
+        return;
+    };
+    let cols = &a[2..];
+    let total: usize = cols.iter().map(|v| v.len().max(1)).product();
+    let rows = &mut cx.write().rows;
+    for mut n in 0..total {
+        let values = cols
+            .iter()
+            .map(|v| {
+                let len = v.len().max(1);
+                let value = v.get(n % len).copied();
+                n /= len;
+                value
+            })
+            .collect();
+        rows.push(Row {
+            shape: shape as u16,
+            at,
+            values,
+        });
+    }
+}
 
 /// Per-table column specs that replace the ontology's, such as the indexer's
 /// dictionary-encoded strings and version columns.
@@ -344,8 +406,17 @@ pub fn export(
     state.trees.push(state.project_compact(env));
     let graph = crate::engine::Graph::new(&state.edges);
     let walk = state.trees.len();
-    let rows = crate::engine::run_trees(phase, &state.trees, walk, Some(project), &graph, env, run)
-        .map(|(_, rows)| rows);
+    let rows = crate::engine::run_trees(
+        phase,
+        &state.trees,
+        walk,
+        Some(project),
+        &graph,
+        env,
+        run,
+        |run| run.take_state::<Rows>().rows,
+    )
+    .map(|(_, rows)| rows.into_iter().flatten().collect());
     let written = rows.map_err(Error::from).and_then(|rows| {
         Sink {
             env,
