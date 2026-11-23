@@ -22,7 +22,7 @@ function ContentRoute() {
       page={page}
       body={body}
       components={baseMdxComponents}
-      nav={page.path.startsWith("engineering") ? <Sidebar /> : undefined}
+      nav={page.path.startsWith("engineering") ? <Sidebar title={page.meta.title} /> : undefined}
       footer={<PageFooter page={page} />}
     >
       {page.path === "engineering" && (
