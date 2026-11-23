@@ -4,24 +4,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Ontology, loading::ONTOLOGY_SCHEMA_FILE};
 
-/// The ledger YAML `scope:` value; an `entities:` subset narrows `Sdlc` only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LedgerScope {
-    /// Full rebuild.
     #[serde(rename = "*")]
     All,
-    /// SDLC-sourced tables. Pairs with an optional `entities:` subset.
     #[serde(rename = "sdlc")]
     Sdlc,
-    /// Code-graph tables.
     #[serde(rename = "code")]
     Code,
-    /// Re-index nothing; requires a `note:` certifying the change is output-neutral.
     #[serde(rename = "none")]
     None,
 }
 
-/// What a migration invalidates and must re-index. Empty `Sdlc` set = the whole SDLC domain.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MigrationScope {
     Full,
@@ -50,7 +44,6 @@ impl MigrationScope {
         }
     }
 
-    /// The widest of the two scopes; mixing `code` and `sdlc` widens to `"*"`.
     #[must_use]
     pub fn widened_with(&self, other: &Self) -> Self {
         match (self, other) {
@@ -85,8 +78,6 @@ impl std::fmt::Display for MigrationScope {
     }
 }
 
-/// The minimal [`MigrationScope`] a fingerprint diff justifies, or `None` if
-/// nothing changed. Fail-safe: anything unmapped widens to [`MigrationScope::Full`].
 #[must_use]
 pub fn derive_scope(
     ontology: &Ontology,
@@ -161,8 +152,6 @@ pub fn derive_scope(
     Some(MigrationScope::Sdlc(sdlc_entities))
 }
 
-/// Names accepted in an entry's `entities:` list: pipeline-bearing nodes, derived
-/// entities, and SDLC-routed relationship kinds (code edges are excluded).
 #[must_use]
 pub fn sdlc_entity_names(ontology: &Ontology) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
@@ -234,7 +223,6 @@ fn parse_derived_name(content: &str) -> Option<String> {
     Some(parsed.name)
 }
 
-/// `edges/<stem>.yaml` → the relationship kind, when it resolves in the ontology.
 fn edge_kind_for_path(ontology: &Ontology, path: &str) -> Option<String> {
     let stem = path
         .strip_prefix("edges/")?
@@ -243,7 +231,6 @@ fn edge_kind_for_path(ontology: &Ontology, path: &str) -> Option<String> {
     ontology.has_edge(&stem).then_some(stem)
 }
 
-/// Whether `table`'s DDL change is explained by the scope collected so far.
 fn table_owned_by_scope(
     ontology: &Ontology,
     table: &str,
@@ -471,8 +458,6 @@ mod tests {
         assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["Note"]))));
     }
 
-    // HAS_NOTE is FK-derived: no edge `pipelines:` block, but routed to the default
-    // SDLC edge table, so it must derive an sdlc entity — not code.
     #[test]
     fn derive_scope_edge_resolves_to_relationship_kind() {
         let ontology = Ontology::new().with_edges(["HAS_NOTE"]);
@@ -485,8 +470,6 @@ mod tests {
         assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["HAS_NOTE"]))));
     }
 
-    // calls/defines/extends/imports/on_branch route to gl_code_edge, so an edge
-    // change there must derive `code`, never a bogus sdlc entity.
     #[test]
     fn derive_scope_code_edge_is_code() {
         let ontology = Ontology::new()

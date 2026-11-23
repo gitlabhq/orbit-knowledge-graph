@@ -29,10 +29,7 @@ pub struct LogCaptureGuard {
     _second_dispatch: Dispatch,
 }
 
-/// Captures the log lines of the current thread while the guard lives.
 pub fn capture_logs() -> (CapturedLogs, LogCaptureGuard) {
-    // With one live dispatcher, tracing-core caches callsite interest from whichever thread
-    // registers it first, so a concurrent test without a subscriber could disable our lines.
     let second_dispatch = Dispatch::new(NoSubscriber::default());
     let logs = CapturedLogs::default();
     let writer = logs.clone();

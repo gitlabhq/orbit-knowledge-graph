@@ -1,14 +1,8 @@
-//! Names, descriptions, units, labels, and histogram buckets live in
-//! `crates/orbit-observability/src/indexer/migration.rs`. This module only
-//! builds instruments against the running `MeterProvider`.
-
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Gauge};
 
 use orbit_observability::indexer::migration;
 
-/// Prometheus exposes this as `gkg_schema_migration_phase_total` after the
-/// rename from the former `gkg_schema_migration_total_total` double suffix.
 #[derive(Clone)]
 pub struct MigrationMetrics {
     pub(crate) phase: Counter<u64>,
@@ -39,11 +33,6 @@ impl Default for MigrationMetrics {
     }
 }
 
-/// The `version_band` label buckets the historical version integer into
-/// `current`, `previous`, or `ancient` to cap cardinality as schema history
-/// grows. Prometheus exposes these as `gkg_schema_migration_completed_total`
-/// and `gkg_schema_cleanup_total` after the rename that dropped the former
-/// `_total_total` double suffix.
 #[derive(Clone)]
 pub struct CompletionMetrics {
     pub(crate) migration_completed: Counter<u64>,
@@ -80,8 +69,6 @@ impl CompletionMetrics {
         );
     }
 
-    /// `version` is the migrating version measured against, used to derive the
-    /// `version_band` label so dashboards don't have to know version numbers.
     pub(crate) fn record_units(
         &self,
         scope: &'static str,

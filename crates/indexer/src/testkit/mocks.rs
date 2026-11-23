@@ -30,8 +30,6 @@ impl MockNatsServices {
         Self::default()
     }
 
-    /// A mock whose `publish` always returns `NatsError::Publish`, for testing
-    /// callers' error handling.
     pub fn failing() -> Self {
         let mock = Self::default();
         mock.fail_publish.store(true, Ordering::Relaxed);

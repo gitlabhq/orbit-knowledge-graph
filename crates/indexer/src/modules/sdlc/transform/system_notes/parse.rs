@@ -1,33 +1,12 @@
-//! GFM reference extraction for system note bodies.
-//!
-//! System notes in the GitLab monolith are authored by
-//! [`SystemNoteService`](https://gitlab.com/gitlab-org/gitlab/-/blob/master/app/services/system_note_service.rb)
-//! and sub-services. The body templates encode cross-entity references as
-//! [GitLab Flavored Markdown](https://docs.gitlab.com/user/markdown/) reference
-//! tokens (`#`, `!`, `@`). This module is a regex-based extractor that pulls the
-//! references back out without rendering the full Banzai pipeline.
-//!
-//! Body templates were lifted from `app/services/system_notes/*.rb` in the Rails
-//! monolith. The patterns are deliberately permissive on the *verb phrase* and
-//! strict on the *reference token*, so future copy-edits on the Rails side do
-//! not silently break extraction.
-
 use std::sync::LazyLock;
 
 use regex::Regex;
 
-/// A target entity referenced from a system note body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reference {
     pub kind: RefKind,
-    /// Full namespace path of the *owning project* of the referenced entity,
-    /// when the reference is cross-project. `None` for same-project references
-    /// — in that case the resolver substitutes the note's own project path.
     pub project_path: Option<String>,
-    /// For Issue / MR references, the internal id. For Commit references,
-    /// `None` (use `commit_sha`).
     pub iid: Option<i64>,
-    /// For Commit references, the SHA (7–40 hex chars). `None` otherwise.
     pub commit_sha: Option<String>,
 }
 
@@ -38,9 +17,6 @@ pub enum RefKind {
     Commit,
 }
 
-/// The Rails `system_note_metadata.action` value. Mirrors `ICON_TYPES` in
-/// [`app/models/system_note_metadata.rb`](https://gitlab.com/gitlab-org/gitlab/-/blob/master/app/models/system_note_metadata.rb).
-/// Vendored as `&'static str` so the dispatcher is exhaustive at compile time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
     CrossReference,
@@ -82,7 +58,6 @@ impl Action {
         })
     }
 
-    /// Inverse of [`Action::parse`]: the canonical action→string mapping.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::CrossReference => "cross_reference",
@@ -103,35 +78,11 @@ impl Action {
         }
     }
 
-    /// Lifecycle actions whose body is a fixed verb (`"closed"`, `"merged"`,
-    /// `"opened"`) and which do not need text parsing. The resolved edge is
-    /// `User --ACTION--> Noteable` from the note row alone.
-    ///
-    /// `reopened` is intentionally absent: reopen is a `resource_state_events`
-    /// row (state = 5), never a system-note action, and REOPENED edges are
-    /// emitted by the standalone `reopened.yaml` ETL instead. See ADR 013.
-    ///
-    /// Test-only: `emit::build_edges` matches on the concrete `Action`
-    /// variants directly, so this predicate is documentation/assertion sugar
-    /// rather than a production branch.
     #[cfg(test)]
     pub fn is_lifecycle(self) -> bool {
         matches!(self, Self::Closed | Self::Merged | Self::Opened)
     }
 }
-
-// Reference token grammar, derived from Rails:
-//
-// * `Project.reference_pattern` in `app/models/project.rb` accepts an optional
-//   namespace prefix (up to 20 segments) followed by a project path. Each
-//   path segment matches `[a-zA-Z0-9_][a-zA-Z0-9_\-\.]{0,254}`.
-// * `Issue.reference_pattern` is `(<project>?)#<digits>`.
-// * `MergeRequest.reference_pattern` is `(<project>?)!<digits>`.
-// * `Commit.reference_pattern` is `(<project>@)?<sha 7..40>`.
-//
-// We bound the namespace depth at 20 segments to match
-// `Namespace::NUMBER_OF_ANCESTORS_ALLOWED`. The IID is bounded at 20 digits to
-// fit `Gitlab::Database::MAX_INT_VALUE`.
 
 const PATH_SEGMENT: &str = r"[A-Za-z0-9_][A-Za-z0-9_\-\.]{0,254}";
 
@@ -163,9 +114,6 @@ static MR_REF: LazyLock<Regex> = LazyLock::new(|| {
     .expect("merge request regex compiles")
 });
 
-// Commit SHA refs always include a project prefix when cross-project, but the
-// project-less form is just a hex run. We require a word boundary on both sides
-// so we don't grab the middle of an HTTP URL fragment.
 #[expect(
     clippy::expect_used,
     reason = "static regex literal is verified by tests and cannot fail at runtime"
@@ -178,69 +126,32 @@ static COMMIT_REF: LazyLock<Regex> = LazyLock::new(|| {
     .expect("commit regex compiles")
 });
 
-/// Extract all entity references from `body` according to `action`.
-///
-/// The dispatcher applies action-specific filters to avoid false positives
-/// from prose tokens that happen to match the GFM grammar (e.g. an issue
-/// title containing `#123`). For free-form actions like `cross_reference`,
-/// only one reference appears in the body by construction (the template is
-/// `"mentioned in {ref}"`), so we take the first match.
 pub fn extract(action: Action, body: &str) -> Vec<Reference> {
     match action {
-        // Lifecycle: body is the bare verb, no cross-entity ref.
         Action::Closed | Action::Merged | Action::Opened => Vec::new(),
 
-        // Body: "mentioned in <ref>".
         Action::CrossReference => first_ref_any(body).into_iter().collect(),
 
-        // Body: "marked as related to <ref>[, <ref>...]".
-        // Multiple refs separated by commas are possible per the Rails template.
         Action::Relate => all_refs_any(body),
 
-        // Body: "removed the relation with <ref>".
         Action::Unrelate => first_ref_any(body).into_iter().collect(),
 
-        // Bodies (hierarchies_service):
-        //   "added #1234 as child item"     (relate_to_child)
-        //   "added group/proj#1234 as parent item"   (relate_to_parent)
-        //   "removed child item #1234"      (unrelate_from_child)
-        //   "removed parent item group/proj#1234"    (unrelate_from_parent)
         Action::RelateToParent
         | Action::RelateToChild
         | Action::UnrelateFromParent
         | Action::UnrelateFromChild => first_ref_any(body).into_iter().collect(),
 
-        // Bodies:
-        //   "moved to <ref>"     "moved from <ref>"
-        //   "cloned to <ref>"    "cloned from <ref>"
         Action::Moved | Action::Cloned => first_ref_any(body).into_iter().collect(),
 
-        // Bodies:
-        //   "marked this issue as a duplicate of <ref>"
-        //   "marked <ref> as a duplicate of this issue"
         Action::Duplicate => first_ref_any(body).into_iter().collect(),
 
-        // Body: "added N commit(s)\n\n* <short_sha> - <title>\n..."
-        // Each `<li>` line starts with a 7-40 hex run.
         Action::Commit => extract_commit_shas_from_list(body),
 
-        // Body: variants
-        //   "enabled an automatic merge when all merge checks for <sha> pass"
-        //   "merged"  (lifecycle — handled above by Action::Merged)
-        //   "canceled the automatic merge"
-        //   "created merge request <ref> to address this issue"
-        //
-        // For the SHA-bearing variants we want the commit; for the "created
-        // merge request <ref>" variant we want the MR. Both can be present
-        // (in theory), but extract_first_sha returns the commit when present
-        // and falls back to MR refs otherwise.
         Action::Merge => extract_merge_ref(body),
     }
 }
 
 fn first_ref_any(body: &str) -> Option<Reference> {
-    // Priority: cross-project (longer, more specific) hits first, otherwise
-    // the regex `match` order picks whichever the engine finds first.
     if let Some(r) = first_ref(&MR_REF, body, RefKind::MergeRequest) {
         return Some(r);
     }
@@ -292,11 +203,6 @@ fn capture_to_ref(caps: &regex::Captures, kind: RefKind) -> Reference {
 }
 
 fn extract_commit_shas_from_list(body: &str) -> Vec<Reference> {
-    // Rails formats the list as `<li>SHORTSHA - TITLE</li>` lines (HTML, not
-    // markdown — see `app/services/system_notes/commit_service.rb`). After
-    // serialization to the note body, each entry begins with the short SHA
-    // followed by ` - `. We anchor on that delimiter so commit-message-style
-    // hex words inside titles don't trigger false positives.
     #[expect(
         clippy::unwrap_used,
         reason = "static regex literal is verified by tests and cannot fail at runtime"
@@ -317,8 +223,6 @@ fn extract_commit_shas_from_list(body: &str) -> Vec<Reference> {
 }
 
 fn extract_merge_ref(body: &str) -> Vec<Reference> {
-    // "enabled an automatic merge when all merge checks for <SHA> pass"
-    // SHA appears after "for " and before " pass".
     #[expect(
         clippy::expect_used,
         reason = "static regex literal is verified by tests and cannot fail at runtime"
@@ -335,8 +239,6 @@ fn extract_merge_ref(body: &str) -> Vec<Reference> {
         }];
     }
 
-    // Fall back to an MR reference (e.g. "created merge request !123 to address
-    // this issue").
     if let Some(r) = first_ref(&MR_REF, body, RefKind::MergeRequest) {
         return vec![r];
     }
@@ -411,9 +313,6 @@ mod tests {
             "branch",
             "designs_added",
             "duo_agent_started",
-            // Containment actions are intentionally unrouted: the FK path
-            // (siphon_work_item_parent_links -> contains.yaml) is the
-            // current-state source of truth for WorkItem CONTAINS. See ADR 013.
             "epic_issue_added",
             "issue_added_to_epic",
             "epic_issue_moved",
@@ -506,8 +405,6 @@ mod tests {
 
     #[test]
     fn relate_mixed_mr_and_issue_refs_are_both_collected() {
-        // Emission order (MR refs before Issue refs) is relied on by downstream
-        // edge-emission stability.
         let refs = extract(Action::Relate, "marked this issue as related to !42 and #9");
         assert_eq!(refs.len(), 2);
         assert_eq!(refs[0], mr_ref(None, 42));
@@ -609,9 +506,6 @@ mod tests {
 
     #[test]
     fn commit_action_ignores_compare_link_hex_in_url() {
-        // The trailing `Compare with previous version` link's URL may contain
-        // hex fragments. We anchor the SHA on the start-of-line + ` - ` and
-        // refuse hex words elsewhere on the line.
         let body = "added 1 commit\n\n\
                     * deadbee - Add feature\n\
                     \n[Compare with previous version](/-/compare/abc1234...def5678)";
@@ -646,7 +540,6 @@ mod tests {
         for action in [Action::Closed, Action::Merged, Action::Opened] {
             assert!(extract(action, "closed").is_empty());
             assert!(extract(action, "merged").is_empty());
-            // The action discriminator wins even when the body looks like a ref.
             assert!(extract(action, "mentioned in !1").is_empty());
         }
     }
@@ -683,9 +576,6 @@ mod tests {
 
     #[test]
     fn iid_extracts_at_most_20_digits() {
-        // The `\d{1,20}` cap exists to prevent unbounded backtracking on
-        // adversarial input; a real Rails IID never exceeds
-        // `Gitlab::Database::MAX_INT_VALUE` (~19 digits).
         let body = "mentioned in #123456789012345678901";
         let refs = extract(Action::CrossReference, body);
         assert!(refs.len() <= 1, "got {refs:?}");

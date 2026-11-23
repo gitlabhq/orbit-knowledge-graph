@@ -1,13 +1,3 @@
-//! Field-level access restriction.
-//!
-//! Rejects selecting, filtering, ordering, and aggregating on `admin_only`
-//! fields when the caller is not an instance administrator. Also rejects aggregation queries in which a
-//! globally-scoped node (no `traversal_path` column) is not reachable through
-//! `relationships` or `path` from a `traversal_path`-scoped node, since
-//! aggregation bypasses the Rails redaction layer that protects other query
-//! types. Rejects entities whose minimum access level no authorized path
-//! meets. Runs before lowering.
-
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, Input, QueryType};
 use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
@@ -659,8 +649,6 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = input_with_aggregation(AggFunction::Count, None);
-        // User and Group declared but not connected: the old declaration-based
-        // check accepted this; the reachability check must reject it.
         input.relationships.clear();
         let err = apply(&input, &ont, &ctx).unwrap_err();
         assert!(
@@ -695,9 +683,6 @@ mod tests {
             "search queries are redacted by the Rails layer and must not be blocked here"
         );
     }
-
-    // These tests load the embedded production ontology so any drift in
-    // user.yaml is caught here, in addition to the pin test in the ontology crate.
 
     const USER_ADMIN_ONLY_COLUMNS: &[&str] = &[
         "email",

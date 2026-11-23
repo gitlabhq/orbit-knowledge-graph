@@ -1,6 +1,3 @@
-//! Step for a relation stored as a column on one node: read the holder table, filter its key column
-//! by the other endpoint, and expose the pair as edge columns.
-
 use ontology::constants::*;
 use query_data_model::OrbitQueryModel;
 
@@ -75,7 +72,6 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         Ok(())
     }
 
-    /// Reads the holder table if it is not in the chain yet; returns whether it joined through the other endpoint.
     fn ensure_holder(&mut self, relation: &EdgeRelation, key: &Fk) -> Result<bool> {
         if self.has_table(&key.node) {
             return Ok(false);

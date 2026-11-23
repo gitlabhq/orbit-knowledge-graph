@@ -6,7 +6,6 @@ use super::EdgeRows;
 use super::scope::{LedgerScope, MigrationScope, sdlc_entity_names};
 use crate::Ontology;
 
-/// Ledger path relative to `ORBIT_CONFIG_DIR`.
 pub const LEDGER_FILE: &str = "schema-migrations.yaml";
 
 const LEDGER_HEADER: &str = "\
@@ -48,14 +47,12 @@ impl MigrationLedger {
         Self::parse(EMBEDDED_LEDGER)
     }
 
-    /// Serialized YAML with the usage header.
     #[must_use]
     pub fn render(&self) -> String {
         let body = orbit_utils::yaml::to_string(self).expect("ledger serializes");
         format!("{LEDGER_HEADER}{body}")
     }
 
-    /// The current entry: newest first, so the top of the list.
     #[must_use]
     pub fn latest(&self) -> Option<&MigrationEntry> {
         self.migrations.first()
@@ -126,7 +123,6 @@ impl MigrationLedger {
     }
 }
 
-/// One `SCHEMA_VERSION` bump.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MigrationEntry {

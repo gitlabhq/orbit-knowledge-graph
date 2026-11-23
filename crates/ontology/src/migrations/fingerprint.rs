@@ -5,7 +5,6 @@ use sha2::{Digest, Sha256};
 
 use crate::loading::ONTOLOGY_SCHEMA_FILE;
 
-/// Fingerprint-snapshot path relative to `ORBIT_CONFIG_DIR`.
 pub const FINGERPRINT_FILE: &str = "schema-migrations.fingerprint.yaml";
 
 const FINGERPRINT_HEADER: &str = "\
@@ -194,7 +193,6 @@ fn get_diff_keys_between(
     changed
 }
 
-/// Strip runtime-only pipeline knobs (`extract.partition_count`) so changing them is version-neutral: they affect neither the graph schema nor the extracted data.
 fn remove_runtime_extract_fields(value: &mut serde_json::Value) {
     let serde_json::Value::Object(root) = value else {
         return;

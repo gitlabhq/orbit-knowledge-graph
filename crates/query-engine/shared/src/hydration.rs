@@ -1,6 +1,3 @@
-//! Shared hydration helpers used by both the server and local pipelines.
-//! The compile + execute step is left to the caller.
-
 use std::collections::HashMap;
 
 use arrow::datatypes::Int64Type;
@@ -22,8 +19,6 @@ use types::QueryResult;
 
 pub use crate::content::PropertyMap;
 
-/// Tries the PK column first (`_orbit_{alias}_pk`), falling back to the
-/// redaction ID column (`_orbit_{alias}_id`).
 pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<i64> {
     let pk_col = primary_key_column(&template.node_alias);
     let id_col = redaction_id_column(&template.node_alias);
@@ -39,7 +34,6 @@ pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) ->
     ids
 }
 
-/// Reads the `_orbit_{alias}_tp` column emitted by the result-contract pass.
 pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<TraversalPath> {
     let tp_col = traversal_path_column(alias);
     let mut paths: Vec<TraversalPath> = result
@@ -53,8 +47,6 @@ pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<Travers
     paths
 }
 
-/// When `static_nodes` is provided (e.g. the center node in a neighbors query),
-/// their IDs are also collected so properties can be hydrated for them.
 pub fn extract_dynamic_refs(
     result: &QueryResult,
     static_nodes: &[compiler::RedactionNode],
@@ -122,7 +114,6 @@ pub fn collect_dynamic_ref_paths(
         .collect()
 }
 
-/// Caps limit at `u32::MAX` to prevent truncation.
 pub fn build_hydration_input(nodes: Vec<InputNode>, total_ids: usize) -> Input {
     Input {
         query_type: QueryType::Hydration,
@@ -132,7 +123,6 @@ pub fn build_hydration_input(nodes: Vec<InputNode>, total_ids: usize) -> Input {
     }
 }
 
-/// `{alias}_props` arrives as a JSON object of strings, so typed fields are re-typed from the ontology.
 pub fn parse_hydration_batches(
     batches: &[RecordBatch],
     ontology: &Ontology,
@@ -252,7 +242,6 @@ pub fn merge_dynamic_properties(result: &mut QueryResult, property_map: &Propert
     }
 }
 
-/// Writes row columns named `{alias}_{column}` so formatters can extract them.
 pub fn merge_static_node_properties(
     result: &mut QueryResult,
     property_map: &PropertyMap,
@@ -276,8 +265,6 @@ pub fn merge_static_node_properties(
     }
 }
 
-/// Remove columns that were injected as dependencies for virtual column
-/// resolvers but not explicitly requested by the user.
 pub fn strip_injected_columns<'a>(
     property_map: &mut PropertyMap,
     specs: impl Iterator<Item = (&'a str, &'a Vec<String>)>,
@@ -333,11 +320,6 @@ pub fn hydrate_static(
     Ok((nodes, total_ids))
 }
 
-/// Uses pre-resolved column specs from the compilation plan; no ontology
-/// lookups at runtime.
-///
-/// `traversal_paths` is the authorized scope; `ref_paths` narrows an entity type to the paths
-/// its own rows carry. A neighbor can sit above the center node, so the center path is no fallback.
 pub fn hydrate_dynamic(
     entity_specs: &[DynamicEntityColumns],
     refs: &HashMap<String, Vec<i64>>,
@@ -435,9 +417,6 @@ pub fn apply_virtual_filters_static(result: &mut QueryResult, templates: &[Hydra
     });
 }
 
-/// Must run after [`apply_virtual_filters_static`]: filter-injected columns
-/// are resolved solely for the filter comparison and were never requested,
-/// so they are dropped from the rows that survived it.
 pub fn strip_filter_injected_static(result: &mut QueryResult, templates: &[HydrationTemplate]) {
     let col_keys: Vec<String> = templates
         .iter()

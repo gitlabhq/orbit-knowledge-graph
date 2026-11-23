@@ -60,13 +60,6 @@ impl PipelineStage for OutputStage {
     }
 }
 
-/// Debug SQL is gated by the JWT `is_gitlab_team_member` claim and realm:
-///
-/// - **SaaS** (`realm == "SaaS"`): requires `is_gitlab_team_member == true`.
-///   Rails sets this via `Gitlab::Com.gitlab_com_group_member?(user)`.
-/// - **Self-managed / Dedicated**: instance admins only.
-///   `is_gitlab_team_member` is always false off `.com`.
-/// - **Unknown realm or missing context**: denied.
 fn can_see_debug_sql(ctx: &QueryPipelineContext) -> bool {
     ctx.security_context
         .as_ref()

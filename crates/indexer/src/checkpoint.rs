@@ -12,21 +12,14 @@ use thiserror::Error;
 
 const CHECKPOINT_TABLE: &str = "checkpoint";
 
-/// The checkpoint key prefix for a given namespace, e.g. `ns.100`.
-///
-/// The pipeline appends `.{plan_name}` to form the full key, so all
-/// checkpoints for a namespace share this prefix followed by a dot.
 pub fn namespace_position_key(namespace_id: i64) -> String {
     format!("{NAMESPACE_KEY_PREFIX}{namespace_id}")
 }
 
 pub const NAMESPACE_KEY_PREFIX: &str = "ns.";
 
-/// The checkpoint scope of global plans; their keys are `global.{plan_name}`.
 pub const GLOBAL_SCOPE_KEY: &str = "global";
 
-/// Inverse of [`namespace_position_key`], tolerating the `.{plan_name}` and
-/// partition suffixes the pipeline appends.
 pub fn namespace_id_from_key(key: &str) -> Option<i64> {
     key.strip_prefix(NAMESPACE_KEY_PREFIX)?
         .split('.')
@@ -53,7 +46,6 @@ impl From<ClickHouseError> for CheckpointError {
     }
 }
 
-/// `floor` is `None` for a backfill (start of time); it is persisted so a resume rebuilds the window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowBounds {
     pub target: DateTime<Utc>,
@@ -117,7 +109,6 @@ impl Checkpoint {
         matches!(self.progress(), Progress::Completed)
     }
 
-    /// Every row up to this watermark is indexed; `None` until a first full pass completes.
     pub fn synced_until(&self) -> Option<DateTime<Utc>> {
         match self.progress() {
             Progress::Completed => Some(self.watermark),
@@ -130,7 +121,6 @@ impl Checkpoint {
         self.cursor_values.as_deref().unwrap_or_default()
     }
 
-    /// A cursored checkpoint must resume its original window, never widen to `(epoch, target]`.
     pub fn pull_window(&self, request_watermark: DateTime<Utc>) -> WindowBounds {
         match self.progress() {
             Progress::Paging => WindowBounds {
@@ -233,8 +223,6 @@ impl ClickHouseCheckpointStore {
         }
     }
 
-    // The newest row wins per key, except `indexed_at`: a page write from an overlapping run must
-    // not hide a completion, so it is the newest value since the last tombstone.
     async fn load_current_checkpoints(
         &self,
         keys: KeyFilter,
@@ -303,9 +291,6 @@ impl ClickHouseCheckpointStore {
         Ok(())
     }
 
-    // Single-row inserts must pin async batching regardless of durability, or per-row inserts
-    // explode the part count. ClickHouse rejects async inserts on a quorum-write cluster, so
-    // those deployments take the part-count hit instead.
     fn insert(&self, sql: &str, durability: WriteDurability) -> ArrowQuery {
         let query = self.client.query(sql);
         if self.client.has_quorum_writes() {
@@ -321,12 +306,10 @@ impl ClickHouseCheckpointStore {
     }
 }
 
-/// Flush-time `now64` defaults would let a buffered progress row outrank a later durable completion.
 fn client_version() -> String {
     Utc::now().format(TIMESTAMP_FORMAT).to_string()
 }
 
-/// The `cursor_values` column as JSON: the sort-key cursor plus the window floor.
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 struct CursorColumn {
     #[serde(rename = "c")]

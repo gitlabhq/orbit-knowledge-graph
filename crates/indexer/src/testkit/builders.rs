@@ -8,13 +8,10 @@ use orbit_server_config::{
     AppConfig, ClickHouseConfiguration, CodeIndexingPipelineConfig, EngineConfiguration,
 };
 
-/// Worker cap for test engines. Production derives this from the container;
-/// tests pin it so concurrency assertions do not depend on the host.
 pub const TEST_MAX_CONCURRENT_WORKERS: usize = 16;
 pub const TEST_SMALL_INDEXING_SLOTS: usize = 6;
 pub const TEST_BIG_INDEXING_SLOTS: usize = 2;
 
-/// `config/default.yaml` engine section with the runtime-derived fields pinned.
 pub fn test_engine_configuration() -> EngineConfiguration {
     let mut engine = AppConfig::embedded_defaults().engine;
     engine.max_concurrent_workers = Some(TEST_MAX_CONCURRENT_WORKERS);
@@ -22,7 +19,6 @@ pub fn test_engine_configuration() -> EngineConfiguration {
     engine
 }
 
-/// `config/default.yaml` code-indexing pipeline with the runtime-derived slots pinned.
 pub fn test_pipeline_configuration() -> CodeIndexingPipelineConfig {
     let mut pipeline = AppConfig::embedded_defaults()
         .engine

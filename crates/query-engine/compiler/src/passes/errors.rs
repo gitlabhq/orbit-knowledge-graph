@@ -1,16 +1,5 @@
-//! Error formatting for JSON Schema validation rejections.
-//!
-//! Enriches `jsonschema`'s default error messages so validator rejections list
-//! valid candidates and steer the agent toward `get_graph_schema`.
-
 use ontology::errors::format_candidate_list;
 
-/// Render a JSON Schema validation error into an actionable message.
-///
-/// jsonschema's own `Display` truncates enum rejections to three candidates
-/// and renders `oneOf` rejections as opaque prose, both of which leave an agent
-/// guessing the valid values. Reading the structured `ValidationErrorKind`
-/// recovers the full allowlist instead.
 pub(crate) fn format_schema_error(
     error: &jsonschema::ValidationError<'_>,
     schema: &serde_json::Value,
@@ -28,8 +17,6 @@ pub(crate) fn format_schema_error(
     }
 
     if let Some(description) = one_of_description(error, schema) {
-        // Some descriptions name the field rather than the accepted shape
-        // ("Start of ID range"), so say what went wrong before quoting one.
         return if path.is_empty() {
             description.to_string()
         } else {
@@ -43,10 +30,6 @@ pub(crate) fn format_schema_error(
     format!("{} at {path}", error.masked())
 }
 
-/// A `oneOf` with no allowlist to recover still has its schema's
-/// `description`, which reads better than jsonschema's prose.
-/// `schema_path` is the canonical location without `$ref` hops, so it
-/// points into `schema`.
 fn one_of_description<'s>(
     error: &jsonschema::ValidationError<'_>,
     schema: &'s serde_json::Value,
@@ -61,10 +44,6 @@ fn one_of_description<'s>(
     schema.pointer(parent)?.get("description")?.as_str()
 }
 
-/// Try to extract an enum allowlist from an error.
-///
-/// For `PropertyNames`, the returned instance is the offending key name, not
-/// the whole object.
 fn extract_enum_options<'a>(
     error: &'a jsonschema::ValidationError<'a>,
 ) -> Option<(String, &'a serde_json::Value)> {
@@ -101,10 +80,6 @@ fn format_enum_rejection(instance: &str, options: &serde_json::Value, path: &str
     format!("{instance} is not an allowed value{candidates} at {path}")
 }
 
-/// Filter operators nest a `oneOf` inside the property-filter `oneOf`, so the
-/// search must recurse. Every `oneOf` the ontology derives today (`columns`,
-/// relationship `type`, filter `op`) carries one allowlist enum, so the first
-/// enum found is the one to show.
 fn find_inner_enum_options<'a>(
     context: &'a [Vec<jsonschema::ValidationError<'a>>],
 ) -> Option<&'a serde_json::Value> {
@@ -147,8 +122,6 @@ fn format_candidates(options: &[serde_json::Value]) -> String {
     format_candidate_list("values", &unique)
 }
 
-/// Uses the structured segment iterator rather than matching the `Display`
-/// string, so a jsonschema serialization change can't silently fall through.
 fn is_group_by_path(path: &jsonschema::paths::Location) -> bool {
     use jsonschema::paths::LocationSegment;
     let mut segments = path.into_iter();

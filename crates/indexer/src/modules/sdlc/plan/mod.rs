@@ -105,7 +105,6 @@ pub(in crate::modules::sdlc) trait Filter {
     }
 }
 
-// A `None` filter contributes nothing, keeping optional filters chainable at call sites.
 impl<F: Filter> Filter for Option<F> {
     fn condition(&self) -> String {
         self.as_ref().map(|f| f.condition()).unwrap_or_default()
@@ -172,7 +171,6 @@ impl Filter for TraversalPathFilter<'_> {
     }
 }
 
-/// Half-open `[lower, upper)` window over the sort-key prefix; a bare `id` range rescans the namespace each page.
 pub(in crate::modules::sdlc) struct CompositeRangeFilter<'a> {
     pub columns: &'a [String],
     pub lower: Option<&'a [String]>,
@@ -203,7 +201,6 @@ enum KeyComparison {
 }
 
 impl KeyComparison {
-    // Lexicographic `>=` is `>` at every depth except the last column.
     fn operator(&self, at_last_column: bool) -> &'static str {
         match self {
             KeyComparison::Greater => ">",
@@ -214,7 +211,6 @@ impl KeyComparison {
     }
 }
 
-/// OR-of-ANDs `(c0 > v0) OR (c0 = v0 AND c1 > v1) …` — ClickHouse prunes this; a packed tuple compare full-scans.
 fn sort_key_prefix_compare(
     columns: &[String],
     values: &[String],
@@ -253,7 +249,6 @@ impl Filter for CursorFilter<'_> {
     }
 }
 
-// `{{filters}}`/`{{batch_size}}` markers are substituted by `PreparedQuery::to_sql`.
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct Plan {
     pub name: String,
@@ -333,14 +328,10 @@ impl PreparedQuery {
         self.batch_size = batch_size;
     }
 
-    /// Partitions share the one worker-pool permit the handler holds, so an undivided
-    /// budget puts `partitions.len()` pages in flight for a slot accounted as holding one.
     pub fn into_partitions(
         self,
         partitions: Vec<PartitionAssignment>,
     ) -> Vec<(PartitionAssignment, PreparedQuery)> {
-        // Below the config minimum the extra round trips cost more than the smaller
-        // pages save.
         let share = (self.batch_size / partitions.len().max(1) as u64)
             .max(orbit_server_config::MIN_DATALAKE_BATCH_SIZE)
             .min(self.batch_size);
@@ -411,8 +402,6 @@ mod tests {
         }
     }
 
-    // The floor must not raise a share above what the operator configured, or every
-    // partition would read more rows per page than the unpartitioned plan would.
     #[test]
     fn into_partitions_never_raises_the_share_above_the_plan_budget() {
         let plan = test_plan(vec!["id"], 50_000);

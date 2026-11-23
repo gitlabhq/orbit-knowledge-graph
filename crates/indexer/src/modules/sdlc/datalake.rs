@@ -42,8 +42,6 @@ impl From<ClickHouseError> for DatalakeError {
 
 pub(crate) type RecordBatchStream<'a> = BoxStream<'a, Result<RecordBatch, DatalakeError>>;
 
-/// Storage-scan figures from the `X-ClickHouse-Summary` header. Greater than or
-/// equal to the rows the page actually returned.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ScanStats {
     pub scanned_rows: u64,
@@ -73,9 +71,6 @@ pub(crate) trait DatalakeQuery: Send + Sync {
         max_block_size: Option<u64>,
     ) -> Result<Vec<RecordBatch>, DatalakeError>;
 
-    /// Buffers a whole page and reports ClickHouse's scan cost from the query
-    /// summary. The default reports zero scan stats; only [`Datalake`] surfaces
-    /// the real summary.
     async fn query_batches_with_summary(
         &self,
         sql: &str,
@@ -90,8 +85,6 @@ pub(crate) trait DatalakeQuery: Send + Sync {
     }
 }
 
-/// Byte cap for retry blocks, keeping a block's String column under the 2GB
-/// Arrow offset limit even for MB-wide rows. ClickHouse's own default.
 const RETRY_PREFERRED_BLOCK_SIZE_BYTES: &str = "1000000";
 
 pub(crate) type DatalakeClient = Arc<ArrowClickHouseClient>;
@@ -159,8 +152,6 @@ impl DatalakeQuery for Datalake {
     ) -> Result<FetchedPage, DatalakeError> {
         let mut query = self.build_query(sql, params);
         if max_block_size.is_some() {
-            // Retry after a datalake failure (the Arrow 2GB overflow): byte-cap
-            // blocks so the retry is safe regardless of row width.
             query = query.with_setting(
                 "preferred_block_size_bytes",
                 RETRY_PREFERRED_BLOCK_SIZE_BYTES,
@@ -219,9 +210,6 @@ fn scan_stats_from_summary(summary: QuerySummary) -> ScanStats {
     }
 }
 
-/// True when a datalake read failed because an Arrow column hit the 2 GiB i32
-/// offset cap. The pipeline's extract retry uses this to drop straight to the
-/// floor block size rather than gradually halving.
 pub(in crate::modules::sdlc) fn is_arrow_string_overflow(err: &DatalakeError) -> bool {
     let DatalakeError::Query(message) = err else {
         return false;

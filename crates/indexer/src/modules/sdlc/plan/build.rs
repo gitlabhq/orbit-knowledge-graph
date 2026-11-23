@@ -1,5 +1,3 @@
-//! Walks the ontology and builds each pipeline as an extract plus a transform.
-
 use std::collections::HashMap;
 
 use ontology::{EtlScope, Extract, ExtractQuery, NodeEntity, Ontology, Pipeline, Transform};
@@ -391,7 +389,6 @@ mod tests {
 
     #[test]
     fn embedded_ontology_yields_unique_plan_names() {
-        // `build_plans` rejects duplicate names, so building without error is the assertion.
         let _ = plans(&test_ontology(), 1000);
     }
 
@@ -506,7 +503,6 @@ mod tests {
 
     #[test]
     fn reopened_standalone_plans_carry_state_filter_for_both_issuable_sides() {
-        // Source of truth: app/models/resource_state_event.rb (`enum :state ... reopened: 5`).
         const REOPENED_STATE: i64 = 5;
 
         let built = plans(&test_ontology(), 1000);
@@ -648,7 +644,6 @@ mod tests {
         assert!(normalized.contains("WITH _batch AS ("), "sql: {sql}");
         assert!(normalized.contains("LIMIT 10000"), "sql: {sql}");
 
-        // Bare siphon_notes scan, not the INNER JOIN that caused FillingRightJoinSide OOM (#830).
         let batch_body = normalized
             .split("WITH _batch AS (")
             .nth(1)
@@ -671,7 +666,6 @@ mod tests {
             "sql: {sql}"
         );
         assert!(normalized.contains("_e0.action AS action"), "sql: {sql}");
-        // The #830 invariants, now generated: metadata join page-bounded and namespace-scoped.
         assert!(
             normalized.contains("FROM siphon_system_note_metadata"),
             "sql: {sql}"

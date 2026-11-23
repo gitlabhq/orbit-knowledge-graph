@@ -15,7 +15,6 @@ use orbit_migrations::version::SCHEMA_VERSION;
 
 pub const MANAGED_STREAMS: &[&str] = &[INDEXER_STREAM, DEAD_LETTER_STREAM];
 
-// No writer since the KV progress store was removed. Kept so GC deletes the streams of older schema versions.
 const RETIRED_INDEXING_PROGRESS_BUCKET: &str = "orbit_indexing_progress";
 
 pub const MANAGED_BUCKETS: &[&str] = &[INDEXING_LOCKS_BUCKET, RETIRED_INDEXING_PROGRESS_BUCKET];
@@ -109,8 +108,6 @@ pub async fn gc_idle_release_streams(
     let mut alive: HashSet<String> = HashSet::new();
     let mut streams = async_nats::jetstream::new(client.clone()).streams();
 
-    // A listing error must abort before any deletion: sweeping on a partial
-    // survey could miss the stream carrying a live release's activity.
     while let Some(info) = streams
         .try_next()
         .await

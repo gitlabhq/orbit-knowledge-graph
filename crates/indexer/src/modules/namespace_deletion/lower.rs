@@ -3,23 +3,10 @@ use ontology::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 
 pub struct DeletionStatement {
-    /// Unprefixed table name.
     pub table: String,
-    /// Full SQL with the schema-version prefix applied to the table name.
     pub sql: String,
 }
 
-/// Builds `INSERT INTO ... SELECT` statements that soft-delete all rows for a
-/// namespace across every ontology-driven table.
-///
-/// For each namespaced node table and the shared edge table, emits:
-/// ```sql
-/// INSERT INTO {prefixed_table} ({sort_key..., unchanging columns..., _deleted, _version})
-/// SELECT {sort_key..., unchanging columns..., true, now64(6)}
-/// FROM {prefixed_table} FINAL
-/// WHERE startsWith(traversal_path, {traversal_path:String})
-///   AND _deleted = false
-/// ```
 pub fn build_deletion_statements(ontology: &ontology::Ontology) -> Vec<DeletionStatement> {
     build_statements(ontology, None)
 }
@@ -107,8 +94,6 @@ fn build_deletion_insert(
         .join(", ");
     let insert_columns = format!("{carried_cols}, {DELETED_COLUMN}, {VERSION_COLUMN}");
     let extra = extra_predicate.map(|p| format!(" {p}")).unwrap_or_default();
-    // FINAL reads the latest row per key. A raw scan still sees the old live
-    // version of a tombstoned row and writes a new tombstone on every run.
     let sql = format!(
         "INSERT INTO {prefixed_table} ({insert_columns}) \
          SELECT {carried_cols}, true, now64(6) \

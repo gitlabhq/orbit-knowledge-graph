@@ -1,17 +1,3 @@
-//! SystemNotes `BlockTransform` implementation (ADR 013, ADR 015).
-//!
-//! Parses system-note bodies extracted by the ontology-driven query plan
-//! (`config/ontology/derived/core/system_note.yaml`), resolves GFM reference
-//! tokens against the datalake, and emits `gl_edge` rows. Rides the shared
-//! SDLC pipeline — only the transform body is custom Rust; extraction,
-//! paging, checkpointing, and writing are all inherited.
-//!
-//! ## Registration
-//!
-//! [`register`] adds the factory to the [`TransformRegistry`] during handler
-//! setup, flipping `is_registered("system_notes")` → true so the dormant
-//! `SystemNote` plan starts producing an `EntityHandler`.
-
 pub(crate) mod emit;
 pub(crate) mod parse;
 pub(crate) mod resolve;
@@ -41,8 +27,6 @@ use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::clickhouse::strings_per_array_param;
 use orbit_utils::traversal_path::TraversalPath;
 
-/// Registry key for this transform; also the `etl.transform` value in
-/// `config/ontology/derived/core/system_note.yaml`.
 pub(in crate::modules::sdlc) const TRANSFORM_NAME: &str = "system_notes";
 
 use emit::{EmittedEdge, NoteRow, NoteableKind, build_edges};
@@ -52,8 +36,6 @@ use resolve::{
     ResolvedTarget, RouteRow, WORK_ITEMS_SQL, lookup_chunks,
 };
 
-/// The block outlives every stage that reads these, so owning the note bodies would
-/// only duplicate them.
 struct ExtractedNote<'a> {
     note: &'a str,
     noteable_id: i64,
@@ -129,17 +111,12 @@ impl BlockTransform for SystemNotesTransform {
     }
 }
 
-/// The captured `datalake` handle is available for second-hop lookups (ADR 015).
 pub(in crate::modules::sdlc) fn register(
     registry: &mut TransformRegistry,
     datalake: Arc<dyn DatalakeQuery>,
     edge_table: &str,
     resolve_lookup_batch_size: usize,
 ) {
-    // Every write path targets the current schema version's table-set, so the
-    // hand-written transform must prefix its destination exactly like the
-    // lowered DataFusion plans do (`lower.rs`); a bare `gl_edge` writes to the
-    // wrong (unprefixed) table.
     let edge_table = prefixed_table_name(edge_table, *SCHEMA_VERSION);
     let factory: TransformFactory = Box::new(move |_plan| {
         Arc::new(SystemNotesTransform::new(
@@ -457,8 +434,6 @@ fn edges_to_record_batch(edges: &[EmittedEdge<'_>]) -> Result<RecordBatch, Handl
     let mut target_kinds = Vec::with_capacity(len);
     let mut deleted = Vec::with_capacity(len);
 
-    // Strict ClickHouse rejects an INSERT omitting a no-DEFAULT column, so emit the
-    // denormalized tag columns as empty lists even though system notes project no tags.
     let mut source_tags = ListBuilder::with_capacity(StringBuilder::new(), len);
     let mut target_tags = ListBuilder::with_capacity(StringBuilder::new(), len);
 

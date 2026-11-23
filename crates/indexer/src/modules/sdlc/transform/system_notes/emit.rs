@@ -1,16 +1,8 @@
-//! Encoding shape matches the existing edge writers in
-//! `crates/indexer/src/modules/code/arrow_converter.rs` so the same
-//! `BatchWriter` plumbing carries these rows through to ClickHouse without
-//! a new code path.
-
 use orbit_log_fields::warn;
 
 use super::parse::{Action, RefKind, Reference};
 use super::resolve::ResolvedTarget;
 
-/// Collapses the `Issue` family into `WorkItem` to match the upstream graph
-/// schema (see `lower_edge_kind` precedent in
-/// `crates/indexer/src/modules/sdlc/plan/lower.rs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoteableKind {
     MergeRequest,
@@ -47,7 +39,6 @@ impl From<RefKind> for NoteableKind {
     }
 }
 
-/// Values must mirror the edge YAML filenames under `config/ontology/edges/`.
 pub mod edge_kinds {
     pub const MENTIONS: &str = "MENTIONS";
     pub const CLOSED: &str = "CLOSED";
@@ -64,16 +55,9 @@ pub struct EmittedEdge<'a> {
     pub target_kind: &'static str,
 }
 
-/// Two lifetimes because the default-project lookup is dropped before the emitted
-/// edges are returned, while the block they borrow from outlives them.
 #[derive(Debug, Clone)]
 pub struct NoteRow<'a, 'p> {
     pub traversal_path: &'a str,
-    /// Full path of the source note's owning project (e.g. `gitlab-org/gitlab`).
-    /// Substituted for same-project GFM shorthand (`#123`, `!456`) when the
-    /// reference carries no explicit project prefix. Empty string when the
-    /// owning project is unknown — the resolver then declines to resolve
-    /// unqualified references on this row.
     pub default_project: &'p str,
     pub author_id: Option<i64>,
     pub noteable_id: i64,
@@ -82,9 +66,6 @@ pub struct NoteRow<'a, 'p> {
     pub references: Vec<Reference>,
 }
 
-/// Returns `None` for any non-lifecycle action so the caller can log-and-skip
-/// rather than `unreachable!`-panic if the outer match arm and this mapping
-/// ever drift.
 fn lifecycle_edge_kind(action: Action) -> Option<&'static str> {
     match action {
         Action::Closed => Some(edge_kinds::CLOSED),
@@ -93,8 +74,6 @@ fn lifecycle_edge_kind(action: Action) -> Option<&'static str> {
     }
 }
 
-/// The resolver returns `None` for any unresolvable `(project_path, iid)` or
-/// commit SHA — those references are silently dropped.
 pub fn build_edges<'a, R>(rows: &[NoteRow<'a, '_>], mut resolve: R) -> Vec<EmittedEdge<'a>>
 where
     R: FnMut(&Reference, &str) -> Option<ResolvedTarget>,
@@ -106,8 +85,6 @@ where
                 let Some(author_id) = row.author_id else {
                     continue;
                 };
-                // Edge YAML declares `merged` only on MergeRequest, `closed`
-                // on MR or WorkItem; drop anything else.
                 let declared_target = match row.action {
                     Action::Merged => row.noteable_kind == NoteableKind::MergeRequest,
                     _ => matches!(
@@ -118,9 +95,6 @@ where
                 if !declared_target {
                     continue;
                 }
-                // Skip (don't `unreachable!`) on an unexpected action: a
-                // panic here would crash-loop the worker on one bad row.
-                // See "no panics in the indexer data path" in AGENTS.md.
                 let Some(kind) = lifecycle_edge_kind(row.action) else {
                     warn!(
                         safe(KIND) = row.action.as_str(),
@@ -139,17 +113,8 @@ where
                 });
             }
 
-            // `opened` produces no edge: there is no source-of-truth FK for
-            // who opened, and the entity's `created_at` already covers the
-            // lifecycle point. ADR 013: out of scope.
             Action::Opened => {}
 
-            // Edge points from the parsed ref (source) to the noteable
-            // (target), matching the ontology's directional mentioner →
-            // mentioned. It lands in the noteable's namespace partition
-            // (`row.traversal_path`) so inbound-degree queries on the target
-            // hit the right partition. All collapse to MENTIONS in v1;
-            // link-type taxonomy is an open question in the ADR.
             Action::CrossReference
             | Action::Relate
             | Action::Unrelate
@@ -166,8 +131,6 @@ where
                     let Some(resolved) = resolve(r, row.default_project) else {
                         continue;
                     };
-                    // Skip self-loops (MR !100 "mentioned in !100"): they
-                    // pollute degree counts.
                     let ref_kind = NoteableKind::from(r.kind);
                     if ref_kind == row.noteable_kind && resolved.id == row.noteable_id {
                         continue;
@@ -289,8 +252,6 @@ mod tests {
 
     #[test]
     fn merged_on_non_mr_noteable_is_dropped() {
-        // `merged.yaml` only declares User → MergeRequest, so a WorkItem
-        // noteable must drop.
         let row = row_for(Action::Merged, "merged", NoteableKind::WorkItem, 42);
         let edges = build_edges(&[row], always_resolve(0, "1/2/"));
         assert!(edges.is_empty());
@@ -298,7 +259,6 @@ mod tests {
 
     #[test]
     fn closed_on_commit_noteable_is_dropped() {
-        // `closed.yaml` declares no `Commit` target (no `Commit` node yet).
         let row = row_for(Action::Closed, "closed", NoteableKind::Commit, 5);
         let edges = build_edges(&[row], always_resolve(0, "1/2/"));
         assert!(edges.is_empty());

@@ -1,5 +1,3 @@
-//! Traversal: plan the pattern, build its relation graph, and return it as the operation.
-
 use query_data_model::OrbitQueryModel;
 
 use crate::error::Result;
