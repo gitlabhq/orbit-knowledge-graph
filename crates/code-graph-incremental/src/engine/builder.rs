@@ -1,6 +1,6 @@
-//! One family's compiled environment: the pipeline over every member's rules
-//! in one interner, the project settings as the members' union, and the
-//! budgets. Long-lived and shared between runs.
+//! An engine: the pipeline compiled over every family member's rules in one
+//! interner, its mounted frontends, the project settings as the members'
+//! union, and the budgets. Built once and shared between runs.
 
 use rustc_hash::FxHashMap;
 
@@ -11,7 +11,7 @@ use crate::intern::Lang;
 use crate::language::SupportLang;
 use crate::sentinel::Limits;
 
-pub struct Env {
+pub struct Engine {
     pub export_config: crate::backend::tables::ExportConfig,
     /// The mounted frontends, the env's own language first.
     pub frontends: Vec<Box<dyn crate::frontend::Frontend>>,
@@ -49,7 +49,7 @@ pub struct Project {
 /// How an engine is configured: the family it serves, the modules it
 /// mounts, its budgets, the interner it compiles into, and the export's
 /// column overrides. Everything else comes from pipeline.yaml.
-pub struct EnvBuilder {
+pub struct EngineBuilder {
     lang_id: SupportLang,
     modules: &'static [Registration],
     limits: Limits,
@@ -57,7 +57,7 @@ pub struct EnvBuilder {
     export_config: crate::backend::tables::ExportConfig,
 }
 
-impl EnvBuilder {
+impl EngineBuilder {
     /// The modules the engine mounts; `modules::ALL` unless given.
     pub fn modules(mut self, modules: &'static [Registration]) -> Self {
         self.modules = modules;
@@ -83,9 +83,9 @@ impl EnvBuilder {
     }
 
     /// Compiles the family's rules against the mounted modules.
-    pub fn build(self) -> Result<Env, LoadError> {
+    pub fn build(self) -> Result<Engine, LoadError> {
         let lang = self.lang.unwrap_or_default();
-        Env::load(
+        Engine::load(
             self.lang_id,
             lang,
             self.limits,
@@ -95,9 +95,9 @@ impl EnvBuilder {
     }
 }
 
-impl Env {
-    pub fn builder(lang_id: SupportLang) -> EnvBuilder {
-        EnvBuilder {
+impl Engine {
+    pub fn builder(lang_id: SupportLang) -> EngineBuilder {
+        EngineBuilder {
             lang_id,
             modules: crate::modules::ALL,
             limits: Limits::UNLIMITED,

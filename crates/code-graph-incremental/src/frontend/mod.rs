@@ -1,10 +1,10 @@
-//! Frontends turn a source file into a tree for the engine. An env mounts
+//! Frontends turn a source file into a tree for the engine. An engine mounts
 //! one per language it reads; a file goes to the first that accepts it.
 
 pub mod markdown;
 pub mod treesitter;
 
-use crate::env::Env;
+use crate::engine::Engine;
 use crate::intern::Lang;
 use crate::language::SupportLang;
 use crate::sentinel::{Killed, Sentinel};
@@ -93,9 +93,9 @@ pub fn for_language(language: SupportLang, max_depth: usize) -> Box<dyn Frontend
 }
 
 /// Parses a file with the first mounted frontend that accepts it, or the
-/// env's first, under the parse budget.
+/// engine's first, under the parse budget.
 pub fn parse(
-    env: &Env,
+    env: &Engine,
     path: &str,
     source: &str,
     run: &Sentinel,

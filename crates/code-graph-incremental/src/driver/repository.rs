@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use super::Report;
 use crate::language::SupportLang;
 use crate::sentinel::Sentinel;
-use crate::{Env, Envelope, Error, Limits, LoadError};
+use crate::{Engine, Envelope, Error, Limits, LoadError};
 use arrow::record_batch::RecordBatch;
 use rustc_hash::FxHashSet;
 
@@ -71,7 +71,7 @@ pub fn repository<E: std::fmt::Display>(
     if families.is_empty() {
         on_worker_pool("none", 1, || {
             (options.phase_started)("none", "export", repository.usage().files);
-            let env = Env::builder(SupportLang::Markdown)
+            let env = Engine::builder(SupportLang::Markdown)
                 .export_config(export_config.clone())
                 .build()?;
             let mut state = super::State::new(&env);
@@ -133,7 +133,7 @@ pub fn repository<E: std::fmt::Display>(
                     let outcome = run.check().map_err(Error::from).and_then(|()| {
                         on_worker_pool(family, family_threads, || {
                             let (report, batches) = {
-                                let env = Env::builder(language)
+                                let env = Engine::builder(language)
                                     .limits(limits)
                                     .export_config(export_config.clone())
                                     .build()?;

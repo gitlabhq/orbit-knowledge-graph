@@ -110,7 +110,7 @@ pub(super) fn split(
 }
 
 fn manifests(family: SupportLang) -> Vec<String> {
-    code_graph_incremental::Env::builder(family)
+    code_graph_incremental::Engine::builder(family)
         .build()
         .map(|env| {
             env.project

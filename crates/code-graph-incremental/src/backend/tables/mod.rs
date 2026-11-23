@@ -10,9 +10,9 @@ use orbit_arrow::{BatchBuilder, ColumnSpec, ColumnType};
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 use crate::driver::State;
+use crate::engine::Engine;
 use crate::engine::lang::DataSpec;
 use crate::engine::{Cx, Function, Loc, Module, Part, Phase, RowShape, Store, Val, Vals};
-use crate::env::Env;
 use crate::error::{Error, LoadError};
 use crate::modules::function;
 use crate::sentinel::Sentinel;
@@ -291,7 +291,7 @@ fn check_shape(table: &Table, shape: &RowShape) -> Result<(), LoadError> {
 }
 
 impl Tables {
-    pub fn load(env: &Env, ontology: &Ontology) -> Result<Self, LoadError> {
+    pub fn load(env: &Engine, ontology: &Ontology) -> Result<Self, LoadError> {
         let mut tables = Vec::new();
         for name in ontology.local_entity_names() {
             let table = ontology
@@ -404,7 +404,7 @@ impl Tables {
 
 /// One `(table, batch)` per table, the edge table last.
 pub fn export(
-    env: &Env,
+    env: &Engine,
     state: &mut State,
     tables: &Tables,
     envelope: &Envelope,
@@ -440,7 +440,7 @@ pub fn export_directories(
     ontology: &Ontology,
     envelope: &Envelope,
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
-    let env = Env::builder(crate::language::SupportLang::Markdown).build()?;
+    let env = Engine::builder(crate::language::SupportLang::Markdown).build()?;
     let tables = Tables::load(&env, ontology)?;
     let mut state = State::new(&env);
     state.trees = paths
@@ -464,7 +464,7 @@ pub fn export_directories(
 }
 
 struct Sink<'a> {
-    env: &'a Env,
+    env: &'a Engine,
     trees: &'a [Tree<Compact>],
     phase: &'a Phase,
     tables: &'a Tables,
@@ -641,8 +641,8 @@ impl Sink<'_> {
 mod tests {
     use super::*;
 
-    fn python() -> Env {
-        Env::builder(crate::language::SupportLang::Python)
+    fn python() -> Engine {
+        Engine::builder(crate::language::SupportLang::Python)
             .build()
             .expect("python rules load")
     }

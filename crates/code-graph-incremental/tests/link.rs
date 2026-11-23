@@ -3,7 +3,7 @@ use std::path::Path;
 use code_graph_incremental::tree::{Compact, EdgeKind};
 type Cursor<'a> = code_graph_incremental::tree::Cursor<'a, Compact>;
 use code_graph_incremental::language::SupportLang;
-use code_graph_incremental::{Env, Limits, Sentinel, State, driver};
+use code_graph_incremental::{Engine, Limits, Sentinel, State, driver};
 mod common;
 
 const MAIN: &str = "\
@@ -25,20 +25,20 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
     }
 }
 
-fn link_repo(env: &Env, root: &Path) -> State {
+fn link_repo(env: &Engine, root: &Path) -> State {
     driver::index(env, &common::walk(root), &Sentinel::disabled())
         .unwrap()
         .0
 }
 
-fn python_env(limits: Limits) -> Env {
-    Env::builder(SupportLang::Python)
+fn python_env(limits: Limits) -> Engine {
+    Engine::builder(SupportLang::Python)
         .limits(limits)
         .build()
         .unwrap()
 }
 
-fn label(env: &Env, node: Cursor) -> String {
+fn label(env: &Engine, node: Cursor) -> String {
     let sym = node
         .child_sym_of_kind(env.lang.lookup_kind("__defname"))
         .or(node.sym_opt())
@@ -46,7 +46,7 @@ fn label(env: &Env, node: Cursor) -> String {
     env.lang.syms.resolve(sym).to_string()
 }
 
-fn edges(env: &Env, state: &State, kind: EdgeKind) -> Vec<(String, String)> {
+fn edges(env: &Engine, state: &State, kind: EdgeKind) -> Vec<(String, String)> {
     let mut found: Vec<_> = state
         .edges
         .iter()
@@ -169,7 +169,7 @@ fn link_one(
     std::thread::Builder::new()
         .stack_size(driver::WORKER_STACK_BYTES)
         .spawn(move || {
-            let env = Env::builder(language)
+            let env = Engine::builder(language)
                 .limits(Limits {
                     file_link_ms,
                     ..Limits::UNLIMITED

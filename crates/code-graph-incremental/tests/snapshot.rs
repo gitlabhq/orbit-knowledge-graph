@@ -3,7 +3,7 @@ use std::path::Path;
 
 use code_graph_incremental::driver::{self, SNAPSHOT_VERSION};
 use code_graph_incremental::language::SupportLang;
-use code_graph_incremental::{Env, Sentinel, State};
+use code_graph_incremental::{Engine, Sentinel, State};
 mod common;
 
 const MAIN: &str = "from utils import helper\nhelper()\n";
@@ -20,13 +20,19 @@ fn write(root: &Path, files: &[(&str, &str)]) -> Vec<String> {
         .collect()
 }
 
-fn index(env: &Env, repo: &Path) -> State {
+fn index(env: &Engine, repo: &Path) -> State {
     driver::index(env, &common::walk(repo), &Sentinel::disabled())
         .unwrap()
         .0
 }
 
-fn reindex(env: &Env, state: State, repo: &Path, changed: Vec<String>, removed: &[&str]) -> State {
+fn reindex(
+    env: &Engine,
+    state: State,
+    repo: &Path,
+    changed: Vec<String>,
+    removed: &[&str],
+) -> State {
     for path in removed {
         std::fs::remove_file(repo.join(path)).unwrap();
     }
@@ -40,7 +46,7 @@ fn reindex(env: &Env, state: State, repo: &Path, changed: Vec<String>, removed: 
         .0
 }
 
-fn save_and_load(env: &Env, state: &State) -> (Env, State) {
+fn save_and_load(env: &Engine, state: &State) -> (Engine, State) {
     let dir = tempfile::tempdir().unwrap();
     let snapshot = dir.path().join("graph.bin");
     state.save(env, &snapshot).unwrap();
@@ -51,7 +57,7 @@ fn files(state: &State) -> HashSet<String> {
     state.trees.iter().map(|t| t.label.clone()).collect()
 }
 
-fn def_names(state: &State, env: &Env) -> Vec<String> {
+fn def_names(state: &State, env: &Engine) -> Vec<String> {
     let mut names: Vec<String> = state
         .trees
         .iter()
@@ -76,7 +82,7 @@ fn cross_file_edges(state: &State) -> usize {
 fn a_snapshot_round_trips_the_graph() {
     let repo = tempfile::tempdir().unwrap();
     write(repo.path(), &[("main.py", MAIN), ("utils.py", UTILS)]);
-    let env = Env::builder(SupportLang::Python).build().unwrap();
+    let env = Engine::builder(SupportLang::Python).build().unwrap();
     let state = index(&env, repo.path());
 
     let (_, loaded) = save_and_load(&env, &state);
@@ -103,7 +109,7 @@ fn a_snapshot_round_trips_the_graph() {
 fn reindex_after_load_keeps_resolution_and_names() {
     let repo = tempfile::tempdir().unwrap();
     write(repo.path(), &[("main.py", MAIN), ("utils.py", UTILS)]);
-    let env = Env::builder(SupportLang::Python).build().unwrap();
+    let env = Engine::builder(SupportLang::Python).build().unwrap();
     let state = index(&env, repo.path());
     let before = cross_file_edges(&state);
     assert!(before > 0);
@@ -125,7 +131,7 @@ fn reindex_after_load_keeps_resolution_and_names() {
 fn removed_files_leave_the_graph_and_dependents_are_revisited() {
     let repo = tempfile::tempdir().unwrap();
     write(repo.path(), &[("main.py", MAIN), ("utils.py", UTILS)]);
-    let env = Env::builder(SupportLang::Python).build().unwrap();
+    let env = Engine::builder(SupportLang::Python).build().unwrap();
     let state = index(&env, repo.path());
     let (env, loaded) = save_and_load(&env, &state);
 
@@ -153,7 +159,7 @@ fn saving_after_a_one_file_edit_rewrites_one_block() {
         .map(|(path, content)| (path.as_str(), content.as_str()))
         .collect();
     write(repo.path(), &sources);
-    let env = Env::builder(SupportLang::Python).build().unwrap();
+    let env = Engine::builder(SupportLang::Python).build().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let snapshot = dir.path().join("graph.bin");
     let blocks = || -> HashSet<String> {
@@ -181,7 +187,7 @@ fn saving_after_a_one_file_edit_rewrites_one_block() {
 
 #[test]
 fn a_block_from_another_snapshot_is_refused_with_an_error() {
-    let env = Env::builder(SupportLang::Python).build().unwrap();
+    let env = Engine::builder(SupportLang::Python).build().unwrap();
     let saved = |file: &str| {
         let repo = tempfile::tempdir().unwrap();
         write(repo.path(), &[(file, UTILS)]);
@@ -234,7 +240,7 @@ fn reindex_and_stage(
     repo: &Path,
     changed: Vec<String>,
     removed: &[&str],
-) -> (Env, State) {
+) -> (Engine, State) {
     let (env, loaded) = State::load(snapshot, SupportLang::Markdown).unwrap();
     for path in removed {
         std::fs::remove_file(repo.join(path)).unwrap();
@@ -252,7 +258,7 @@ fn reindex_and_stage(
     (env, state)
 }
 
-fn links(env: &Env, state: &State) -> HashSet<(String, String)> {
+fn links(env: &Engine, state: &State) -> HashSet<(String, String)> {
     state
         .edges
         .iter()
@@ -290,7 +296,7 @@ fn link_targets_removed_or_added_in_another_block_update_the_source_block() {
         .collect();
     let repo = tempfile::tempdir().unwrap();
     write(repo.path(), &sources);
-    let env = Env::builder(SupportLang::Markdown).build().unwrap();
+    let env = Engine::builder(SupportLang::Markdown).build().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let snapshot = dir.path().join("graph.bin");
     index(&env, repo.path()).save(&env, &snapshot).unwrap();

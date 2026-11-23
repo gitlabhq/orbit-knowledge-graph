@@ -4,7 +4,7 @@ use arrow::record_batch::RecordBatch;
 use code_graph_incremental::backend::tables::{Scope, Tables};
 use code_graph_incremental::driver::{FileStats, Report};
 use code_graph_incremental::language::SupportLang;
-use code_graph_incremental::{Env, Envelope, Scalar, State};
+use code_graph_incremental::{Engine, Envelope, Scalar, State};
 use orbit_arrow::ArrowUtils;
 use rustc_hash::FxHashSet;
 
@@ -63,7 +63,7 @@ impl<'a> Exporter<'a> {
     pub(super) fn write(
         &mut self,
         family: SupportLang,
-        env: &Env,
+        env: &Engine,
         state: &mut State,
         report: &Report,
         stats: bool,
@@ -178,7 +178,7 @@ pub(super) struct Replacement {
 pub(super) fn replacement(
     git: &GitInfo,
     ontology: &ontology::Ontology,
-    env: &Env,
+    env: &Engine,
     state: &mut State,
     files: &FxHashSet<String>,
 ) -> Result<Replacement> {

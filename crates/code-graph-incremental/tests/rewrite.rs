@@ -4,7 +4,7 @@ use code_graph_incremental::tree::Compact;
 type Tree = code_graph_incremental::tree::Tree<Compact>;
 type Cursor<'a> = code_graph_incremental::tree::Cursor<'a, Compact>;
 use code_graph_incremental::language::SupportLang;
-use code_graph_incremental::{Env, Killed, Limits, Sentinel, driver};
+use code_graph_incremental::{Engine, Killed, Limits, Sentinel, driver};
 mod common;
 
 const MAIN: &str = "\
@@ -20,24 +20,24 @@ def run():
     g.greet(os.getcwd())
 ";
 
-fn rewrite_repo(env: &Env, root: &Path) -> (Vec<Tree>, Vec<Killed>) {
+fn rewrite_repo(env: &Engine, root: &Path) -> (Vec<Tree>, Vec<Killed>) {
     let (state, report) = driver::index(env, &common::walk(root), &Sentinel::disabled()).unwrap();
     (state.trees, report.skipped)
 }
 
-fn python_env(limits: Limits) -> Env {
-    Env::builder(SupportLang::Python)
+fn python_env(limits: Limits) -> Engine {
+    Engine::builder(SupportLang::Python)
         .limits(limits)
         .build()
         .unwrap()
 }
 
-fn nodes<'a>(env: &Env, tree: &'a Tree, kind: &str) -> impl Iterator<Item = Cursor<'a>> {
+fn nodes<'a>(env: &Engine, tree: &'a Tree, kind: &str) -> impl Iterator<Item = Cursor<'a>> {
     let kind = env.lang.lookup_kind(kind);
     tree.root().descendants().filter(move |c| c.is(kind))
 }
 
-fn name_of(env: &Env, node: Cursor) -> String {
+fn name_of(env: &Engine, node: Cursor) -> String {
     let sym = node
         .child_sym_of_kind(env.lang.lookup_kind("__name"))
         .unwrap_or(0);

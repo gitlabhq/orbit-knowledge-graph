@@ -3,7 +3,7 @@ use std::path::Path;
 use arrow::record_batch::RecordBatch;
 use code_graph_incremental::backend::tables::{self, Scope, Tables};
 use code_graph_incremental::language::SupportLang;
-use code_graph_incremental::{Env, Envelope, Error, Limits, Scalar, Sentinel, driver};
+use code_graph_incremental::{Engine, Envelope, Error, Limits, Scalar, Sentinel, driver};
 mod common;
 use ontology::Ontology;
 
@@ -11,14 +11,14 @@ struct Exported {
     tables: Vec<(String, RecordBatch)>,
 }
 
-fn index(env: &Env, root: &Path) -> code_graph_incremental::State {
+fn index(env: &Engine, root: &Path) -> code_graph_incremental::State {
     driver::index(env, &common::walk(root), &Sentinel::disabled())
         .unwrap()
         .0
 }
 
 fn export_with(
-    env: &Env,
+    env: &Engine,
     repository: &orbit_utils::vfs::Vfs<()>,
     ontology: &Ontology,
     envelope: Envelope,
@@ -76,7 +76,7 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
     let sources = common::walk(repo.path());
-    let mut env = Env::builder(SupportLang::Python)
+    let mut env = Engine::builder(SupportLang::Python)
         .limits(Limits::UNLIMITED)
         .build()
         .unwrap();
@@ -144,7 +144,7 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
 }
 
 fn export_repo(root: &Path) -> Exported {
-    let env = Env::builder(SupportLang::Python)
+    let env = Engine::builder(SupportLang::Python)
         .limits(Limits::UNLIMITED)
         .build()
         .unwrap();
@@ -431,7 +431,7 @@ fn definition_coordinates_cover_the_same_span_as_bytes() {
     ] {
         let repo = tempfile::tempdir().unwrap();
         write_all(repo.path(), &[(path, source.as_bytes())]);
-        let env = Env::builder(language)
+        let env = Engine::builder(language)
             .limits(Limits::UNLIMITED)
             .build()
             .unwrap();
@@ -629,7 +629,7 @@ fn exporting_deeply_nested_definitions_grows_linearly() {
         source += &"}\n".repeat(levels);
         let repo = tempfile::tempdir().unwrap();
         write_all(repo.path(), &[("deep.js", source.as_bytes())]);
-        let env = Env::builder(SupportLang::JavaScript)
+        let env = Engine::builder(SupportLang::JavaScript)
             .limits(Limits::UNLIMITED)
             .build()
             .unwrap();
@@ -668,7 +668,7 @@ fn exporting_some_trees_matches_the_full_export_of_those_files() {
         repo.path(),
         &[("utils.py", UTILS.as_bytes()), ("main.py", MAIN.as_bytes())],
     );
-    let env = Env::builder(SupportLang::Python)
+    let env = Engine::builder(SupportLang::Python)
         .limits(Limits::UNLIMITED)
         .build()
         .unwrap();

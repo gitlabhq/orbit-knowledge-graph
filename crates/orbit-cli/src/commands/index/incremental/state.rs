@@ -7,7 +7,7 @@ use anyhow::{Context as _, Result};
 use arrow::record_batch::RecordBatch;
 use code_graph_incremental::driver::{self, Report};
 use code_graph_incremental::language::SupportLang;
-use code_graph_incremental::{Env, Sentinel, State};
+use code_graph_incremental::{Engine, Sentinel, State};
 use rustc_hash::FxHashSet;
 
 use super::input;
@@ -54,7 +54,7 @@ impl Project<'_> {
                     return Err(tui::cancelled("Indexing cancelled."));
                 }
                 let read_at = std::time::SystemTime::now();
-                let mut env = Env::builder(family).build()?;
+                let mut env = Engine::builder(family).build()?;
                 env.limits.total_ms = self.budget_ms;
                 let (mut state, report) = self.indexing(&env, paths)?.index(&env)?;
                 let snapshot = self.snapshot_path(family);
@@ -201,7 +201,7 @@ impl Project<'_> {
             })
     }
 
-    fn indexing(&self, env: &Env, paths: Vec<String>) -> Result<Indexing> {
+    fn indexing(&self, env: &Engine, paths: Vec<String>) -> Result<Indexing> {
         let files = paths.len();
         let cancel = self.cancel.clone();
         Ok(Indexing {
@@ -311,7 +311,7 @@ fn pending_file(snapshot: &std::path::Path) -> PathBuf {
 /// `touched` names the files that changed since that one was read; without
 /// it every block is written.
 fn stage(
-    env: &Env,
+    env: &Engine,
     state: &State,
     snapshot: &std::path::Path,
     touched: Option<&FxHashSet<u32>>,
@@ -405,20 +405,20 @@ pub(super) struct Indexing {
 }
 
 impl Indexing {
-    fn index(self, env: &Env) -> Result<(State, Report)> {
+    fn index(self, env: &Engine) -> Result<(State, Report)> {
         let indexed = driver::index(env, &self.repository, &self.run)?;
         self.bars.inspect(FamilyBars::done);
         Ok(indexed)
     }
 
-    fn reindex(self, env: &Env, state: State, removed: &[String]) -> Result<(State, Report)> {
+    fn reindex(self, env: &Engine, state: State, removed: &[String]) -> Result<(State, Report)> {
         let indexed = driver::reindex(env, &self.repository, state, removed, &self.run)?;
         self.bars.inspect(FamilyBars::done);
         Ok(indexed)
     }
 }
 
-type IndexingFor<'a> = dyn Fn(&Env, Vec<String>) -> Result<Indexing> + 'a;
+type IndexingFor<'a> = dyn Fn(&Engine, Vec<String>) -> Result<Indexing> + 'a;
 
 /// How `orbit index` and a refresh read changed files into the saved graph.
 pub(super) struct Reader<'a> {
@@ -514,7 +514,7 @@ impl Reader<'_> {
             true => State::load(&snapshot, family)
                 .with_context(|| format!("failed to load {}", snapshot.display()))?,
             false => {
-                let env = Env::builder(family).build()?;
+                let env = Engine::builder(family).build()?;
                 let state = State::new(&env);
                 (env, state)
             }

@@ -3,7 +3,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::constants::PATH_SEP;
 use crate::driver::SourceFile;
-use crate::env::{Env, ParseFormat, Project};
+use crate::engine::{Engine, ParseFormat, Project};
 use crate::intern::Lang;
 use crate::tree::{Cursor, Node, Tag, Tree};
 
@@ -17,7 +17,7 @@ pub struct WalkResult {
 
 pub struct ProjectTree<'a> {
     lang: &'a Lang,
-    env: Option<&'a Env>,
+    env: Option<&'a Engine>,
     project: &'a Project,
     paths: &'a [&'a str],
     files: Option<&'a [SourceFile]>,
@@ -33,13 +33,13 @@ impl<'a> ProjectTree<'a> {
         pt.tree
     }
 
-    pub fn tree(env: &'a Env, paths: &'a [&'a str], files: Option<&'a [SourceFile]>) -> Tree {
+    pub fn tree(env: &'a Engine, paths: &'a [&'a str], files: Option<&'a [SourceFile]>) -> Tree {
         Self::build(env, paths, files).tree
     }
 
     fn new(
         lang: &'a Lang,
-        env: Option<&'a Env>,
+        env: Option<&'a Engine>,
         project: &'a Project,
         paths: &'a [&'a str],
         files: Option<&'a [SourceFile]>,
@@ -59,7 +59,7 @@ impl<'a> ProjectTree<'a> {
     }
 
     pub fn build(
-        env: &'a Env,
+        env: &'a Engine,
         paths: &'a [&'a str],
         files: Option<&'a [SourceFile]>,
     ) -> WalkResult {

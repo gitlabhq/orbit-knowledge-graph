@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
-use crate::env::Env;
+use crate::engine::Engine;
 use crate::file_tree::{ProjectTree, WalkResult};
 use crate::intern::{Interner, Lang};
 use crate::language::SupportLang;
@@ -35,7 +35,7 @@ pub struct State {
 }
 
 impl State {
-    pub(crate) fn project_tree(&self, env: &Env) -> WalkResult {
+    pub(crate) fn project_tree(&self, env: &Engine) -> WalkResult {
         let paths: Vec<_> = self
             .trees
             .iter()
@@ -45,7 +45,7 @@ impl State {
         ProjectTree::build(env, &paths, Some(&self.configs))
     }
 
-    pub fn new(_: &Env) -> Self {
+    pub fn new(_: &Engine) -> Self {
         Self {
             trees: Vec::new(),
             edges: Vec::new(),
@@ -85,7 +85,7 @@ impl State {
     }
 
     /// The project tree after the project phase, Compact, for family phases.
-    pub(crate) fn project_compact(&self, env: &Env) -> Tree<Compact> {
+    pub(crate) fn project_compact(&self, env: &Engine) -> Tree<Compact> {
         let paths: Vec<_> = self
             .trees
             .iter()
@@ -98,7 +98,7 @@ impl State {
 
     /// Sets on each tree the tags the project phase put on its file and the
     /// directories above it.
-    pub(crate) fn project(&mut self, env: &Env) {
+    pub(crate) fn project(&mut self, env: &Engine) {
         let walk = self.project_tree(env);
         let by_path: FxHashMap<&str, usize> = self
             .trees
@@ -414,7 +414,7 @@ impl State {
     /// [`FILES_PER_BLOCK`] files, grouped by a hash of their path. A block is
     /// named by the hash of its content, so a save writes only the blocks
     /// whose files changed and removes the ones nothing refers to any more.
-    pub fn save(&self, env: &Env, path: &Path) -> io::Result<()> {
+    pub fn save(&self, env: &Engine, path: &Path) -> io::Result<()> {
         self.write(env, path, path, None)?;
         remove_unreferenced_blocks(path)
     }
@@ -427,7 +427,7 @@ impl State {
     /// its file without being serialised.
     pub fn stage(
         &self,
-        env: &Env,
+        env: &Engine,
         path: &Path,
         staged: &Path,
         touched: Option<&FxHashSet<u32>>,
@@ -444,7 +444,7 @@ impl State {
 
     fn write(
         &self,
-        env: &Env,
+        env: &Engine,
         path: &Path,
         index_path: &Path,
         touched: Option<&FxHashSet<u32>>,
@@ -592,10 +592,10 @@ impl State {
         Ok(open_index(path)?.1.labels)
     }
 
-    pub fn load(path: &Path, lang_id: SupportLang) -> io::Result<(Env, Self)> {
+    pub fn load(path: &Path, lang_id: SupportLang) -> io::Result<(Engine, Self)> {
         let (mut input, index) = open_index(path)?;
         let shared: Shared = read_frame(&mut input, &mut rkyv::util::AlignedVec::new())?;
-        let env = Env::builder(lang_id)
+        let env = Engine::builder(lang_id)
             .lang(Lang::from(shared.lang))
             .limits(Limits::UNLIMITED)
             .build()

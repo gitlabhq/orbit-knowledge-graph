@@ -13,7 +13,7 @@ use super::program::{Pass, Phase, Scratch, Template, order};
 use super::{
     Compact, Cursor, Graph, Indexed, Loc, Outputs, Run, Store, Tree, WHOLE, Write, machine,
 };
-use crate::env::Env;
+use crate::engine::Engine;
 use crate::intern::Lang;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Edge, Mutable, Storage};
@@ -26,7 +26,7 @@ pub fn run_tree<S: Store>(
     tree: &mut Tree<S>,
     fi: u32,
     rules: Option<usize>,
-    env: &Env,
+    env: &Engine,
     graph: Option<&Graph>,
     budget: &Sentinel,
 ) -> Result<(Vec<Edge>, Outputs), Killed> {
@@ -63,7 +63,7 @@ pub fn run_family(
     phase: &Phase,
     trees: &[Tree<Compact>],
     base: &[Edge],
-    env: &Env,
+    env: &Engine,
     budget: &Sentinel,
 ) -> Result<(Vec<Edge>, Option<Killed>), Killed> {
     let project = trees.len() as u32 - 1;
@@ -119,7 +119,7 @@ pub fn run_trees(
     walk: usize,
     project: Option<u32>,
     graph: &Graph,
-    env: &Env,
+    env: &Engine,
     budget: &Sentinel,
 ) -> Result<(Vec<Edge>, Outputs), Killed> {
     let scope = scope_budget(phase, env, budget);
@@ -156,7 +156,7 @@ pub fn run_trees(
 struct On<'a> {
     phase: &'a Phase,
     rules: usize,
-    env: &'a Env,
+    env: &'a Engine,
     graph: Option<&'a Graph>,
     fi: u32,
     budget: &'a Sentinel,
@@ -418,7 +418,7 @@ pub(super) fn piece<'t, S: Store>(
 
 /// The phase's per-tree budget, on thread CPU time; unbounded when the phase
 /// declares none.
-fn tree_budget(phase: &Phase, env: &Env, label: &str) -> Sentinel {
+fn tree_budget(phase: &Phase, env: &Engine, label: &str) -> Sentinel {
     let ms = phase
         .budget
         .tree
@@ -429,7 +429,7 @@ fn tree_budget(phase: &Phase, env: &Env, label: &str) -> Sentinel {
 }
 
 /// A phase's per-scope budget, a child of `run`.
-pub fn scope_budget(phase: &Phase, env: &Env, run: &Sentinel) -> Sentinel {
+pub fn scope_budget(phase: &Phase, env: &Engine, run: &Sentinel) -> Sentinel {
     let ms = phase
         .budget
         .scope

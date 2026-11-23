@@ -1,3 +1,4 @@
+mod builder;
 mod compile;
 mod expr;
 mod graph;
@@ -14,9 +15,9 @@ use std::marker::PhantomData;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
-use crate::env::Env;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Compact, Edge, EdgeKind, Mutable, Node, Storage};
+pub use builder::{Engine, EngineBuilder, ParseFile, ParseFormat, Project};
 pub use graph::Graph;
 pub use program::{Def, Part, Phase, Pipeline, RowShape, resolution};
 pub use walk::{run_family, run_tree, run_trees, scope_budget};
@@ -198,7 +199,7 @@ pub struct Indexed<'t, S: Store> {
     phase: &'t Phase,
     trees: &'t [Tree<S>],
     files: usize,
-    env: &'t Env,
+    env: &'t Engine,
     budget: &'t Sentinel,
     family: Box<[std::sync::OnceLock<FxHashMap<u32, Vec<Loc>>>]>,
 }
@@ -208,7 +209,7 @@ impl<'t, S: Store> Indexed<'t, S> {
         phase: &'t Phase,
         trees: &'t [Tree<S>],
         files: usize,
-        env: &'t Env,
+        env: &'t Engine,
         budget: &'t Sentinel,
     ) -> Self {
         Self {
@@ -667,7 +668,7 @@ impl<'t, S: Store> Run<'t, S> {
         trees: &'t [Tree<S>],
         fi: u32,
         rules: usize,
-        env: &'t Env,
+        env: &'t Engine,
         phase: &'t Phase,
         budget: &'t Sentinel,
         file: &'t Sentinel,

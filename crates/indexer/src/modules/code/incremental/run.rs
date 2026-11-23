@@ -5,7 +5,7 @@ use super::super::pipeline::IndexingReport;
 use code_graph::v2::pipeline::{FileTimingEntry, LanguageTimings};
 use code_graph::v2::{OnBatch, SinkError};
 use code_graph_incremental::driver::{self, FileStats};
-use code_graph_incremental::{Envelope, Error, Scalar, export::ExportConfig};
+use code_graph_incremental::{Envelope, Error, Scalar, backend::tables::ExportConfig};
 
 use super::super::{
     arrow_converter::{IndexerEnvelope, route_graph},

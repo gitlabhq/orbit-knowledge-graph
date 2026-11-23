@@ -14,8 +14,8 @@ use rayon::prelude::*;
 pub use repository::{Options, WORKER_STACK_BYTES, repository};
 pub use state::{SNAPSHOT_VERSION, SourceFile, State};
 
+use crate::engine::Engine;
 use crate::engine::{self, Graph, Phase};
-use crate::env::Env;
 use crate::error::Error;
 use crate::language::SupportLang;
 use crate::sentinel::{Killed, Sentinel};
@@ -54,7 +54,7 @@ pub fn candidates(
 
 /// Indexes the family's files of `repository` into a fresh graph.
 pub fn index(
-    env: &Env,
+    env: &Engine,
     repository: &orbit_utils::vfs::Vfs<()>,
     run: &Sentinel,
 ) -> Result<(State, Report), Error> {
@@ -71,7 +71,7 @@ pub fn index(
 /// Re-indexes the changed files of `repository` into `state`, dropping the
 /// files in `removed`.
 pub fn reindex(
-    env: &Env,
+    env: &Engine,
     repository: &orbit_utils::vfs::Vfs<()>,
     mut state: State,
     removed: &[String],
@@ -93,7 +93,7 @@ pub fn reindex(
 }
 
 /// The phases before the first that needs more than its own tree, and the rest.
-fn split(env: &Env) -> (&[Phase], &[Phase]) {
+fn split(env: &Engine) -> (&[Phase], &[Phase]) {
     let phases = env.pipeline.phases.as_slice();
     let at = phases
         .iter()
@@ -103,7 +103,7 @@ fn split(env: &Env) -> (&[Phase], &[Phase]) {
 }
 
 fn insert(
-    env: &Env,
+    env: &Engine,
     state: &mut State,
     files: &[SourceFile],
     run: &Sentinel,
@@ -140,7 +140,7 @@ fn insert(
 /// Parses one file and runs the phases that read only that file. The tree
 /// becomes Compact at the first phase that runs on Compact trees.
 fn one_file(
-    env: &Env,
+    env: &Engine,
     file: &SourceFile,
     phases: &[Phase],
     run: &Sentinel,
@@ -180,7 +180,7 @@ enum Stage {
 }
 
 impl Stage {
-    fn compact(&mut self, env: &Env) -> &mut Tree<Compact> {
+    fn compact(&mut self, env: &Engine) -> &mut Tree<Compact> {
         if let Stage::Mutable(_) = self {
             let Stage::Mutable(tree) = std::mem::replace(self, Stage::Moving) else {
                 unreachable!()
@@ -193,7 +193,7 @@ impl Stage {
         }
     }
 
-    fn into_compact(mut self, env: &Env) -> Tree<Compact> {
+    fn into_compact(mut self, env: &Engine) -> Tree<Compact> {
         self.compact(env);
         match self {
             Stage::Compact(tree) => tree,
@@ -204,7 +204,7 @@ impl Stage {
 
 /// Keeps only canonical nodes with their text frozen into symbols, and drops
 /// the source.
-fn canonical(env: &Env, mut tree: Tree<Mutable>) -> Tree<Compact> {
+fn canonical(env: &Engine, mut tree: Tree<Mutable>) -> Tree<Compact> {
     let root = tree.root;
     tree.node_mut(root).kind = env.lang.tree_kinds().source_file;
     tree.prune(&env.lang);
@@ -218,7 +218,12 @@ fn canonical(env: &Env, mut tree: Tree<Mutable>) -> Tree<Compact> {
 
 /// Runs the phases after the per-file ones: project phases on the project
 /// tree, then tree phases over every tree with the whole graph.
-fn finish(env: &Env, state: &mut State, run: &Sentinel, report: &mut Report) -> Result<(), Error> {
+fn finish(
+    env: &Engine,
+    state: &mut State,
+    run: &Sentinel,
+    report: &mut Report,
+) -> Result<(), Error> {
     let (_, rest) = split(env);
     for phase in rest {
         run.check()?;
@@ -259,7 +264,7 @@ fn finish(env: &Env, state: &mut State, run: &Sentinel, report: &mut Report) -> 
 
 /// The family's source files and manifests, read; unreadable ones are reported.
 fn sources(
-    env: &Env,
+    env: &Engine,
     repository: &orbit_utils::vfs::Vfs<()>,
     report: &mut Report,
 ) -> (Vec<SourceFile>, Vec<SourceFile>) {
@@ -317,7 +322,12 @@ fn sources(
 }
 
 /// A `File` row for every repository file that has no tree, with the reason.
-fn unparsed(env: &Env, repository: &orbit_utils::vfs::Vfs<()>, state: &mut State, report: &Report) {
+fn unparsed(
+    env: &Engine,
+    repository: &orbit_utils::vfs::Vfs<()>,
+    state: &mut State,
+    report: &Report,
+) {
     let parsed: std::collections::HashSet<String> =
         state.trees.iter().map(|t| t.label.clone()).collect();
     let skipped: HashMap<&str, &str> = report

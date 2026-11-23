@@ -7,7 +7,7 @@ use std::sync::Arc;
 use code_graph_incremental::backend::tables::{self, Scope, Tables};
 use code_graph_incremental::driver::{self, Report};
 use code_graph_incremental::language::SupportLang;
-use code_graph_incremental::{Env, Envelope, Killed, Limits, Scalar, Sentinel, State};
+use code_graph_incremental::{Engine, Envelope, Killed, Limits, Scalar, Sentinel, State};
 use ontology::Ontology;
 
 struct FixturePolicy;
@@ -116,7 +116,7 @@ fn index_and_check(yaml: &str) {
         .collect();
     let lang_id = detect_lang(&suite, &paths);
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
-    let env = Env::builder(lang_id)
+    let env = Engine::builder(lang_id)
         .limits(suite_limits(&suite))
         .build()
         .expect("rules compile");
@@ -180,7 +180,7 @@ fn index_and_check(yaml: &str) {
 /// Exports the graph into a fresh DuckDB and runs `tests` against it; the
 /// graph comes back for the next step.
 fn check(
-    env: &Env,
+    env: &Engine,
     (mut state, report): (State, Report),
     ontology: &Arc<Ontology>,
     tests: &[TestCase],

@@ -5,7 +5,7 @@ pub mod text;
 
 use crate::engine::{Cursor, Cx, Module, Registration, Store, Vals, register};
 
-/// The default catalog: every module an `Env` mounts unless told otherwise.
+/// The default catalog: every module an `Engine` mounts unless told otherwise.
 pub static ALL: &[Registration] = &[
     register::<core::Core>(),
     register::<names::Names>(),
