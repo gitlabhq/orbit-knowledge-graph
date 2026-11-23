@@ -202,6 +202,18 @@ impl Resolver {
             .map(|req| req.fi)
             .collect();
         invalidated.extend(dirty_fis);
+        if env.resolve.config.submodule_imports {
+            let roots: FxHashSet<&str> = dirty_fis
+                .iter()
+                .filter_map(|&fi| main_rs_root(&trees[fi as usize].label))
+                .collect();
+            invalidated.extend(
+                self.reqs
+                    .iter()
+                    .filter(|req| roots.contains(req.target_path.as_str()))
+                    .map(|req| req.fi),
+            );
+        }
         let added_keys = self
             .file_index
             .keys
@@ -945,7 +957,9 @@ fn gather_imports_for(
                         && target_path.is_empty()
                         && let Some(root) = source_root(tree, lang, root_relative)
                     {
-                        target_path = root.to_owned();
+                        target_path =
+                            binary_crate_root(tree, root, lang, root_relative, trees, file_index)
+                                .unwrap_or_else(|| root.to_owned());
                     }
                     let mut direct = resolve_glob(&target_path, file_index, prefixes);
                     direct.retain(|loc| loc.fi != fi);
@@ -2249,6 +2263,35 @@ fn source_root<'a>(tree: &'a Tree, lang: &Lang, root_relative: u32) -> Option<&'
     tree.label
         .strip_suffix(relative)
         .map(|root| root.trim_end_matches(PATH_SEP))
+}
+
+/// The source root holding a `main.rs`: `src/main.rs` gives `src`.
+fn main_rs_root(path: &str) -> Option<&str> {
+    path.strip_suffix("main.rs")?.strip_suffix(PATH_SEP)
+}
+
+/// `lib.rs` and `main.rs` side by side are two crates. A file is in the binary
+/// crate when `main.rs` declares its top-level module.
+fn binary_crate_root(
+    tree: &Tree,
+    root: &str,
+    lang: &Lang,
+    root_relative: u32,
+    trees: &[Tree],
+    file_index: &FileIndex,
+) -> Option<String> {
+    let main_key = format!("{root}{PATH_SEP}main");
+    let main = file_index.get(&main_key).filter(|loc| loc.node == 0)?;
+    let relative = lang.syms.resolve(tree.root().tag(root_relative)?);
+    let top = relative.split(PATH_SEP).next()?.split('.').next()?;
+    let import_type = lang.syms.lookup("import_type");
+    let declaration = lang.syms.lookup("ModDeclaration");
+    let declared = trees[main.fi as usize].root().children().any(|c| {
+        c.kind() == C::Import
+            && c.tag(import_type) == Some(declaration)
+            && c.names().any(|name| lang.syms.resolve(name.sym()) == top)
+    });
+    declared.then_some(main_key)
 }
 
 /// Module files for `names` under the files in `parents`: `a.rs` keeps them in `a/`.
