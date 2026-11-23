@@ -63,7 +63,9 @@ const toSegment = (x: number, y: number, ax: number, ay: number, bx: number, by:
   return { d: Math.hypot(x - ax - t * dx, y - ay - t * dy), t };
 };
 
-export function SearchMap({ search, anchor, region }: { search: Search | null; anchor: string; region: string }) {
+// `tall` and `lift` set the height of the map inside `region` and its gap from the top, so a small region,
+// such as a scroll scene on a phone, fits the whole route.
+export function SearchMap({ search, anchor, region, tall = MAP_TALL, lift = MAP_LIFT }: { search: Search | null; anchor: string; region: string; tall?: number; lift?: number }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const state = useRef<{ search: Search | null; since: number }>({ search, since: 0 });
 
@@ -99,8 +101,7 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
       const snap = (value: number) => Math.round(value / GAP) * GAP;
       const left = area.left - own.left;
       const wide = Math.max(area.width, own.width - left - 60);
-      const top = area.top - own.top + MAP_LIFT;
-      const tall = MAP_TALL;
+      const top = area.top - own.top + lift;
       const random = seeded(search.id);
       if (search.steps) {
         const steps = search.steps;
@@ -122,7 +123,7 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
         const stops = steps.map((step, index) => {
           const point = search.points?.[index];
           const px = snap(left + wide * (point ? point[0] : 0.1 + (0.8 * index) / Math.max(1, steps.length - 1)));
-          const py = snap(top + MAP_TALL * (point ? point[1] : index % 2 ? 0.1 + 0.3 * random() : 0.55 + 0.3 * random()));
+          const py = snap(top + tall * (point ? point[1] : index % 2 ? 0.1 + 0.3 * random() : 0.55 + 0.3 * random()));
           return { name: step.name, tone: step.tone ?? ("path" as const), from: index * STEP_MS, at: (index + 1) * STEP_MS, px, py, ox: px, oy: py };
         });
         stops.forEach((stop, index) => index > 0 && Object.assign(stop, { ox: stops[index - 1]!.px, oy: stops[index - 1]!.py }));
@@ -138,7 +139,7 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
           from: 0,
           at: CODE_MS,
           px: snap(left + 60 + ((wide - 60) * ((cell % 3) + 0.4 + random() * 0.2)) / 3),
-          py: snap(top + (MAP_TALL * (Math.floor(cell / 3) + 0.1 + (cell % 3 === 1 ? 0.5 : 0) + random() * 0.25)) / 5.5),
+          py: snap(top + (tall * (Math.floor(cell / 3) + 0.1 + (cell % 3 === 1 ? 0.5 : 0) + random() * 0.25)) / 5.5),
           ox: 0,
           oy: 0,
         };
@@ -162,13 +163,13 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
 
       const code = search !== null && !search.steps;
       const cx = area ? (area.left - own.left + width) / 2 : width / 2;
-      const cy = area ? area.top - own.top + MAP_LIFT + MAP_TALL / 2 : height / 2;
+      const cy = area ? area.top - own.top + lift + tall / 2 : height / 2;
       const reach = Math.hypot(Math.max(cx, width - cx), Math.max(cy, height - cy));
       const ring = code ? (age / RING_MS) * reach : -1e4;
       const fade = code ? Math.max(0, 1 - age / (RING_MS * 1.1)) : 0;
       const fillAge = search?.logo && stops.length ? age - stops.at(-1)!.at : -1;
       const fill = fillAge > 0 ? Math.min(1, fillAge / LOGO_FILL_MS) : 0;
-      const box = fill > 0 && chat && area ? logoBox(area.left - own.left, Math.max(area.width, own.width - (area.left - own.left) - 60), area.top - own.top + MAP_LIFT, MAP_TALL) : null;
+      const box = fill > 0 && chat && area ? logoBox(area.left - own.left, Math.max(area.width, own.width - (area.left - own.left) - 60), area.top - own.top + lift, tall) : null;
 
       for (let y = 0; y < height + GAP; y += GAP)
         for (let x = 0; x < width + GAP; x += GAP) {
@@ -202,7 +203,8 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
         if (!stop.name) continue;
         ctx.fillStyle = code ? `rgb(${palette.rest})` : style.color;
         ctx.globalAlpha = code ? 0.7 : 0.9;
-        ctx.fillText(stop.name, stop.px, stop.py + 22);
+        const half = ctx.measureText(stop.name).width / 2 + 4;
+        ctx.fillText(stop.name, Math.min(Math.max(stop.px, half), width - half), stop.py + 22);
       }
     };
 
@@ -233,7 +235,7 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
       sized.disconnect();
       seen.disconnect();
     };
-  }, [anchor, region]);
+  }, [anchor, region, tall, lift]);
 
   return <canvas ref={canvas} aria-hidden="true" className="next-map" />;
 }

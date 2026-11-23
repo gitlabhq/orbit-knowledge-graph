@@ -19,12 +19,9 @@ pipelines:
       order_by: [traversal_path, issue_id, id]
       filter: "link_type = 0"
       query: generated
-      lookups:
-        - { node: MergeRequest, id: merge_request_id }
-        - { node: WorkItem, id: issue_id }
     transform:
       type: datafusion
       edges:
-        - from: { field: merge_request_id, kind: MergeRequest, enrich: true }
-          to: { field: issue_id, kind: WorkItem, enrich: true }
+        - from: { field: merge_request_id, kind: MergeRequest }
+          to: { field: issue_id, kind: WorkItem }
           label: CLOSES

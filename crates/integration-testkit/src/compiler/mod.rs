@@ -1591,6 +1591,10 @@ fn state_assertions_match_serialized_state_by_json_path() {
             "result_ctx.nodes is an empty map",
         ),
         (
+            "{result_context: {nodes: {$exact: {u: {entity_type: User}}, x: 1}}}",
+            "result_ctx.nodes: $exact cannot share a map with other keys",
+        ),
+        (
             "{result_context: {nodes: {$exact: {}}}}",
             "result_ctx.nodes.u is not listed in $exact",
         ),
