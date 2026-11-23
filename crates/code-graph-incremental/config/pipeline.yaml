@@ -49,19 +49,17 @@ modules:
     tags: { scoped: scoped, hoisted: hoisted, lifted: lifted, implicit_self: implicit_self, type_only: type_only, weak: weak }
 
 phases:
-  - { name: canonicalize, over: tree, does: rewrite, budget: { label: rewrite, tree: file_rewrite_ms, skip: skip_timeout_walk } }
-  - { name: normalize, over: tree, does: rewrite, budget: { label: rewrite, tree: file_rewrite_ms, skip: skip_timeout_walk } }
+  - { name: canonicalize, over: tree, order: children_first, budget: { label: rewrite, tree: file_rewrite_ms, skip: skip_timeout_walk } }
+  - { name: normalize, over: tree, order: children_first, budget: { label: rewrite, tree: file_rewrite_ms, skip: skip_timeout_walk } }
   - name: link
     over: tree
-    does: edges
     bind: { names.read: ssa.flow, ssa.value_of: value_of, ssa.valued: valued, ssa.source: source }
     budget: { tree: file_link_ms, skip: skip_timeout_ssa }
-  - { name: project, over: project, does: rewrite }
+  - { name: project, over: project, order: children_first }
   - name: resolve
     over: family
-    does: edges
     until: stable
     budget: { scope: cross_file_resolve_ms }
     bind: { names.read: resolved }
-  - { name: display, over: tree, does: tags }
-  - { name: export, over: graph, does: rows }
+  - { name: display, over: tree }
+  - { name: export, over: graph }

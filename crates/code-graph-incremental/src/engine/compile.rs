@@ -35,7 +35,9 @@ struct PipelineSpec {
 struct PhaseSpec {
     name: String,
     over: String,
-    does: String,
+    /// `children_first` walks each tree's children before their parent.
+    #[serde(default)]
+    order: Option<String>,
     #[serde(default)]
     until: Option<String>,
     #[serde(default)]
@@ -52,17 +54,6 @@ struct ModuleSpec {
     kinds: BTreeMap<String, String>,
     #[serde(default)]
     tags: BTreeMap<String, String>,
-}
-
-/// How a phase's rule lists read: as passes over the tree, whose pairs
-/// each fire on their own, or as groups of one pass, whose first pair that
-/// holds fires.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Does {
-    Rewrite,
-    Tags,
-    Edges,
-    Rows,
 }
 
 impl Pipeline {
@@ -236,16 +227,16 @@ fn data_texts(spec: &DataSpec, out: &mut Vec<String>) {
     }
 }
 
-fn does_of(spec: &PhaseSpec) -> Result<(Does, bool), LoadError> {
+/// Whether a phase walks children first, and whether it reruns until its
+/// edges stop changing.
+fn walk_of(spec: &PhaseSpec) -> Result<(bool, bool), LoadError> {
     let err = |what: &str, value: &str| {
         LoadError(format!("phase {}: unknown {what}: {value}", spec.name))
     };
-    let does = match spec.does.as_str() {
-        "rewrite" => Does::Rewrite,
-        "tags" => Does::Tags,
-        "edges" => Does::Edges,
-        "rows" => Does::Rows,
-        other => return Err(err("does", other)),
+    let post = match spec.order.as_deref() {
+        None => false,
+        Some("children_first") => true,
+        Some(other) => return Err(err("order", other)),
     };
     let stable = match spec.until.as_deref() {
         None => false,
@@ -255,7 +246,7 @@ fn does_of(spec: &PhaseSpec) -> Result<(Does, bool), LoadError> {
     if !matches!(spec.over.as_str(), "tree" | "project" | "family" | "graph") {
         return Err(err("over", &spec.over));
     }
-    Ok((does, stable))
+    Ok((post, stable))
 }
 
 fn compile_phase(
@@ -267,7 +258,7 @@ fn compile_phase(
     lang: &Lang,
     indexes: &RefCell<Vec<IndexSpec>>,
 ) -> Result<Phase, LoadError> {
-    let (does, until_stable) = does_of(spec)?;
+    let (post, until_stable) = walk_of(spec)?;
     let (binds, def_binds) = binds(registry, spec, &files.shared.defs)?;
     let links = super::Links::load(registry, &binds, &def_binds)?;
     let loader = Loader::new(registry, files, names, tables, lang, &links, indexes)?;
@@ -279,22 +270,36 @@ fn compile_phase(
         .iter()
         .map(|f| stages_of(f.as_ref().and_then(|f| f.phases.get(&spec.name))))
         .collect();
-    let (passes, by_lang) = match does {
-        Does::Rewrite | Does::Tags => {
+    let grouped = shared
+        .iter()
+        .chain(langs.iter().flatten())
+        .map(|s| s.grouped);
+    let grouped = match grouped.clone().all(|g| g) {
+        true => true,
+        false if grouped.clone().any(|g| g) => {
+            return Err(LoadError(format!(
+                "phase {}: a phase's sections are all groups or all passes",
+                spec.name
+            )));
+        }
+        false => false,
+    };
+    let (passes, by_lang) = match grouped {
+        false => {
             let mut passes = Vec::new();
             let mut by_lang = Vec::new();
             for (at, own) in langs.iter().enumerate() {
                 let mut mine = Vec::new();
                 for stage in own.iter().chain(&shared) {
                     mine.push(passes.len() as u16);
-                    passes.push(loader.stage(stage, at as u8, does == Does::Rewrite)?);
+                    passes.push(loader.stage(stage, at as u8, post)?);
                 }
                 by_lang.push(mine);
             }
             (passes, by_lang)
         }
-        Does::Edges | Does::Rows => {
-            let pass = loader.groups(&shared, &langs, does)?;
+        true => {
+            let pass = loader.groups(&shared, &langs, post)?;
             (vec![pass], vec![vec![0]; langs.len()])
         }
     };
@@ -881,7 +886,7 @@ impl<'a> Loader<'a> {
         &self,
         shared: &[StageSpec],
         langs: &[Vec<StageSpec>],
-        does: Does,
+        post: bool,
     ) -> Result<Pass, LoadError> {
         let mut groups: Vec<(&str, Vec<(Option<u8>, &Pair)>)> = Vec::new();
         let staged = langs
@@ -915,11 +920,7 @@ impl<'a> Loader<'a> {
                         .matcher(&pair.pattern, pair.when.as_deref(), owner, &[])
                         .map_err(err)?;
                     let cell = RefCell::new(m.slots.clone());
-                    let value = match does {
-                        Does::Rows => self.expressions(&pair.value, &cell),
-                        _ => self.edges(&pair.value, &cell),
-                    }
-                    .map_err(err)?;
+                    let value = self.group_value(&pair.value, &cell).map_err(err)?;
                     slots = slots.max(cell.borrow().len());
                     cases.push((group as u16, (Some(m), guard, value)));
                 }
@@ -930,7 +931,7 @@ impl<'a> Loader<'a> {
             cases: Cases::new(cases, stops),
             slots,
             templates: Vec::new(),
-            post: false,
+            post,
             repeat: false,
             tag_keys: Vec::new(),
         })
@@ -1022,6 +1023,15 @@ impl<'a> Loader<'a> {
             }
             None => self.core("edge", vec![kind, from, to, site, Expr::Empty]),
         })
+    }
+
+    /// A group pair's value by its shape: a map from edge kinds to targets,
+    /// or expressions.
+    fn group_value(&self, value: &Value, slots: &RefCell<Slots>) -> Result<Expr, LoadError> {
+        match value {
+            Value::Object(_) => self.edges(value, slots),
+            _ => self.expressions(value, slots),
+        }
     }
 
     /// An expression, or a list of them for their union; `none` writes

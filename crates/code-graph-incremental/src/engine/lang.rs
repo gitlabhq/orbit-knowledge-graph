@@ -25,11 +25,14 @@ pub struct Pair {
     pub origin: String,
 }
 
-/// A rewrite stage, an edge kind's rules, or a phase's only list of pairs.
+/// A list of pairs: a group, whose first pair that holds fires, from a
+/// section that maps names to pairs; or a pass, every pair of which can fire,
+/// from a section that lists them.
 #[derive(Debug, Clone)]
 pub struct StageSpec {
     pub name: String,
     pub repeat: bool,
+    pub grouped: bool,
     pub pairs: Vec<Pair>,
 }
 
@@ -307,6 +310,7 @@ impl Loader<'_> {
                     Ok(StageSpec {
                         name: kind,
                         repeat: false,
+                        grouped: true,
                         pairs: self.pairs(&at, scope, pairs, 0)?,
                     })
                 })
@@ -321,6 +325,7 @@ impl Loader<'_> {
             Value::Array(_) => Ok(vec![StageSpec {
                 name: phase.to_owned(),
                 repeat: false,
+                grouped: false,
                 pairs: self.pairs(&at, scope, section, 0)?,
             }]),
             Value::Null => Ok(Vec::new()),
@@ -368,6 +373,7 @@ impl Loader<'_> {
             pairs: self.pairs(&format!("{at}: stage {name}"), scope, pairs, depth)?,
             name,
             repeat,
+            grouped: false,
         });
         Ok(())
     }
