@@ -25,9 +25,7 @@ use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineRunner, QueryPipelineContext, TypeMap,
 };
 use query_engine::shared::content::ColumnResolverRegistry;
-use query_engine::shared::{
-    CompilationStage, ExecutionStage, ExtractionStage, OutputStage, PipelineOutput,
-};
+use query_engine::shared::{Passthrough, PipelineOutput, RemoteStages, run_remote};
 use response::{
     assert_compilation, assert_output, assert_pagination, assert_repeated_response, repeat_count,
     validate_response,
@@ -242,25 +240,20 @@ impl engine::Engine for ClickhouseEngine<'_> {
         if let Some(RoutingOutput::Schema(_)) = route {
             return Err(PipelineError::custom("schema calls are not graph queries"));
         }
-        PipelineRunner::start(&mut ctx, &mut obs)
-            .then(&CompilationStage::<query_data_model::ClickHouseDataModel>::new())
-            .await?
-            .then(&ExecutionStage(ClickHouseExecutor {
-                migration_version: 0,
-            }))
-            .await?
-            .then(&ExtractionStage)
-            .await?
-            .then(&MockAuthorizationStage(&self.redaction))
-            .await?
-            .then(&RedactionStage)
-            .await?
-            .then(&HydrationStage)
-            .await?
-            .then(&OutputStage)
-            .await?
-            .finish()
-            .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
+        run_remote(
+            &mut ctx,
+            &mut obs,
+            RemoteStages {
+                security: &Passthrough,
+                executor: ClickHouseExecutor {
+                    migration_version: 0,
+                },
+                authorization: &MockAuthorizationStage(&self.redaction),
+                redaction: &RedactionStage,
+                hydration: &HydrationStage,
+            },
+        )
+        .await
     }
 }
 

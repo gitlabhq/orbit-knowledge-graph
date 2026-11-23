@@ -18,9 +18,7 @@ use query_engine::compiler::Frontend;
 use query_engine::pipeline::{
     MultiObserver, PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext, TypeMap,
 };
-use query_engine::shared::{
-    CompilationStage, ExecutionStage, ExtractionStage, OutputStage, PipelineOutput,
-};
+use query_engine::shared::{PipelineOutput, RemoteStages, run_remote};
 
 use super::helpers::send_query_result;
 use super::metrics::OTelPipelineObserver;
@@ -146,28 +144,20 @@ impl QueryPipelineService {
                 return Ok(QueryServiceOutput::Schema(response));
             }
 
-            let output = PipelineRunner::start(&mut ctx, &mut obs)
-                .then(&SecurityStage)
-                .await?
-                .then(&CompilationStage::<query_data_model::ClickHouseDataModel>::new())
-                .await?
-                .then(&ExecutionStage(ClickHouseExecutor {
-                    migration_version: schema.migration_version,
-                }))
-                .await?
-                .then(&ExtractionStage)
-                .await?
-                .then(&AuthorizationStage)
-                .await?
-                .then(&RedactionStage)
-                .await?
-                .then(&HydrationStage)
-                .await?
-                .then(&OutputStage)
-                .await?
-                .finish()
-                .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
-                .inspect_err(|e| obs.record_error(e))?;
+            let output = run_remote(
+                &mut ctx,
+                &mut obs,
+                RemoteStages {
+                    security: &SecurityStage,
+                    executor: ClickHouseExecutor {
+                        migration_version: schema.migration_version,
+                    },
+                    authorization: &AuthorizationStage,
+                    redaction: &RedactionStage,
+                    hydration: &HydrationStage,
+                },
+            )
+            .await?;
             Ok::<_, PipelineError>(QueryServiceOutput::Graph(Box::new(output)))
         };
 

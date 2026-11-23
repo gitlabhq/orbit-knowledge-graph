@@ -7,7 +7,7 @@ use query_engine::compiler::ParameterizedQuery;
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
 };
-use query_engine::shared::{AuthorizationOutput, ExtractionOutput, HydrationOutput, QueryExecutor};
+use query_engine::shared::{AuthorizationOutput, ExtractionOutput, QueryExecutor};
 
 use super::coverage::Coverage;
 use crate::mock_redaction::MockRedactionService;
@@ -54,28 +54,5 @@ impl QueryExecutor for LocalExecutor<'_> {
             .unwrap()
             .query_arrow(&sql)
             .map_err(|error| PipelineError::Execution(format!("{error}\n{sql}")))
-    }
-}
-
-pub(super) struct LocalFinishStage;
-
-impl PipelineStage for LocalFinishStage {
-    type Input = ExtractionOutput;
-    type Output = HydrationOutput;
-
-    async fn execute(
-        &self,
-        ctx: &mut QueryPipelineContext,
-        _obs: &mut dyn PipelineObserver,
-    ) -> Result<Self::Output, PipelineError> {
-        let input = ctx.phases.remove::<ExtractionOutput>().ok_or_else(|| {
-            PipelineError::Execution("ExtractionOutput not found in phases".into())
-        })?;
-        Ok(HydrationOutput {
-            query_result: input.query_result,
-            result_context: ctx.compiled()?.base.result_context.clone(),
-            redacted_count: 0,
-            hydration_queries: Vec::new(),
-        })
     }
 }

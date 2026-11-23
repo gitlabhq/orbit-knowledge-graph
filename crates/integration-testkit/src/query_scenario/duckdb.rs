@@ -5,17 +5,13 @@ use std::sync::{Arc, Mutex};
 use duckdb_client::DuckDbClient;
 use query_data_model::DuckDbDataModel;
 use query_engine::compiler::{Frontend, generate_local_ddl};
-use query_engine::pipeline::{
-    NoOpObserver, PipelineError, PipelineRunner, QueryPipelineContext, TypeMap,
-};
-use query_engine::shared::{
-    CompilationStage, ExecutionStage, ExtractionStage, OutputStage, PipelineOutput,
-};
+use query_engine::pipeline::{NoOpObserver, PipelineError, QueryPipelineContext, TypeMap};
+use query_engine::shared::{PipelineOutput, run_local};
 
 use super::coverage::Coverage;
 use super::engine::{Engine, Planned, run_all, run_steps};
 use super::seed_preset;
-use super::stages::{LocalExecutor, LocalFinishStage};
+use super::stages::LocalExecutor;
 use crate::scenario::seed::{group_by_columns, values_insert};
 use crate::scenario::{Backend, Seed};
 
@@ -70,22 +66,15 @@ impl Engine for DuckdbEngine<'_> {
             phases: TypeMap::default(),
         };
         let mut obs = NoOpObserver;
-        PipelineRunner::start(&mut ctx, &mut obs)
-            .then(&CompilationStage::<DuckDbDataModel>::new())
-            .await?
-            .then(&ExecutionStage(LocalExecutor {
+        run_local(
+            &mut ctx,
+            &mut obs,
+            LocalExecutor {
                 database: &self.database,
                 coverage: self.coverage,
-            }))
-            .await?
-            .then(&ExtractionStage)
-            .await?
-            .then(&LocalFinishStage)
-            .await?
-            .then(&OutputStage)
-            .await?
-            .finish()
-            .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
+            },
+        )
+        .await
     }
 
     async fn run_scenario(env: &DuckdbEnv, plan: Planned, presets: &Path) {
