@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 use serde_json::Value;
 
 use super::expr::{Expr, IndexSpec, Scope};
-use super::lang::{DataSpec, DefBody, DefSpec, Pair, RuleFiles, StageSpec};
+use super::lang::{DataSpec, DefBody, DefSpec, Pair, RuleFiles, StageSpec, TableSpec};
 use super::pattern::{self, Slots, Tpl};
 use super::program::{
     BudgetSpec, Cases, Def, DefImpl, Indexer, Match, Part, Pass, Phase, Pipeline, Roles, RowShape,
@@ -90,12 +90,14 @@ impl Pipeline {
         let values = data_values(&files, lang)?;
         let enclosing: Vec<u16> = spec.scopes.iter().map(|k| lang.intern_kind(k)).collect();
         let roles = roles(&spec, lang)?;
+        let (rows, tables) = tables(&files.shared.tables)?;
         let indexes = RefCell::new(Vec::new());
         let mut phases = spec
             .phases
             .iter()
             .map(|p| {
-                let mut phase = compile_phase(p, &files, &names, lang, &indexes)?;
+                let mut phase = compile_phase(p, &files, &names, &tables, lang, &indexes)?;
+                phase.rows = rows.clone();
                 phase.data = values.clone();
                 phase.enclosing = enclosing.clone();
                 phase.roles = roles.clone();
@@ -105,7 +107,7 @@ impl Pipeline {
         let indexes = indexes.into_inner();
         for phase in &mut phases {
             phase.index_count = indexes.len();
-            phase.indexers = indexers(phase, &files, &names, lang, &indexes)?;
+            phase.indexers = indexers(phase, &files, &names, &tables, lang, &indexes)?;
         }
         let settings = merged_data(&files);
         Ok(Self { phases, settings })
@@ -249,13 +251,14 @@ fn compile_phase(
     spec: &PhaseSpec,
     files: &RuleFiles,
     names: &HashMap<String, u16>,
+    tables: &Tables,
     lang: &Lang,
     indexes: &RefCell<Vec<IndexSpec>>,
 ) -> Result<Phase, LoadError> {
     let (does, until_stable) = does_of(spec)?;
     let (binds, def_binds) = binds(spec, &files.shared.defs)?;
     let links = super::Links::load(&binds, &def_binds)?;
-    let loader = Loader::new(files, names, lang, &links, indexes)?;
+    let loader = Loader::new(files, names, tables, lang, &links, indexes)?;
     let (defs, overrides) = loader.defs(files)?;
     let stages_of = |rules: Option<&Vec<StageSpec>>| rules.cloned().unwrap_or_default();
     let shared = stages_of(files.shared.phases.get(&spec.name));
@@ -295,7 +298,6 @@ fn compile_phase(
         .label
         .clone()
         .unwrap_or_else(|| spec.name.clone());
-    let rows = loader.rows.take();
     drop(loader);
     Ok(Phase {
         name: spec.name.clone(),
@@ -311,7 +313,7 @@ fn compile_phase(
         index_count: 0,
         enclosing: Vec::new(),
         roles: Vec::new(),
-        rows,
+        rows: Vec::new(),
         indexers: Vec::new(),
         passes,
         by_lang,
@@ -323,11 +325,12 @@ fn indexers(
     phase: &Phase,
     files: &RuleFiles,
     names: &HashMap<String, u16>,
+    tables: &Tables,
     lang: &Lang,
     indexes: &[IndexSpec],
 ) -> Result<Vec<Indexer>, LoadError> {
     let registry = RefCell::new(indexes.to_vec());
-    let loader = Loader::new(files, names, lang, &phase.links, &registry)?;
+    let loader = Loader::new(files, names, tables, lang, &phase.links, &registry)?;
     let mut out = Vec::new();
     for (id, index) in indexes.iter().enumerate() {
         let owners: Vec<Option<u8>> = match index.pattern.contains('%') {
@@ -469,13 +472,14 @@ struct Loader<'a> {
     lang_data: Vec<BTreeMap<String, DataSpec>>,
     lang: &'a Lang,
     indexes: &'a RefCell<Vec<IndexSpec>>,
-    rows: RefCell<Vec<RowShape>>,
+    tables: &'a Tables,
 }
 
 impl<'a> Loader<'a> {
     fn new(
         files: &'a RuleFiles,
         names: &'a HashMap<String, u16>,
+        tables: &'a Tables,
         lang: &'a Lang,
         links: &'a super::Links,
         indexes: &'a RefCell<Vec<IndexSpec>>,
@@ -501,7 +505,7 @@ impl<'a> Loader<'a> {
             lang_data: merged_data(files),
             lang,
             indexes,
-            rows: RefCell::new(Vec::new()),
+            tables,
         })
     }
 
@@ -519,6 +523,7 @@ impl<'a> Loader<'a> {
             data: self.names,
             defs: &self.defs,
             indexes: self.indexes,
+            tables: self.tables,
             effects,
             shared,
         }
@@ -876,7 +881,7 @@ impl<'a> Loader<'a> {
                         .map_err(err)?;
                     let cell = RefCell::new(m.slots.clone());
                     let value = match does {
-                        Does::Rows => self.rows(&pair.value, &cell),
+                        Does::Rows => self.expressions(&pair.value, &cell),
                         _ => self.edges(&pair.value, &cell),
                     }
                     .map_err(err)?;
@@ -984,91 +989,78 @@ impl<'a> Loader<'a> {
         })
     }
 
-    /// A row spec or a list of them; `none` writes nothing and stops the
-    /// group.
-    fn rows(&self, value: &Value, slots: &RefCell<Slots>) -> Result<Expr, LoadError> {
-        let spec = |v: &Value| {
-            serde_json::from_value::<RowSpec>(v.clone()).map_err(|e| LoadError(format!("row: {e}")))
-        };
-        let specs: Vec<RowSpec> = match value {
-            Value::String(s) if s == "none" => Vec::new(),
-            Value::Array(items) => items.iter().map(spec).collect::<Result<_, _>>()?,
-            one => vec![spec(one)?],
-        };
-        let rows = specs
-            .iter()
-            .map(|s| self.row(slots, s))
-            .collect::<Result<_, _>>()?;
-        Ok(union(rows))
+    /// An expression, or a list of them for their union; `none` writes
+    /// nothing and stops the group.
+    fn expressions(&self, value: &Value, slots: &RefCell<Slots>) -> Result<Expr, LoadError> {
+        match value {
+            Value::String(s) if s == "none" => Ok(Expr::Empty),
+            Value::String(src) => self.parse(src, slots, true),
+            Value::Array(items) => {
+                let parts = items
+                    .iter()
+                    .map(|item| self.expressions(item, slots))
+                    .collect::<Result<_, _>>()?;
+                Ok(union(parts))
+            }
+            _ => Err(LoadError(
+                "a value is an expression or a list of them".into(),
+            )),
+        }
     }
+}
 
-    fn row(&self, slots: &RefCell<Slots>, spec: &RowSpec) -> Result<Expr, LoadError> {
-        let columns: Vec<String> = spec.columns.keys().cloned().collect();
-        let mut exprs = spec
-            .columns
-            .values()
-            .map(|src| self.parse(src, slots, true))
-            .collect::<Result<Vec<_>, _>>()?;
-        let column = |name: &str| {
-            columns
-                .iter()
-                .position(|c| c == name)
-                .ok_or_else(|| LoadError(format!("row {}: no column {name}", spec.table)))
+/// Each row shape's id and value names, by shape name.
+type Tables = HashMap<String, (u16, Vec<String>)>;
+
+/// The export's row shapes, in name order, and their names.
+fn tables(specs: &BTreeMap<String, TableSpec>) -> Result<(Vec<RowShape>, Tables), LoadError> {
+    let mut rows = Vec::new();
+    let mut tables = HashMap::new();
+    for (name, spec) in specs {
+        let missing = |what: &str| LoadError(format!("table {name}: no column {what}"));
+        let names: Vec<String> = spec.columns.iter().chain(&spec.keys).cloned().collect();
+        let find = |list: &[String], what: &str| {
+            list.iter()
+                .position(|n| n == what)
+                .ok_or_else(|| missing(what))
         };
         let id = match &spec.id {
             None => None,
             Some(id) => {
-                let mut parts = Vec::new();
-                for part in &id.parts {
-                    parts.push(match columns.iter().position(|c| c == part) {
-                        Some(at) => Part::Column(at),
-                        None => {
-                            exprs.push(self.parse(part, slots, true)?);
-                            Part::Value(exprs.len() - 1)
-                        }
-                    });
-                }
+                let parts = id
+                    .parts
+                    .iter()
+                    .map(|p| {
+                        let i = find(&names, p)?;
+                        Ok(match i < spec.columns.len() {
+                            true => Part::Column(i),
+                            false => Part::Value(i),
+                        })
+                    })
+                    .collect::<Result<_, LoadError>>()?;
                 Some((id.seed.clone(), parts))
             }
         };
         let expect = spec
             .expect
             .iter()
-            .map(|(name, table)| Ok((column(name)?, table.clone())))
+            .map(|(c, table)| Ok((find(&spec.columns, c)?, table.clone())))
             .collect::<Result<_, LoadError>>()?;
-        let follows = spec.follows.as_deref().map(column).transpose()?;
-        let mut rows = self.rows.borrow_mut();
+        let follows = spec
+            .follows
+            .as_deref()
+            .map(|c| find(&spec.columns, c))
+            .transpose()?;
+        tables.insert(name.clone(), (rows.len() as u16, names));
         rows.push(RowShape {
             table: spec.table.clone(),
-            columns,
+            columns: spec.columns.clone(),
             id,
             expect,
             follows,
         });
-        let shape = u16::try_from(rows.len() - 1)
-            .map_err(|_| LoadError("more than 65536 row shapes".into()))?;
-        let mut args = vec![number(u32::from(shape)), Expr::Var(0)];
-        args.extend(exprs);
-        Ok(core("row", args))
     }
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RowSpec {
-    table: String,
-    id: Option<IdSpec>,
-    columns: BTreeMap<String, String>,
-    #[serde(default)]
-    expect: BTreeMap<String, String>,
-    follows: Option<String>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct IdSpec {
-    seed: String,
-    parts: Vec<String>,
+    Ok((rows, tables))
 }
 
 /// Splits `template #key=value #key@kind=value` into the template and its

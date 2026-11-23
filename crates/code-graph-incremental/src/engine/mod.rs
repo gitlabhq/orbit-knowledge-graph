@@ -155,6 +155,9 @@ pub enum Arg {
     Edge,
     /// `'pattern' [by key]`: a declared index, its id once the rules load.
     Pattern,
+    /// A row shape's name, a number once the rules load; the call's named
+    /// arguments then give the shape's values, in its order.
+    Shape,
     /// Any further sets, last in a signature.
     Rest,
 }

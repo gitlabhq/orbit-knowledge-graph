@@ -37,6 +37,8 @@ pub struct Scope<'a> {
     pub data: &'a HashMap<String, u16>,
     pub defs: &'a HashMap<String, (u16, usize)>,
     pub indexes: &'a RefCell<Vec<IndexSpec>>,
+    /// Each row shape's id and value names, by shape name.
+    pub tables: &'a HashMap<String, (u16, Vec<String>)>,
     pub effects: bool,
     /// In a language's redefinition: the shared definition and its arity.
     pub shared: Option<(u16, usize)>,
@@ -296,35 +298,70 @@ impl<'s> Parser<'s, '_> {
     }
 
     /// A call's arguments, each read as its signature says: an expression,
-    /// an edge kind's name, or a declared index's pattern. A pattern with no
-    /// key and nothing after it is keyed by the empty text.
+    /// an edge kind's name, a declared index's pattern, or a row shape's name
+    /// whose values follow as `name: value`, in the shape's order and empty
+    /// where not given. A pattern with no key and nothing after it is keyed
+    /// by the empty text.
     fn typed_args(&mut self, sig: &[Arg], piped: Option<Expr>) -> Result<Vec<Expr>, LoadError> {
         let mut args: Vec<Expr> = piped.into_iter().collect();
+        let mut named: Option<(Vec<String>, Vec<Option<Expr>>)> = None;
         if !self.eat("(") || self.eat(")") {
             return Ok(args);
         }
         loop {
-            let arg = sig[args.len().min(sig.len().saturating_sub(1))];
-            match arg {
-                Arg::Edge => {
-                    self.space();
-                    let name = self.ident();
-                    let kind = self.scope.lang.edge_kind(name).ok_or_else(|| {
-                        self.error(&format!("edge kind {name} is not in pipeline.yaml edges"))
-                    })?;
-                    args.push(Expr::Lit(Val::Sym(u32::from(kind.0))));
+            let back = self.at;
+            self.space();
+            let name = self.ident();
+            match &mut named {
+                Some((names, values)) if !name.is_empty() && self.eat(":") => {
+                    let at = names
+                        .iter()
+                        .position(|n| n == name)
+                        .ok_or_else(|| self.error(&format!("the shape has no value {name}")))?;
+                    values[at] = Some(self.expr()?);
                 }
-                Arg::Pattern => {
-                    let (id, keyless) = self.index()?;
-                    args.push(Expr::Lit(Val::Sym(id)));
-                    if keyless {
-                        args.push(Expr::Lit(Val::Sym(self.scope.lang.syms.intern(""))));
-                        return Ok(args);
+                _ => {
+                    self.at = back;
+                    match sig[args.len().min(sig.len().saturating_sub(1))] {
+                        Arg::Edge => {
+                            self.space();
+                            let name = self.ident();
+                            let kind = self.scope.lang.edge_kind(name).ok_or_else(|| {
+                                self.error(&format!(
+                                    "edge kind {name} is not in pipeline.yaml edges"
+                                ))
+                            })?;
+                            args.push(Expr::Lit(Val::Sym(u32::from(kind.0))));
+                        }
+                        Arg::Shape => {
+                            self.space();
+                            let name = self.ident();
+                            let (id, names) = self
+                                .scope
+                                .tables
+                                .get(name)
+                                .cloned()
+                                .ok_or_else(|| self.error(&format!("no table {name}")))?;
+                            args.push(Expr::Lit(Val::Sym(u32::from(id))));
+                            let values = vec![None; names.len()];
+                            named = Some((names, values));
+                        }
+                        Arg::Pattern => {
+                            let (id, keyless) = self.index()?;
+                            args.push(Expr::Lit(Val::Sym(id)));
+                            if keyless {
+                                args.push(Expr::Lit(Val::Sym(self.scope.lang.syms.intern(""))));
+                                return Ok(args);
+                            }
+                        }
+                        _ => args.push(self.expr()?),
                     }
                 }
-                _ => args.push(self.expr()?),
             }
             if self.eat(")") {
+                if let Some((_, values)) = named {
+                    args.extend(values.into_iter().map(|v| v.unwrap_or(Expr::Empty)));
+                }
                 return Ok(args);
             }
             if !self.eat(",") {

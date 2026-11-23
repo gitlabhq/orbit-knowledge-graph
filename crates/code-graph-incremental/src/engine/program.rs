@@ -196,8 +196,9 @@ pub(super) struct Indexer {
     pub(super) key: Expr,
 }
 
-/// The rows one case writes: its table, its column names, and how its id is
-/// made. Values arrive in column order, then the extra id parts.
+/// A row shape: its table, its column names, and how its id is made. Values
+/// arrive in column order, then the values only the id reads.
+#[derive(Clone)]
 pub struct RowShape {
     pub table: String,
     pub columns: Vec<String>,

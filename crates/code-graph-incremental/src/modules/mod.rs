@@ -62,5 +62,6 @@ macro_rules! function {
     (@arg edge) => { $crate::engine::Arg::Edge };
     (@arg pattern) => { $crate::engine::Arg::Pattern };
     (@arg rest) => { $crate::engine::Arg::Rest };
+    (@arg shape) => { $crate::engine::Arg::Shape };
 }
 use function;

@@ -118,7 +118,7 @@ static FUNCTIONS: &[Function<Core>] = &[
         }
         Vals::new()
     }),
-    function!(Effect, "row", [one, set, rest], |cx, a| {
+    function!(Effect, "row", [shape, set, rest], |cx, a| {
         let Some(at) = a[1].first().and_then(|v| v.loc()) else {
             return Vals::new();
         };

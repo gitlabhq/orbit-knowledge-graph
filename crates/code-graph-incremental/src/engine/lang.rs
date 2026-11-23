@@ -57,6 +57,31 @@ pub struct LangFile {
     pub data: BTreeMap<String, DataSpec>,
     pub defs: Vec<DefSpec>,
     pub phases: BTreeMap<String, Vec<StageSpec>>,
+    pub tables: BTreeMap<String, TableSpec>,
+}
+
+/// A row shape the export writes: its table, its columns in order, values
+/// only its id reads, how the id is made from those names, the table each
+/// expected column's value must be a row of, and the column whose rows a
+/// row follows.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TableSpec {
+    pub table: String,
+    pub columns: Vec<String>,
+    #[serde(default)]
+    pub keys: Vec<String>,
+    pub id: Option<IdSpec>,
+    #[serde(default)]
+    pub expect: BTreeMap<String, String>,
+    pub follows: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IdSpec {
+    pub seed: String,
+    pub parts: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -94,6 +119,7 @@ fn merge(into: &mut LangFile, from: LangFile) -> Result<(), LoadError> {
         }
     }
     into.defs.extend(from.defs);
+    into.tables.extend(from.tables);
     for (phase, stages) in from.phases {
         into.phases.entry(phase).or_default().extend(stages);
     }
@@ -202,6 +228,10 @@ impl Loader {
             data: scope.data.clone(),
             ..LangFile::default()
         };
+        if let Some(tables) = top.remove("tables") {
+            file.tables =
+                serde_json::from_value(tables).map_err(|e| err(format!("{name}: tables: {e}")))?;
+        }
         if let Some(defs) = top.remove("define") {
             let Value::Object(defs) = defs else {
                 return Err(err(format!("{name}: define is a mapping")));
