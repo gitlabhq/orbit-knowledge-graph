@@ -14,7 +14,7 @@ use super::program::{
     BudgetSpec, Cases, Def, DefImpl, Indexer, Match, Part, Pass, Phase, Pipeline, Roles, RowShape,
     Template, resolution,
 };
-use super::{FnId, Kind, Val, Vals};
+use super::{FnId, Kind, Registration, Registry, Val, Vals};
 use crate::error::LoadError;
 use crate::intern::Lang;
 use crate::tree::EdgeKind;
@@ -67,7 +67,12 @@ enum Does {
 
 impl Pipeline {
     /// `languages` holds each language's rule file, by its index in the env.
-    pub fn load(lang: &Lang, languages: &[Option<&'static str>]) -> Result<Self, LoadError> {
+    pub fn load(
+        lang: &Lang,
+        languages: &[Option<&'static str>],
+        modules: &'static [Registration],
+    ) -> Result<Self, LoadError> {
+        let registry = Registry::new(modules);
         let spec: PipelineSpec =
             orbit_utils::yaml::from_str(include_str!("../../config/pipeline.yaml"))?;
         for edge in &spec.edges {
@@ -89,14 +94,15 @@ impl Pipeline {
             .collect();
         let values = data_values(&files, lang)?;
         let enclosing: Vec<u16> = spec.scopes.iter().map(|k| lang.intern_kind(k)).collect();
-        let roles = roles(&spec, lang)?;
+        let roles = roles(&registry, &spec, lang)?;
         let (rows, tables) = tables(&files.shared.tables)?;
         let indexes = RefCell::new(Vec::new());
         let mut phases = spec
             .phases
             .iter()
             .map(|p| {
-                let mut phase = compile_phase(p, &files, &names, &tables, lang, &indexes)?;
+                let mut phase =
+                    compile_phase(&registry, p, &files, &names, &tables, lang, &indexes)?;
                 phase.rows = rows.clone();
                 phase.data = values.clone();
                 phase.enclosing = enclosing.clone();
@@ -107,10 +113,14 @@ impl Pipeline {
         let indexes = indexes.into_inner();
         for phase in &mut phases {
             phase.index_count = indexes.len();
-            phase.indexers = indexers(phase, &files, &names, &tables, lang, &indexes)?;
+            phase.indexers = indexers(&registry, phase, &files, &names, &tables, lang, &indexes)?;
         }
         let settings = merged_data(&files);
-        Ok(Self { phases, settings })
+        Ok(Self {
+            registry,
+            phases,
+            settings,
+        })
     }
 }
 
@@ -130,8 +140,9 @@ fn merged_data(files: &RuleFiles) -> Vec<BTreeMap<String, DataSpec>> {
 }
 
 /// Each module's roles, by slot: every role bound, every kind in the vocabulary.
-fn roles(spec: &PipelineSpec, lang: &Lang) -> Result<Vec<Roles>, LoadError> {
-    crate::modules::ALL
+fn roles(registry: &Registry, spec: &PipelineSpec, lang: &Lang) -> Result<Vec<Roles>, LoadError> {
+    registry
+        .modules
         .iter()
         .map(|module| bind_roles(spec, lang, module.name, module.kinds, module.tags))
         .collect()
@@ -248,6 +259,7 @@ fn does_of(spec: &PhaseSpec) -> Result<(Does, bool), LoadError> {
 }
 
 fn compile_phase(
+    registry: &Registry,
     spec: &PhaseSpec,
     files: &RuleFiles,
     names: &HashMap<String, u16>,
@@ -256,9 +268,9 @@ fn compile_phase(
     indexes: &RefCell<Vec<IndexSpec>>,
 ) -> Result<Phase, LoadError> {
     let (does, until_stable) = does_of(spec)?;
-    let (binds, def_binds) = binds(spec, &files.shared.defs)?;
-    let links = super::Links::load(&binds, &def_binds)?;
-    let loader = Loader::new(files, names, tables, lang, &links, indexes)?;
+    let (binds, def_binds) = binds(registry, spec, &files.shared.defs)?;
+    let links = super::Links::load(registry, &binds, &def_binds)?;
+    let loader = Loader::new(registry, files, names, tables, lang, &links, indexes)?;
     let (defs, overrides) = loader.defs(files)?;
     let stages_of = |rules: Option<&Vec<StageSpec>>| rules.cloned().unwrap_or_default();
     let shared = stages_of(files.shared.phases.get(&spec.name));
@@ -286,13 +298,13 @@ fn compile_phase(
             (vec![pass], vec![vec![0]; langs.len()])
         }
     };
-    let used = modules_reached(&passes, &defs);
+    let used = modules_reached(registry, &passes, &defs);
     let bound: Vec<FnId> = binds
         .iter()
         .map(|b| b.0)
         .chain(def_binds.iter().map(|b| b.0))
         .collect();
-    check_binds(spec, &bound, &used)?;
+    check_binds(registry, spec, &bound, &used)?;
     let label = spec
         .budget
         .label
@@ -322,6 +334,7 @@ fn compile_phase(
 
 /// Every declared index, compiled for a phase's languages.
 fn indexers(
+    registry: &Registry,
     phase: &Phase,
     files: &RuleFiles,
     names: &HashMap<String, u16>,
@@ -329,8 +342,16 @@ fn indexers(
     lang: &Lang,
     indexes: &[IndexSpec],
 ) -> Result<Vec<Indexer>, LoadError> {
-    let registry = RefCell::new(indexes.to_vec());
-    let loader = Loader::new(files, names, tables, lang, &phase.links, &registry)?;
+    let declared = RefCell::new(indexes.to_vec());
+    let loader = Loader::new(
+        registry,
+        files,
+        names,
+        tables,
+        lang,
+        &phase.links,
+        &declared,
+    )?;
     let mut out = Vec::new();
     for (id, index) in indexes.iter().enumerate() {
         let owners: Vec<Option<u8>> = match index.pattern.contains('%') {
@@ -360,17 +381,19 @@ type Binds = (Vec<(FnId, FnId)>, Vec<(FnId, u16)>);
 
 /// `module.function: provider`, where the provider is another module's
 /// function or the name of a definition.
-fn binds(spec: &PhaseSpec, defs: &[DefSpec]) -> Result<Binds, LoadError> {
+fn binds(registry: &Registry, spec: &PhaseSpec, defs: &[DefSpec]) -> Result<Binds, LoadError> {
     let id = |path: &str| {
         let (module, name) = path
             .split_once('.')
             .ok_or_else(|| LoadError(format!("bind {path}: expected <module>.<function>")))?;
-        super::lookup(module, name).ok_or_else(|| LoadError(format!("bind {path}: unknown")))
+        registry
+            .lookup(module, name)
+            .ok_or_else(|| LoadError(format!("bind {path}: unknown")))
     };
     let (mut binds, mut to_defs) = (Vec::new(), Vec::new());
     for (of, to) in &spec.bind {
         let of = id(of)?;
-        let declared = super::function(of);
+        let declared = registry.function(of);
         if !declared.required {
             return Err(LoadError(format!(
                 "bind {}: only a required function is bound",
@@ -393,7 +416,7 @@ fn binds(spec: &PhaseSpec, defs: &[DefSpec]) -> Result<Binds, LoadError> {
             continue;
         }
         let to = id(to)?;
-        let provider = super::function(to);
+        let provider = registry.function(to);
         if provider.required {
             return Err(LoadError(format!(
                 "bind {}: binds to a required function",
@@ -417,7 +440,7 @@ fn binds(spec: &PhaseSpec, defs: &[DefSpec]) -> Result<Binds, LoadError> {
 
 /// The modules a phase's rules call, directly or through the definitions
 /// they reach.
-fn modules_reached(passes: &[Pass], defs: &[Def]) -> Vec<u8> {
+fn modules_reached(registry: &Registry, passes: &[Pass], defs: &[Def]) -> Vec<u8> {
     let mut calls: Vec<Result<FnId, u16>> = Vec::new();
     for pass in passes {
         pass.cases.calls(&mut |c| calls.push(c));
@@ -427,7 +450,7 @@ fn modules_reached(passes: &[Pass], defs: &[Def]) -> Vec<u8> {
     while let Some(c) = calls.pop() {
         match c {
             Ok(id) => {
-                let slot = super::function(id).slot;
+                let slot = registry.function(id).slot;
                 if !used.contains(&slot) {
                     used.push(slot);
                 }
@@ -446,14 +469,19 @@ fn modules_reached(passes: &[Pass], defs: &[Def]) -> Vec<u8> {
 }
 
 /// Every module a phase calls has its required functions bound.
-fn check_binds(spec: &PhaseSpec, bound: &[FnId], used: &[u8]) -> Result<(), LoadError> {
+fn check_binds(
+    registry: &Registry,
+    spec: &PhaseSpec,
+    bound: &[FnId],
+    used: &[u8],
+) -> Result<(), LoadError> {
     for &slot in used {
-        let module = super::modules::ALL[usize::from(slot)].name;
-        if let Some(id) = super::required(module).find(|id| !bound.contains(id)) {
+        let module = registry.module(slot).name;
+        if let Some(id) = registry.required(module).find(|id| !bound.contains(id)) {
             return Err(LoadError(format!(
                 "phase {}: {module}.{} needs a bind",
                 spec.name,
-                super::function(id).name
+                registry.function(id).name
             )));
         }
     }
@@ -464,6 +492,7 @@ fn check_binds(spec: &PhaseSpec, bound: &[FnId], used: &[u8]) -> Result<(), Load
 /// the shared definitions and data, and the declared indexes and row shapes
 /// the rules add to.
 struct Loader<'a> {
+    registry: &'a Registry,
     modules: Vec<String>,
     links: &'a super::Links,
     names: &'a HashMap<String, u16>,
@@ -477,6 +506,7 @@ struct Loader<'a> {
 
 impl<'a> Loader<'a> {
     fn new(
+        registry: &'a Registry,
         files: &'a RuleFiles,
         names: &'a HashMap<String, u16>,
         tables: &'a Tables,
@@ -494,10 +524,8 @@ impl<'a> Loader<'a> {
             }
         }
         Ok(Self {
-            modules: super::modules::ALL
-                .iter()
-                .map(|m| m.name.to_owned())
-                .collect(),
+            registry,
+            modules: registry.modules.iter().map(|m| m.name.to_owned()).collect(),
             links,
             names,
             defs,
@@ -518,6 +546,7 @@ impl<'a> Loader<'a> {
         Scope {
             slots,
             modules: &self.modules,
+            registry: self.registry,
             links: self.links,
             lang: self.lang,
             data: self.names,
@@ -527,6 +556,15 @@ impl<'a> Loader<'a> {
             effects,
             shared,
         }
+    }
+
+    /// A call to one of the core module's functions.
+    fn core(&self, name: &str, args: Vec<Expr>) -> Expr {
+        let id = self
+            .registry
+            .lookup("core", name)
+            .expect("the core module declares the rule writes");
+        Expr::Call(id, args.into())
     }
 
     fn parse(&self, src: &str, slots: &RefCell<Slots>, effects: bool) -> Result<Expr, LoadError> {
@@ -676,7 +714,7 @@ impl<'a> Loader<'a> {
 
     /// Each definition's dependencies: the states of every module function
     /// it can reach through other definitions.
-    fn deps(&self, defs: &[Def]) -> Vec<u8> {
+    fn deps(&self, defs: &[Def]) -> Vec<u64> {
         let calls: Vec<Vec<Result<FnId, u16>>> = defs
             .iter()
             .map(|def| {
@@ -685,7 +723,7 @@ impl<'a> Loader<'a> {
                 used
             })
             .collect();
-        let mut deps: Vec<u8> = calls
+        let mut deps: Vec<u64> = calls
             .iter()
             .map(|used| {
                 used.iter()
@@ -816,17 +854,14 @@ impl<'a> Loader<'a> {
         if !replace {
             for (key, val) in tags.drain(..) {
                 let on = u32::from(tag_on.unwrap_or(0));
-                writes.push(core(
-                    "set_tag",
-                    vec![number(key), number(on), Expr::Var(0), val],
-                ));
+                writes.push(self.core("set_tag", vec![number(key), number(on), Expr::Var(0), val]));
             }
         }
         for tpl in tpls {
             let mut args = vec![number(templates.len() as u32), Expr::Var(0)];
             args.extend(tags.iter().map(|(_, val)| val.clone()));
             args.extend(tpl.texts().into_iter().cloned());
-            writes.push(core("build", args));
+            writes.push(self.core("build", args));
             templates.push(Template {
                 case,
                 tpl,
@@ -967,7 +1002,7 @@ impl<'a> Loader<'a> {
         let to = self.parse(to, slots, true)?;
         let from = match from {
             Some(f) => self.parse(f, slots, true)?,
-            None => core("scope", vec![Expr::Var(0)]),
+            None => self.core("scope", vec![Expr::Var(0)]),
         };
         let site = match site {
             Some(s) => self.parse(s, slots, true)?,
@@ -978,14 +1013,14 @@ impl<'a> Loader<'a> {
             Some(name) if resolution(name).is_none() => {
                 let slot = slots.borrow_mut().slot("TARGET");
                 let of = self.parse(name, slots, true)?;
-                let edge = core("edge", vec![kind, from, Expr::Var(slot), site, of]);
+                let edge = self.core("edge", vec![kind, from, Expr::Var(slot), site, of]);
                 Expr::Every(Box::new(to), slot, Box::new(edge))
             }
             Some(name) => {
                 let fixed = Expr::Lit(Val::Sym(self.lang.syms.intern(name)));
-                core("edge", vec![kind, from, to, site, fixed])
+                self.core("edge", vec![kind, from, to, site, fixed])
             }
-            None => core("edge", vec![kind, from, to, site, Expr::Empty]),
+            None => self.core("edge", vec![kind, from, to, site, Expr::Empty]),
         })
     }
 
@@ -1102,12 +1137,6 @@ fn union(mut parts: Vec<Expr>) -> Expr {
         1 => parts.pop().unwrap_or(Expr::Empty),
         _ => Expr::Union(parts.into()),
     }
-}
-
-/// A call to one of the core module's functions.
-fn core(name: &str, args: Vec<Expr>) -> Expr {
-    let id = super::lookup("core", name).expect("the core module declares the rule writes");
-    Expr::Call(id, args.into())
 }
 
 fn number(n: u32) -> Expr {

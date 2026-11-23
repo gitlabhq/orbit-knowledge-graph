@@ -10,13 +10,11 @@ mod walk;
 
 use std::any::Any;
 use std::marker::PhantomData;
-use std::sync::LazyLock;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
 use crate::env::Env;
-use crate::modules;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Compact, Edge, EdgeKind, Mutable, Node, Storage};
 pub use graph::Graph;
@@ -373,15 +371,16 @@ pub struct FnId(u16);
 pub struct Links {
     to: Vec<FnId>,
     defs: Vec<Option<u16>>,
-    deps: Vec<u8>,
+    deps: Vec<u64>,
 }
 
 impl Links {
     pub fn load(
+        registry: &Registry,
         binds: &[(FnId, FnId)],
         defs: &[(FnId, u16)],
     ) -> Result<Self, crate::error::LoadError> {
-        let ids = || (0..TABLE.len() as u16).map(FnId);
+        let ids = || (0..registry.len() as u16).map(FnId);
         let to: Vec<FnId> = ids()
             .map(|id| {
                 binds
@@ -390,32 +389,35 @@ impl Links {
                     .unwrap_or(id)
             })
             .collect();
-        let mut uses = Vec::with_capacity(TABLE.len());
+        let mut uses = Vec::with_capacity(registry.len());
         for id in ids() {
-            let f = function(id);
+            let f = registry.function(id);
             let mut called = Vec::new();
             for &(module, name) in f.uses {
-                if module != modules::ALL[usize::from(f.slot)].name {
+                if module != registry.module_of(id) {
                     return Err(crate::error::LoadError(format!(
                         "{}.{} uses {module}.{name}: a module calls only its own functions",
-                        modules::ALL[usize::from(f.slot)].name,
+                        registry.module_of(id),
                         f.name
                     )));
                 }
-                let used = lookup(module, name).ok_or_else(|| {
+                let used = registry.lookup(module, name).ok_or_else(|| {
                     crate::error::LoadError(format!("{} uses unknown {module}.{name}", f.name))
                 })?;
                 called.push(to[usize::from(used.0)]);
             }
             uses.push(called);
         }
-        let own = |id: FnId| match function(id) {
-            f if f.kind == Kind::Flow && !f.required => 1 << f.slot,
+        let own = |id: FnId| match registry.function(id) {
+            f if f.kind == Kind::Flow && !f.required => 1u64 << f.slot,
             _ => 0,
         };
-        let mut deps: Vec<u8> = ids()
+        let every = 1u64
+            .checked_shl(registry.modules.len() as u32)
+            .map_or(u64::MAX, |bit| bit - 1);
+        let mut deps: Vec<u64> = ids()
             .map(|id| match defs.iter().any(|&(of, _)| of == id) {
-                true => u8::MAX,
+                true => every,
                 false => own(id),
             })
             .collect();
@@ -443,8 +445,8 @@ impl Links {
         }
     }
 
-    pub fn kind(&self, id: FnId) -> Kind {
-        let f = function(self.to[usize::from(id.0)]);
+    pub fn kind(&self, registry: &Registry, id: FnId) -> Kind {
+        let f = registry.function(self.to[usize::from(id.0)]);
         match (f.kind, self.deps[usize::from(id.0)]) {
             (Kind::Pure, deps) if deps != 0 => Kind::Flow,
             (kind, _) => kind,
@@ -452,47 +454,69 @@ impl Links {
     }
 }
 
-static TABLE: LazyLock<Vec<Entry>> = LazyLock::new(|| {
-    assert!(modules::ALL.len() <= SLOTS);
-    modules::ALL
-        .iter()
-        .enumerate()
-        .flat_map(|(slot, m)| (m.describe)(slot as u8))
-        .collect()
-});
-
-pub fn lookup(module: &str, name: &str) -> Option<FnId> {
-    let at = TABLE
-        .iter()
-        .position(|e| modules::ALL[usize::from(e.slot)].name == module && e.name == name)?;
-    Some(FnId(at as u16))
+/// A mounted module list and its functions, numbered in module order.
+pub struct Registry {
+    modules: &'static [Registration],
+    table: Vec<Entry>,
+    /// Each module's first function id.
+    starts: Vec<u16>,
 }
 
-pub fn function(id: FnId) -> &'static Entry {
-    &TABLE[usize::from(id.0)]
+impl Registry {
+    pub fn new(modules: &'static [Registration]) -> Self {
+        assert!(modules.len() <= SLOTS);
+        let mut table = Vec::new();
+        let mut starts = Vec::with_capacity(modules.len());
+        for (slot, m) in modules.iter().enumerate() {
+            starts.push(table.len() as u16);
+            table.extend((m.describe)(slot as u8));
+        }
+        Self {
+            modules,
+            table,
+            starts,
+        }
+    }
+
+    pub fn lookup(&self, module: &str, name: &str) -> Option<FnId> {
+        let at = self
+            .table
+            .iter()
+            .position(|e| self.modules[usize::from(e.slot)].name == module && e.name == name)?;
+        Some(FnId(at as u16))
+    }
+
+    pub fn function(&self, id: FnId) -> &Entry {
+        &self.table[usize::from(id.0)]
+    }
+
+    pub fn module_of(&self, id: FnId) -> &'static str {
+        self.modules[usize::from(self.function(id).slot)].name
+    }
+
+    pub fn slot_of(&self, module: &str) -> Option<u8> {
+        let at = self.modules.iter().position(|m| m.name == module)?;
+        Some(at as u8)
+    }
+
+    pub fn module(&self, slot: u8) -> &'static Registration {
+        &self.modules[usize::from(slot)]
+    }
+
+    /// How many functions the mounted modules declare.
+    pub(crate) fn len(&self) -> usize {
+        self.table.len()
+    }
+
+    pub fn required<'a>(&'a self, module: &'a str) -> impl Iterator<Item = FnId> + 'a {
+        (0..self.len() as u16)
+            .map(FnId)
+            .filter(move |&id| self.function(id).required && self.module_of(id) == module)
+    }
 }
 
-pub fn module_of(id: FnId) -> &'static str {
-    modules::ALL[usize::from(function(id).slot)].name
-}
-
-pub fn slot_of(module: &str) -> Option<u8> {
-    let at = modules::ALL.iter().position(|m| m.name == module)?;
-    Some(at as u8)
-}
-
-#[macro_export]
-macro_rules! fn_id {
-    ($module:literal, $name:literal) => {{
-        static ID: std::sync::LazyLock<$crate::engine::FnId> = std::sync::LazyLock::new(|| {
-            $crate::engine::lookup($module, $name).expect(concat!($module, ".", $name))
-        });
-        *ID
-    }};
-}
-
-/// Module state slots; a dependency set is a `u8` mask over them.
-const SLOTS: usize = 8;
+/// Module state slots; a dependency set is a `u64` mask over them.
+const SLOTS: usize = 64;
 
 type Key = (FnId, SmallVec<[Val; 4]>);
 
@@ -506,7 +530,7 @@ enum Memo {
     /// fixpoint round it belongs to and those calls.
     Done {
         vals: Vals,
-        deps: u8,
+        deps: u64,
         stamp: u64,
         within: Option<(u64, Vec<Key>)>,
     },
@@ -527,6 +551,7 @@ pub struct Run<'t, S: Store = Compact> {
     trees: &'t [Tree<S>],
     fi: u32,
     pub(crate) lang_ref: &'t crate::intern::Lang,
+    registry: &'t Registry,
     links: &'t Links,
     budget: &'t Sentinel,
     file: &'t Sentinel,
@@ -546,8 +571,9 @@ pub struct Run<'t, S: Store = Compact> {
     /// The tree writes of the node being fired, applied once it is done.
     writes: Vec<Write>,
     states: Box<[Box<dyn Any>]>,
-    epochs: [u64; SLOTS],
-    reading: u8,
+    epochs: Box<[u64]>,
+    written: u64,
+    reading: u64,
     memo: Table,
     reads: FxHashSet<Key>,
     /// Bumped each time a cycle head reruns, retiring results of the last round.
@@ -571,7 +597,15 @@ impl<'t, S: Store> Run<'t, S> {
         budget: &'t Sentinel,
         file: &'t Sentinel,
     ) -> Self {
-        let mut run = Self::detached(trees, fi, &env.lang, &phase.links, budget, file);
+        let mut run = Self::detached(
+            trees,
+            fi,
+            &env.lang,
+            &env.pipeline.registry,
+            &phase.links,
+            budget,
+            file,
+        );
         run.max_edges = env.limits.max_file_edges;
         run.lang = rules;
         run.data = phase.data.get(rules).map_or(&[], Vec::as_slice);
@@ -589,6 +623,7 @@ impl<'t, S: Store> Run<'t, S> {
         trees: &'t [Tree<S>],
         fi: u32,
         lang: &'t crate::intern::Lang,
+        registry: &'t Registry,
         links: &'t Links,
         budget: &'t Sentinel,
         file: &'t Sentinel,
@@ -597,6 +632,7 @@ impl<'t, S: Store> Run<'t, S> {
             trees,
             fi,
             lang_ref: lang,
+            registry,
             links,
             budget,
             file,
@@ -614,9 +650,10 @@ impl<'t, S: Store> Run<'t, S> {
             data: &[],
             edges: Vec::new(),
             writes: Vec::new(),
-            states: modules::ALL.iter().map(|m| (m.state)()).collect(),
-            epochs: [0; SLOTS],
-            reading: u8::MAX,
+            states: registry.modules.iter().map(|m| (m.state)()).collect(),
+            epochs: vec![0; registry.modules.len()].into(),
+            written: 0,
+            reading: u64::MAX,
             memo: Table::default(),
             reads: FxHashSet::default(),
             round: 0,
@@ -665,7 +702,7 @@ impl<'t, S: Store> Run<'t, S> {
         self.killed.is_none()
     }
 
-    fn stamp(&self, deps: u8) -> u64 {
+    fn stamp(&self, deps: u64) -> u64 {
         stamp(&self.epochs, deps)
     }
 
@@ -721,7 +758,7 @@ impl<'t, S: Store> Run<'t, S> {
     /// Starts the phase's modules on the run's tree.
     fn start_modules(&mut self) {
         for &slot in self.phase_modules {
-            (S::hooks(&modules::ALL[usize::from(slot)]).start)(self, slot, 0);
+            (S::hooks(self.registry.module(slot)).start)(self, slot, 0);
         }
     }
 
@@ -732,7 +769,7 @@ impl<'t, S: Store> Run<'t, S> {
             return Err(killed);
         }
         for &slot in self.phase_modules.iter().rev() {
-            (S::hooks(&modules::ALL[usize::from(slot)]).finish)(self, slot);
+            (S::hooks(self.registry.module(slot)).finish)(self, slot);
         }
         if let Some(killed) = self.killed.take() {
             return Err(killed);
@@ -745,7 +782,10 @@ impl<'t, S: Store> Run<'t, S> {
 
     /// Takes module `M`'s state from the run, leaving a fresh one.
     pub fn take_state<M: Module>(&mut self) -> M::State {
-        let slot = slot_of(M::NAME).expect("every module is registered");
+        let slot = self
+            .registry
+            .slot_of(M::NAME)
+            .expect("every module is registered");
         let state = self.states[usize::from(slot)]
             .downcast_mut::<M::State>()
             .expect("each slot holds its module's state");
@@ -793,8 +833,8 @@ impl<'t, S: Store> Run<'t, S> {
     }
 
     fn fn_name(&self, id: FnId) -> String {
-        match TABLE.get(usize::from(id.0)) {
-            Some(f) => format!("{}.{}", modules::ALL[usize::from(f.slot)].name, f.name),
+        match self.registry.table.get(usize::from(id.0)) {
+            Some(f) => format!("{}.{}", self.registry.module(f.slot).name, f.name),
             None => self.fns.get(usize::from(u16::MAX - id.0)).map_or_else(
                 || format!("def #{}", u16::MAX - id.0),
                 |d| d.name.to_string(),
@@ -803,14 +843,8 @@ impl<'t, S: Store> Run<'t, S> {
     }
 }
 
-pub fn required(module: &str) -> impl Iterator<Item = FnId> + '_ {
-    (0..TABLE.len() as u16)
-        .map(FnId)
-        .filter(move |&id| function(id).required && module_of(id) == module)
-}
-
 impl Links {
-    pub(crate) fn deps_of(&self, id: FnId) -> u8 {
+    pub(crate) fn deps_of(&self, id: FnId) -> u64 {
         self.deps[usize::from(id.0)]
     }
 
@@ -819,7 +853,7 @@ impl Links {
     }
 }
 
-fn stamp(epochs: &[u64; SLOTS], mut deps: u8) -> u64 {
+fn stamp(epochs: &[u64], mut deps: u64) -> u64 {
     let mut sum = 0;
     while deps != 0 {
         sum += epochs[deps.trailing_zeros() as usize];
@@ -950,7 +984,7 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
 
     pub fn state(&mut self) -> &mut M::State {
         debug_assert!(
-            self.run.reading & (1 << self.slot) != 0,
+            self.run.reading & (1u64 << self.slot) != 0,
             "{} state read by a function whose uses do not reach it",
             M::NAME
         );
@@ -959,6 +993,7 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
 
     pub fn write(&mut self) -> &mut M::State {
         self.run.epochs[usize::from(self.slot)] += 1;
+        self.run.written += 1;
         self.slot_state()
     }
 
@@ -969,15 +1004,26 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
     }
 
     pub fn call(&mut self, id: FnId, args: &[Vals]) -> Vals {
+        let registry = self.run.registry;
         assert_eq!(
-            function(id).slot,
+            registry.function(id).slot,
             self.slot,
             "{} called {}.{}: a module calls only its own functions",
             M::NAME,
-            module_of(id),
-            function(id).name
+            registry.module_of(id),
+            registry.function(id).name
         );
         self.run.call(id, args)
+    }
+
+    /// Calls the module's own function `name`.
+    pub fn call_own(&mut self, name: &str, args: &[Vals]) -> Vals {
+        let index = M::functions()
+            .iter()
+            .position(|f| f.name == name)
+            .unwrap_or_else(|| panic!("{} declares no function {name}", M::NAME));
+        let first = self.run.registry.starts[usize::from(self.slot)];
+        self.call(FnId(first + index as u16), args)
     }
 
     pub fn call1(&mut self, id: FnId, arg: Val) -> Vals {

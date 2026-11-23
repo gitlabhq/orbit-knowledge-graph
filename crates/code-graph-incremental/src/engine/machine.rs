@@ -12,8 +12,7 @@ use smallvec::SmallVec;
 use super::expr::Expr;
 use super::program::{Cases, Def, DefImpl, Scratch};
 use super::{
-    Arg, Cursor, FnId, Key, Kind, Loc, MAX_FIXPOINT_ROUNDS, Memo, Run, Store, Val, Vals, function,
-    truthy,
+    Arg, Cursor, FnId, Key, Kind, Loc, MAX_FIXPOINT_ROUNDS, Memo, Run, Store, Val, Vals, truthy,
 };
 use crate::constants::{RED_ZONE, STACK_SEGMENT};
 
@@ -32,10 +31,10 @@ struct Pending {
     key: Key,
     callee: Callee,
     args: Args,
-    deps: u8,
-    epochs: [u64; super::SLOTS],
+    deps: u64,
+    written: u64,
     outer: FxHashSet<Key>,
-    reading: u8,
+    reading: u64,
     rounds: u32,
     started: Option<Instant>,
 }
@@ -344,7 +343,9 @@ impl<'e, S: Store> Machine<'e, S> {
     fn spread<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [Def], callee: Callee, args: Args) {
         let at = match callee {
             Callee::Def(_) => (args.first().is_some_and(|a| a.len() != 1)).then_some(0),
-            Callee::Native(id) => function(id)
+            Callee::Native(id) => run
+                .registry
+                .function(id)
                 .sig
                 .iter()
                 .zip(&args)
@@ -389,10 +390,10 @@ impl<'e, S: Store> Machine<'e, S> {
                 }
                 let deps = links.deps[usize::from(id.0)];
                 let id = links.to[usize::from(id.0)];
-                let f = function(id);
+                let f = run.registry.function(id);
                 if matches!(f.kind, Kind::Effect | Kind::Inline) {
                     let reading = match f.kind {
-                        Kind::Effect => std::mem::replace(&mut run.reading, u8::MAX),
+                        Kind::Effect => std::mem::replace(&mut run.reading, u64::MAX),
                         _ => run.reading,
                     };
                     let found = invoke(run, id, &args);
@@ -440,7 +441,7 @@ impl<'e, S: Store> Machine<'e, S> {
             .insert(key.clone(), Memo::Busy(Vals::new()));
         let pending = Pending {
             started: run.profile.as_mut().map(|p| p.enter(key.0)),
-            epochs: run.epochs,
+            written: run.written,
             outer: std::mem::take(&mut run.reads),
             reading: std::mem::replace(&mut run.reading, deps),
             deps,
@@ -535,7 +536,7 @@ impl<'e, S: Store> Machine<'e, S> {
         }
         let read: Vec<Key> = run.reads.iter().cloned().collect();
         run.reads.extend(p.outer);
-        if p.epochs != run.epochs {
+        if p.written != run.written {
             run.memo.entries.remove(&p.key);
         } else {
             let stamp = run.stamp(p.deps);
@@ -727,8 +728,8 @@ impl<'e, S: Store> Machine<'e, S> {
 
 /// Runs module function `id` natively.
 fn invoke<S: Store>(run: &mut Run<'_, S>, id: FnId, args: &[Vals]) -> Vals {
-    let f = function(id);
-    let hooks = S::hooks(&crate::modules::ALL[usize::from(f.slot)]);
+    let f = run.registry.function(id);
+    let hooks = S::hooks(run.registry.module(f.slot));
     (hooks.invoke)(run, f.slot, f.index, args)
 }
 

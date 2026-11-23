@@ -162,7 +162,7 @@ pub struct Def {
     pub(super) name: Box<str>,
     pub(super) params: usize,
     pub(super) body: DefImpl,
-    pub(super) deps: u8,
+    pub(super) deps: u64,
     pub(super) slots: usize,
 }
 
@@ -270,6 +270,7 @@ impl Phase {
 }
 
 pub struct Pipeline {
+    pub registry: super::Registry,
     pub phases: Vec<Phase>,
     pub(super) settings: Vec<BTreeMap<String, DataSpec>>,
 }

@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use super::pattern::Slots;
-use super::{Arg, FnId, Kind, Run, Store, Val, Vals, function, lookup, module_of};
+use super::{Arg, FnId, Kind, Registry, Run, Store, Val, Vals};
 use crate::error::LoadError;
 use crate::intern::Lang;
 
@@ -32,6 +32,7 @@ pub struct IndexSpec {
 pub struct Scope<'a> {
     pub slots: &'a RefCell<Slots>,
     pub modules: &'a [String],
+    pub registry: &'a Registry,
     pub links: &'a super::Links,
     pub lang: &'a Lang,
     pub data: &'a HashMap<String, u16>,
@@ -270,18 +271,25 @@ impl<'s> Parser<'s, '_> {
                     .scope
                     .modules
                     .iter()
-                    .find(|m| lookup(m, name).is_some())
+                    .find(|m| self.scope.registry.lookup(m, name).is_some())
                     .ok_or_else(|| self.error(&format!("no definition or function {name}")))?;
                 (module.as_str(), name)
             }
         };
-        let id = lookup(module, name)
+        let registry = self.scope.registry;
+        let id = registry
+            .lookup(module, name)
             .ok_or_else(|| self.error(&format!("unknown function {module}.{name}")))?;
-        if !self.scope.modules.iter().any(|m| m == module_of(id)) {
+        if !self
+            .scope
+            .modules
+            .iter()
+            .any(|m| m == registry.module_of(id))
+        {
             return Err(self.error(&format!("module {module} is not allowed in this phase")));
         }
         let id = self.scope.links.to(id);
-        let f = function(id);
+        let f = registry.function(id);
         if f.kind == Kind::Effect && !self.scope.effects {
             return Err(self.error(&format!("{module}.{name} has effects")));
         }

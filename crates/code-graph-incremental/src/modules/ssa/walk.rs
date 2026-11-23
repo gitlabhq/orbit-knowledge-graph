@@ -98,13 +98,8 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
     }
 
     fn required(&mut self, name: &str, node: u32) -> Vals {
-        let id = match name {
-            "value_of" => crate::fn_id!("ssa", "value_of"),
-            "valued" => crate::fn_id!("ssa", "valued"),
-            _ => crate::fn_id!("ssa", "source"),
-        };
         let at = Val::Node(self.loc(node));
-        self.call(id, &[one(at)])
+        self.call_own(name, &[one(at)])
     }
 
     fn record(&mut self, c: Cursor<'t, S>) {

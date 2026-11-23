@@ -4,6 +4,7 @@
 
 use rustc_hash::FxHashMap;
 
+use crate::engine::Registration;
 use crate::engine::lang::DataSpec;
 use crate::error::LoadError;
 use crate::intern::Lang;
@@ -55,6 +56,16 @@ impl Env {
     /// Compiles the family's rules into an existing interner, so ids in a
     /// graph restored from a snapshot and ids in the rules agree.
     pub fn with_lang(lang_id: SupportLang, lang: Lang, limits: Limits) -> Result<Self, LoadError> {
+        Self::mounted(lang_id, lang, limits, crate::modules::ALL)
+    }
+
+    /// Like `with_lang`, with the engine running only the given modules.
+    pub fn mounted(
+        lang_id: SupportLang,
+        lang: Lang,
+        limits: Limits,
+        modules: &'static [Registration],
+    ) -> Result<Self, LoadError> {
         let members = lang_id.family_members();
         let mut rules: FxHashMap<SupportLang, usize> = FxHashMap::default();
         let mut sources: Vec<Option<&'static str>> = Vec::new();
@@ -72,7 +83,7 @@ impl Env {
             };
             rules.insert(member, index);
         }
-        let pipeline = crate::engine::Pipeline::load(&lang, &sources)?;
+        let pipeline = crate::engine::Pipeline::load(&lang, &sources, modules)?;
         let project = project(&pipeline, &lang, sources.len())?;
         Ok(Self {
             export_config: crate::backend::tables::ExportConfig::default(),
