@@ -598,7 +598,7 @@ impl State {
     pub fn load(path: &Path, lang_id: SupportLang) -> io::Result<(Engine, Self)> {
         let (mut input, index) = open_index(path)?;
         let shared: Shared = read_frame(&mut input, &mut rkyv::util::AlignedVec::new())?;
-        let env = Engine::builder(lang_id)
+        let env = Engine::family(lang_id)
             .lang(Lang::from(shared.lang))
             .limits(Limits::UNLIMITED)
             .build()

@@ -35,7 +35,7 @@ fn sleeps_always() -> Sentinel {
 fn per_file_budgets_count_thread_cpu_time_not_time_asleep() {
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), &[("main.py", MAIN), ("utils.py", UTILS)]);
-    let env = Engine::builder(SupportLang::Python)
+    let env = Engine::family(SupportLang::Python)
         .limits(Limits {
             file_parse_ms: BUDGET_MS,
             file_rewrite_ms: BUDGET_MS,

@@ -32,7 +32,7 @@ fn link_repo(env: &Engine, root: &Path) -> State {
 }
 
 fn python_env(limits: Limits) -> Engine {
-    Engine::builder(SupportLang::Python)
+    Engine::family(SupportLang::Python)
         .limits(limits)
         .build()
         .unwrap()
@@ -169,7 +169,7 @@ fn link_one(
     std::thread::Builder::new()
         .stack_size(driver::WORKER_STACK_BYTES)
         .spawn(move || {
-            let env = Engine::builder(language)
+            let env = Engine::family(language)
                 .limits(Limits {
                     file_link_ms,
                     ..Limits::UNLIMITED

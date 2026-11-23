@@ -246,3 +246,24 @@ static DOTTED_EXTENSIONS: std::sync::LazyLock<std::collections::HashMap<&'static
         }
         m
     });
+
+impl crate::engine::Engine {
+    /// The code-indexing engine for a language's family: a frontend per
+    /// member, the language's own first, each with its rule file, over the
+    /// code pipeline.
+    pub fn family(language: SupportLang) -> crate::engine::EngineBuilder {
+        let mut members = language.family_members();
+        members.sort_by_key(|&m| m != language);
+        let source = crate::engine::PipelineSource {
+            pipeline: crate::config::PIPELINE,
+            rules: crate::config::RULES,
+            libs: crate::config::LIBS,
+        };
+        members.into_iter().fold(
+            crate::engine::Engine::builder().pipeline(source),
+            |builder, member| {
+                builder.frontend(crate::frontend::for_language(member), lang_yaml(member))
+            },
+        )
+    }
+}

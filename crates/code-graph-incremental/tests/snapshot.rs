@@ -82,7 +82,7 @@ fn cross_file_edges(state: &State) -> usize {
 fn a_snapshot_round_trips_the_graph() {
     let repo = tempfile::tempdir().unwrap();
     write(repo.path(), &[("main.py", MAIN), ("utils.py", UTILS)]);
-    let env = Engine::builder(SupportLang::Python).build().unwrap();
+    let env = Engine::family(SupportLang::Python).build().unwrap();
     let state = index(&env, repo.path());
 
     let (_, loaded) = save_and_load(&env, &state);
@@ -109,7 +109,7 @@ fn a_snapshot_round_trips_the_graph() {
 fn reindex_after_load_keeps_resolution_and_names() {
     let repo = tempfile::tempdir().unwrap();
     write(repo.path(), &[("main.py", MAIN), ("utils.py", UTILS)]);
-    let env = Engine::builder(SupportLang::Python).build().unwrap();
+    let env = Engine::family(SupportLang::Python).build().unwrap();
     let state = index(&env, repo.path());
     let before = cross_file_edges(&state);
     assert!(before > 0);
@@ -131,7 +131,7 @@ fn reindex_after_load_keeps_resolution_and_names() {
 fn removed_files_leave_the_graph_and_dependents_are_revisited() {
     let repo = tempfile::tempdir().unwrap();
     write(repo.path(), &[("main.py", MAIN), ("utils.py", UTILS)]);
-    let env = Engine::builder(SupportLang::Python).build().unwrap();
+    let env = Engine::family(SupportLang::Python).build().unwrap();
     let state = index(&env, repo.path());
     let (env, loaded) = save_and_load(&env, &state);
 
@@ -159,7 +159,7 @@ fn saving_after_a_one_file_edit_rewrites_one_block() {
         .map(|(path, content)| (path.as_str(), content.as_str()))
         .collect();
     write(repo.path(), &sources);
-    let env = Engine::builder(SupportLang::Python).build().unwrap();
+    let env = Engine::family(SupportLang::Python).build().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let snapshot = dir.path().join("graph.bin");
     let blocks = || -> HashSet<String> {
@@ -187,7 +187,7 @@ fn saving_after_a_one_file_edit_rewrites_one_block() {
 
 #[test]
 fn a_block_from_another_snapshot_is_refused_with_an_error() {
-    let env = Engine::builder(SupportLang::Python).build().unwrap();
+    let env = Engine::family(SupportLang::Python).build().unwrap();
     let saved = |file: &str| {
         let repo = tempfile::tempdir().unwrap();
         write(repo.path(), &[(file, UTILS)]);
@@ -296,7 +296,7 @@ fn link_targets_removed_or_added_in_another_block_update_the_source_block() {
         .collect();
     let repo = tempfile::tempdir().unwrap();
     write(repo.path(), &sources);
-    let env = Engine::builder(SupportLang::Markdown).build().unwrap();
+    let env = Engine::family(SupportLang::Markdown).build().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let snapshot = dir.path().join("graph.bin");
     index(&env, repo.path()).save(&env, &snapshot).unwrap();

@@ -6,7 +6,6 @@ use crate::engine::Registration;
 use crate::engine::lang::DataSpec;
 use crate::error::LoadError;
 use crate::intern::Lang;
-use crate::language::SupportLang;
 use crate::sentinel::Limits;
 
 pub struct Engine {
@@ -25,17 +24,43 @@ pub struct Mounted {
     pub rules: usize,
 }
 
-/// How an engine is configured: the family it serves, the modules it
-/// mounts, its budgets, and the interner it compiles into. Everything else
-/// comes from pipeline.yaml.
+/// The YAML an engine compiles: pipeline.yaml, the rule files every
+/// frontend shares, and the libraries rule files import by name.
+#[derive(Clone, Copy)]
+pub struct PipelineSource {
+    pub pipeline: &'static str,
+    pub rules: &'static [(&'static str, &'static str)],
+    pub libs: &'static [(&'static str, &'static str)],
+}
+
+/// How an engine is put together: the frontends it mounts, each with the
+/// rule file its trees run, the pipeline, the modules, the budgets, and the
+/// interner it compiles into. The first frontend reads what no other does.
 pub struct EngineBuilder {
-    lang_id: SupportLang,
+    frontends: Vec<(Box<dyn crate::frontend::Frontend>, Option<&'static str>)>,
+    pipeline: Option<PipelineSource>,
     modules: &'static [Registration],
     limits: Limits,
     lang: Option<Lang>,
 }
 
 impl EngineBuilder {
+    /// Mounts a frontend whose trees run `rules`, a language's own rule
+    /// file, if it has one.
+    pub fn frontend(
+        mut self,
+        frontend: Box<dyn crate::frontend::Frontend>,
+        rules: Option<&'static str>,
+    ) -> Self {
+        self.frontends.push((frontend, rules));
+        self
+    }
+
+    pub fn pipeline(mut self, source: PipelineSource) -> Self {
+        self.pipeline = Some(source);
+        self
+    }
+
     /// The modules the engine mounts; `modules::ALL` unless given.
     pub fn modules(mut self, modules: &'static [Registration]) -> Self {
         self.modules = modules;
@@ -55,73 +80,59 @@ impl EngineBuilder {
         self
     }
 
-    /// Compiles the family's rules against the mounted modules.
+    /// Compiles the pipeline against the mounted modules; frontends that
+    /// share a rule file share its compiled rules.
     pub fn build(self) -> Result<Engine, LoadError> {
-        let lang = self.lang.unwrap_or_default();
-        Engine::load(self.lang_id, lang, self.limits, self.modules)
-    }
-}
-
-impl Engine {
-    pub fn builder(lang_id: SupportLang) -> EngineBuilder {
-        EngineBuilder {
-            lang_id,
-            modules: crate::modules::ALL,
-            limits: Limits::UNLIMITED,
-            lang: None,
+        let source = self
+            .pipeline
+            .ok_or_else(|| LoadError("an engine needs a pipeline".into()))?;
+        if self.frontends.is_empty() {
+            return Err(LoadError("an engine needs a frontend".into()));
         }
-    }
-
-    fn load(
-        lang_id: SupportLang,
-        lang: Lang,
-        limits: Limits,
-        modules: &'static [Registration],
-    ) -> Result<Self, LoadError> {
-        let members = lang_id.family_members();
+        let lang = self.lang.unwrap_or_default();
+        let mut langs: Vec<Option<&'static str>> = Vec::new();
         let mut frontends = Vec::new();
-        let mut sources: Vec<Option<&'static str>> = Vec::new();
-        for &member in &members {
-            let yaml = crate::language::lang_yaml(member);
-            let index = match sources
-                .iter()
-                .position(|s| s.map(str::as_ptr) == yaml.map(str::as_ptr))
-            {
-                Some(index) => index,
+        for (frontend, yaml) in self.frontends {
+            let same = |s: &Option<&str>| s.map(str::as_ptr) == yaml.map(str::as_ptr);
+            let rules = match langs.iter().position(same) {
+                Some(at) => at,
                 None => {
-                    sources.push(yaml);
-                    sources.len() - 1
+                    langs.push(yaml);
+                    langs.len() - 1
                 }
             };
-            let frontend = crate::frontend::for_language(member, limits.max_tree_depth);
-            frontends.push((
-                member,
-                Mounted {
-                    frontend,
-                    rules: index,
-                },
-            ));
+            frontends.push(Mounted { frontend, rules });
         }
-        frontends.sort_by_key(|(member, _)| *member != lang_id);
-        let frontends = frontends.into_iter().map(|(_, m)| m).collect();
         let pipeline = crate::engine::Pipeline::load(
             &lang,
             &crate::engine::lang::Sources {
-                pipeline: crate::config::PIPELINE,
-                rules: crate::config::RULES,
-                libs: crate::config::LIBS,
-                langs: &sources,
+                pipeline: source.pipeline,
+                rules: source.rules,
+                libs: source.libs,
+                langs: &langs,
             },
-            modules,
+            self.modules,
         )?;
-        let project = Box::new(project(&pipeline, sources.len())?);
-        Ok(Self {
+        let project = Box::new(project(&pipeline, langs.len())?);
+        Ok(Engine {
             frontends,
             pipeline,
             project,
             lang,
-            limits,
+            limits: self.limits,
         })
+    }
+}
+
+impl Engine {
+    pub fn builder() -> EngineBuilder {
+        EngineBuilder {
+            frontends: Vec::new(),
+            pipeline: None,
+            modules: crate::modules::ALL,
+            limits: Limits::UNLIMITED,
+            lang: None,
+        }
     }
 
     /// The mounted frontend that reads `path`, if any.

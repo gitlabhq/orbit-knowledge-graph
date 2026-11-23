@@ -71,7 +71,7 @@ pub fn repository<E: std::fmt::Display>(
     if families.is_empty() {
         on_worker_pool("none", 1, || {
             (options.phase_started)("none", "export", repository.usage().files);
-            let env = Engine::builder(SupportLang::Markdown).build()?;
+            let env = Engine::family(SupportLang::Markdown).build()?;
             let mut state = super::State::new(&env);
             state.trees = repository
                 .files()
@@ -131,7 +131,7 @@ pub fn repository<E: std::fmt::Display>(
                     let outcome = run.check().map_err(Error::from).and_then(|()| {
                         on_worker_pool(family, family_threads, || {
                             let (report, batches) = {
-                                let env = Engine::builder(language).limits(limits).build()?;
+                                let env = Engine::family(language).limits(limits).build()?;
                                 phase_started(family, "index", file_count);
                                 let (mut graph, mut report) = super::index(&env, repository, run)?;
                                 report.unread_files.retain(|path| owns(family, path));

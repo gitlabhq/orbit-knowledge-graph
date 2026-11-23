@@ -106,7 +106,7 @@ pub(super) fn split(
 
 /// Whether a family's project frontend reads the file at a path.
 fn manifest_reader(family: SupportLang) -> impl Fn(&str) -> bool {
-    let env = code_graph_incremental::Engine::builder(family).build().ok();
+    let env = code_graph_incremental::Engine::family(family).build().ok();
     move |path| env.as_ref().is_some_and(|env| env.project.reads(path))
 }
 

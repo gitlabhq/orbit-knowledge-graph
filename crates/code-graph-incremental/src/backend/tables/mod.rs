@@ -446,7 +446,7 @@ pub fn export_directories(
     ontology: &Ontology,
     envelope: &Envelope,
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
-    let env = Engine::builder(crate::language::SupportLang::Markdown).build()?;
+    let env = Engine::family(crate::language::SupportLang::Markdown).build()?;
     let tables = Tables::load(&env, ontology, &ExportConfig::default())?;
     let mut state = State::new(&env);
     state.trees = paths
@@ -648,7 +648,7 @@ mod tests {
     use super::*;
 
     fn python() -> Engine {
-        Engine::builder(crate::language::SupportLang::Python)
+        Engine::family(crate::language::SupportLang::Python)
             .build()
             .expect("python rules load")
     }

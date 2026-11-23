@@ -61,7 +61,7 @@ fn unread_sources_and_manifests_remain_in_the_graph_and_report() {
     for path in ["main.ts", "package.json"] {
         std::fs::remove_file(root.path().join(path)).unwrap();
     }
-    let env = Engine::builder(SupportLang::TypeScript)
+    let env = Engine::family(SupportLang::TypeScript)
         .limits(Limits::UNLIMITED)
         .build()
         .unwrap();
@@ -90,7 +90,7 @@ fn every_configured_language_parses_when_classified_for_parsing() {
             _ => b"x",
         };
         write_all(repo.path(), &[(&path, source)]);
-        let env = Engine::builder(lang)
+        let env = Engine::family(lang)
             .limits(Limits::UNLIMITED)
             .build()
             .unwrap();
@@ -116,7 +116,7 @@ fn tsx_inside_the_typescript_pipeline_gets_the_tsx_grammar() {
         repo.path(),
         &[("app.tsx", jsx), ("util.ts", b"export const n = 1;\n")],
     );
-    let env = Engine::builder(SupportLang::TypeScript)
+    let env = Engine::family(SupportLang::TypeScript)
         .limits(Limits::UNLIMITED)
         .build()
         .unwrap();
@@ -144,7 +144,7 @@ fn only_this_familys_files_are_parsed() {
             ("data.json", b"{}"),
         ],
     );
-    let env = Engine::builder(SupportLang::Python)
+    let env = Engine::family(SupportLang::Python)
         .limits(Limits::UNLIMITED)
         .build()
         .unwrap();
@@ -197,7 +197,7 @@ fn a_family_parses_each_member_with_its_own_grammar() {
             ("main.py", b"x = 1\n"),
         ],
     );
-    let env = Engine::builder(SupportLang::Kotlin)
+    let env = Engine::family(SupportLang::Kotlin)
         .limits(Limits::UNLIMITED)
         .build()
         .unwrap();

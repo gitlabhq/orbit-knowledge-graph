@@ -116,7 +116,7 @@ fn index_and_check(yaml: &str) {
         .collect();
     let lang_id = detect_lang(&suite, &paths);
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
-    let env = Engine::builder(lang_id)
+    let env = Engine::family(lang_id)
         .limits(suite_limits(&suite))
         .build()
         .expect("rules compile");

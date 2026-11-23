@@ -26,7 +26,7 @@ fn rewrite_repo(env: &Engine, root: &Path) -> (Vec<Tree>, Vec<Killed>) {
 }
 
 fn python_env(limits: Limits) -> Engine {
-    Engine::builder(SupportLang::Python)
+    Engine::family(SupportLang::Python)
         .limits(limits)
         .build()
         .unwrap()

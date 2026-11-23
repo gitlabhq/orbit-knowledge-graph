@@ -8,7 +8,7 @@ pub mod treesitter;
 use crate::engine::Engine;
 use crate::intern::Lang;
 use crate::language::SupportLang;
-use crate::sentinel::{Killed, Sentinel};
+use crate::sentinel::{Killed, Limits, Sentinel};
 use crate::tree::Tree;
 
 /// The parse budget's label, which reports name a parse timeout by.
@@ -21,20 +21,21 @@ pub trait Frontend: Send + Sync {
     /// Whether this frontend reads the file at `path`.
     fn accepts(&self, path: &str) -> bool;
 
-    /// The file's tree, and why parsing stopped early, if it did.
+    /// The file's tree, within `limits`, and why parsing stopped early, if
+    /// it did.
     fn parse(
         &self,
         source: &str,
         path: &str,
         lang: &Lang,
+        limits: &Limits,
         budget: &Sentinel,
     ) -> Result<(Tree, Option<Killed>), Killed>;
 }
 
-/// A tree-sitter grammar's frontend, cutting trees deeper than `max_depth`.
+/// A tree-sitter grammar's frontend.
 pub struct TreeSitter {
     pub language: SupportLang,
-    pub max_depth: usize,
 }
 
 impl Frontend for TreeSitter {
@@ -51,9 +52,11 @@ impl Frontend for TreeSitter {
         source: &str,
         path: &str,
         lang: &Lang,
+        limits: &Limits,
         budget: &Sentinel,
     ) -> Result<(Tree, Option<Killed>), Killed> {
-        treesitter::parse_with_sentinel(source, self.language, lang, path, budget, self.max_depth)
+        let depth = limits.max_tree_depth;
+        treesitter::parse_with_sentinel(source, self.language, lang, path, budget, depth)
     }
 }
 
@@ -74,6 +77,7 @@ impl Frontend for Markdown {
         source: &str,
         path: &str,
         lang: &Lang,
+        _: &Limits,
         budget: &Sentinel,
     ) -> Result<(Tree, Option<Killed>), Killed> {
         let tree = markdown::parse(source, lang, path);
@@ -83,13 +87,10 @@ impl Frontend for Markdown {
 }
 
 /// The frontend a language's files parse with.
-pub fn for_language(language: SupportLang, max_depth: usize) -> Box<dyn Frontend> {
+pub fn for_language(language: SupportLang) -> Box<dyn Frontend> {
     match language {
         SupportLang::Markdown => Box::new(Markdown),
-        language => Box::new(TreeSitter {
-            language,
-            max_depth,
-        }),
+        language => Box::new(TreeSitter { language }),
     }
 }
 
@@ -106,5 +107,5 @@ pub fn parse(
         .child(PARSE, path, env.limits.file_parse_ms)
         .on_thread_cpu();
     budget.check()?;
-    frontend.parse(source, path, &env.lang, &budget)
+    frontend.parse(source, path, &env.lang, &env.limits, &budget)
 }

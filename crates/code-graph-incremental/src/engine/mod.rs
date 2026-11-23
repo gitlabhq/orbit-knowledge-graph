@@ -17,7 +17,7 @@ use smallvec::SmallVec;
 
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Compact, Edge, EdgeKind, Mutable, Node, Storage};
-pub use builder::{Engine, EngineBuilder, Mounted};
+pub use builder::{Engine, EngineBuilder, Mounted, PipelineSource};
 pub use graph::Graph;
 pub use program::{Def, Part, Phase, Pipeline, RowShape, resolution};
 pub use walk::{run_family, run_tree, run_trees, scope_budget};
