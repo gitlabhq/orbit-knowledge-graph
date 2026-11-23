@@ -1,8 +1,6 @@
 cases:
   - name: A default-table relationship scans one edge table filtered by its kind
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","columns":["name"],"filters":{"visibility_level":"public"}},{"id":"u","entity":"User","columns":["username"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":25,"order_by":"-g.created_at"}
       gql: |
         MATCH (g:Group {visibility_level: 'public'})<-[:MEMBER_OF]-(u:User) RETURN g.name, u.username ORDER BY g.created_at DESC LIMIT 25
     logical:
@@ -17,8 +15,6 @@ cases:
 
   - name: A code relationship scans only the code edge table
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1]},{"id":"d","entity":"Definition"}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}],"limit":25}
       gql: |
         MATCH (f:File {id: 1})-[:DEFINES]->(d:Definition) RETURN f, d LIMIT 25
     logical:
@@ -31,8 +27,6 @@ cases:
 
   - name: Alternative code relationships stay on the code edge table
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"}],"relationships":[{"type":["CALLS","EXTENDS","DEFINES"],"from":"a","to":"b"}],"limit":25}
       gql: |
         MATCH (a:Definition {id: 1})-[:CALLS|EXTENDS|DEFINES]->(b:Definition) RETURN a, b LIMIT 25
     physical:
@@ -45,8 +39,6 @@ cases:
 
   - name: A pinned file narrows the joined definitions to reached IDs
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":["12345"],"columns":["path"]},{"id":"d","entity":"Definition","columns":["name"]}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}],"limit":50}
       gql: |
         MATCH (f:File {id: 12345})-[:DEFINES]->(d:Definition) RETURN f.path, d.name LIMIT 50
     physical:
@@ -61,8 +53,6 @@ cases:
 
   - name: A single-hop wildcard keeps one default-table scan
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"*","from":"u","to":"p"}],"limit":25}
       gql: |
         MATCH (u:User {id: 1})-->(p:Project) RETURN u, p LIMIT 25
     logical:
@@ -75,8 +65,6 @@ cases:
 
   - name: A wildcard relationship reads only the kinds that connect its endpoint entities
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"*","from":"u","to":"mr"}],"limit":10}
       gql: |
         MATCH (u:User {id: 1})-[]->(mr:MergeRequest) RETURN u, mr LIMIT 10
     logical:
@@ -93,8 +81,6 @@ cases:
   - name: Relationship alternatives on two edge tables union one latest-row scan per table
     ontology_overlay: variant_routes
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1]},{"id":"d","entity":"Definition"}],"relationships":[{"type":["CALLS","DEFINES"],"from":"f","to":"d"}],"limit":25}
       gql: |
         MATCH (f:File {id: 1})-[:CALLS|DEFINES]->(d:Definition) RETURN f, d LIMIT 25
     logical:

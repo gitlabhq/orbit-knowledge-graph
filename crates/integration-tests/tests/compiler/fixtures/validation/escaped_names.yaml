@@ -2,10 +2,8 @@ physical:
   clickhouse: {}
 
 cases:
-  - name: Backticked variable, label, and property names normalize like JSON
+  - name: Backticked variable, label, and property names normalize
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":5}
       gql: |
         MATCH (`u`:`User` {`id`: 1}) RETURN `u` LIMIT 5
     logical:
@@ -18,8 +16,6 @@ cases:
 
   - name: A backticked reserved SKIP word is a valid variable name
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"offset","entity":"User","node_ids":[1]}]}
       gql: |
         MATCH (`offset`:User {id: 1}) RETURN `offset`
     logical:
@@ -27,8 +23,6 @@ cases:
 
   - name: Variables with underscores, capitals, and digits render as SQL identifiers
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"user_node","entity":"User","node_ids":[1],"columns":["username"]},{"id":"_private","entity":"Note","columns":["confidential"]},{"id":"CamelCase","entity":"Project","node_ids":[1],"columns":["name"]},{"id":"node123","entity":"Group","columns":["name"]}],"relationships":[{"type":"AUTHORED","from":"user_node","to":"_private"},{"type":"IN_PROJECT","from":"_private","to":"CamelCase"},{"type":"MEMBER_OF","from":"user_node","to":"node123"}]}
       gql: |
         MATCH (user_node:User {id: 1})-[:AUTHORED]->(_private:Note)-[:IN_PROJECT]->(CamelCase:Project {id: 1}), (user_node)-[:MEMBER_OF]->(node123:Group) RETURN user_node.username, _private.confidential, CamelCase.name, node123.name
     physical:

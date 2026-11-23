@@ -1,5 +1,3 @@
-missing_frontends:
-  json: The JSON DSL has no syntax for these GQL forms.
 
 physical:
   clickhouse:

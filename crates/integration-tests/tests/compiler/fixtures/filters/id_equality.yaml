@@ -17,14 +17,10 @@ physical:
 cases:
   - name: An id equality filter compiles like a pinned id
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"w","entity":"WorkItem","filters":{"id":7}},{"id":"n","entity":"Note","columns":["note"]}],"relationships":[{"type":"HAS_NOTE","from":"w","to":"n"}],"limit":30}
       gql: |
         MATCH (w:WorkItem)-[:HAS_NOTE]->(n:Note) WHERE w.id = 7 RETURN n.note
 
   - name: A pinned id
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"w","entity":"WorkItem","node_ids":[7]},{"id":"n","entity":"Note","columns":["note"]}],"relationships":[{"type":"HAS_NOTE","from":"w","to":"n"}],"limit":30}
       gql: |
         MATCH (w:WorkItem {id: 7})-[:HAS_NOTE]->(n:Note) RETURN n.note

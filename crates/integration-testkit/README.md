@@ -354,13 +354,13 @@ only IDs and the relationship type.
 | `absent` | [key] | The decoded value has none of these top-level keys |
 | `value` | object | A partial match on the decoded value: objects may have extra keys, arrays match item by item |
 
-Each format also checks its format name and version. TOON decodes to its JSON value, must be the canonical encoding, and, for queries other than aggregations, must have the same node and edge counts as the graph response. GQL decodes to `{header, rows, columns}` from its result table: `header` lists the column names, `rows` holds the cells by row, and `columns` maps each column name to its cells. Every format runs for every query language of the case, because a JSON query can also ask for GQL output. A new format is one module in `src/query_scenario/output_format/` that implements `Encoding`, plus one `OutputFormat` variant.
+Each format also checks its format name and version. TOON decodes to its JSON value, must be the canonical encoding, and, for queries other than aggregations, must have the same node and edge counts as the graph response. GQL decodes to `{header, rows, columns}` from its result table: `header` lists the column names, `rows` holds the cells by row, and `columns` maps each column name to its cells. Every format runs for every query language of the case. A new format is one module in `src/query_scenario/output_format/` that implements `Encoding`, plus one `OutputFormat` variant.
 
 **Compilation:**
 
 | Field | Type | Description |
 |---|---|---|
-| `compile_error` | reason / {key: reason} | Expect the compiler to reject the query for this reason. A key is a backend (`clickhouse`, `duckdb`) or a frontend (`json`, `gql`); a backend key wins. Reasons: `parse`, `schema`, `reference`, `ontology`, `authorization`, `restrict`, `ontology_internal`, `depth`, `limit`, `security`, `lowering`, `codegen`, `pipeline` |
+| `compile_error` | reason / {key: reason} | Expect the compiler to reject the query for this reason. A key is a backend (`clickhouse`, `duckdb`) or a frontend (`gql`); a backend key wins. Reasons: `parse`, `schema`, `reference`, `ontology`, `authorization`, `restrict`, `ontology_internal`, `depth`, `limit`, `security`, `lowering`, `codegen`, `pipeline` |
 | `compile_error_not_contains` | [regex] | The error message must not match any listed regex, for a literal from this query. Requires `compile_error`. Every compile error is also checked for a traversal path, an email address, a physical table name, and the fixtures' private markers |
 
 **Pagination:**

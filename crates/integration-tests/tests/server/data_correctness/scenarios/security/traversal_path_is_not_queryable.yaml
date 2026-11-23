@@ -130,7 +130,7 @@ cases:
       compile_error: ontology
 
   - name: negated_null_check_rejected
-    description: A JSON not entry with is_null on traversal_path is rejected
+    description: NOT with IS NULL on traversal_path is rejected
     config:
       security: { org_id: 1, paths: ["1/100/"] }
     query:

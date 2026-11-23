@@ -1,8 +1,6 @@
 cases:
   - name: A multi-id center keeps one fused edge scan
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[1,2]}],"neighbors":{"direction":"both","rel_types":["MEMBER_OF","CONTAINS"]},"limit":30}
       gql: |
         MATCH (g:Group)-[r:MEMBER_OF|CONTAINS]-(m) WHERE g.id IN [1, 2] RETURN g, r, m LIMIT 30
     logical:
@@ -16,8 +14,6 @@ cases:
 
   - name: A single-id center scans each arm by its own id
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"w","entity":"WorkItem","node_ids":[7]}],"neighbors":{"direction":"both","rel_types":["RELATED_TO","HAS_LABEL"]},"limit":30}
       gql: |
         MATCH (w:WorkItem)-[r:RELATED_TO|HAS_LABEL]-(m) WHERE w.id = 7 RETURN w, r, m LIMIT 30
     logical:
@@ -34,8 +30,6 @@ cases:
 
   - name: An id equality filter on a neighbors center compiles like a pinned id
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"w","entity":"WorkItem","filters":{"id":7}}],"neighbors":{"direction":"both"},"limit":30}
       gql: |
         MATCH (w:WorkItem)-[r]-(m) WHERE w.id = 7 RETURN w, r, m LIMIT 30
     logical:
@@ -55,8 +49,6 @@ cases:
 
   - name: A single-id center records the center and its label for the response
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing"},"limit":10}
       gql: |
         MATCH (u:User {id: 1})-->(n) RETURN u, n LIMIT 10
     physical:
@@ -67,8 +59,6 @@ cases:
 
   - name: A multi-id center records no center and no label
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1,2]}],"neighbors":{"direction":"outgoing"},"limit":10}
       gql: |
         MATCH (u:User)-->(n) WHERE u.id IN [1, 2] RETURN u, n LIMIT 10
     physical:

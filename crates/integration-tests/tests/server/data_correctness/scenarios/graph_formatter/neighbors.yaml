@@ -13,12 +13,9 @@ cases:
   - name: neighbors_both_direction_edges_correct
     description: Both-direction neighbors of a user keep MEMBER_OF edges pointing out of the user
     query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-          "neighbors": {"direction": "both"}
-        }
+      gql: |
+        MATCH (u:User {id: 1})--(neighbor)
+        RETURN u, neighbor
     expect:
       edges:
         MEMBER_OF: [[1, 100], [1, 101]]
@@ -31,12 +28,9 @@ cases:
   - name: neighbors_both_direction_mixed_entity
     description: Both-direction neighbors of an MR keep each edge's true source
     query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000]}],
-          "neighbors": {"direction": "both"}
-        }
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000})--(neighbor)
+        RETURN mr, neighbor
     expect:
       edges:
         AUTHORED: [[1, 2000]]
@@ -52,13 +46,9 @@ cases:
   - name: neighbors_dynamic_columns_all
     description: dynamic_columns star hydrates neighbor group properties
     query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-          "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
-          "options": {"dynamic_columns": "*"}
-        }
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(neighbor)
+        RETURN u, properties(neighbor)
     expect:
       nodes:
         User:
@@ -86,12 +76,9 @@ cases:
           merge_request: []
           note: []
     query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-          "neighbors": {"direction": "outgoing"}
-        }
+      gql: |
+        MATCH (u:User {id: 1})-->(neighbor)
+        RETURN u, neighbor
     expect:
       nodes:
         User:
@@ -105,12 +92,9 @@ cases:
   - name: neighbors_outgoing_exact
     description: Outgoing neighbors of a user are its groups and authored MR, with no path metadata on edges
     query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-          "neighbors": {"direction": "outgoing"}
-        }
+      gql: |
+        MATCH (u:User {id: 1})-->(neighbor)
+        RETURN u, neighbor
     expect:
       nodes:
         User:
@@ -133,12 +117,9 @@ cases:
   - name: neighbors_incoming_exact
     description: Incoming neighbors of group 101 are exactly its two members, with no path metadata on edges
     query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "g", "entity": "Group", "node_ids": [101]}],
-          "neighbors": {"direction": "incoming"}
-        }
+      gql: |
+        MATCH (g:Group {id: 101})<--(neighbor)
+        RETURN g, neighbor
     expect:
       nodes:
         Group:
@@ -157,12 +138,9 @@ cases:
   - name: neighbors_both_exact
     description: Both-direction neighbors of group 100 are its members and project; the parent group is not returned because its edge is stored outside the center's subtree
     query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
-          "neighbors": {"direction": "both"}
-        }
+      gql: |
+        MATCH (g:Group {id: 100})--(neighbor)
+        RETURN g, neighbor
     expect:
       nodes:
         Group:
@@ -185,12 +163,9 @@ cases:
   - name: neighbors_with_rel_types_filter
     description: rel_types AUTHORED keeps only the authored MR and drops group neighbors
     query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-          "neighbors": {"direction": "outgoing", "rel_types": ["AUTHORED"]}
-        }
+      gql: |
+        MATCH (u:User {id: 1})-[:AUTHORED]->(neighbor)
+        RETURN u, neighbor
     expect:
       node_count: 2
       nodes:

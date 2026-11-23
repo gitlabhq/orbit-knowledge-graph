@@ -65,8 +65,8 @@ async fn execute_project_query(db: &TestContext) -> Result<String, PipelineError
     server_extensions.insert(derive_clickhouse_data_model(&ontology));
     server_extensions.insert(Claims::dummy());
     let mut ctx = QueryPipelineContext {
-        frontend: Frontend::JsonDsl,
-        query_json: r#"{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000,1001],"columns":["name"]}],"limit":10}"#.to_string(),
+        frontend: Frontend::Gql,
+        query: "MATCH (p:Project) WHERE p.id IN [1000, 1001] RETURN p{.name} LIMIT 10".to_string(),
         compiled: None,
         ontology,
         security_context: None,

@@ -5,8 +5,6 @@ cases:
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.weight = 3 OR wi.weight = 13)
         RETURN wi.weight LIMIT 10
-    missing_frontends:
-      json: The JSON frontend has no OR.
     security:
       paths:
         - 1/
@@ -25,8 +23,6 @@ cases:
         MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.state = 'closed' OR u.username = 'charlie')
         RETURN wi.id, u.username LIMIT 10
-    missing_frontends:
-      json: The JSON frontend has no OR.
     security:
       paths:
         - 1/
@@ -43,8 +39,6 @@ cases:
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.state = 'closed' OR wi.state = 'opened' AND wi.weight = 13)
         RETURN wi.weight LIMIT 10
-    missing_frontends:
-      json: The JSON frontend has no OR.
     security:
       paths:
         - 1/
@@ -63,8 +57,6 @@ cases:
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.weight = 3 OR wi.weight IS NULL)
         RETURN wi.weight LIMIT 10
-    missing_frontends:
-      json: The JSON frontend has no OR.
     security:
       paths:
         - 1/
@@ -83,8 +75,6 @@ cases:
         MATCH (wi:WorkItem)
         WHERE wi.id = 4000 OR wi.id = 4001
         RETURN wi.state LIMIT 10
-    missing_frontends:
-      json: The JSON frontend has no OR.
     physical:
       clickhouse:
         rejected:
@@ -101,8 +91,6 @@ cases:
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.traversal_path = '1/100/' OR wi.weight = 3)
         RETURN wi.weight LIMIT 10
-    missing_frontends:
-      json: The JSON frontend has no OR.
     physical:
       clickhouse:
         rejected:
@@ -117,8 +105,6 @@ cases:
         MATCH (wi:WorkItem {id: 4000})
         WHERE wi.weight = 0 OR wi.weight = 1 OR wi.weight = 2 OR wi.weight = 3 OR wi.weight = 4 OR wi.weight = 5 OR wi.weight = 6 OR wi.weight = 7 OR wi.weight = 8 OR wi.weight = 9 OR wi.weight = 10 OR wi.weight = 11 OR wi.weight = 12 OR wi.weight = 13 OR wi.weight = 14 OR wi.weight = 15 OR wi.weight = 16
         RETURN wi.weight LIMIT 10
-    missing_frontends:
-      json: The JSON frontend has no OR.
     physical:
       clickhouse:
         rejected:
@@ -133,8 +119,6 @@ cases:
         MATCH (wi:WorkItem {id: 4000})
         WHERE ((((((((((wi.weight = 0 OR wi.iid = 1) OR wi.weight = 2) OR wi.iid = 3) OR wi.weight = 4) OR wi.iid = 5) OR wi.weight = 6) OR wi.iid = 7) OR wi.weight = 8) OR wi.iid = 9) OR wi.weight = 10) OR wi.iid = 11
         RETURN wi.weight LIMIT 10
-    missing_frontends:
-      json: The JSON frontend has no OR.
     physical:
       clickhouse:
         rejected:
@@ -149,8 +133,6 @@ cases:
         MATCH (wi:WorkItem {id: 4000})
         WHERE (((((((((wi.weight = 0 OR wi.iid = 1) OR wi.weight = 2) OR wi.iid = 3) OR wi.weight = 4) OR wi.iid = 5) OR wi.weight = 6) OR wi.iid = 7) OR wi.weight = 8) OR wi.iid = 9) OR wi.weight = 10
         RETURN wi.weight LIMIT 10
-    missing_frontends:
-      json: The JSON frontend has no OR.
     physical:
       clickhouse:
         sql:

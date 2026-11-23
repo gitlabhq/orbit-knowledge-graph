@@ -1,8 +1,6 @@
 cases:
   - name: Pinned wildcard neighbors scan each direction on its own id column and report the side
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","columns":["name"],"node_ids":[100]}],"neighbors":{"direction":"both"}}
       gql: |
         MATCH (g:Group {id: 100})--(n) RETURN n
     logical:
@@ -20,8 +18,6 @@ cases:
 
   - name: Wildcard neighbors scan every edge table that holds a relationship of the center
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"neighbors":{"direction":"both"}}
       gql: |
         MATCH (p:Project {id: 1})--(n) RETURN n
     logical:
@@ -37,8 +33,6 @@ cases:
 
   - name: Filtered neighbors of a node keyed by a redaction id scan the node once per arm without an alias clash
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"f","entity":"File","filters":{"path":{"contains":"labkit"}}}],"neighbors":{"direction":"both"}}
       gql: |
         MATCH (f:File)--(n) WHERE f.path CONTAINS 'labkit' RETURN n
     logical:
@@ -54,8 +48,6 @@ cases:
 
   - name: Wildcard neighbors read only the kinds that leave the center entity
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing"},"limit":10}
       gql: |
         MATCH (u:User {id: 1})-[r]->(m) RETURN u, r, m LIMIT 10
     logical:

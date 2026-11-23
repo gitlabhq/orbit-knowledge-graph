@@ -1,8 +1,6 @@
 cases:
   - name: Local contains folds case on both sides
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","filters":{"path":{"contains":"ALI"}}}],"limit":10}
       gql: |
         MATCH (f:File) WHERE f.path CONTAINS 'ALI' RETURN f LIMIT 10
     logical:
@@ -14,8 +12,6 @@ cases:
 
   - name: Local starts_with folds case on both sides
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","filters":{"path":{"starts_with":"ALI"}}}],"limit":10}
       gql: |
         MATCH (f:File) WHERE f.path STARTS WITH 'ALI' RETURN f LIMIT 10
     logical:
@@ -27,8 +23,6 @@ cases:
 
   - name: Local ends_with folds case on both sides
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","filters":{"path":{"ends_with":"ALI"}}}],"limit":10}
       gql: |
         MATCH (f:File) WHERE f.path ENDS WITH 'ALI' RETURN f LIMIT 10
     logical:

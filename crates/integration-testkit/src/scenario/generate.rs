@@ -91,10 +91,7 @@ fn apply(generator: &Generate, mut case: Value, name: &str) -> Result<Vec<Value>
                     fields.insert("name".into(), format!("{name}: {}", example.name).into());
                     fields.insert(
                         "query".into(),
-                        Value::Object(Map::from_iter([
-                            ("json".into(), example.json.into()),
-                            ("gql".into(), example.gql.into()),
-                        ])),
+                        Value::Object(Map::from_iter([("gql".into(), example.gql.into())])),
                     );
                     generated
                 })
@@ -187,8 +184,7 @@ fn generators_expand_cases_and_reject_misuse() {
     assert!(repeated[0].get("generate").is_none());
     let named = expand(case("generate: {kind: named_queries}"), &all).unwrap();
     assert!(named.len() > 1);
-    assert!(named.iter().all(|case| case["query"]["json"].is_string()
-        && case["query"]["gql"].is_string()
+    assert!(named.iter().all(|case| case["query"]["gql"].is_string()
         && case["name"].as_str().unwrap().starts_with("generated: ")));
     let rows = expand(
         case("generate:\n  - {kind: rows, into: config.extra_seed.gl_note, count: 2, start: 7, row: {id: $i, traversal_path: 1/$i/}}\n  - {kind: rows, into: config.extra_seed.gl_note, count: 1, row: {id: $i}}\n  - {kind: rows, into: config.redaction.allow.project, count: 2, start: 5, row: $i}\nconfig: {extra_seed: {gl_note: [{id: 1}]}}"),

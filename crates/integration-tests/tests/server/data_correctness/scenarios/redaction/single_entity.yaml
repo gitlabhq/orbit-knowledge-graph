@@ -11,12 +11,6 @@ cases:
         allow:
           project: [7100, 7101, 7102, 7103, 7104]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}],
-          "limit": 10
-        }
       gql: |
         MATCH (p:Project) WHERE p.id >= 1 AND p.id <= 10000 RETURN p LIMIT 10
     expect:
@@ -31,12 +25,6 @@ cases:
         allow:
           project: [7100, 7104]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}],
-          "limit": 10
-        }
       gql: |
         MATCH (p:Project) WHERE p.id >= 1 AND p.id <= 10000 RETURN p LIMIT 10
     expect:
@@ -52,14 +40,6 @@ cases:
         allow:
           project: [7100, 7101, 7102, 7103, 7104]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "p", "entity": "Project",
-                     "filters": {"visibility_level": {"in": ["public", "internal"]}}}],
-          "order_by": "p.id",
-          "limit": 50
-        }
       gql: |
         MATCH (p:Project) WHERE p.visibility_level IN ['public', 'internal'] RETURN p ORDER BY p.id LIMIT 50
     expect:
@@ -78,14 +58,6 @@ cases:
         deny:
           project: [7102, 7104]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "p", "entity": "Project",
-                     "filters": {"visibility_level": {"in": ["public", "internal"]}}}],
-          "order_by": "p.id",
-          "limit": 50
-        }
       gql: |
         MATCH (p:Project) WHERE p.visibility_level IN ['public', 'internal'] RETURN p ORDER BY p.id LIMIT 50
     expect:
@@ -103,12 +75,6 @@ cases:
         allow:
           group: [701, 702, 703]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "g", "entity": "Group", "node_ids": [701, 702, 703]}],
-          "limit": 100
-        }
       gql: |
         MATCH (g:Group) WHERE g.id IN [701, 702, 703] RETURN g LIMIT 100
     expect:
@@ -125,12 +91,6 @@ cases:
         deny:
           group: [702]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "g", "entity": "Group", "node_ids": [701, 702, 703]}],
-          "limit": 100
-        }
       gql: |
         MATCH (g:Group) WHERE g.id IN [701, 702, 703] RETURN g LIMIT 100
     expect:
@@ -146,12 +106,6 @@ cases:
         allow:
           user: [1, 2, 3, 4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 2, "end": 4}}],
-          "limit": 100
-        }
       gql: |
         MATCH (u:User) WHERE u.id >= 2 AND u.id <= 4 RETURN u LIMIT 100
     expect:
@@ -166,12 +120,6 @@ cases:
         allow:
           project: [7100, 7101, 7102, 7103, 7104]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "p", "entity": "Project", "node_ids": [7100, 7103]}],
-          "limit": 10
-        }
       gql: |
         MATCH (p:Project) WHERE p.id IN [7100, 7103] RETURN p LIMIT 10
     expect:
@@ -188,12 +136,6 @@ cases:
         deny:
           project: [7103]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "p", "entity": "Project", "node_ids": [7100, 7103]}],
-          "limit": 10
-        }
       gql: |
         MATCH (p:Project) WHERE p.id IN [7100, 7103] RETURN p LIMIT 10
     expect:
@@ -209,15 +151,6 @@ cases:
         allow:
           user: [1, 2, 3, 4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"state": {"eq": "active"},
-                                 "username": {"in": ["alice", "bob", "charlie", "diana"]}}}],
-          "order_by": "u.username",
-          "limit": 100
-        }
       gql: |
         MATCH (u:User) WHERE u.state = 'active' AND u.username IN ['alice', 'bob', 'charlie', 'diana'] RETURN u ORDER BY u.username LIMIT 100
     expect:
@@ -237,15 +170,6 @@ cases:
         deny:
           user: [3, 4]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"state": {"eq": "active"},
-                                 "username": {"in": ["alice", "bob", "charlie", "diana"]}}}],
-          "order_by": "u.username",
-          "limit": 100
-        }
       gql: |
         MATCH (u:User) WHERE u.state = 'active' AND u.username IN ['alice', 'bob', 'charlie', 'diana'] RETURN u ORDER BY u.username LIMIT 100
     expect:
@@ -264,12 +188,6 @@ cases:
         allow:
           user: [1]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "filters": {"state": "active"}}],
-          "limit": 10
-        }
       gql: |
         MATCH (u:User) WHERE u.state = 'active' RETURN u LIMIT 10
     expect:
@@ -286,12 +204,6 @@ cases:
         allow:
           merge_request: [7200, 7201, 7202, 7203]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}}],
-          "limit": 10
-        }
       gql: |
         MATCH (mr:MergeRequest) WHERE mr.id >= 1 AND mr.id <= 10000 RETURN mr LIMIT 10
     expect:
@@ -308,12 +220,6 @@ cases:
         deny:
           merge_request: [7202, 7203]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}}],
-          "limit": 10
-        }
       gql: |
         MATCH (mr:MergeRequest) WHERE mr.id >= 1 AND mr.id <= 10000 RETURN mr LIMIT 10
     expect:
@@ -329,13 +235,6 @@ cases:
         allow:
           user: [1, 2, 3, 4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
-          "order_by": "u.id",
-          "limit": 10
-        }
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u ORDER BY u.id LIMIT 10
     expect:
@@ -352,13 +251,6 @@ cases:
         deny:
           user: [2, 4]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
-          "order_by": "u.id",
-          "limit": 10
-        }
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u ORDER BY u.id LIMIT 10
     expect:
@@ -374,13 +266,6 @@ cases:
         allow:
           user: [1, 2, 3, 4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
-          "order_by": "-u.id",
-          "limit": 10
-        }
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u ORDER BY u.id DESC LIMIT 10
     expect:
@@ -397,13 +282,6 @@ cases:
         deny:
           user: [4, 2]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
-          "order_by": "-u.id",
-          "limit": 10
-        }
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u ORDER BY u.id DESC LIMIT 10
     expect:
@@ -423,12 +301,6 @@ cases:
         allow:
           project: [7100, 7101]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "w", "entity": "AgentSession", "id_range": {"start": 1, "end": 10000}}],
-          "limit": 10
-        }
       gql: |
         MATCH (w:AgentSession) WHERE w.id >= 1 AND w.id <= 10000 RETURN w LIMIT 10
     expect:
@@ -449,12 +321,6 @@ cases:
         deny:
           project: [7101]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "w", "entity": "AgentSession", "id_range": {"start": 1, "end": 10000}}],
-          "limit": 10
-        }
       gql: |
         MATCH (w:AgentSession) WHERE w.id >= 1 AND w.id <= 10000 RETURN w LIMIT 10
     expect:

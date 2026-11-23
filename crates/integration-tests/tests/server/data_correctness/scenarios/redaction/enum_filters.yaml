@@ -11,11 +11,8 @@ cases:
         allow:
           user: [1, 2, 3, 4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 0}}]
-        }
+      gql: |
+        MATCH (u:User {user_type: 0}) RETURN u{.user_type}
     expect:
       node_count: 3
       nodes:
@@ -34,11 +31,8 @@ cases:
         allow:
           user: [1, 2, 3, 4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 6}}]
-        }
+      gql: |
+        MATCH (u:User {user_type: 6}) RETURN u{.user_type}
     expect:
       node_count: 1
       nodes:
@@ -53,11 +47,8 @@ cases:
         allow:
           merge_request: [7200, 7201, 7202, 7203]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 1}}]
-        }
+      gql: |
+        MATCH (mr:MergeRequest {state: 1}) RETURN mr{.state}
     expect:
       node_count: 2
       nodes:
@@ -75,11 +66,8 @@ cases:
         allow:
           merge_request: [7200, 7201, 7202, 7203]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 3}}]
-        }
+      gql: |
+        MATCH (mr:MergeRequest {state: 3}) RETURN mr{.state}
     expect:
       node_count: 1
       nodes:
@@ -94,11 +82,8 @@ cases:
         allow:
           merge_request: [7200, 7201, 7202, 7203]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": [1, 2]}}}]
-        }
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.state IN [1, 2] RETURN mr
     expect:
       node_count: 3
       nodes:
@@ -113,11 +98,6 @@ cases:
         allow:
           user: [1, 2, 3, 4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "columns": ["state"], "filters": {"state": "active"}}]
-        }
       gql: |
         MATCH (u:User) WHERE u.state = 'active' RETURN u.state
     expect:
@@ -139,11 +119,6 @@ cases:
         allow:
           user: [1, 2, 3, 4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "filters": {"state": "blocked"}}]
-        }
       gql: |
         MATCH (u:User) WHERE u.state = 'blocked' RETURN u
     expect:
@@ -160,11 +135,6 @@ cases:
         allow:
           user: [1, 2, 3, 4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "filters": {"state": {"in": ["active", "blocked"]}}}]
-        }
       gql: |
         MATCH (u:User) WHERE u.state IN ['active', 'blocked'] RETURN u
     expect:

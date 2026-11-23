@@ -3,8 +3,6 @@ cases:
     query:
       gql: |
         MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED]->(u:User) RETURN mr, u
-    missing_frontends:
-      json: JSON relationships do not validate the declared direction.
     physical:
       clickhouse:
         rejected:
@@ -16,8 +14,6 @@ cases:
     query:
       gql: |
         MATCH (u:User)<-[a:AUTHORED]-(mr:MergeRequest {project_id: 1}) RETURN count(mr)
-    missing_frontends:
-      json: JSON relationships do not validate the declared direction.
     physical:
       clickhouse:
         rejected:
@@ -29,8 +25,6 @@ cases:
     query:
       gql: |
         MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED]->(p:Project) RETURN mr, p
-    missing_frontends:
-      json: JSON relationships do not validate the declared direction.
     physical:
       clickhouse:
         rejected:
@@ -42,8 +36,6 @@ cases:
     query:
       gql: |
         MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED|CLOSES]->(u:User) RETURN mr, u
-    missing_frontends:
-      json: JSON relationships do not validate the declared direction.
     physical:
       clickhouse:
         rejected:
@@ -55,8 +47,6 @@ cases:
     query:
       gql: |
         MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED|CLOSES]->(p:Project) RETURN mr, p
-    missing_frontends:
-      json: JSON relationships do not validate the declared direction.
     physical:
       clickhouse:
         rejected:
@@ -68,8 +58,6 @@ cases:
     query:
       gql: |
         MATCH (p:Project {id: 1})<-[IN_PROJECT]-(mr:MergeRequest) RETURN count(mr)
-    missing_frontends:
-      json: JSON relationships do not validate the declared direction.
     physical:
       clickhouse:
         rejected:
@@ -81,8 +69,6 @@ cases:
     query:
       gql: |
         MATCH (mr:MergeRequest {id: 1})-[IN_MILESTONE]->(m) RETURN m
-    missing_frontends:
-      json: JSON relationships do not validate the declared direction.
     physical:
       clickhouse:
         rejected:
@@ -94,8 +80,6 @@ cases:
     query:
       gql: |
         MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {project_id: 1}) RETURN mr, u
-    missing_frontends:
-      json: The source test supplies only GQL.
     logical:
       expect: ["(EdgeScan AUTHORED u->mr AS e0)"]
     physical:
@@ -105,8 +89,6 @@ cases:
     query:
       gql: |
         MATCH (mr:MergeRequest {project_id: 1})<-[:AUTHORED]-(u:User) RETURN count(mr)
-    missing_frontends:
-      json: The source test supplies only GQL.
     logical:
       expect: ["(EdgeScan AUTHORED u->mr AS e0)"]
     physical:
@@ -116,8 +98,6 @@ cases:
     query:
       gql: |
         MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED|IN_PROJECT]->(p:Project) RETURN mr, p
-    missing_frontends:
-      json: The source test supplies only GQL.
     logical:
       expect: ["(EdgeScan AUTHORED|IN_PROJECT mr->p AS e0)"]
     physical:
@@ -127,8 +107,6 @@ cases:
     query:
       gql: |
         MATCH (g:Group {id: 1})-[:CONTAINS*1..2]->(p:Project) RETURN p
-    missing_frontends:
-      json: The source test supplies only GQL.
     logical:
       expect: ["(EdgeScan CONTAINS g->p AS e0 HOPS 1..2)"]
     physical:
@@ -138,8 +116,6 @@ cases:
     query:
       gql: |
         MATCH (p:Project {id: 1})<-[r]-(mr:MergeRequest) RETURN count(mr)
-    missing_frontends:
-      json: The source test supplies only GQL.
     logical:
       expect: ["(EdgeScan IN_PROJECT|SOURCE_PROJECT mr->p AS e0)"]
     physical:
@@ -149,8 +125,6 @@ cases:
     query:
       gql: |
         MATCH (p:Project {id: 1})<-[R]-(mr:MergeRequest) RETURN count(mr)
-    missing_frontends:
-      json: The source test supplies only GQL.
     logical:
       expect: ["(EdgeScan IN_PROJECT|SOURCE_PROJECT mr->p AS e0)"]
     physical:
@@ -160,20 +134,7 @@ cases:
     query:
       gql: |
         MATCH (mr:MergeRequest {id: 1})-[:IN_MILESTONE]->(m) RETURN m
-    missing_frontends:
-      json: The source test supplies only GQL.
     logical:
       expect: ["(Input neighbors (...))"]
-    physical:
-      clickhouse: {}
-
-  - name: JSON accepts a relationship against the declared direction
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"u","entity":"User"}],"relationships":[{"type":"AUTHORED","from":"mr","to":"u"}]}
-    missing_frontends:
-      gql: GQL rejects the reversed arrow, as the first case shows.
-    logical:
-      expect: ["(EdgeScan AUTHORED mr->u AS e0)"]
     physical:
       clickhouse: {}

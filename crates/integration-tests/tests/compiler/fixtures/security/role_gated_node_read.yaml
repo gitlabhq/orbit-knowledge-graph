@@ -3,8 +3,6 @@ name: A role-gated entity keeps its node read under a covered filter
 security: { admin: true, access_level: 50 }
 
 query:
-  json: |
-    {"query_type":"aggregation","nodes":[{"id":"v","entity":"Vulnerability","filters":{"state":{"eq":"detected"}}},{"id":"proj","entity":"Project","node_ids":[1]}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"proj","filters":{"source_id":7}}],"group_by":["proj"],"aggregations":[{"count":"v","as":"n"}],"limit":10}
   gql: |
     MATCH (v:Vulnerability {state: 'detected'})-[r:IN_PROJECT]->(proj:Project {id: 1}) WHERE r.source_id = 7 RETURN proj, count(v) AS n LIMIT 10
 

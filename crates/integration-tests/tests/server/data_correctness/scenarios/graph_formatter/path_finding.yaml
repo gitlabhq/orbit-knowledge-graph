@@ -13,15 +13,9 @@ cases:
   - name: path_finding_exact_path
     description: The shortest User to Project path goes through Group 100 with sequential steps and no internal path column
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
+        RETURN p
     expect:
       node_count: 3
       nodes:
@@ -49,15 +43,9 @@ cases:
           merge_request: []
           note: []
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
+        RETURN p
     expect:
       node_count: 0
       total_edge_count: 0
@@ -65,15 +53,9 @@ cases:
   - name: path_finding_max_depth_too_short
     description: The two-hop path from user 1 to project 1000 is not found with max_depth 1
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..1]->(`end`:Project {id: 1000})
+        RETURN p
     expect:
       node_count: 0
       total_edge_count: 0
@@ -81,15 +63,9 @@ cases:
   - name: path_finding_max_depth_reaches
     description: The same two-hop path is found with max_depth 2
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..2]->(`end`:Project {id: 1000})
+        RETURN p
     expect:
       path_count: 1
       path_destinations: { Project: [1000] }
@@ -100,14 +76,8 @@ cases:
   - name: path_finding_with_rel_types
     description: The project is unreachable with only MEMBER_OF edges
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF"]}
-        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF*1..3]->(`end`:Project {id: 1000})
+        RETURN p
     expect:
       node_count: 0

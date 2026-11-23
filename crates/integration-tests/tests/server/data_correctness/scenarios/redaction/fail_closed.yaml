@@ -5,12 +5,6 @@ config:
   seed: redaction
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
-      "limit": 10
-    }
   gql: |
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u LIMIT 10
 
@@ -62,13 +56,6 @@ cases:
     config:
       redaction: none
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                     "columns": ["username", "name", "state"]}],
-          "limit": 10
-        }
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.name, u.state LIMIT 10
     expect:
@@ -80,13 +67,6 @@ cases:
         allow:
           user: [1, 2, 3, 4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                     "columns": ["username", "name", "state"]}],
-          "limit": 10
-        }
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.name, u.state LIMIT 10
     expect:
@@ -101,12 +81,6 @@ cases:
         allow:
           user: [1, 2, 3, 4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "filters": {"username": "nonexistent"}}],
-          "limit": 10
-        }
       gql: |
         MATCH (u:User) WHERE u.username = 'nonexistent' RETURN u LIMIT 10
     expect:
@@ -118,13 +92,6 @@ cases:
         allow:
           user: [1, 2, 3, 4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"username": {"eq": "definitely_does_not_exist_12345"}}}],
-          "limit": 10
-        }
       gql: |
         MATCH (u:User) WHERE u.username = 'definitely_does_not_exist_12345' RETURN u LIMIT 10
     expect:
@@ -136,12 +103,6 @@ cases:
         allow:
           group: [701, 702, 703]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
-          "limit": 100
-        }
       gql: |
         MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g LIMIT 100
     expect:
@@ -154,12 +115,6 @@ cases:
     config:
       redaction: none
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
-          "limit": 100
-        }
       gql: |
         MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g LIMIT 100
     expect:

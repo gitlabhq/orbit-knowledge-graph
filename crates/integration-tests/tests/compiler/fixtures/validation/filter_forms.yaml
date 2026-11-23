@@ -4,8 +4,6 @@ physical:
 cases:
   - name: Operator objects normalize like GQL comparisons and IN lists
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"created_at":{"gte":"2024-01-01"},"state":{"in":["active","blocked"]}}}]}
       gql: |
         MATCH (u:User) WHERE u.created_at >= '2024-01-01' AND u.state IN ['active', 'blocked'] RETURN u
     logical:
@@ -13,8 +11,6 @@ cases:
 
   - name: An array of operator objects bounds one property and a bare value stays an equality
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"created_at":[{"gte":"2026-04-01T00:00:00Z"},{"lt":"2026-05-01T00:00:00Z"}],"state":"merged"}}]}
       gql: |
         MATCH (mr:MergeRequest) WHERE mr.created_at >= '2026-04-01T00:00:00Z' AND mr.created_at < '2026-05-01T00:00:00Z' AND mr.state = 'merged' RETURN mr
     logical:
@@ -26,8 +22,6 @@ cases:
 
   - name: Several keys in one operator object combine with AND
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"created_at":{"gte":"2026-04-01","lt":"2026-05-01"}}}]}
       gql: |
         MATCH (mr:MergeRequest) WHERE mr.created_at >= '2026-04-01' AND mr.created_at < '2026-05-01' RETURN mr
     logical:
@@ -35,8 +29,6 @@ cases:
 
   - name: A false nullability operator selects the opposite null check
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"merged_at":{"is_null":true},"latest_closed_at":{"is_null":false},"created_at":{"is_not_null":false}}}]}
       gql: |
         MATCH (mr:MergeRequest) WHERE mr.merged_at IS NULL AND mr.latest_closed_at IS NOT NULL AND mr.created_at IS NULL RETURN mr
     logical:

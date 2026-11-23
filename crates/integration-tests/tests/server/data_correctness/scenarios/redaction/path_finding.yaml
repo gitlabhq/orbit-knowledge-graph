@@ -13,15 +13,6 @@ cases:
           group: [701, 702, 703]
           project: [7100, 7101, 7102, 7103, 7104]
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [7100]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 7100}) RETURN p
     expect:
@@ -41,15 +32,6 @@ cases:
     config:
       redaction: none
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [7100]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 7100}) RETURN p
     expect:
@@ -65,15 +47,6 @@ cases:
         deny:
           user: [1]
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [7100]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 7100}) RETURN p
     expect:
@@ -89,15 +62,6 @@ cases:
         deny:
           group: [701, 702, 703]
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [7100]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 7100}) RETURN p
     expect:
@@ -112,15 +76,6 @@ cases:
           group: [701, 702, 703]
           project: [7100, 7101, 7102, 7103, 7104]
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [7100, 7102, 7104]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [7100, 7102, 7104] RETURN p
     expect:
@@ -143,15 +98,6 @@ cases:
         deny:
           group: [703]
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [7100, 7102, 7104]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [7100, 7102, 7104] RETURN p
     expect:
@@ -180,15 +126,6 @@ cases:
         deny:
           group: [703]
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [7100, 7102, 7104]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [7100, 7102, 7104] RETURN p
     expect:
@@ -211,15 +148,6 @@ cases:
           group: [701, 702, 703]
           project: [7100, 7101, 7102, 7103, 7104]
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1, 2]},
-            {"id": "end", "entity": "Project", "node_ids": [7100, 7102]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User)-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE start.id IN [1, 2] AND `end`.id IN [7100, 7102] RETURN p
     expect:
@@ -250,15 +178,6 @@ cases:
           group: [701, 702, 703]
           project: [7100, 7101, 7102, 7103, 7104]
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [7100, 7102]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [7100, 7102] RETURN p
     expect:
@@ -279,15 +198,6 @@ cases:
         deny:
           project: [7102]
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [7100, 7102]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [7100, 7102] RETURN p
     expect:
@@ -311,15 +221,6 @@ cases:
         deny:
           project: [7102]
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [7100, 7102]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [7100, 7102] RETURN p
     expect:
@@ -341,15 +242,6 @@ cases:
           group: [701, 702, 703]
           project: [7100, 7101, 7102, 7103, 7104]
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1, 2]},
-            {"id": "end", "entity": "Project", "node_ids": [7100]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User)-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 7100}) WHERE start.id IN [1, 2] RETURN p
     expect:
@@ -376,15 +268,6 @@ cases:
         deny:
           user: [2]
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1, 2]},
-            {"id": "end", "entity": "Project", "node_ids": [7100]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User)-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 7100}) WHERE start.id IN [1, 2] RETURN p
     expect:
@@ -404,15 +287,6 @@ cases:
           group: [701, 702, 703]
           project: [7100, 7101, 7102, 7103, 7104]
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [99999]},
-            {"id": "end", "entity": "Project", "node_ids": [99999]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User {id: 99999})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 99999}) RETURN p
     expect:

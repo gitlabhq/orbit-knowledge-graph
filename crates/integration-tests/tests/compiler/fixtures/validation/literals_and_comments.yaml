@@ -2,46 +2,36 @@ physical:
   clickhouse: {}
 
 cases:
-  - name: Comments, lowercase keywords, a hex id, and a trailing semicolon normalize like JSON
+  - name: Comments, lowercase keywords, a hex id, and a trailing semicolon normalize
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[16]}]}
       gql: |
         /* MATCH nothing */ match(u:User {id: 0x10}) return u; // done
     logical:
       expect: ["(Filter u.id IN [16] (NodeScan User AS u))"]
 
-  - name: An octal id normalizes like JSON
+  - name: An octal id normalizes
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[8]}]}
       gql: |
         MATCH (u:User {id: 0o10}) RETURN u
     logical:
       expect: ["(Filter u.id IN [8] (NodeScan User AS u))"]
 
-  - name: The smallest 64-bit id normalizes like JSON
+  - name: The smallest 64-bit id normalizes
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[-9223372036854775808]}]}
       gql: |
         MATCH (u:User {id: -9223372036854775808}) RETURN u
     logical:
       expect: ["(Filter u.id IN [-9223372036854775808] (NodeScan User AS u))"]
 
-  - name: String escapes and a surrogate pair decode like JSON
+  - name: String escapes and a surrogate pair decode
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"a'b\\c\n😀"}}]}
       gql: |
         MATCH (`u`:User {username: 'a\'b\\c\n\uD83D\uDE00'}) RETURN u
     logical:
       expect: ["(Filter u.username = 'a\\'b\\\\c\n😀' (NodeScan User AS u))"]
 
-  - name: A date() call normalizes like a JSON date string
+  - name: A date() call normalizes to a date string
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"created_at":{"gte":"2024-01-01"}}}]}
       gql: |
         MATCH (u:User) WHERE u.created_at >= date('2024-01-01') RETURN u
     logical:
@@ -49,8 +39,6 @@ cases:
 
   - name: DEBUG inside a string literal stays a bound value
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"DEBUG"}}]}
       gql: |
         MATCH (u:User {username: 'DEBUG'}) RETURN u
     logical:
@@ -62,8 +50,6 @@ cases:
 
   - name: An escaped quote cannot end a literal and turn on DEBUG
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"x' RETURN u DEBUG //"}}]}
       gql: |
         MATCH (u:User {username: 'x\' RETURN u DEBUG //'}) RETURN u
     logical:
@@ -75,8 +61,6 @@ cases:
 
   - name: A unicode-escaped quote cannot end a literal and turn on DEBUG
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"' RETURN u DEBUG //"}}]}
       gql: |
         MATCH (u:User {username: '\u0027 RETURN u DEBUG //'}) RETURN u
     logical:
@@ -88,8 +72,6 @@ cases:
 
   - name: SQL inside a double-quoted literal stays a bound value
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"'; DROP TABLE gl_user; --"}}]}
       gql: |
         MATCH (u:User {username: "'; DROP TABLE gl_user; --"}) RETURN u
     logical:
@@ -103,8 +85,6 @@ cases:
     query:
       gql: |
         MATCH (u:User {username: 'DEBUG'}) RETURN u /* DEBUG */
-    missing_frontends:
-      json: JSON has no comments.
     logical:
       expect: ["(Input traversal (...))"]
     physical:
@@ -116,8 +96,6 @@ cases:
     query:
       gql: |
         MATCH (u:User {username: 'DEBUG'}) RETURN u // DEBUG
-    missing_frontends:
-      json: JSON has no comments.
     logical:
       expect: ["(Input traversal (...))"]
     physical:
@@ -129,8 +107,6 @@ cases:
     query:
       gql: |
         MATCH (u:User {username: 'x\' RETURN u DEBUG //'}) RETURN u /* DEBUG */
-    missing_frontends:
-      json: JSON has no comments.
     logical:
       expect: ["(Input traversal (...))"]
     physical:
@@ -142,8 +118,6 @@ cases:
     query:
       gql: |
         MATCH (u:User {username: 'x\' RETURN u DEBUG //'}) RETURN u // DEBUG
-    missing_frontends:
-      json: JSON has no comments.
     logical:
       expect: ["(Input traversal (...))"]
     physical:
@@ -155,8 +129,6 @@ cases:
     query:
       gql: |
         MATCH (u:User {username: '\u0027 RETURN u DEBUG //'}) RETURN u /* DEBUG */
-    missing_frontends:
-      json: JSON has no comments.
     logical:
       expect: ["(Input traversal (...))"]
     physical:
@@ -168,8 +140,6 @@ cases:
     query:
       gql: |
         MATCH (u:User {username: '\u0027 RETURN u DEBUG //'}) RETURN u // DEBUG
-    missing_frontends:
-      json: JSON has no comments.
     logical:
       expect: ["(Input traversal (...))"]
     physical:
@@ -181,8 +151,6 @@ cases:
     query:
       gql: |
         MATCH (u:User {username: "'; DROP TABLE gl_user; --"}) RETURN u /* DEBUG */
-    missing_frontends:
-      json: JSON has no comments.
     logical:
       expect: ["(Input traversal (...))"]
     physical:
@@ -194,8 +162,6 @@ cases:
     query:
       gql: |
         MATCH (u:User {username: "'; DROP TABLE gl_user; --"}) RETURN u // DEBUG
-    missing_frontends:
-      json: JSON has no comments.
     logical:
       expect: ["(Input traversal (...))"]
     physical:

@@ -1,8 +1,6 @@
 cases:
   - name: Aggregate functions, a property group, and a measure sort normalize alike
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"u","entity":"Note","node_ids":[1,2]}],"group_by":[{"key":"u.confidential","as":"confidential"}],"aggregations":[{"count":"u","as":"n"},{"sum":"u.id"},{"avg":"u.id"},{"min":"u.created_at"},{"max":"u.created_at"}],"aggregation_sort":"-n","limit":10}
       gql: |
         MATCH (u:Note) WHERE u.id IN [1, 2] RETURN u.confidential AS confidential, count(u) AS n, sum(u.id), avg(u.id), min(u.created_at), max(u.created_at) ORDER BY n DESC LIMIT 10
     logical:
@@ -12,8 +10,6 @@ cases:
 
   - name: Null predicates and all properties normalize alike
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":"*","filters":{"created_at":{"is_not_null":true},"state":{"is_null":true}}}]}
       gql: |
         MATCH (u:User) WHERE u.created_at IS NOT NULL AND u.state IS NULL RETURN properties(u)
     logical:
@@ -23,8 +19,6 @@ cases:
 
   - name: Repeated node projections merge regardless of property order
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username","name"]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":[{"key":"u","as":"author"},{"key":"u","as":"owner"}],"aggregations":[{"count":"mr","as":"mr_count"}]}
       gql: |
         MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u{.username, .name} AS author, u{.name, .username} AS owner, count(mr) AS mr_count
     logical:
@@ -34,8 +28,6 @@ cases:
 
   - name: Repeated node projections in the same property order merge
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username","name"]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":[{"key":"u","as":"author"},{"key":"u","as":"owner"}],"aggregations":[{"count":"mr","as":"mr_count"}]}
       gql: |
         MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u{.username, .name} AS author, u{.username, .name} AS owner, count(mr) AS mr_count
     logical:
@@ -45,8 +37,6 @@ cases:
 
   - name: Grouping a node by its projected properties groups by the node identity
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"f","entity":"File","node_ids":[1,2],"columns":["id","content"]}],"group_by":["f"],"aggregations":[{"count":"f","as":"total"}],"limit":5}
       gql: |
         MATCH (f:File) WHERE f.id IN [1, 2] RETURN f{.id, .content}, count(f) AS total LIMIT 5
     logical:
@@ -58,8 +48,6 @@ cases:
 
   - name: Unaliased measures derive their output names from the function and target
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1,2]}],"aggregations":[{"count":"mr"},{"avg":"mr.added_lines"},{"max":"mr.removed_lines","as":"biggest"}]}
       gql: |
         MATCH (mr:MergeRequest) WHERE mr.id IN [1, 2] RETURN count(mr), avg(mr.added_lines), max(mr.removed_lines) AS biggest
     logical:
@@ -69,8 +57,6 @@ cases:
 
   - name: Group keys derive their output names from the node, property, and bucket unless aliased
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":["u","mr.state",{"key":"mr.created_at","truncate":"month"},{"key":"mr.target_branch","as":"branch"}],"aggregations":[{"count":"mr","as":"count"}]}
       gql: |
         MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u, mr.state, date_trunc('month', mr.created_at), mr.target_branch AS branch, count(mr) AS count
     logical:
@@ -80,8 +66,6 @@ cases:
 
   - name: An omitted limit and omitted columns use the default page size and default properties
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"admin"}}]}
       gql: |
         MATCH (u:User) WHERE u.username = 'admin' RETURN u
     logical:
@@ -96,8 +80,6 @@ cases:
 
   - name: Each traversal node keeps its own property list or all properties
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"p","entity":"Project","columns":"*"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}]}
       gql: |
         MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) RETURN u.username, properties(p)
     logical:
@@ -109,8 +91,6 @@ cases:
 
   - name: A property alias used as the sort key is ignored
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["iid"]},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"order_by":"mr.iid","limit":5}
       gql: |
         MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p AS project ORDER BY number LIMIT 5
     logical:
@@ -123,8 +103,6 @@ cases:
 
   - name: A property alias is ignored when the sort names the property
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["iid"]},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"order_by":"mr.iid","limit":5}
       gql: |
         MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p AS project ORDER BY mr.iid LIMIT 5
     logical:
@@ -137,8 +115,6 @@ cases:
 
   - name: A map projection alias is ignored with a descending alias sort
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["iid"]},{"id":"p","entity":"Project","node_ids":[1],"columns":["full_path"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"order_by":"-mr.iid","limit":5}
       gql: |
         MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p{.full_path} AS project ORDER BY number DESC LIMIT 5
     logical:
@@ -153,8 +129,6 @@ cases:
     query:
       gql: |
         MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number ORDER BY number SKIP 5 LIMIT 5
-    missing_frontends:
-      json: JSON has no SKIP.
     logical:
       expect: ["(Sort mr.iid (_))", "(Offset 5 (_))", "(Limit 5 (_))"]
     physical:
@@ -165,8 +139,6 @@ cases:
 
   - name: An alias on a neighbors center is ignored
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"direction":"outgoing"}}
       gql: |
         MATCH (center:WorkItem {id: 1})-->(n) RETURN center AS item, n
     logical:

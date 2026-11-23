@@ -1,8 +1,6 @@
 name: Bidirectional shortest paths concatenate typed node tuples from both frontiers
 
 query:
-  json: |
-    {"query_type":"path_finding","nodes":[{"id":"start","entity":"Project","columns":["name"],"node_ids":[100]},{"id":"end","entity":"Project","columns":["name"],"node_ids":[200]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["CONTAINS"]}}
   gql: |
     MATCH p = ANY SHORTEST (start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}) RETURN p
 

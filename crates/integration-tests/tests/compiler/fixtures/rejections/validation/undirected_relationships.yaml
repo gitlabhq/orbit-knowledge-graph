@@ -1,5 +1,3 @@
-missing_frontends:
-  json: JSON relationships always name a direction.
 
 physical:
   clickhouse:

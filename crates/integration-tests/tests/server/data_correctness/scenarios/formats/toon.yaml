@@ -30,15 +30,11 @@ cases:
   - name: traversal_groups_nodes_by_type_into_tables
     description: A traversal encodes one TOON table per node type and one edge table
     query:
-      json: |
-        {"query_type": "traversal",
-         "nodes": [
-           {"id": "u", "entity": "User", "columns": ["username", "name"]},
-           {"id": "g", "entity": "Group", "node_ids": [500]}
-         ],
-         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-         "order_by": "u.id",
-         "limit": 10}
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 500})
+        RETURN u{.username, .name}, g{.id}
+        ORDER BY u.id
+        LIMIT 10
     expect:
       node_count: 4
       nodes:
@@ -69,10 +65,11 @@ cases:
   - name: empty_result_omits_nodes_and_edges
     description: An empty result encodes no node or edge tables
     query:
-      json: |
-        {"query_type": "traversal",
-         "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 99000, "end": 99999}, "columns": ["username"]}],
-         "limit": 10}
+      gql: |
+        MATCH (u:User)
+        WHERE u.id >= 99000 AND u.id <= 99999
+        RETURN u{.username}
+        LIMIT 10
     expect:
       node_count: 0
       format:
@@ -83,10 +80,8 @@ cases:
   - name: quoted_strings_round_trip
     description: A string with double quotes decodes to the same value
     query:
-      json: |
-        {"query_type": "traversal",
-         "nodes": [{"id": "u", "entity": "User", "node_ids": [502], "columns": ["name"]}],
-         "limit": 1}
+      gql: |
+        MATCH (u:User {id: 502}) RETURN u{.name} LIMIT 1
     expect:
       nodes:
         User:
@@ -103,10 +98,8 @@ cases:
   - name: escaped_strings_round_trip
     description: A title with a newline and a tab decodes to the same text
     query:
-      json: |
-        {"query_type": "traversal",
-         "nodes": [{"id": "m", "entity": "MergeRequest", "node_ids": [5001], "columns": ["title"]}],
-         "limit": 1}
+      gql: |
+        MATCH (m:MergeRequest {id: 5001}) RETURN m{.title} LIMIT 1
     expect:
       nodes:
         MergeRequest:
@@ -123,11 +116,12 @@ cases:
   - name: booleans_round_trip
     description: Boolean columns decode as booleans, and a null boolean decodes as null
     query:
-      json: |
-        {"query_type": "traversal",
-         "nodes": [{"id": "n", "entity": "Note", "node_ids": [5100, 5101], "columns": ["note", "internal", "confidential"]}],
-         "order_by": "n.id",
-         "limit": 10}
+      gql: |
+        MATCH (n:Note)
+        WHERE n.id IN [5100, 5101]
+        RETURN n{.note, .internal, .confidential}
+        ORDER BY n.id
+        LIMIT 10
     expect:
       nodes:
         Note: { order: [5100, 5101] }
@@ -142,10 +136,9 @@ cases:
   - name: path_edges_carry_path_and_step
     description: Path-finding edges carry the path id and the step
     query:
-      json: |
-        {"query_type": "path_finding",
-         "nodes": [{"id": "u", "entity": "User", "node_ids": [501]}, {"id": "g", "entity": "Group", "node_ids": [500]}],
-         "path": {"type": "shortest", "from": "u", "to": "g", "max_depth": 2, "rel_types": ["MEMBER_OF"]}}
+      gql: |
+        MATCH p = ANY SHORTEST (u:User {id: 501})-[:MEMBER_OF*1..2]->(g:Group {id: 500})
+        RETURN p
     expect:
       path_count: 1
       format:
@@ -158,16 +151,10 @@ cases:
   - name: aggregation_lifts_group_nodes_and_references_them_by_id
     description: An aggregation grouped by a node lists the group nodes and references them by id in the rows
     query:
-      json: |
-        {"query_type": "aggregation",
-         "nodes": [
-           {"id": "g", "entity": "Group", "node_ids": [500], "columns": ["name"]},
-           {"id": "u", "entity": "User"}
-         ],
-         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-         "group_by": ["g"],
-         "aggregations": [{"count": "u", "as": "user_count"}],
-         "limit": 10}
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 500})
+        RETURN g{.name}, count(u) AS user_count
+        LIMIT 10
     expect:
       groups:
         g:
@@ -187,13 +174,10 @@ cases:
   - name: aggregation_by_property_emits_scalar_rows
     description: An aggregation grouped by a property has no node tables
     query:
-      json: |
-        {"query_type": "aggregation",
-         "nodes": [{"id": "g", "entity": "Group", "node_ids": [500]}, {"id": "u", "entity": "User"}],
-         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-         "group_by": ["u.state"],
-         "aggregations": [{"count": "u", "as": "user_count"}],
-         "limit": 10}
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 500})
+        RETURN u.state, count(u) AS user_count
+        LIMIT 10
     expect:
       row_values:
         - { u_state: active, user_count: 3 }
@@ -207,12 +191,10 @@ cases:
   - name: aggregation_without_groups_emits_one_row
     description: An aggregation without a group key has no group columns
     query:
-      json: |
-        {"query_type": "aggregation",
-         "nodes": [{"id": "g", "entity": "Group", "node_ids": [500]}, {"id": "u", "entity": "User"}],
-         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-         "aggregations": [{"count": "u", "as": "total"}],
-         "limit": 1}
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 500})
+        RETURN count(u) AS total
+        LIMIT 1
     expect:
       row_values:
         - { total: 3 }

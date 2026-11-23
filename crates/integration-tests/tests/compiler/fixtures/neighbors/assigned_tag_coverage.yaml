@@ -1,8 +1,6 @@
 name: ASSIGNED neighbor filters use writer-provided source tags
 
 query:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[99000],"filters":{"user_type":"human"}}],"neighbors":{"direction":"outgoing","rel_types":["ASSIGNED"]}}
   gql: |
     MATCH (u:User {id: 99000, user_type: 'human'})-[:ASSIGNED]->(neighbor)
     RETURN neighbor

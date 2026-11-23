@@ -169,7 +169,7 @@ A file can hold several fixtures in a `cases` list. Every other top-level key
 is a default for each case, and each case needs its own `name`.
 
 A case with `generate` expands before it runs. `kind: named_queries` makes one
-case per embedded named query. Each case renders the query in JSON and GQL with
+case per embedded named query. Each case renders the query in GQL with
 its example parameters, keeps every other key of the case, and appends the
 query name to the case name. `kind: repeat` replaces `placeholder` in every
 string of the case with `repeat` repeated `count` times and then `suffix`, the

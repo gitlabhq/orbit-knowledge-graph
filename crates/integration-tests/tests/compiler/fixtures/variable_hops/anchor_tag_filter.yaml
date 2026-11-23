@@ -1,8 +1,6 @@
 name: A variable-hop union projects edge tags and filters the anchor by its tags
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"a","entity":"Pipeline","filters":{"source":{"eq":"push"}},"columns":["iid"]},{"id":"b","entity":"Pipeline","columns":["iid"]}],"relationships":[{"type":"CHILD_OF","from":"a","to":"b","hops":[1,2]}],"limit":50}
   gql: |
     MATCH (a:Pipeline {source: 'push'})-[:CHILD_OF*1..2]->(b:Pipeline) RETURN a.iid, b.iid LIMIT 50
 

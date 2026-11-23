@@ -9,8 +9,6 @@ cases:
   - name: name_ends_with
     description: An ends_with filter keeps the definitions whose name has the suffix
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[12000,12001,12002],"columns":["name"],"filters":{"name":{"ends_with":"query"}}}],"limit":10}
       gql: |
         MATCH (d:Definition) WHERE d.id IN [12000, 12001, 12002] AND d.name ENDS WITH 'query' RETURN d.name LIMIT 10
     expect:

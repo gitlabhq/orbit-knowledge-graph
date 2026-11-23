@@ -11,13 +11,6 @@ cases:
         allow:
           user: [1, 2, 3, 4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                     "columns": ["username", "state"]}],
-          "limit": 10
-        }
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.state LIMIT 10
     expect:
@@ -35,13 +28,6 @@ cases:
         deny:
           user: [4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                     "columns": ["username", "state"]}],
-          "limit": 10
-        }
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.state LIMIT 10
     expect:
@@ -61,13 +47,6 @@ cases:
         allow:
           group: [701, 702, 703]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000},
-                     "columns": "*"}],
-          "limit": 10
-        }
       gql: |
         MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN properties(g) LIMIT 10
     expect:
@@ -86,13 +65,6 @@ cases:
         deny:
           group: [702, 703]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000},
-                     "columns": "*"}],
-          "limit": 10
-        }
       gql: |
         MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN properties(g) LIMIT 10
     expect:
@@ -113,12 +85,6 @@ cases:
         deny:
           user: [3, 4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
-          "limit": 10
-        }
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u LIMIT 10
     expect:
@@ -140,20 +106,6 @@ cases:
           group: [702, 703]
           project: [7101, 7102, 7103, 7104]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            {"id": "g", "entity": "Group", "columns": ["name"]},
-            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "visibility_level"]}
-          ],
-          "relationships": [
-            {"type": "MEMBER_OF", "from": "u", "to": "g"},
-            {"type": "CONTAINS", "from": "g", "to": "p"}
-          ],
-          "limit": 30
-        }
       gql: |
         MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:`CONTAINS`]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u.username, g.name, p.name, p.visibility_level LIMIT 30
     expect:
@@ -186,20 +138,6 @@ cases:
           group: [701, 702, 703]
           project: [7100, 7101, 7102, 7103, 7104]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            {"id": "g", "entity": "Group", "columns": ["name"]},
-            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "visibility_level"]}
-          ],
-          "relationships": [
-            {"type": "MEMBER_OF", "from": "u", "to": "g"},
-            {"type": "CONTAINS", "from": "g", "to": "p"}
-          ],
-          "limit": 30
-        }
       gql: |
         MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:`CONTAINS`]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u.username, g.name, p.name, p.visibility_level LIMIT 30
     expect:
@@ -225,16 +163,6 @@ cases:
           user: [2, 3, 4, 5]
           group: [702, 703]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"]},
-            {"id": "g", "entity": "Group", "columns": ["name"]}
-          ],
-          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-          "limit": 20
-        }
       gql: |
         MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.state, g.name LIMIT 20
     expect:
@@ -263,20 +191,6 @@ cases:
         deny:
           project: [7100, 7101, 7102, 7103, 7104]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            {"id": "g", "entity": "Group", "columns": ["name"]},
-            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}
-          ],
-          "relationships": [
-            {"type": "MEMBER_OF", "from": "u", "to": "g"},
-            {"type": "CONTAINS", "from": "g", "to": "p"}
-          ],
-          "limit": 50
-        }
       gql: |
         MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:`CONTAINS`]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u.username, g.name, p.name LIMIT 50
     expect:
@@ -288,15 +202,6 @@ cases:
         allow:
           user: [1, 2]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                     "columns": ["username", "name", "state"],
-                     "filters": {"username": {"in": ["alice", "bob"]}}}],
-          "order_by": "u.username",
-          "limit": 10
-        }
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username IN ['alice', 'bob'] RETURN u.username, u.name, u.state ORDER BY u.username LIMIT 10
     expect:
@@ -316,13 +221,6 @@ cases:
         allow:
           project: [7100, 7101, 7102, 7103, 7104]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000},
-                     "columns": ["id", "name", "visibility_level"]}],
-          "limit": 10
-        }
       gql: |
         MATCH (p:Project) WHERE p.id >= 1 AND p.id <= 10000 RETURN p.id, p.name, p.visibility_level LIMIT 10
     expect:
@@ -339,13 +237,6 @@ cases:
         deny:
           project: [7101, 7102, 7103]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000},
-                     "columns": ["id", "name", "visibility_level"]}],
-          "limit": 10
-        }
       gql: |
         MATCH (p:Project) WHERE p.id >= 1 AND p.id <= 10000 RETURN p.id, p.name, p.visibility_level LIMIT 10
     expect:
@@ -365,16 +256,6 @@ cases:
           group: [701, 702, 703]
           project: [7100, 7101, 7102, 7103, 7104]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "visibility_level"]},
-            {"id": "p", "entity": "Project", "columns": ["name", "visibility_level"]}
-          ],
-          "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
-          "limit": 20
-        }
       gql: |
         MATCH (g:Group)-[:`CONTAINS`]->(p:Project) WHERE g.id >= 1 AND g.id <= 10000 RETURN g.name, g.visibility_level, p.name, p.visibility_level LIMIT 20
     expect:
@@ -389,16 +270,6 @@ cases:
           group: [701]
           project: [7100, 7102]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "visibility_level"]},
-            {"id": "p", "entity": "Project", "columns": ["name", "visibility_level"]}
-          ],
-          "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
-          "limit": 20
-        }
       gql: |
         MATCH (g:Group)-[:`CONTAINS`]->(p:Project) WHERE g.id >= 1 AND g.id <= 10000 RETURN g.name, g.visibility_level, p.name, p.visibility_level LIMIT 20
     expect:
@@ -417,13 +288,6 @@ cases:
         allow:
           user: [1, 2, 3, 4, 5]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                     "columns": ["username"], "filters": {"state": "active"}}],
-          "limit": 10
-        }
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.state = 'active' RETURN u.username LIMIT 10
     expect:

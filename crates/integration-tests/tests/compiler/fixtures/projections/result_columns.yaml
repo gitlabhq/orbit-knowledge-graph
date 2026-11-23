@@ -1,8 +1,6 @@
 cases:
   - name: Search keeps requested columns and adds node identity columns
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username","state"]}],"limit":10}
       gql: |
         MATCH (u:User {id: 1}) RETURN u.username, u.state LIMIT 10
     logical:
@@ -15,8 +13,6 @@ cases:
 
   - name: Wildcard search projects every column and adds node identity columns
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":"*"}],"limit":10}
       gql: |
         MATCH (u:User {id: 1}) RETURN properties(u) LIMIT 10
     logical:
@@ -29,8 +25,6 @@ cases:
 
   - name: Traversal adds identity columns for both endpoints
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"CONTAINS","from":"u","to":"p"}],"limit":10}
       gql: |
         MATCH (u:User {id: 1})-[:CONTAINS]->(p:Project) RETURN u.username, p.name LIMIT 10
     physical:
@@ -46,8 +40,6 @@ cases:
 
   - name: Aggregation adds identity columns only for the grouped node
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":["u"],"aggregations":[{"count":"mr","as":"mr_count"}],"limit":10}
       gql: |
         MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u{.username}, count(mr) AS mr_count LIMIT 10
     logical:
@@ -61,8 +53,6 @@ cases:
 
   - name: Definition identity uses its project ID for redaction
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[1],"columns":["name","project_id"]}],"limit":10}
       gql: |
         MATCH (d:Definition {id: 1}) RETURN d.name, d.project_id LIMIT 10
     physical:
@@ -72,8 +62,6 @@ cases:
 
   - name: Project identity uses its own ID for redaction
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1],"columns":["name"]}],"limit":10}
       gql: |
         MATCH (p:Project {id: 1}) RETURN p.name LIMIT 10
     physical:

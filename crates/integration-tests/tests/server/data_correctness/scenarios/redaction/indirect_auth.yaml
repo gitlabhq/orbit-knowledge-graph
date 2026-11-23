@@ -20,12 +20,6 @@ config:
       - { traversal_path: "1/700/702/7101/", source_id: 3002, source_kind: File, relationship_kind: DEFINES, target_id: 7303, target_kind: Definition }
 
 query:
-  json: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "f", "entity": "File", "node_ids": [3000]}],
-      "neighbors": {"direction": "outgoing", "rel_types": ["DEFINES"]}
-    }
   gql: |
     MATCH (f:File {id: 3000})-[:DEFINES]->(n) RETURN f, n
 
@@ -70,12 +64,6 @@ cases:
         allow:
           project: [7100, 7101]
     query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "f", "entity": "File", "node_ids": [3000, 3002]}],
-          "neighbors": {"direction": "outgoing", "rel_types": ["DEFINES"]}
-        }
       gql: |
         MATCH (f:File)-[:DEFINES]->(n) WHERE f.id IN [3000, 3002] RETURN f, n
     expect:
@@ -96,12 +84,6 @@ cases:
         deny:
           project: [7101]
     query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "f", "entity": "File", "node_ids": [3000, 3002]}],
-          "neighbors": {"direction": "outgoing", "rel_types": ["DEFINES"]}
-        }
       gql: |
         MATCH (f:File)-[:DEFINES]->(n) WHERE f.id IN [3000, 3002] RETURN f, n
     expect:
@@ -122,15 +104,6 @@ cases:
         allow:
           project: [7100]
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "File", "node_ids": [3000]},
-            {"id": "end", "entity": "Definition", "node_ids": [7300, 7301]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["DEFINES"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:File {id: 3000})-[:DEFINES*1..2]->(`end`:Definition) WHERE `end`.id IN [7300, 7301] RETURN p
     expect:
@@ -147,15 +120,6 @@ cases:
         deny:
           project: [7100]
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "File", "node_ids": [3000]},
-            {"id": "end", "entity": "Definition", "node_ids": [7300, 7301]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["DEFINES"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:File {id: 3000})-[:DEFINES*1..2]->(`end`:Definition) WHERE `end`.id IN [7300, 7301] RETURN p
     expect:
@@ -173,8 +137,6 @@ cases:
         allow:
           project: [7100]
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [3000, 3003], "columns": ["name"]}], "limit": 10}
       gql: |
         MATCH (f:File) WHERE f.id IN [3000, 3003] RETURN f.name
     expect:

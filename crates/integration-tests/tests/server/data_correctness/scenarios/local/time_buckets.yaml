@@ -11,8 +11,6 @@ cases:
   - name: week_buckets_start_sunday
     description: Week buckets start on Sunday and return dates
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[15001,15002,15003]}],"group_by":[{"key":"d.created_at","truncate":"week","as":"week"}],"aggregations":[{"count":"d","as":"n"}],"aggregation_sort":"week"}
       gql: |
         MATCH (d:Definition) WHERE d.id IN [15001, 15002, 15003] RETURN date_trunc('week', d.created_at) AS week, count(d) AS n ORDER BY week
     expect:
@@ -24,8 +22,6 @@ cases:
   - name: clock_units
     description: Minute and hour buckets truncate one timestamp and stay timestamps; a day bucket is a date
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[15003]}],"group_by":[{"key":"d.created_at","truncate":"minute","as":"minute"},{"key":"d.created_at","truncate":"hour","as":"hour"},{"key":"d.created_at","truncate":"day","as":"day"}],"aggregations":[{"count":"d","as":"n"}]}
       gql: |
         MATCH (d:Definition {id: 15003}) RETURN date_trunc('minute', d.created_at) AS minute, date_trunc('hour', d.created_at) AS hour, date_trunc('day', d.created_at) AS day, count(d) AS n
     expect:
@@ -36,8 +32,6 @@ cases:
   - name: calendar_units
     description: Month, quarter, and year buckets truncate one timestamp to dates
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[15003]}],"group_by":[{"key":"d.created_at","truncate":"month","as":"month"},{"key":"d.created_at","truncate":"quarter","as":"quarter"},{"key":"d.created_at","truncate":"year","as":"year"}],"aggregations":[{"count":"d","as":"n"}]}
       gql: |
         MATCH (d:Definition {id: 15003}) RETURN date_trunc('month', d.created_at) AS month, date_trunc('quarter', d.created_at) AS quarter, date_trunc('year', d.created_at) AS year, count(d) AS n
     expect:
@@ -48,8 +42,6 @@ cases:
   - name: timestamp_filter
     description: A timestamp filter binds a timestamp parameter and keeps the rows from Sunday on
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[15001,15002,15003],"columns":["name","created_at"],"filters":{"created_at":{"gte":"2026-10-04T00:00:00Z"}}}],"limit":10}
       gql: |
         MATCH (d:Definition) WHERE d.id IN [15001, 15002, 15003] AND d.created_at >= datetime('2026-10-04T00:00:00Z') RETURN d.name, d.created_at LIMIT 10
     expect:
@@ -62,8 +54,6 @@ cases:
   - name: timestamp_extremes
     description: Minimum and maximum of a timestamp return the earliest and latest values
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[15001,15002,15003]}],"aggregations":[{"min":"d.created_at","as":"first"},{"max":"d.created_at","as":"last"}]}
       gql: |
         MATCH (d:Definition) WHERE d.id IN [15001, 15002, 15003] RETURN min(d.created_at) AS first, max(d.created_at) AS last
     expect:

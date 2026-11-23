@@ -48,8 +48,6 @@ cases:
 
   - name: A scope-preserving relationship carries the pinned source's path to its target
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[7]},{"id":"diff","entity":"MergeRequestDiff"}],"relationships":[{"type":"HAS_DIFF","from":"mr","to":"diff"}],"limit":1}
       gql: |
         MATCH (mr:MergeRequest {id: 7})-[:HAS_DIFF]->(diff:MergeRequestDiff) RETURN mr, diff LIMIT 1
     logical:
@@ -61,8 +59,6 @@ cases:
 
   - name: A relationship that is not scope-preserving keeps the pinned source's path off its target
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[7]},{"id":"l","entity":"Label","filters":{"title":"bug"},"columns":["title"]}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"l"}],"limit":10}
       gql: |
         MATCH (mr:MergeRequest {id: 7})-[:HAS_LABEL]->(l:Label {title: 'bug'}) RETURN l.title LIMIT 10
     logical:
@@ -79,8 +75,6 @@ cases:
   - name: A pinned prune-to-target endpoint keeps its own bound
     security: { paths: [1/9970/] }
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"p","entity":"Project","node_ids":[15846663]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}]}
       gql: |
         MATCH (u:User)-[:MEMBER_OF]->(p:Project {id: 15846663}) RETURN u, p
     physical:
@@ -91,8 +85,6 @@ cases:
   - name: A prune-to-target bound does not cross a user hub
     security: { paths: [1/9970/] }
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Project","node_ids":[15846663]},{"id":"u","entity":"User"},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"a"},{"type":"MEMBER_OF","from":"u","to":"b"}]}
       gql: |
         MATCH (a:Project {id: 15846663})<-[:MEMBER_OF]-(u:User)-[:MEMBER_OF]->(b:Project) RETURN a, u, b
     physical:

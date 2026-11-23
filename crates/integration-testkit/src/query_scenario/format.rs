@@ -430,9 +430,9 @@ impl TryFrom<RawCompileError> for CompileErrorExpect {
             RawCompileError::By(by) => by
                 .into_iter()
                 .map(|(key, name)| {
-                    if !["json", "gql", "clickhouse", "duckdb"].contains(&key.as_str()) {
+                    if !["gql", "clickhouse", "duckdb"].contains(&key.as_str()) {
                         return Err(format!(
-                            "compile_error key '{key}' is not json, gql, clickhouse, or duckdb"
+                            "compile_error key '{key}' is not gql, clickhouse, or duckdb"
                         ));
                     }
                     Ok((key, rejection_reason(&name)?))

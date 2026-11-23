@@ -430,7 +430,8 @@ pub enum InputGroupByKey {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantNames)]
+#[strum(serialize_all = "snake_case")]
 pub enum TruncateUnit {
     Minute,
     Hour,

@@ -1,5 +1,3 @@
-missing_frontends:
-  json: The source test checks how GQL reads its optional trailing clauses.
 
 physical:
   clickhouse: {}

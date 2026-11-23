@@ -2,10 +2,8 @@ physical:
   clickhouse: {}
 
 cases:
-  - name: A bounded hop range normalizes to the JSON hops
+  - name: A bounded hop range normalizes to hops
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"a","to":"b","hops":[1,3]}]}
       gql: |
         MATCH (a:User {id: 1})-[:MEMBER_OF*1..3]->(b:Project) RETURN a, b
     logical:
@@ -13,8 +11,6 @@ cases:
 
   - name: An exact hop count normalizes to equal hop bounds
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"a","to":"b","hops":[2,2]}]}
       gql: |
         MATCH (a:User {id: 1})-[:MEMBER_OF*2]->(b:Project) RETURN a, b
     logical:
@@ -22,8 +18,6 @@ cases:
 
   - name: A WHERE comparison on a relationship variable becomes a relationship filter
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"a","to":"b","filters":{"target_id":{"gte":2}}}]}
       gql: |
         MATCH (a:User {id: 1})-[r:MEMBER_OF]->(b:Project) WHERE r.target_id >= 2 RETURN a, b
     logical:
@@ -31,8 +25,6 @@ cases:
 
   - name: An inline relationship property becomes a relationship filter
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"a","to":"b","filters":{"target_id":2}}]}
       gql: |
         MATCH (a:User {id: 1})-[:MEMBER_OF {target_id: 2}]->(b:Project) RETURN a, b
     logical:
@@ -40,8 +32,6 @@ cases:
 
   - name: An inline property on a single-hop range is a plain relationship filter
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"a","to":"b","filters":{"target_id":2}}]}
       gql: |
         MATCH (a:User {id: 1})-[:MEMBER_OF*1..1 {target_id: 2}]->(b:Project) RETURN a, b
     logical:
@@ -49,8 +39,6 @@ cases:
 
   - name: An empty property map on a hop range adds no filter
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"a","to":"b","hops":[1,3]}]}
       gql: |
         MATCH (a:User {id: 1})-[:MEMBER_OF*1..3 {}]->(b:Project) RETURN a, b
     logical:
@@ -58,8 +46,6 @@ cases:
 
   - name: An outgoing arrow from the pinned node keeps the relationship direction
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}]}
       gql: |
         MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group) RETURN u, g
     logical:
@@ -67,8 +53,6 @@ cases:
 
   - name: An incoming arrow into the pinned node keeps the relationship direction
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"u","entity":"User"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}]}
       gql: |
         MATCH (g:Group {id: 1})<-[:MEMBER_OF]-(u:User) RETURN g, u
     logical:
@@ -76,8 +60,6 @@ cases:
 
   - name: A typed undirected relationship to an unlabeled node is a neighbors query
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["MEMBER_OF"]}}
       gql: |
         MATCH (g:Group {id: 1})-[:MEMBER_OF]-(n) RETURN n
     logical:
@@ -85,8 +67,6 @@ cases:
 
   - name: An untyped undirected relationship to an unlabeled node is a neighbors query
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[1]}],"neighbors":{"direction":"both"}}
       gql: |
         MATCH (g:Group {id: 1})--(n) RETURN n
     logical:
@@ -94,8 +74,6 @@ cases:
 
   - name: A relationship type list normalizes to type alternatives
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"MergeRequest"}],"relationships":[{"type":["AUTHORED","ASSIGNED"],"from":"a","to":"b"}]}
       gql: |
         MATCH (a:User {id: 1})-[:AUTHORED|ASSIGNED]->(b:MergeRequest) RETURN a, b
     logical:
@@ -103,8 +81,6 @@ cases:
 
   - name: A incoming neighbors pattern with the endpoint written after the center is a neighbors query
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"rel_types":["AUTHORED"],"direction":"incoming"}}
       gql: |
         MATCH (n)-[:AUTHORED]->(center:WorkItem {id: 1}) RETURN center, n
     logical:
@@ -116,8 +92,6 @@ cases:
 
   - name: A incoming neighbors pattern with the endpoint written before the center is a neighbors query
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"rel_types":["AUTHORED"],"direction":"incoming"}}
       gql: |
         MATCH (center:WorkItem {id: 1})<-[:AUTHORED]-(n) RETURN center, n
     logical:
@@ -129,8 +103,6 @@ cases:
 
   - name: A outgoing neighbors pattern with the endpoint written after the center is a neighbors query
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"direction":"outgoing"}}
       gql: |
         MATCH (n)<--(center:WorkItem {id: 1}) RETURN center, n
     logical:
@@ -142,8 +114,6 @@ cases:
 
   - name: A outgoing neighbors pattern with the endpoint written before the center is a neighbors query
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"direction":"outgoing"}}
       gql: |
         MATCH (center:WorkItem {id: 1})-->(n) RETURN center, n
     logical:
@@ -155,8 +125,6 @@ cases:
 
   - name: A both neighbors pattern with the endpoint written after the center is a neighbors query
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"direction":"both"}}
       gql: |
         MATCH (n)--(center:WorkItem {id: 1}) RETURN center, n
     logical:
@@ -168,8 +136,6 @@ cases:
 
   - name: A both neighbors pattern with the endpoint written before the center is a neighbors query
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"direction":"both"}}
       gql: |
         MATCH (center:WorkItem {id: 1})--(n) RETURN center, n
     logical:
@@ -181,8 +147,6 @@ cases:
 
   - name: Returning a neighbors center by name is a neighbors query
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"center","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both"}}
       gql: |
         MATCH (center:User {id: 1})--(n) RETURN center, n
     logical:
@@ -190,8 +154,6 @@ cases:
 
   - name: Returning neighbors center properties projects them
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"center","entity":"User","node_ids":[1],"columns":["username","state"]}],"neighbors":{"direction":"both"}}
       gql: |
         MATCH (center:User {id: 1})--(n) RETURN center.username, center.state, n
     logical:

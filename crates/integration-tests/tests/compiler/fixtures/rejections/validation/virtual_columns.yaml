@@ -1,8 +1,6 @@
 cases:
   - name: A virtual column filter without pinned ids names node_ids and the column
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","filters":{"content":{"contains":"needle"},"project_id":{"eq":1000}},"columns":["path"]}],"limit":10}
       gql: |
         MATCH (f:File) WHERE f.content CONTAINS 'needle' AND f.project_id = 1000 RETURN f.path LIMIT 10
     physical:
@@ -16,8 +14,6 @@ cases:
 
   - name: A virtual column filter in an aggregation names the query type and the column
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"f","entity":"File","filters":{"content":{"contains":"needle"}}}],"aggregations":[{"count":"f","as":"total"}],"group_by":["f.language"],"limit":5}
       gql: |
         MATCH (f:File) WHERE f.content CONTAINS 'needle' RETURN f.language, count(f) AS total LIMIT 5
     physical:
@@ -31,8 +27,6 @@ cases:
 
   - name: A virtual column filter on a neighbors center names the query type and the column
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":{"contains":"needle"}}}],"neighbors":{"direction":"outgoing"},"limit":5}
       gql: |
         MATCH (f:File {id: 1})-[r]->(n) WHERE f.content CONTAINS 'needle' RETURN f, r, n LIMIT 5
     physical:
@@ -46,8 +40,6 @@ cases:
 
   - name: An unsupported operator on a virtual column names the operator and the column
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":{"gt":"x"}}}],"limit":5}
       gql: |
         MATCH (f:File {id: 1}) WHERE f.content > 'x' RETURN f LIMIT 5
     physical:

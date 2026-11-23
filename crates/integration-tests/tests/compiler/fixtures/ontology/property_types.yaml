@@ -2,8 +2,6 @@ cases:
   - name: An integer compares with a float property
     ontology_overlay: property_types
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1],"filters":{"score":42}}]}
       gql: |
         MATCH (g:Group {id: 1, score: 42}) RETURN g
     logical:
@@ -15,24 +13,18 @@ cases:
   - name: A filter on a property that cannot be filtered is rejected
     ontology_overlay: property_types
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","filters":{"private_note":"secret"}}],"limit":10}
       gql: |
         MATCH (g:Group {private_note: 'secret'}) RETURN g LIMIT 10
     physical:
       clickhouse:
         rejected:
-          phase: { json: json_dsl_parse, gql: validate }
-          reason: { json: ontology, gql: schema }
-          contains:
-            json: ['"private_note" is not an allowed value']
-            gql: ['filter on "private_note" for Group: field is not filterable']
+          phase: validate
+          reason: schema
+          contains: ['filter on "private_note" for Group: field is not filterable']
 
   - name: Grouping by a property that cannot be filtered is rejected
     ontology_overlay: property_types
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","node_ids":[1]}],"group_by":["g.private_note"],"aggregations":[{"count":"g","as":"group_count"}],"limit":10}
       gql: |
         MATCH (g:Group {id: 1}) RETURN g.private_note, count(g) AS group_count LIMIT 10
     physical:
@@ -45,8 +37,6 @@ cases:
   - name: A relationship filter takes its value type from the edge table column
     ontology_overlay: string_edge_source
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"NOTED","from":"u","to":"n","filters":{"source_id":42}}]}
       gql: |
         MATCH (u:User {id: 1})-[:NOTED {source_id: 42}]->(n:Note) RETURN u, n
     physical:

@@ -1661,10 +1661,6 @@ mod tests {
     }
     use crate::gql::parse;
 
-    fn assert_rejects(query: &str, expected: &str) {
-        assert_input_rejects(parse(query).unwrap(), expected);
-    }
-
     fn assert_input_rejects(input: Input, expected: &str) {
         let ontology = Ontology::load_embedded().unwrap();
         let err = validator(&ontology).check_references(&input).unwrap_err();
@@ -1829,5 +1825,74 @@ mod tests {
             .unwrap_err();
             assert!(error.to_string().contains(CONDITION_COLUMN_RULE), "{error}");
         }
+    }
+
+    #[test]
+    fn rejects_references_to_undefined_nodes() {
+        let traversal = "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u, mr";
+        let path = "MATCH p = ANY SHORTEST (g:Group {id: 1})-[:CONTAINS*1..2]->(pr:Project {id: 2}) RETURN p";
+        for input in [
+            mutated(traversal, |input| {
+                input.relationships[0].from = "ghost".into()
+            }),
+            mutated(traversal, |input| {
+                input.relationships[0].to = "ghost".into()
+            }),
+            mutated(path, |input| {
+                input.path.as_mut().unwrap().from = "ghost".into()
+            }),
+            mutated(path, |input| {
+                input.path.as_mut().unwrap().to = "ghost".into()
+            }),
+        ] {
+            assert_input_rejects(input, "undefined node \"ghost\"");
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_node_ids() {
+        assert_input_rejects(
+            mutated(
+                "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u, mr",
+                |input| input.nodes[1].id = "u".into(),
+            ),
+            "duplicate node id \"u\"",
+        );
+    }
+
+    #[test]
+    fn rejects_traversal_node_outside_the_relationship_chain() {
+        assert_input_rejects(
+            mutated(
+                "MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project) RETURN g, p",
+                |input| {
+                    input.nodes.push(crate::input::InputNode {
+                        id: "orphan".into(),
+                        entity: Some("Note".into()),
+                        ..Default::default()
+                    })
+                },
+            ),
+            "traversal requires exactly n-1 relationships for n nodes",
+        );
+    }
+
+    #[test]
+    fn rejects_edge_column_missing_for_some_endpoint_pairs() {
+        assert_input_rejects(
+            mutated(
+                "MATCH (g:Group {id: 1})-[:CONTAINS*1..2]->(p:Project) RETURN g, p",
+                |input| {
+                    input.relationships[0].filters.insert(
+                        "project_id".into(),
+                        vec![InputFilter {
+                            value: Some(serde_json::json!(1)),
+                            ..Default::default()
+                        }],
+                    );
+                },
+            ),
+            "relationship[0] CONTAINS column \"project_id\" is missing or has a different type for some endpoint pairs",
+        );
     }
 }

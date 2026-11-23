@@ -2,8 +2,6 @@ cases:
   - name: A schema version prefix renames the node table
     schema_version_prefix: v1_
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]}],"limit":1}
       gql: |
         MATCH (g:Group {id: 1}) RETURN g.name LIMIT 1
     physical:
@@ -15,8 +13,6 @@ cases:
   - name: A path-scoped User filters its table by the caller's path
     ontology_overlay: scoped_user
     query: &scoped_user
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]}],"limit":1}
       gql: |
         MATCH (u:User {id: 1}) RETURN u.id LIMIT 1
     physical:
@@ -36,8 +32,6 @@ cases:
   - name: A renamed global User table stays unscoped while the joined Project and edge stay scoped
     ontology_overlay: renamed_user
     query: &member_of
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1],"filters":{"username":"alice"}},{"id":"project","entity":"Project","filters":{"name":"orbit"}}],"relationships":[{"type":"MEMBER_OF","from":"user","to":"project"}],"limit":1}
       gql: |
         MATCH (user:User {id: 1, username: 'alice'})-[:MEMBER_OF]->(project:Project {name: 'orbit'}) RETURN user, project LIMIT 1
     physical:

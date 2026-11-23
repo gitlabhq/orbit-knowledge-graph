@@ -1,8 +1,6 @@
 cases:
   - name: Neighbors take the edge path only for relationship kinds stored under the neighbor's path
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["AUTHORED"]}}
       gql: |
         MATCH (u:User {id: 1})-[:AUTHORED]-(n) RETURN u, n
     logical:
@@ -15,8 +13,6 @@ cases:
 
   - name: Neighbors leave the path empty when the edge path belongs to the center
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["IN_PROJECT"]}}
       gql: |
         MATCH (p:Project {id: 1})-[:IN_PROJECT]-(n) RETURN p, n
     logical:

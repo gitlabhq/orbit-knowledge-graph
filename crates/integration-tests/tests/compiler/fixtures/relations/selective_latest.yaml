@@ -221,8 +221,6 @@ cases:
 
   - name: A filtered traversal reads the latest node rows with FINAL
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"limit":10}
       gql: |
         MATCH (mr:MergeRequest {state: 'merged'}) RETURN mr LIMIT 10
     logical:
@@ -234,8 +232,6 @@ cases:
 
   - name: A filtered aggregation input reads the latest node rows with FINAL
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}},{"id":"p","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"merged_mrs"}],"limit":10}
       gql: |
         MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project) RETURN p, count(mr) AS merged_mrs LIMIT 10
     logical:
@@ -247,8 +243,6 @@ cases:
 
   - name: A filtered path-finding endpoint reads the latest node rows with FINAL
     query:
-      json: |
-        {"query_type":"path_finding","nodes":[{"id":"start","entity":"User","filters":{"username":"root"}},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":2,"rel_types":["MEMBER_OF","CONTAINS"]},"limit":10}
       gql: |
         MATCH p = ANY SHORTEST (start:User {username: 'root'})-[:MEMBER_OF|CONTAINS*1..2]->(`end`:Project {id: 100}) RETURN p LIMIT 10
     logical:
@@ -260,8 +254,6 @@ cases:
 
   - name: A filtered neighbors center reads the latest node rows with FINAL
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":{"contains":"fix"}}}],"neighbors":{"direction":"both"},"limit":10}
       gql: |
         MATCH (mr:MergeRequest)-[r]-(m) WHERE mr.title CONTAINS 'fix' RETURN mr, r, m LIMIT 10
     logical:

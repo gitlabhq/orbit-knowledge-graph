@@ -3,8 +3,6 @@ ontology_overlay: local_dates
 cases:
   - name: A minute bucket renders DuckDB date_trunc
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[1]}],"aggregations":[{"count":"d","as":"n"}],"group_by":[{"key":"d.created_at","truncate":"minute","as":"bucket"}],"limit":10}
       gql: |
         MATCH (d:Definition {id: 1}) RETURN date_trunc('minute', d.created_at) AS bucket, count(d) AS n LIMIT 10
     physical:
@@ -15,8 +13,6 @@ cases:
 
   - name: A hour bucket renders DuckDB date_trunc
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[1]}],"aggregations":[{"count":"d","as":"n"}],"group_by":[{"key":"d.created_at","truncate":"hour","as":"bucket"}],"limit":10}
       gql: |
         MATCH (d:Definition {id: 1}) RETURN date_trunc('hour', d.created_at) AS bucket, count(d) AS n LIMIT 10
     physical:
@@ -27,8 +23,6 @@ cases:
 
   - name: A day bucket renders DuckDB date_trunc
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[1]}],"aggregations":[{"count":"d","as":"n"}],"group_by":[{"key":"d.created_at","truncate":"day","as":"bucket"}],"limit":10}
       gql: |
         MATCH (d:Definition {id: 1}) RETURN date_trunc('day', d.created_at) AS bucket, count(d) AS n LIMIT 10
     physical:
@@ -39,8 +33,6 @@ cases:
 
   - name: A week bucket renders DuckDB date_trunc shifted to start on Sunday
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[1]}],"aggregations":[{"count":"d","as":"n"}],"group_by":[{"key":"d.created_at","truncate":"week","as":"bucket"}],"limit":10}
       gql: |
         MATCH (d:Definition {id: 1}) RETURN date_trunc('week', d.created_at) AS bucket, count(d) AS n LIMIT 10
     physical:
@@ -51,8 +43,6 @@ cases:
 
   - name: A month bucket renders DuckDB date_trunc
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[1]}],"aggregations":[{"count":"d","as":"n"}],"group_by":[{"key":"d.created_at","truncate":"month","as":"bucket"}],"limit":10}
       gql: |
         MATCH (d:Definition {id: 1}) RETURN date_trunc('month', d.created_at) AS bucket, count(d) AS n LIMIT 10
     physical:
@@ -63,8 +53,6 @@ cases:
 
   - name: A quarter bucket renders DuckDB date_trunc
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[1]}],"aggregations":[{"count":"d","as":"n"}],"group_by":[{"key":"d.created_at","truncate":"quarter","as":"bucket"}],"limit":10}
       gql: |
         MATCH (d:Definition {id: 1}) RETURN date_trunc('quarter', d.created_at) AS bucket, count(d) AS n LIMIT 10
     physical:
@@ -75,8 +63,6 @@ cases:
 
   - name: A year bucket renders DuckDB date_trunc
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[1]}],"aggregations":[{"count":"d","as":"n"}],"group_by":[{"key":"d.created_at","truncate":"year","as":"bucket"}],"limit":10}
       gql: |
         MATCH (d:Definition {id: 1}) RETURN date_trunc('year', d.created_at) AS bucket, count(d) AS n LIMIT 10
     physical:

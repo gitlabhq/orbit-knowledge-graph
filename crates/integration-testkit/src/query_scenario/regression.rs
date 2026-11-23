@@ -147,8 +147,13 @@ fn compile_errors_assert_the_rejection_reason() {
     );
     rejects(
         query.clone(),
-        "compile_error: {json: schema}",
+        "compile_error: {clickhouse: schema}",
         "compile_error names neither backend 'duckdb' nor frontend 'gql'",
+    );
+    rejects(
+        query.clone(),
+        "compile_error: {json: schema}",
+        "compile_error key 'json'",
     );
     rejects(
         query.clone(),
@@ -222,9 +227,7 @@ fn edge_prop_absent_checks_every_edge() {
         "edge_prop_absent takes depth, path_id, or step, got weight",
     );
     rejects(
-        json!({"json": r#"{"query_type": "path_finding",
-            "nodes": [{"id": "a", "entity": "Definition", "node_ids": [1]}, {"id": "b", "entity": "Definition", "node_ids": [3]}],
-            "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3, "rel_types": ["CALLS"]}}"#}),
+        json!({"gql": "MATCH p = ANY SHORTEST (a:Definition {id: 1})-[:CALLS*1..3]->(b:Definition {id: 3}) RETURN p"}),
         "path_count: 1\nedge_prop_absent: [path_id]",
         "CALLS edge Definition 1 -> Definition 2 has path_id",
     );
@@ -283,18 +286,6 @@ fn toon_expectations_check_text_value_and_absent_keys() {
         "toon output has nodes",
     );
     rejects(query, &format!("{base}    exact: true"), "unknown field");
-}
-
-#[test]
-fn gql_format_expectations_also_run_for_json_queries() {
-    let query = json!({"json": r#"{"query_type": "traversal", "nodes": [{"id": "d", "entity": "Definition", "node_ids": [1]}], "limit": 1}"#});
-    let base = "nodes: {Definition: {ids: [1]}}\nformat:\n  gql:\n";
-    run_suite(query.clone(), &format!("{base}    value: {{header: [d]}}"));
-    rejects(
-        query,
-        &format!("{base}    value: {{header: [e]}}"),
-        "gql.header[0] is \"d\", expected \"e\"",
-    );
 }
 
 #[test]

@@ -1,5 +1,3 @@
-missing_frontends:
-  json: JSON accepts relationship filters on hop ranges, so only GQL rejects this shape.
 
 physical:
   clickhouse:

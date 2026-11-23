@@ -1,97 +1,55 @@
 cases:
-  - name: A traversal without nodes is rejected
-    query:
-      json: |
-        {"query_type": "traversal"}
-    missing_frontends:
-      gql: GQL has no query without a MATCH pattern.
-    physical:
-      clickhouse:
-        rejected:
-          phase: json_dsl_parse
-          reason: schema
-          contains: ['"nodes" is a required property']
-
   - name: A node variable with SQL text is rejected
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "n; DROP TABLE users; --", "entity": "User"}]}
       gql: |
         MATCH (`n; DROP TABLE users; --`:User) RETURN `n; DROP TABLE users; --`
     physical:
       clickhouse:
         rejected:
-          phase: { json: json_dsl_parse, gql: gql_parse }
+          phase: gql_parse
           reason: schema
-          contains:
-            json: ['does not match "^[a-zA-Z_][a-zA-Z0-9_]{0,63}$" at /nodes/0/id']
-            gql: ['invalid identifier "n; DROP TABLE users; --"']
-
-  - name: A relationship endpoint with SQL text is rejected
-    query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "a", "entity": "User"}, {"id": "b", "entity": "Group"}], "relationships": [{"type": "MEMBER_OF", "from": "a' OR '1'='1", "to": "b"}]}
-    missing_frontends:
-      gql: GQL relationship endpoints are pattern variables, so an endpoint cannot name something other than a node.
-    physical:
-      clickhouse:
-        rejected:
-          phase: json_dsl_parse
-          reason: schema
-          contains: ['does not match "^[a-zA-Z_][a-zA-Z0-9_]{0,63}$" at /relationships/0/from']
+          contains: ['invalid identifier "n; DROP TABLE users; --"']
 
   - name: An empty node variable is rejected
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "", "entity": "User"}]}
       gql: |
         MATCH (``:User) RETURN ``
     physical:
       clickhouse:
         rejected:
-          phase: { json: json_dsl_parse, gql: gql_parse }
+          phase: gql_parse
           reason: schema
-          contains:
-            json: ['does not match "^[a-zA-Z_][a-zA-Z0-9_]{0,63}$" at /nodes/0/id']
-            gql: ["column 8: expected a variable"]
+          contains: ["column 8: expected a variable"]
 
   - name: A node variable that starts with a digit is rejected
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "123abc", "entity": "User"}]}
       gql: |
         MATCH (`123abc`:User) RETURN `123abc`
     physical:
       clickhouse:
         rejected:
-          phase: { json: json_dsl_parse, gql: gql_parse }
+          phase: gql_parse
           reason: schema
-          contains:
-            json: ['does not match "^[a-zA-Z_][a-zA-Z0-9_]{0,63}$" at /nodes/0/id']
-            gql: ['invalid identifier "123abc"']
+          contains: ['invalid identifier "123abc"']
 
   - name: A filter property with SQL text is rejected
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "filters": {"foo; DROP TABLE--": "value"}}]}
       gql: |
         MATCH (u:User {`foo; DROP TABLE--`: 'value'}) RETURN u
     physical:
       clickhouse:
         rejected:
-          phase: { json: json_dsl_parse, gql: gql_parse }
+          phase: gql_parse
           reason: schema
-          contains: { json: ['"foo; DROP TABLE--" does not match "^[a-zA-Z_][a-zA-Z0-9_]{0,63}$" at /nodes/0/filters'], gql: ['invalid identifier "foo; DROP TABLE--"'] }
+          contains: ['invalid identifier "foo; DROP TABLE--"']
 
   - name: A non-numeric id in an id list is rejected
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":["invalid"],"id_range":{"start":1,"end":3}}]}
       gql: |
         MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u
     physical:
       clickhouse:
         rejected:
-          phase: { json: json_dsl_parse, gql: gql_parse }
+          phase: gql_parse
           reason: schema
-          contains: { json: ["at /nodes/0/node_ids/0"], gql: ["node IDs must be signed 64-bit integers"] }
+          contains: ["node IDs must be signed 64-bit integers"]

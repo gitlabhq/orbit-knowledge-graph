@@ -1,22 +1,16 @@
 cases:
   - name: A relationship cycle is rejected
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1],"columns":["id"]},{"id":"b","entity":"Definition","columns":["id"]},{"id":"c","entity":"Definition","columns":["id"]}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"},{"type":"CALLS","from":"c","to":"a"}]}
       gql: |
         MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)-[:CALLS]->(a) RETURN a.id, b.id, c.id
     physical:
       duckdb:
         rejected:
-          phase: { json: validate_local, gql: gql_parse }
+          phase: gql_parse
           reason: schema
-          contains:
-            json: [exactly n-1 relationships]
-            gql: [cycles are unsupported]
+          contains: [cycles are unsupported]
       clickhouse:
         rejected:
-          phase: { json: validate, gql: gql_parse }
+          phase: gql_parse
           reason: schema
-          contains:
-            json: [exactly n-1 relationships]
-            gql: [cycles are unsupported]
+          contains: [cycles are unsupported]

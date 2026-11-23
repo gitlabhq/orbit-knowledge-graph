@@ -17,16 +17,6 @@ cases:
           user: [1, 2, 3, 4, 5]
           group: [1, 701, 702, 703]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-            {"id": "g", "entity": "Group"}
-          ],
-          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-          "limit": 30
-        }
       gql: |
         MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 30
     expect:
@@ -51,16 +41,6 @@ cases:
         deny:
           group: [1]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-            {"id": "g", "entity": "Group"}
-          ],
-          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-          "limit": 30
-        }
       gql: |
         MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 30
     expect:

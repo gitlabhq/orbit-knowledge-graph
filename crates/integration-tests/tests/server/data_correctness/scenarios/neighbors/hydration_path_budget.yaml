@@ -25,8 +25,6 @@ generate:
     row: $i
 
 query:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing","rel_types":["CONTAINS"]},"limit":1000}
   gql: |
     MATCH (u:User {id: 1})-[:CONTAINS]->(n) RETURN u, n LIMIT 1000
 

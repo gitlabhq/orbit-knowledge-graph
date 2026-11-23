@@ -1,8 +1,6 @@
 cases:
   - name: Pinned target ids and a covered target filter both narrow the edge read
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","node_ids":[1]},{"id":"p","entity":"Pipeline","node_ids":[1,2,3],"filters":{"source":{"eq":"push"}}}],"relationships":[{"type":"TRIGGERS_PIPELINE","from":"j","to":"p"}],"limit":10}
       gql: |
         MATCH (j:Job {id: 1})-[:TRIGGERS_PIPELINE]->(p:Pipeline {source: 'push'}) WHERE p.id IN [1, 2, 3] RETURN j, p LIMIT 10
     logical:

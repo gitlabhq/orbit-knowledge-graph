@@ -224,7 +224,6 @@ macro_rules! run_subtests_shared {
 
 pub struct NamedQueryExample {
     pub name: String,
-    pub json: String,
     pub gql: String,
 }
 
@@ -237,15 +236,11 @@ pub fn named_query_examples(
         .iter()
         .map(|query| {
             let params = query.example_parameters();
-            let render = |language| {
-                query
-                    .render_language(language, &values, &params)
-                    .map_err(|error| format!("{}: {error}", query.name))
-            };
             Ok(NamedQueryExample {
                 name: query.name.clone(),
-                json: render(named_queries::Language::Json)?,
-                gql: render(named_queries::Language::Gql)?,
+                gql: query
+                    .render(named_queries::Language::Gql, &values, &params)
+                    .map_err(|error| format!("{}: {error}", query.name))?,
             })
         })
         .collect()

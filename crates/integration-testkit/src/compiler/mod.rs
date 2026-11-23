@@ -196,6 +196,9 @@ impl TryFrom<RawScenario> for Scenario {
 
 impl Scenario {
     fn validate_frontends(&self) -> Result<(), String> {
+        if self.query.is_empty() {
+            return Err("a fixture needs a query".into());
+        }
         for language in self.query.keys().chain(self.missing_frontends.keys()) {
             if language.parse::<Frontend>().is_err() {
                 return Err(format!("unknown frontend {language}"));
@@ -1154,12 +1157,8 @@ pub(crate) fn record_duckdb_fixtures(
             || Arc::clone(&base),
             |name| Arc::new(crate::load_ontology_overlay(name)),
         );
-        for (language, raw) in &scenario.query {
-            let frontend = match language.as_str() {
-                "json" => compiler::Frontend::JsonDsl,
-                _ => compiler::Frontend::Gql,
-            };
-            if let Ok(compiled) = compiler::compile_local(raw, frontend, &ontology) {
+        for raw in scenario.query.values() {
+            if let Ok(compiled) = compiler::compile_local(raw, compiler::Frontend::Gql, &ontology) {
                 coverage.record(&compiled.ast);
             }
         }
@@ -1274,7 +1273,7 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
 fn yaml_requires_every_frontend_or_an_explicit_exception() {
     for (query, exceptions, valid) in [
         ("{gql: query}", "{}", true),
-        ("{}", "{gql: Cannot express the tested shape}", true),
+        ("{}", "{gql: Cannot express the tested shape}", false),
         ("{}", "{}", false),
         ("{gql: ' '}", "{}", false),
         ("{gql: query}", "{gql: Redundant exception}", false),
@@ -1336,7 +1335,7 @@ cases:
 }
 
 #[test]
-fn languages_compile_to_the_same_output_unless_a_reason_says_why() {
+fn language_differs_entries_are_validated() {
     let run = |cases: &str| {
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(
@@ -1353,37 +1352,17 @@ fn languages_compile_to_the_same_output_unless_a_reason_says_why() {
         .err()
         .unwrap_or_default()
     };
-    let query = |limit: u32| {
-        format!(
-            "{{json: '{{\"query_type\":\"traversal\",\"nodes\":[{{\"id\":\"u\",\"entity\":\"User\",\"node_ids\":[1]}}],\"limit\":{limit}}}', gql: 'MATCH (u:User {{id: 1}}) RETURN u LIMIT 5'}}"
-        )
-    };
-    let differing = query(6);
-    let matching = query(5);
+    let matching = "{gql: 'MATCH (u:User {id: 1}) RETURN u LIMIT 5'}";
 
     assert!(run(&format!("  - {{name: same, query: {matching}}}")).is_empty());
-    let failures = run(&format!("  - {{name: differs, query: {differing}}}"));
-    assert_eq!(failures.len(), 1, "{failures:?}");
-    assert!(
-        failures[0].contains("differs [clickhouse]: "),
-        "{failures:?}"
-    );
-    assert!(failures[0].contains(" vs json ["), "{failures:?}");
-    assert!(
-        run(&format!(
-            "  - {{name: explained, query: {differing}, language_differs: {{json: The limits differ}}}}"
-        ))
-        .is_empty()
-    );
     for (differs, expected) in [
-        ("{json: Stale}", "language_differs.json is stale"),
         (
             "{sql: Unknown}",
             "language_differs.sql names no query language",
         ),
-        ("{json: ' '}", "language_differs.json needs a reason"),
+        ("{gql: ' '}", "language_differs.gql needs a reason"),
         (
-            "{json: Both, gql: Both}",
+            "{gql: Only}",
             "language_differs must leave one language to compare against",
         ),
     ] {
@@ -1556,7 +1535,7 @@ fn state_assertions_match_serialized_state_by_json_path() {
         std::fs::write(
             directory.path().join("fields.yaml"),
             format!(
-                "name: fields\nquery:\n  json: '{{\"query_type\":\"traversal\",\"nodes\":[{{\"id\":\"u\",\"entity\":\"User\",\"node_ids\":[1],\"filters\":{{\"username\":\"alice\"}}}}]}}'\n  gql: \"MATCH (u:User {{id: 1, username: 'alice'}}) RETURN u\"\nphysical:\n  clickhouse: {physical}\n"
+                "name: fields\nquery:\n  gql: \"MATCH (u:User {{id: 1, username: 'alice'}}) RETURN u\"\nphysical:\n  clickhouse: {physical}\n"
             ),
         )
         .unwrap();
@@ -1632,7 +1611,7 @@ fn run_one(fixture: &str, ontology: ontology::Ontology) -> String {
 fn schema_version_prefix_renames_the_tables_a_fixture_sees() {
     let fixture = |prefix: &str| {
         format!(
-            "name: prefix\n{prefix}query:\n  json: '{{\"query_type\":\"traversal\",\"nodes\":[{{\"id\":\"u\",\"entity\":\"User\",\"node_ids\":[1]}}]}}'\n  gql: 'MATCH (u:User {{id: 1}}) RETURN u'\nphysical:\n  clickhouse:\n    final_ast: {{expect: ['(Scan Table(v1_gl_user) AS u)']}}\n"
+            "name: prefix\n{prefix}query:\n  gql: 'MATCH (u:User {{id: 1}}) RETURN u'\nphysical:\n  clickhouse:\n    final_ast: {{expect: ['(Scan Table(v1_gl_user) AS u)']}}\n"
         )
     };
     let ontology = || ontology::Ontology::new().with_nodes(["User"]);
@@ -1647,7 +1626,7 @@ fn schema_version_prefix_renames_the_tables_a_fixture_sees() {
 fn hydration_columns_replace_the_selected_columns() {
     let fixture = |alias: &str| {
         format!(
-            "name: columns\nhydration: {{columns: {{{alias}: []}}}}\nquery:\n  json: '{{\"query_type\":\"traversal\",\"nodes\":[{{\"id\":\"u\",\"entity\":\"User\",\"node_ids\":[1],\"columns\":[\"username\"]}}]}}'\n  gql: 'MATCH (u:User {{id: 1}}) RETURN u.username'\nphysical:\n  clickhouse:\n    emitted: {{expect: [\"(Project u.id AS u_id, 'User' AS u_entity_type, '{{}}' AS u_props (...))\"]}}\n"
+            "name: columns\nhydration: {{columns: {{{alias}: []}}}}\nquery:\n  gql: 'MATCH (u:User {{id: 1}}) RETURN u.username'\nphysical:\n  clickhouse:\n    emitted: {{expect: [\"(Project u.id AS u_id, 'User' AS u_entity_type, '{{}}' AS u_props (...))\"]}}\n"
         )
     };
     let ontology = || {
@@ -1663,7 +1642,7 @@ fn hydration_columns_replace_the_selected_columns() {
 fn rejections_need_contains_for_every_language() {
     let parse = |contains: &str| {
         orbit_utils::yaml::from_str::<Scenario>(&format!(
-            "name: r\nquery: {{json: q, gql: q}}\nphysical: {{clickhouse: {{rejected: {{phase: validate, reason: schema{contains}}}}}}}"
+            "name: r\nquery: {{gql: q}}\nphysical: {{clickhouse: {{rejected: {{phase: validate, reason: schema{contains}}}}}}}"
         ))
         .err()
         .map(|error| error.to_string())
@@ -1672,8 +1651,7 @@ fn rejections_need_contains_for_every_language() {
     for (contains, language) in [
         ("", "gql"),
         (", contains: []", "gql"),
-        (", contains: {json: [x], gql: []}", "gql"),
-        (", contains: {gql: [x]}", "json"),
+        (", contains: {gql: []}", "gql"),
     ] {
         let error = parse(contains).expect(contains);
         assert!(

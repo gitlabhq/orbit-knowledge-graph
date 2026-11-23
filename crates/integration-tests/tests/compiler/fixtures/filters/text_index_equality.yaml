@@ -66,8 +66,6 @@ cases:
   - name: Inequality on a text-indexed string stays a plain comparison
 
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","filters":{"name":{"ne":"compile"}},"columns":["name"]}],"limit":10}
       gql: |
         MATCH (d:Definition) WHERE d.name <> 'compile' RETURN d.name LIMIT 10
 
@@ -87,8 +85,6 @@ cases:
   - name: Equality on a text-indexed string stays plain beside a sort-key filter
 
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","filters":{"project_id":9,"name":"compile"},"columns":["name"]}],"limit":10}
       gql: |
         MATCH (d:Definition) WHERE d.project_id = 9 AND d.name = 'compile' RETURN d.name LIMIT 10
 
