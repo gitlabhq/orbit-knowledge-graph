@@ -88,6 +88,7 @@ fn every_configured_language_parses_when_classified_for_parsing() {
         let source: &[u8] = match lang {
             SupportLang::Markdown => b"# x",
             SupportLang::Vue => b"<script>x</script>",
+            SupportLang::GraphQl => b"query x { id }",
             _ => b"x",
         };
         write_all(repo.path(), &[(&path, source)]);

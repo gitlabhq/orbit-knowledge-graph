@@ -151,8 +151,6 @@ tests:
       - { row: { import_type: "DefaultImport", target: "CeBlobOverflowMenu" } }
 
   - name: GraphQL import through ee_else_ce targets primary export proxy
-    # Known gap: .graphql files are not import targets yet.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'

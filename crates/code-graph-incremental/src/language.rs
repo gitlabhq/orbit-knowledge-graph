@@ -10,6 +10,8 @@ pub enum SupportLang {
     Dockerfile,
     Elixir,
     Go,
+    #[serde(rename = "graphql")]
+    GraphQl,
     Haskell,
     Hcl,
     Java,
@@ -133,6 +135,7 @@ pub fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
         SupportLang::Zig => Some(include_str!("../langs/zig.yaml")),
         SupportLang::Markdown => Some(include_str!("../langs/markdown.yaml")),
         SupportLang::Vue => Some(include_str!("../langs/vue.yaml")),
+        SupportLang::GraphQl => Some(include_str!("../langs/graphql.yaml")),
         _ => None,
     }
 }

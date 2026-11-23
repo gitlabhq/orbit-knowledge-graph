@@ -7,7 +7,7 @@ families:
   jvm:
     members: [java, kotlin, scala]
   js_ts:
-    members: [javascript, typescript, tsx, vue]
+    members: [javascript, typescript, tsx, vue, graphql]
 
 languages:
   bash:
@@ -51,6 +51,12 @@ languages:
     aliases: [go, golang]
     grammar: tree-sitter-go
     fqn_separator: "."
+
+  graphql:
+    extensions: [graphql, gql]
+    aliases: [graphql, gql]
+    grammar: graphql
+    fqn_separator: "::"
 
   haskell:
     extensions: [hs]

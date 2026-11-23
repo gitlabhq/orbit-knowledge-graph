@@ -1,6 +1,7 @@
 //! Frontends turn a source file into a tree for the engine. An engine mounts
 //! one per language it reads; a file goes to the first that accepts it.
 
+pub mod graphql;
 pub mod markdown;
 pub mod project;
 pub mod treesitter;
@@ -128,11 +129,42 @@ impl Frontend for Vue {
     }
 }
 
+/// The GraphQL document reader.
+pub struct GraphQl;
+
+impl Frontend for GraphQl {
+    fn name(&self) -> &str {
+        "graphql"
+    }
+
+    fn accepts(&self, path: &str) -> bool {
+        SupportLang::from_path(path) == Some(SupportLang::GraphQl)
+    }
+
+    fn is_named(&self, name: &str) -> bool {
+        SupportLang::from_alias(name) == Some(SupportLang::GraphQl)
+    }
+
+    fn parse(
+        &self,
+        source: &str,
+        path: &str,
+        lang: &Lang,
+        _: &Limits,
+        budget: &Sentinel,
+    ) -> Result<(Tree, Option<Killed>), Killed> {
+        let tree = graphql::parse(source, lang, path);
+        budget.check()?;
+        Ok((tree, None))
+    }
+}
+
 /// The frontend a language's files parse with.
 pub fn for_language(language: SupportLang) -> Box<dyn Frontend> {
     match language {
         SupportLang::Markdown => Box::new(Markdown),
         SupportLang::Vue => Box::new(Vue),
+        SupportLang::GraphQl => Box::new(GraphQl),
         language => Box::new(TreeSitter { language }),
     }
 }
