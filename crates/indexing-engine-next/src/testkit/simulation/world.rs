@@ -251,11 +251,6 @@ impl World {
         UNIX_EPOCH + Instant::now().duration_since(self.started_at) + TICK * self.offset_of(actor)
     }
 
-    pub(super) fn instant_at(&self, actor: Actor, local: SystemTime) -> Instant {
-        let since_epoch = local.duration_since(UNIX_EPOCH).unwrap_or_default();
-        self.started_at + since_epoch.saturating_sub(TICK * self.offset_of(actor))
-    }
-
     pub(super) fn draw_number(&mut self, range: std::ops::RangeInclusive<u64>) -> u64 {
         self.rng.random_range(range)
     }

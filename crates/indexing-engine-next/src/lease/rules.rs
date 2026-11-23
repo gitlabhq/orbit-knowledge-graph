@@ -103,6 +103,12 @@ impl Hold {
         local_now >= self.renew_at
     }
 
+    pub fn time_until_renewal(&self, local_now: SystemTime) -> Duration {
+        self.renew_at
+            .duration_since(local_now)
+            .unwrap_or(Duration::ZERO)
+    }
+
     pub fn build_renewal(
         &self,
         rules: &LeaseRules,

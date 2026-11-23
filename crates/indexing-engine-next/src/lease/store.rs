@@ -53,8 +53,7 @@ impl Leases {
                 Ok(None) => {}
                 Err(error) => warn_port_failure("lease_take_failed", &error),
             }
-            let retry_at = now + self.rules.renew_every;
-            self.clock.sleep_until(retry_at).await;
+            self.clock.sleep(self.rules.renew_every).await;
         }
     }
 
@@ -63,10 +62,12 @@ impl Leases {
         hold: &mut Hold,
         key: &WorkerKey,
         in_flight: &dyn InFlight,
+        started_at: SystemTime,
     ) {
+        let mut now = started_at;
         loop {
-            self.clock.sleep_until(hold.renew_at()).await;
-            let now = self.clock.now().await;
+            self.clock.sleep(hold.time_until_renewal(now)).await;
+            now = self.clock.now().await;
             match self.extend_if_ours(hold, key, now).await {
                 Ok(true) => {
                     if let Err(error) = in_flight.acknowledge_progress().await {

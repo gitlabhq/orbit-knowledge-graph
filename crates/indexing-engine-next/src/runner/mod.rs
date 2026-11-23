@@ -64,7 +64,7 @@ async fn serve_lane(runner: Arc<Runner>, lane: LaneId, slots: NonZeroU32) {
                     expanded(ERROR_MESSAGE) = %error,
                     "the pull of the lane failed"
                 );
-                runner.ports.clock.sleep_until(now + PULL_RETRY).await;
+                runner.ports.clock.sleep(PULL_RETRY).await;
                 continue;
             }
         };

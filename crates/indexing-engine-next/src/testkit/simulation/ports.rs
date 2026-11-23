@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -47,10 +47,9 @@ impl Clock for SimulatedPorts {
         self.world.begin_step(self.actor, StepKind::Any).await
     }
 
-    async fn sleep_until(&self, local: SystemTime) {
+    async fn sleep(&self, duration: Duration) {
         self.world.stop_unless_allowed(self.actor).await;
-        let wake_at = self.world.lock().instant_at(self.actor, local);
-        tokio::time::sleep_until(wake_at).await;
+        tokio::time::sleep(duration).await;
     }
 }
 

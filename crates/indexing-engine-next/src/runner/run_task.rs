@@ -1,5 +1,6 @@
 use std::fmt::Display;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use super::Runner;
 use crate::builder::ErasedWorker;
@@ -32,15 +33,16 @@ impl Runner {
         let task = delivery.message.task;
         let key = delivery.message.worker_key();
         let mut hold = self.leases.acquire(&key, task).await;
-        if let Err(error) = self.start_task(&key, task).await {
-            return self.abandon_run(task, error).await;
-        }
+        let started_at = match self.start_task(&key, task).await {
+            Ok(started_at) => started_at,
+            Err(error) => return self.abandon_run(task, error).await,
+        };
 
         let ctx = TaskContext::new(Arc::clone(&self.pools), Some(hold.fence()));
         let in_flight = delivery.in_flight.as_ref();
         let outcome = tokio::select! {
             biased;
-            () = self.leases.renew_while_running(&mut hold, &key, in_flight) => return,
+            () = self.leases.renew_while_running(&mut hold, &key, in_flight, started_at) => return,
             outcome = worker.run(&ctx, &delivery.message.input) => outcome,
         };
         match outcome {
@@ -63,7 +65,7 @@ impl Runner {
         }
     }
 
-    async fn start_task(&self, key: &WorkerKey, task: TaskId) -> anyhow::Result<()> {
+    async fn start_task(&self, key: &WorkerKey, task: TaskId) -> anyhow::Result<SystemTime> {
         let pending = &self.ports.pending;
         let now = self.ports.clock.now().await;
         let entry = pending.read(key).await?;
@@ -79,7 +81,7 @@ impl Runner {
             cleared_pending,
         };
         self.ports.log.record(now, started);
-        Ok(())
+        Ok(now)
     }
 
     async fn finish_task(&self, delivery: &Delivery, hold: Option<&Hold>, outcome: EncodedOutcome) {
