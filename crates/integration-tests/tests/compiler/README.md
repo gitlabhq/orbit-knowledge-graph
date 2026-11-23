@@ -18,13 +18,18 @@ physical:
       node: {expect: ["(Limit 3 (Project u.username AS u_username (_)))"]}
     settings:
       query_config: {equals: {transform_null_in: "0"}, absent: [join_order_algorithm]}
+    result_contract:
+      result_ctx: {query_type: traversal, nodes: {u: {entity_type: User}}}
     hydrate_plan:
-      hydration_plan: static
+      hydration_plan: {static: {u: {node_alias: u}}}
     security:
       node: {expect: ["(Filter false, ... (_))"]}
     codegen:
       output:
         sql: {contains: [gl_merge_request], not_contains: [gl_edge]}
+        parameterized_sql: {contains: ["{p"], not_contains: [opened]}
+        params: [{value: opened, data_type: String}]
+        param_count: 8
         indexes: [{table: gl_merge_request, name: idx_title}]
 ```
 
@@ -38,8 +43,9 @@ Common targets have aliases, declared in one table in
 | `emitted` | `response_policy.node` on ClickHouse, `paginate.node` on DuckDB |
 | `final_ast` | `security.node` |
 | `hydration` | `hydrate_plan.hydration_plan` |
+| `result_context` | `result_contract.result_ctx` on ClickHouse |
 | `settings` | `settings.query_config` |
-| `sql`, `indexes` | `codegen.output` |
+| `sql`, `parameterized_sql`, `params`, `param_count`, `indexes` | `codegen.output` on ClickHouse |
 
 An alias and an explicit phase entry cannot set the same state field.
 
@@ -53,8 +59,51 @@ contract:
 | `query_plan` | Patterns on the planned tree, and `point_lookup` |
 | `node` | Patterns on the SQL AST |
 | `query_config` | `exact`, `equals`, and `absent` on the resolved ClickHouse settings |
-| `hydration_plan` | `none`, `static`, or `dynamic` |
-| `output` | `sql` text checks, and `indexes` that the layout declares and the final query scans |
+| `hydration_plan` | The serialized hydration plan |
+| `result_ctx` | The serialized result context |
+| `output` | `sql` and `parameterized_sql` text checks, `params` matches and `param_count`, and `indexes` that the layout declares and the final query scans |
+
+In `input`, the `Input` head names the query type, then `include_debug_sql`
+and `dynamic_columns=*` when the query sets them. A head without them asserts
+the defaults.
+
+`hydration_plan` and `result_ctx` are compared as JSON. The runner serializes
+the state and matches it with the fixture value. A map matches on the keys it
+lists, a list matches by length and position, and other values compare
+exactly. An empty map is rejected, because it matches anything. To assert the exact
+keys of a map, wrap it as `{$exact: {...}}`. The map then fails on any key it
+does not list, and `{$exact: {}}` asserts an empty map. A failure names
+the JSON path that differs. Collections of keyed records serialize as maps:
+static templates by `node_alias`, dynamic entries by `entity_type`, and
+`virtual_filters` by property. A plan serializes as `none`, `{static: {...}}`,
+or `{dynamic: {...}}`.
+
+Each `params` entry must match one bound parameter on the keys it lists. The
+parameter has `value` and `data_type`, the ClickHouse type name. Extra bound
+parameters are allowed. `param_count` checks the number of bound parameters.
+
+```yaml
+hydration:
+  static:
+    f:
+      virtual_columns: [{column_name: content, service: gitaly, lookup: blob_content}]
+      virtual_filters: {content: {op: contains, value: needle}}
+result_context:
+  neighbors_center: {entity: User, id: 1}
+  labels: {User: username}
+params: [{value: opened, data_type: String}, {value: [1, 2], data_type: "Array(Int64)"}]
+param_count: 8
+```
+
+`sql` checks the rendered SQL, with parameter values inlined.
+`parameterized_sql` checks the SQL that is sent with bound parameters.
+
+Every case that compiles gets two more checks without an assertion. DuckDB
+runs the rendered SQL of each DuckDB case on an empty database of the local
+schema. For each ClickHouse case, the query and each CTE body, emitted as a
+statement of its own for EXPLAIN, must define every CTE that their AST reads
+and render each read under that CTE's name. The run fails if no case has a CTE
+body that reads another CTE.
 
 The compiler fixtures binary loads the embedded query config, so `settings` sees the
 production settings, such as the query cache. The container suite runs EXPLAIN
@@ -67,10 +116,30 @@ After `paginate`, `Limit` shows the fetched rows (the page plus one probe row)
 and `Offset` shows the lowered SKIP. In `input`, `Limit` and `Offset` show the
 requested LIMIT and SKIP. `security` sets the user, with the same shape as a
 query scenario's `config.security`. Hydration fixtures run the hydration
-pipeline, which has no `normalize` or `paginate` phase.
+pipeline, which has no `normalize` or `paginate` phase. Its `hydration` setup
+takes `dynamic`, `path_segment_budget`, the `paths` of each node alias, and the
+`columns` of a node alias, which replace the columns that the query selects.
 
 Set `ontology_overlay: denorm_approved` to load `config/seeds/overlays/denorm_approved/`
-for one fixture. Other fixtures keep the default ontology.
+for one fixture. Other fixtures keep the default ontology. An overlay merges
+its YAML files over the ontology files of the same path, so it can add a
+property, change a table, or add an edge table. Set `schema_version_prefix: v1_`
+to prefix every physical table name, as a schema version does. It combines with
+`ontology_overlay`.
+
+```yaml
+ontology_overlay: renamed_user
+schema_version_prefix: v1_
+```
+
+| Overlay | Change |
+|---|---|
+| `scoped_user` | `User` is scoped by a traversal path instead of global |
+| `renamed_user` | `User` is stored in `gl_renamed_user` |
+| `property_types` | `Group` has a float `score` and a visible `private_note` that cannot be filtered |
+| `string_edge_source` | A `NOTED` edge from `User` to `Note` in a table whose `source_id` is a string |
+| `local_dates` | The local `Definition` has a `created_at` timestamp |
+| `local_nulls` | The local `Definition` has a nullable `rank` |
 
 Both `query.json` and `query.gql` are required. If a frontend cannot express the
 tested plan, declare its reason under `missing_frontends`. The runner rejects
@@ -97,6 +166,22 @@ language_differs:
 
 A file can hold several fixtures in a `cases` list. Every other top-level key
 is a default for each case, and each case needs its own `name`.
+
+A case with `generate` expands before it runs. `kind: named_queries` makes one
+case per embedded named query. Each case renders the query in JSON and GQL with
+its example parameters, keeps every other key of the case, and appends the
+query name to the case name. `kind: repeat` replaces `placeholder` in every
+string of the case with `repeat` repeated `count` times and then `suffix`, the
+same expansion as a scenario's `{repeat, count, suffix}` value, so a fixture
+can check a large input without embedding it.
+
+```yaml
+- name: A query past the byte limit is rejected before parsing
+  generate: {kind: repeat, placeholder: LONG_NAME, repeat: x, count: 40000}
+  query:
+    gql: |
+      MATCH (u:User {username: 'LONG_NAME'}) RETURN u
+```
 
 The fixtures cover access-path choices and their important eligibility guards.
 
@@ -143,6 +228,23 @@ The exact order must list every top-level CTE and can use bound captures.
 Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
 `absent: false`, and combining both forms are rejected.
 
+## Schema calls
+
+`schema/` holds the checks for `CALL db.schema()`, which `gql::prepare` answers
+with a schema response instead of compiling a query. Each case names the
+`call`, the introspection `scope` (`all` or `local`), and one of `expect` or
+`rejected`. `expect` takes `query` for a statement that prepares as a query,
+`overview` for the compact overview of the scope, or `{node: Name}` for one
+domain with that node, its properties, and no edges. `rejected` takes
+`contains`, and every rejection must be safe to show a client.
+
+```yaml
+- name: A node outside the local scope is rejected
+  call: "CALL db.schema('MergeRequest')"
+  scope: local
+  rejected: {contains: ["schema node 'MergeRequest' is unknown or unavailable in this scope"]}
+```
+
 ## Coverage
 
 | Area | Fixtures |
@@ -169,8 +271,7 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
   The YAML fixture independently covers the large dynamic mode.
 - The explain view flattens associative OR expressions. Static prefix fixtures
   verify predicate content, but do not assert the internal balanced-tree depth.
-- Virtual-property hydration and backend code-generation optimizations are
-  outside this harness.
+- Backend code-generation optimizations are outside this harness.
 
 ## Keep in Rust
 
@@ -183,7 +284,7 @@ not ignored tests or missing fixture migrations.
 | `lower::hydration::tests::large_static_tp_sets_emit_or` | Pins 257 static predicates and rejects array mode; complements the dynamic YAML fixture |
 | `lower::hydration::tests::{dynamic,static}_tp_filter_precedes_id_filter` | Checks serialized predicate order; partial YAML item matching is unordered |
 | `compiler::hydration_planning_selects_paths_before_sql_rendering` | Exercises the 256/257 boundary and budget-driven mode selection together |
-| `compiler_legacy::ontology::hydration_widens_paths_to_segment_budget` | Checks bound path arrays, shared parameters, and ancestor coverage across generated paths |
+| `compiler::tests::hydration_widens_paths_to_segment_budget` | Checks bound path arrays, shared parameters, and ancestor coverage across generated paths |
 | Compiler scope, role, settings, virtual-property, and telemetry tests | Exercise phases or observable outputs outside compiler fixture assertions |
 | Compiler dialect and parameter-rendering tests | Check final backend SQL or parameter bindings, rather than the shared SQL AST |
 | Input deserialization, normalization, schema-limit, validation-error, GQL hashing, hydration-metadata, and DDL tests | Check contracts that a valid query through the harness does not reach |

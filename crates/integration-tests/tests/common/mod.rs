@@ -29,18 +29,6 @@ pub fn admin_security_context() -> SecurityContext {
     .with_role(true, Some(AccessLevel::Owner as u32))
 }
 
-pub async fn compile_and_execute(
-    ctx: &TestContext,
-    json: &str,
-) -> (CompiledQueryContext, QueryResult) {
-    let ontology = load_ontology();
-    let security_ctx = test_security_context();
-    let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&compiled.base).await;
-    let result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
-    (compiled, result)
-}
-
 pub trait DummyClaims {
     fn dummy() -> Self;
 }

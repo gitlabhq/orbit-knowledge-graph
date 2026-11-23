@@ -1,13 +1,19 @@
 use std::fmt;
 
 macro_rules! operators {
-    ($($variant:ident => $label:literal),+ $(,)?) => {
+    ($($variant:ident => $label:literal $($leaf:ident)?),+ $(,)?) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub enum Operator { $($variant),+ }
 
         impl Operator {
             #[cfg(test)]
             pub const ALL: &'static [Self] = &[$(Self::$variant),+];
+
+            pub fn has_children(self) -> bool {
+                match self {
+                    $(Self::$variant => operators!(@children $($leaf)?),)+
+                }
+            }
 
             pub fn parse(label: &str) -> Result<Self, String> {
                 match label {
@@ -23,18 +29,20 @@ macro_rules! operators {
             }
         }
     };
+    (@children leaf) => { false };
+    (@children) => { true };
 }
 
 operators! {
-    Hole => "_",
-    Sequence => "...",
+    Hole => "_" leaf,
+    Sequence => "..." leaf,
     Input => "Input",
-    NodeScan => "NodeScan",
-    EdgeScan => "EdgeScan",
+    NodeScan => "NodeScan" leaf,
+    EdgeScan => "EdgeScan" leaf,
     Filter => "Filter",
     Project => "Project",
     Aggregate => "Aggregate",
-    Scan => "Scan",
+    Scan => "Scan" leaf,
     Deduplicate => "Deduplicate",
     Bind => "Bind",
     Join => "Join",
@@ -49,5 +57,5 @@ operators! {
     Neighbors => "Neighbors",
     PathFinding => "PathFinding",
     Hydration => "Hydration",
-    Insert => "Insert",
+    Insert => "Insert" leaf,
 }

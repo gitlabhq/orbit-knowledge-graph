@@ -21,4 +21,4 @@ cases:
         - 1/100/
     physical:
       clickhouse:
-        hydration: static
+        hydration: { static: { wi: { node_alias: wi } } }

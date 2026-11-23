@@ -301,6 +301,13 @@ pub fn variables(pattern: &Expression) -> Result<Vec<String>, String> {
     Ok(names)
 }
 
+pub fn childless(pattern: &Expression) -> Option<Operator> {
+    if pattern.label.has_children() && pattern.children.is_empty() {
+        return Some(pattern.label);
+    }
+    pattern.children.iter().find_map(childless)
+}
+
 pub fn has_holes(pattern: &Expression) -> bool {
     fn holes(terms: &[terms::Term]) -> bool {
         terms.iter().any(|term| match term {

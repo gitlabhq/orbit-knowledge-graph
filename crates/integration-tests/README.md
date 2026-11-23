@@ -17,7 +17,7 @@ tests/
   common/               # shared helpers
   canary/               # TestContext canary
   compiler/             # compiler fixtures in compiler/fixtures/
-  compiler_legacy/      # Rust compiler, dialect, and named query tests that move to compiler fixtures
+  duckdb/               # DuckDB codegen, security, and transform tests in the local binary
   indexer/              # indexer tests; indexer scenarios in indexer/scenarios/
   server/               # server tests; query scenarios in server/data_correctness/scenarios/
   fixtures/             # CLI fixtures
@@ -57,7 +57,7 @@ To run specific suites or tests directly:
 ```shell
 # Local tests (no Docker needed)
 cargo nextest run --test local                                           # all local tests
-cargo nextest run --test local -E 'test(compiler_legacy::)'              # legacy compiler tests only
+cargo nextest run --test local -E 'test(duckdb::)'                       # DuckDB tests only
 cargo nextest run --test local -E 'test(querying_pipeline::)'            # querying pipeline only
 cargo nextest run --test compiler                                        # compiler fixtures
 
@@ -105,20 +105,13 @@ See the [integration-testkit README](../integration-testkit/README.md) for the
 4. If you need a new server test module, add `pub mod foo;` to
    `server_containers.rs` and create `server/foo.rs`.
 
-### Rust-only data correctness tests
+### Rust-only data correctness test
 
-Three tests remain in [retained.rs](tests/server/data_correctness/retained.rs).
-They check internal execution contracts or comparisons that YAML does not express:
-
-| Test | Reason |
-|------|--------|
-| `long_node_text_is_excerpted_only_on_wide_pages` | Checks exact narrow-page text and requires the wide-page excerpt to be shorter than the original text. |
-| `path_finding_code_filtered_endpoints_stay_on_same_traversal_path` | Inspects raw path rows before redaction and hydration, and excludes a cross-project decoy. |
-| `semantic_aggregate_and_nested_cte_codegen_execute` | Executes a constructed compiler AST to check conditional counts, nested CTEs, and UNION arms. |
-
-The first two share the seeded `data_correctness` test. The codegen test uses
-its own table. Both entrypoints and the YAML scenarios run with
-`mise test:integration:data`.
+One test remains in [retained.rs](tests/server/data_correctness/retained.rs).
+`semantic_aggregate_and_nested_cte_codegen_execute` executes a constructed
+compiler AST to check conditional counts, nested CTEs, and UNION arms, which a
+YAML scenario cannot build. It uses its own table and runs with
+`mise test:integration:data`, like the YAML scenarios.
 
 Add new query correctness cases as YAML scenarios. Extend the harness when a
 response assertion is missing.
@@ -139,8 +132,8 @@ the module name (e.g. `querying_pipeline` lives under `server/`), use a
 `#[path]` attribute:
 
 ```rust
-// local.rs — compiler_legacy/ is at the tests/ root, so standard resolution works:
-mod compiler_legacy;
+// local.rs — duckdb/ is at the tests/ root, so standard resolution works:
+mod duckdb;
 
 // querying_pipeline/ lives under server/, so we need an explicit path:
 #[path = "server/querying_pipeline/mod.rs"]

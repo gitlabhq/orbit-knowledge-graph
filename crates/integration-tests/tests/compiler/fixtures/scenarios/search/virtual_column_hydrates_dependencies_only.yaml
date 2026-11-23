@@ -21,4 +21,4 @@ cases:
           not_contains:
             - f_content
             - f.content
-        hydration: static
+        hydration: { static: { f: { node_alias: f } } }
