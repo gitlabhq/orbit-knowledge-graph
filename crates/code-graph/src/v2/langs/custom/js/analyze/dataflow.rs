@@ -1,8 +1,3 @@
-//! JS-side control-flow + dataflow visitor that produces call edges.
-//!
-//! The underlying SSA mechanism lives in `v2::dsl::ssa`; this file is
-//! the analysis built on top of it.
-
 use std::collections::HashMap;
 
 use bumpalo::Bump;
@@ -80,11 +75,6 @@ impl<'a, 'ctx> CallExtractor<'a, 'ctx> {
                 .enumerate()
                 .map(|(idx, def)| (def.fqn.clone(), idx as u32))
                 .collect(),
-            // First def at a given byte range wins. `HashMap::collect`
-            // would silently keep the *last* duplicate, which let a
-            // synthetic-span def (e.g. an inner arrow whose span matches
-            // its `export default` wrapper) overwrite the real def and
-            // misattribute call-site enclosure.
             def_idx_by_range: {
                 let mut map = HashMap::new();
                 for (idx, def) in defs.iter().enumerate() {
@@ -620,8 +610,6 @@ fn invocation_target(
 }
 
 fn expression_steps_from_expression(expression: &Expression<'_>) -> Option<Vec<ExpressionStep>> {
-    // Member-expression nesting is attacker-controlled (`a.b.c...` deep
-    // enough to exhaust a 2 MiB thread stack). Grow instead of crashing.
     stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
         match expression.get_inner_expression() {
             Expression::Identifier(identifier) => {

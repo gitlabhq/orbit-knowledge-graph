@@ -20,7 +20,6 @@ impl Default for Interner {
 }
 
 impl Interner {
-    /// Distinct per interner, so caches keyed on interned ids never mix two.
     pub(crate) fn id(&self) -> u64 {
         self.id
     }

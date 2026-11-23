@@ -119,7 +119,6 @@ fixtures:
       }
 
 tests:
-  # Two distinct interfaces in one namespace, both indexed as Interface.
   - name: "Two interfaces in same namespace indexed as Interface"
     query: |
       MATCH (d:Definition)
@@ -131,7 +130,6 @@ tests:
       - { row_count: 2 }
       - { unique: fqn }
 
-  # Interface method declarations become Method defs scoped under the interface.
   - name: "Interface method declarations indexed as Method under the interface FQN"
     query: |
       MATCH (d:Definition)
@@ -145,7 +143,6 @@ tests:
       - { row_count: 4 }
       - { unique: fqn }
 
-  # One class implementing one interface (FileLogger -> LoggerInterface).
   - name: "FileLogger implements LoggerInterface produces Extends edge"
     query: |
       MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
@@ -164,8 +161,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # Interface-typed property dispatch: $this->users is typed as the interface,
-  # so the call resolves to the INTERFACE method, not the concrete implementation.
   - name: "Controller.show -> UserRepositoryInterface.find via interface-typed property"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -184,7 +179,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # Repository's own injected interface property — same pattern at a deeper layer.
   - name: "Repository.find -> LoggerInterface.info via interface-typed property"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -194,8 +188,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # Factory function wires concrete classes together via `new`. Each `new X(...)`
-  # should produce a Calls edge from the enclosing function to the class.
   - name: "bootApp -> FileLogger via new (constructor reference as Calls)"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -214,10 +206,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # `new UserController(...)` type-flows (a subsequent `$c->method()` would
-  # resolve) but, by design, instantiation does not emit a class-level Calls
-  # edge — no language models `new X()` as a call to the class. We assert the
-  # injected class is indexed instead.
   - name: "Factory target UserController is indexed (new X() is type-flow, not a class Calls edge)"
     query: |
       MATCH (d:Definition)
@@ -227,8 +215,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # Typed properties with namespaced types resolve their type via use-imports.
-  # UserController has two such properties; both must be indexed by bare name.
   - name: "Interface-typed properties on UserController indexed by bare name"
     query: |
       MATCH (d:Definition)

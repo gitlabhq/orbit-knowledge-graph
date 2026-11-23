@@ -14,15 +14,10 @@ use std::sync::{Arc, Mutex};
 use crate::v2::linker::{CodeGraph, GraphEdge};
 use crate::v2::trace::Tracer;
 
-// This is a parse-cost guard for generated Go blobs, not the cumulative Arrow
-// offset-overflow fix. A batch can still overflow with many files below this
-// limit; `arrow_overflow` panic recovery keeps that case self-healing.
 const GO_PARSER_MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
-// 1 MiB as a parse cost guard to keep machine generated files out
 const YAML_PARSER_MAX_FILE_SIZE: u64 = 1024 * 1024;
 
-/// Log files >= this size before processing so an uncatchable OOM/overflow crash names the in-flight file.
 pub(crate) const LARGE_FILE_BREADCRUMB_BYTES: u64 = 2 * 1024 * 1024;
 
 pub type FileInput = String;
@@ -89,7 +84,6 @@ fn build_file_inventory_graph(
     graph
 }
 
-/// Emit a crash-surviving breadcrumb for a large in-flight file; low volume, stays on in production.
 pub(crate) fn breadcrumb_large_file(path: &str, bytes: u64, language: &str) {
     if bytes >= LARGE_FILE_BREADCRUMB_BYTES {
         orbit_log_fields::info!(
@@ -102,7 +96,6 @@ pub(crate) fn breadcrumb_large_file(path: &str, bytes: u64, language: &str) {
     }
 }
 
-/// Cooperative cancellation token. Clone-cheap (`Arc`).
 #[derive(Clone, Default)]
 pub struct CancellationToken(Arc<AtomicBool>);
 
@@ -111,8 +104,6 @@ impl CancellationToken {
         Self(Arc::new(AtomicBool::new(false)))
     }
 
-    /// Signal cancellation. All pipeline phases will exit at their
-    /// next check point (per-file granularity).
     pub fn cancel(&self) {
         self.0.store(true, Ordering::Relaxed);
     }
@@ -152,8 +143,6 @@ impl ProgressObserver for SilentProgress {}
 
 type EdgeTriple = (NodeIndex, NodeIndex, GraphEdge);
 
-/// A chain reference that failed resolution in Phase 2, stored for
-/// re-resolution in Phase 3 after return types are merged.
 struct FailedChain {
     name: String,
     chain: Vec<crate::v2::types::ExpressionStep>,
@@ -195,7 +184,6 @@ fn add_edge_if_missing(
     }
 }
 
-/// Per-file inferred return types keyed by the graph node indices of definitions.
 type InferredReturns = (Vec<petgraph::graph::NodeIndex>, Vec<(u32, String)>);
 
 fn panic_payload_message(payload: &Box<dyn Any + Send>) -> String {
@@ -208,13 +196,6 @@ fn panic_payload_message(payload: &Box<dyn Any + Send>) -> String {
     }
 }
 
-/// Returns `true` when `message` matches Arrow's offset-overflow panic family.
-///
-/// Verified against Arrow 58.3.0 panic sites in `arrow-buffer`'s
-/// `OffsetBuffer::from_repeated_length` (`"offset overflow"`) and
-/// `arrow-array`'s `GenericByteBuilder::next_offset`
-/// (`"byte array offset overflow"`). Re-validate this substring after Arrow
-/// upgrades; a mismatch makes these panics fatal again.
 fn is_offset_overflow_message(message: &str) -> bool {
     message.to_ascii_lowercase().contains("offset overflow")
 }
@@ -241,10 +222,6 @@ fn affected_file_scope(files: &[FamilyFileInput]) -> String {
 }
 
 fn record_offset_overflow_skips(ctx: &PipelineContext, files: &[FamilyFileInput], detail: String) {
-    // Arrow reports only the batch-level offset overflow, not the row/file that
-    // crossed the cumulative `i32` limit. Marking the whole family batch is
-    // intentionally conservative so the repository self-heals without implying
-    // precise per-file attribution.
     for file in files {
         ctx.record_skip(
             file.path.clone(),
@@ -254,19 +231,13 @@ fn record_offset_overflow_skips(ctx: &PipelineContext, files: &[FamilyFileInput]
     }
 }
 
-/// Max file timing entries retained (top-N by total_ms).
 const MAX_FILE_TIMINGS: usize = 100;
 
 pub struct PipelineContext {
     pub config: PipelineConfig,
     pub tracer: crate::v2::trace::Tracer,
     pub root_path: String,
-    /// Per-file benign skips. Surface under
-    /// `gkg.indexer.code.files.skipped{reason}`.
     pub skipped: std::sync::Mutex<Vec<crate::v2::error::SkippedFile>>,
-    /// Per-file failures. Surface under
-    /// `gkg.indexer.code.file_faults{kind}` and contribute to
-    /// `files.processed{outcome="errored"}`.
     pub faults: std::sync::Mutex<Vec<crate::v2::error::FaultedFile>>,
     pub file_timings: std::sync::Mutex<Vec<FileTimingEntry>>,
     pub language_timings: std::sync::Mutex<Vec<LanguageTimings>>,
@@ -311,9 +282,6 @@ impl PipelineContext {
         }
     }
 
-    /// Record a file timing entry into the bounded top-N heap.
-    /// Only retains the slowest `MAX_FILE_TIMINGS` entries, so peak
-    /// memory is proportional to the cap, not the repo file count.
     pub fn record_file_timing(&self, entry: FileTimingEntry) {
         if let Ok(mut timings) = self.file_timings.lock() {
             if timings.len() < MAX_FILE_TIMINGS {
@@ -541,50 +509,29 @@ pub trait LanguagePipeline {
         btx: &BatchTx<'_>,
     ) -> Result<(), Vec<PipelineError>>;
 
-    /// Build a [`LanguageContext`] for this pipeline at runtime.
-    /// Returns `Some` for generic DSL pipelines, `None` for custom
-    /// pipelines that can't participate in a [`FamilyPipeline`].
     fn lang_ctx(_ctx: &Arc<PipelineContext>) -> Option<Arc<LanguageContext>> {
         None
     }
 }
 
-/// Headroom for the native tree-sitter parse, whose stack overflow is an uncatchable SIGSEGV.
 pub const DEFAULT_PARSE_WORKER_STACK_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone)]
 pub struct PipelineConfig {
-    /// Max language-supported files accepted for one pipeline run.
-    /// 0 = no limit.
     pub max_files: usize,
     pub cancel: CancellationToken,
-    /// Rayon threads per language. 0 = use all available cores.
     pub worker_threads: usize,
-    /// Max languages processing concurrently. Limits peak memory
-    /// (at most N CodeGraphs + N rayon pools alive at once).
-    /// 0 = default (2).
     pub max_concurrent_languages: usize,
-    /// Global per-file resolution timeout. Applied to all languages
-    /// unless the language's own DSL rules specify a different value.
-    /// `None` = no global timeout (language rules may still set one).
     pub per_file_timeout: Option<std::time::Duration>,
     pub per_file_parse_timeout: Option<std::time::Duration>,
     pub per_file_walk_timeout: Option<std::time::Duration>,
     pub per_file_ssa_timeout: Option<std::time::Duration>,
-    /// Wall-clock budget for the sequential cross-file resolution phase.
-    /// `None` = use the compiled-in default from `utils::CROSS_FILE_RESOLVE_TIMEOUT`.
     pub cross_file_resolve_timeout: Option<std::time::Duration>,
-    /// Internal switch set by `Pipeline::run_with_tracer` so parser graphs only
-    /// emit parsed nodes and relationships while a separate structural graph
-    /// owns repository file/directory rows.
     pub emit_file_inventory_graph: bool,
     pub progress: Arc<dyn ProgressObserver>,
-    /// Called once per successfully-parsed file with its per-phase CPU time, so
-    /// the consumer can record a distribution. Fires from parallel workers.
     pub on_phase_cpu: Option<PhaseCpuObserver>,
 }
 
-/// Observer for per-file parse/walk/ssa CPU time. See [`PipelineConfig::on_phase_cpu`].
 pub type PhaseCpuObserver = Arc<dyn Fn(Language, crate::v2::dsl::engine::PhaseCpu) + Send + Sync>;
 
 impl Default for PipelineConfig {
@@ -617,12 +564,6 @@ impl PipelineConfig {
 
 pub use orbit_utils::fs_walk::{Decision, FileInventory, FileInventoryEntry};
 
-/// Per-file timing captured during pipeline execution.
-///
-/// `resolve_ms` reflects per-file SSA/edge resolution for generic
-/// (tree-sitter) and Rust pipelines. For JS/TS (OXC), cross-file
-/// resolution runs as a bulk phase and is not attributed per-file,
-/// so `resolve_ms` will be 0 and `total_ms` reflects parse time only.
 #[derive(Debug, Clone)]
 pub struct FileTimingEntry {
     pub path: String,
@@ -635,7 +576,6 @@ pub struct FileTimingEntry {
 
 pub struct PipelineResult {
     pub stats: PipelineStats,
-    /// Task-level errors. Fatal entries route to `code_errors_total{stage}`.
     pub errors: Vec<PipelineError>,
     pub skipped: Vec<crate::v2::error::SkippedFile>,
     pub faults: Vec<crate::v2::error::FaultedFile>,
@@ -653,15 +593,11 @@ pub struct PipelineStats {
     pub imports_count: usize,
     pub references_count: usize,
     pub edges_count: usize,
-    /// Per-file timing entries, sorted by total_ms descending.
     pub slowest_files: Vec<FileTimingEntry>,
     pub language_timings: Vec<LanguageTimings>,
-    /// Top-level pipeline phase durations (non-overlapping).
     pub phase_timings: PhaseTimings,
 }
 
-/// Per-language phase breakdown. Phases are non-overlapping and sum
-/// to `total_ms` for each language.
 #[derive(Debug, Clone, Default)]
 pub struct LanguageTimings {
     pub language: String,
@@ -673,9 +609,6 @@ pub struct LanguageTimings {
     pub total_ms: f64,
 }
 
-/// Top-level pipeline phase durations. `file_discovery_ms` and
-/// `structural_graph_ms` run once; language processing runs with
-/// bounded concurrency so wall-clock times may overlap.
 #[derive(Debug, Clone, Default)]
 pub struct PhaseTimings {
     pub file_discovery_ms: f64,
@@ -755,7 +688,6 @@ impl Pipeline {
         )
     }
 
-    /// Blocks until all languages finish processing.
     pub fn run_with_tracer(
         root: &Path,
         file_inventory: Arc<FileInventory>,
@@ -768,10 +700,6 @@ impl Pipeline {
         config.emit_file_inventory_graph = true;
         let t_pipeline = std::time::Instant::now();
 
-        // 1. Group parseable files by language family (the stream already
-        //    canonicalized the inventory). Files keep their specific Language for
-        //    parser selection; the family determines which files share a
-        //    CodeGraph for cross-language resolution.
         let t_discovery = std::time::Instant::now();
         let (files_by_family, parsed_file_languages) =
             group_parseable_inventory(&file_inventory, config.max_files);
@@ -805,10 +733,6 @@ impl Pipeline {
             inventory: Some(inventory.clone()),
         });
 
-        // 2. Process languages with bounded concurrency. At most
-        //    max_concurrent_languages run at once (default 2), each
-        //    with its own rayon pool. Limits peak memory to N
-        //    CodeGraphs + N rayon pools.
         let max_langs = ctx.config.concurrent_languages();
         let directories_count = AtomicUsize::new(0);
         let files_count = AtomicUsize::new(0);
@@ -821,7 +745,6 @@ impl Pipeline {
 
         let file_discovery_ms = t_discovery.elapsed().as_secs_f64() * 1000.0;
 
-        // Bounded channel as a semaphore: N permits = N concurrent languages
         let t_languages = std::time::Instant::now();
         let (sem_tx, sem_rx) = crossbeam_channel::bounded::<()>(max_langs);
         for _ in 0..max_langs {
@@ -861,8 +784,6 @@ impl Pipeline {
                     if worker_threads > 0 {
                         pool_builder = pool_builder.num_threads(worker_threads);
                     }
-                    // The pool serves one family of one project, so all of its jobs belong
-                    // to this span.
                     let pool_builder = pool_builder.spawn_handler(|thread| {
                         let span = span.clone();
                         let mut builder = std::thread::Builder::new();
@@ -919,10 +840,6 @@ impl Pipeline {
                     drop(pool);
 
                     match result.unwrap_or_else(|payload| {
-                        // If the panic payload is already a typed CodeGraphError
-                        // (e.g. an UnexpectedNodeType from the linker), surface
-                        // it directly so its `stage` reaches the dashboard
-                        // instead of collapsing into `internal`.
                         let affected_files = affected_file_scope(files);
                         let err = match payload.downcast::<crate::v2::error::CodeGraphError>() {
                             Ok(typed) => {
@@ -984,17 +901,6 @@ impl Pipeline {
                                 safe(ERROR_COUNT) = errors.len(),
                                 "language processing failed"
                             );
-                            // After the typed-outcome refactor the
-                            // language pipelines return `Ok(())` even
-                            // when every file was skipped or faulted —
-                            // so this arm only fires for task-level
-                            // failures recovered from the `catch_unwind`
-                            // above (rayon panic, linker invariant
-                            // violation, etc.). Files that hadn't been
-                            // processed yet are silently dropped from
-                            // counts; the failure itself surfaces via
-                            // `code_errors_total{stage}` so on-call can
-                            // see what bailed out.
                             if let Ok(mut errs) = all_errors.lock() {
                                 errs.extend(errors);
                             }
@@ -1026,9 +932,6 @@ impl Pipeline {
             .map(|mut e| std::mem::take(&mut *e))
             .unwrap_or_default();
 
-        // Build the structural file/directory graph after parsing so each File
-        // node carries its final reason in a single write: pre-parse stream skips,
-        // then parse-phase skips and faults.
         let t_structural = std::time::Instant::now();
         if !file_inventory.is_empty() {
             let mut reasons: FxHashMap<&str, FileReason> = FxHashMap::default();
@@ -1112,12 +1015,6 @@ impl Pipeline {
     }
 }
 
-/// Generic pipeline parameterized by language spec `P` and rules `R`.
-///
-/// - **Phase 1** (parallel): full AST walk → defs, imports, refs
-/// - **Finalize**: build ancestor chains → stream nodes to writer
-/// - **Phase 2** (parallel): resolve refs → edges
-/// - **Phase 3**: re-resolve failed chains → stream edges to writer
 pub struct GenericPipeline<P, R>(PhantomData<(P, R)>);
 
 impl<P, R> LanguagePipeline for GenericPipeline<P, R>
@@ -1155,12 +1052,6 @@ where
     }
 }
 
-/// Pipeline for language families with multiple member languages.
-///
-/// Parses each file with its language-specific `LanguageSpec`, but
-/// feeds all definitions into a single shared `CodeGraph`. Resolution
-/// (Phase 2/3) uses per-file `LanguageContext` so each file resolves
-/// with its own rules while seeing the unified symbol table.
 pub struct FamilyPipeline;
 
 impl FamilyPipeline {
@@ -1175,8 +1066,6 @@ impl FamilyPipeline {
         let tracer = &ctx.tracer;
         let t0 = std::time::Instant::now();
 
-        // Pick the primary context deterministically: sort by Language
-        // Debug repr so the result doesn't depend on HashMap iteration.
         let primary_lang = *member_ctxs
             .keys()
             .min_by_key(|l| format!("{l:?}"))
@@ -1184,9 +1073,6 @@ impl FamilyPipeline {
         let primary_ctx = &member_ctxs[&primary_lang];
         let primary_rules = primary_ctx.rules.clone();
 
-        // All family members must share the same FQN separator -- the
-        // graph can only have one. Reject mismatches at construction
-        // rather than silently producing broken FQNs.
         let expected_sep = primary_rules.fqn_separator;
         for (lang, lctx) in member_ctxs {
             assert_eq!(
@@ -1197,7 +1083,6 @@ impl FamilyPipeline {
             );
         }
 
-        // Sentinel: use the shortest per_file_timeout across members.
         let per_file_timeout = member_ctxs
             .values()
             .filter_map(|lc| {
@@ -1234,8 +1119,6 @@ impl FamilyPipeline {
         }
 
         enum ParseOutcome {
-            /// Boxed: `ParsedFile` dwarfs the other variants, and one
-            /// `ParseOutcome` per repository file is held across the barrier.
             Ok(Box<ParsedFile>),
             Skip(SkippedFile),
             Err(FaultedFile),
@@ -1245,8 +1128,6 @@ impl FamilyPipeline {
             path_idx: usize,
             language: Language,
             result: ParseFullResult,
-            /// Compact form of `result.refs`; the raw refs are dropped at
-            /// parse time so only this survives until Phase 2.
             refs: crate::v2::refpack::RefPack,
             ext: String,
             file_size: u64,
@@ -1636,8 +1517,6 @@ impl FamilyPipeline {
                 });
 
                 dedupe_edge_triples(&mut edges);
-                // `dedupe_edge_triples` retains in place and every file's result
-                // is held until the merge, so the slop is repository-wide.
                 edges.shrink_to_fit();
                 failed_chains.shrink_to_fit();
                 total_edges.fetch_add(edges.len(), std::sync::atomic::Ordering::Relaxed);
@@ -1885,9 +1764,6 @@ mod tests {
 
     #[test]
     fn arrow_string_offsets_reproduce_i32_offset_overflow() {
-        // Memory-safe as of Arrow 58.3.0: `new_repeated` calls
-        // `OffsetBuffer::from_repeated_length` first, which panics on the
-        // `i32` overflow check before allocating the value buffer.
         let result = std::panic::catch_unwind(|| {
             let repeats = (i32::MAX as usize / "hello".len()) + 1;
             let _ = arrow::array::StringArray::new_repeated("hello", repeats);
@@ -2577,7 +2453,6 @@ namespace MyApp {
                 label: Default::default(),
             });
         }
-        // Worker threads log to the global subscriber, not to a thread-local default.
         let buffer = LogBuffer::default();
         let writer = buffer.clone();
         let subscriber = tracing_subscriber::fmt()

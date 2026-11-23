@@ -351,8 +351,6 @@ fn overlapping_importer_cycles_are_invalidated_once_after_multiple_edits() {
     );
 }
 
-/// The import pass is global; the per-file budget covers the second pass
-/// (inheritance, decorators, destructuring).
 #[test]
 fn a_file_over_the_resolve_budget_keeps_imports_and_loses_inheritance() {
     let repo = tempfile::tempdir().unwrap();

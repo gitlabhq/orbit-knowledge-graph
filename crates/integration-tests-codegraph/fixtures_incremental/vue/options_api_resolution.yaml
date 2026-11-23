@@ -104,7 +104,6 @@ fixtures:
 
 tests:
   - name: Vue child component default import targets primary export proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -116,7 +115,6 @@ tests:
       - { row: { import_type: "DefaultImport", target: "ChildBadge" } }
 
   - name: Vue default import resolves to virtual component when SFC also exports classes
-    # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -128,7 +126,6 @@ tests:
       - { not: true, row: { callee: "Helper" } }
 
   - name: Vue GraphQL default import targets primary export proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -140,7 +137,6 @@ tests:
       - { row: { import_type: "DefaultImport", target: "app/assets/javascripts/graphql/get_items.query.graphql::default" } }
 
   - name: Vue mounted hook resolves this-method call to local method
-    # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -153,7 +149,6 @@ tests:
       - { row: { caller: "mounted", callee: "load" } }
 
   - name: Vue local this-method chain resolves load to normalize
-    # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -166,7 +161,6 @@ tests:
       - { row: { caller: "load", callee: "normalize" } }
 
   - name: Vue this-alias preserves local method resolution
-    # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -179,7 +173,6 @@ tests:
       - { row: { caller: "relayNormalize", callee: "normalize" } }
 
   - name: Vue imported helper call resolves from method to helper definition
-    # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -191,7 +184,6 @@ tests:
       - { row: { caller: "normalize", callee: "logError" } }
 
   - name: Vue namespace import member call resolves to concrete definition
-    # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -203,7 +195,6 @@ tests:
       - { row: { caller: "emitTrack", callee: "trackEvent" } }
 
   - name: Vue unresolved external namespace calls target imported symbols
-    # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)

@@ -1,14 +1,8 @@
-//! This module contains tree-sitter-c/cpp grammar rules that do not belong in
-//! the language-neutral `treesitter-visit` wrapper.
-
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-/// `reference_declarator`, `parenthesized_declarator`, and
-/// `attributed_declarator` have no `declarator` field. Their first named child
-/// is the inner declarator.
 const DECLARATOR_WRAPPERS: &[&str] = &[
     "function_declarator",
     "pointer_declarator",
@@ -18,8 +12,6 @@ const DECLARATOR_WRAPPERS: &[&str] = &[
     "attributed_declarator",
 ];
 
-/// These named children can precede the inner declarator, so the fallback must
-/// skip them.
 const NON_NAME_CHILDREN: &[&str] = &["comment", "ms_call_modifier"];
 
 fn descend_declarator_name<'r>(node: &N<'r>) -> Option<N<'r>> {
@@ -43,17 +35,11 @@ pub fn c_declarator_name(def: &N<'_>) -> Option<String> {
     Some(declared_name_node(def)?.text().to_string())
 }
 
-/// An unnamed parameter such as `void f(int *)` ends in an abstract declarator,
-/// which names nothing, so it binds nothing rather than binding `*`.
 pub fn binding_declarator_name(binding: &N<'_>) -> Option<String> {
     let node = declared_name_node(binding)?;
     (!node.kind().as_ref().starts_with("abstract_")).then(|| node.text().to_string())
 }
 
-/// Keep class qualifiers because they identify out-of-line members in the FQN.
-/// Normalize conversion operators and drop the template arguments of an
-/// explicit specialization (`foo<int>` is named `foo`) at any depth because
-/// `qualified_identifier` is right-recursive.
 pub fn cpp_declarator_name(def: &N<'_>) -> Option<String> {
     let node = declared_name_node(def)?;
     if node.kind().as_ref() == "operator_cast" {
@@ -81,8 +67,6 @@ fn trailing_name<'r>(node: &N<'r>) -> Option<N<'r>> {
     Some(cur)
 }
 
-/// Use the last token before the operator's parameter list. This preserves type
-/// parameters such as `std::function<void(int)>` and excludes trailing comments.
 fn operator_cast_text(node: &N<'_>) -> Option<String> {
     let params = function_parameter_list(node)?;
     let base = node.range().start;
@@ -104,8 +88,6 @@ fn function_parameter_list<'r>(node: &N<'r>) -> Option<N<'r>> {
     cur.child_of_kind("parameter_list")
 }
 
-/// `abstract_reference_declarator` has no `declarator` field, so use its first
-/// name-bearing child.
 fn descend_abstract_declarator<'r>(node: &N<'r>) -> Option<N<'r>> {
     node.field("declarator").or_else(|| {
         node.children()
@@ -135,8 +117,6 @@ mod tests {
                 "void f(int n, int *p, char **argv, void (*cb)(void)) {}",
                 "parameter_declaration",
             ),
-            // A nested declarator carries its own parameter list, so an abstract
-            // parameter inside it contributes an extra entry here.
             [Some("n"), Some("p"), Some("argv"), Some("cb"), None].map(|s| s.map(String::from)),
         );
     }

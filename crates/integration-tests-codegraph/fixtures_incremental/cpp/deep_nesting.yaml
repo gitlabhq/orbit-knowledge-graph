@@ -40,7 +40,6 @@ tests:
           values: [inside_if, nested_if, else_if, nested_loop, nested_call, nested_try]
 
   - name: "nested_block calls its target after the nesting"
-    # Known gap: in C++, a call after ten or more nested bare blocks does not link, on main too.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

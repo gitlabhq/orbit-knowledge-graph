@@ -1,15 +1,3 @@
-# Kotlin rewrite rules.
-# Handles: package, imports (named, aliased, wildcard), classes, interfaces,
-# enums, objects, companion objects, extension functions (as __impl wrappers
-# named after the receiver type), properties with this.x typing, functions,
-# this./super. calls, control flow, bindings.
-#
-# Known gaps (engine, not rules):
-# - Same-package siblings without an import need a package scope.
-# - Wildcard imports name a directory; the resolver resolves only files.
-# - The DSL cannot see a node's parent, so local `val`/`var` declarations
-#   get the same treatment as properties: a __def plus SSA bindings.
-
 config:
   stdlib: [{ module: java, precedence: runtime }, { module: javax }, { module: jdk },
       { module: kotlin, availability: implicit, precedence: runtime, symbols: [
@@ -87,11 +75,9 @@ stages:
       - match: '(annotation $T:type_identifier)'
         replace: '(__decorator @$T)'
 
-      # this.x → __ivar
       - match: '(navigation_expression (this_expression) (navigation_suffix $N:simple_identifier))'
         replace: '(__ivar @$N $N)'
 
-      # : Base(), : Iface → __supertype
       - match: '(delegation_specifier (constructor_invocation $T:__member $A:value_arguments))'
         replace: '(__supertype $T)'
       - match: '(delegation_specifier $T:__member)'
@@ -101,7 +87,6 @@ stages:
       - match: '(delegation_specifier $T:type_identifier)'
         replace: '(__supertype @$T)'
 
-      # Parameters
       - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier $T:__member)'
         replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee $T))))) (__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T)))))'
       - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier $T:type_identifier)'
@@ -158,7 +143,6 @@ stages:
 
   - name: classify
     rules:
-      # val (a, b) = expr: each slot reads the value's positional component
       - match: '(property_declaration (binding_pattern_kind) (multi_variable_declaration $$$V:variable_declaration) $E:__call)'
         replace: '(__destructure (__rhs $E) $$$V->__binding)'
       - match: '(property_declaration (binding_pattern_kind) (multi_variable_declaration $$$V:variable_declaration) $E:simple_identifier)'
@@ -171,7 +155,6 @@ stages:
         replace: '(__def (__defname @$N) (__property) (__ssa_return_type? @$T) $G)'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:__member) $$$V)'
         replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee $T))))) (__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__type) (__callee $T)))) $$$V)'
-      # Properties and locals: a __def for the graph plus SSA bindings
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:type_identifier) $V:__call)'
         replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T))))) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:type_identifier))'
@@ -185,7 +168,6 @@ stages:
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $$$V)'
         replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs $$$V)))'
 
-      # Assignments
       - match: '(assignment (directly_assignable_expression $N:__ivar) $R:__call)'
         replace: '(__binding $N (__rhs $R))'
       - match: '(assignment (directly_assignable_expression $N:__ivar) $R)'
@@ -195,7 +177,6 @@ stages:
       - match: '(assignment (directly_assignable_expression $N:simple_identifier) $R)'
         replace: '(__binding @$N (__rhs @$R $R))'
 
-      # Control flow
       - match: '(if_expression condition: $C consequence: $Q alternative:? $A)'
         replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
       - match: '(when_expression $S?:when_subject $$$E:when_entry)'
@@ -211,19 +192,16 @@ stages:
       - match: '(do_while_statement $$$C)'
         replace: '(__ssa_loop $$$C)'
 
-      # Enum entries
       - match: '(enum_entry $N:simple_identifier $$$R)'
         replace: '(__def (__defname @$N) (__enum_variant) $$$R)'
 
       - match: '(function_declaration $M?:modifiers $N:simple_identifier $P:function_value_parameters $RT:__member $B?:function_body)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type $RT) $M $P $B)'
-      # Functions: extension functions become methods of the receiver type
       - match: '(function_declaration $M?:modifiers $R:type_identifier $N:simple_identifier $P:function_value_parameters $RT?:type_identifier $B?:function_body)'
         replace: '(__def (__defname @$R) (__impl) (__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M (__binding "this" (__ssa_typed @$R)) $P $B))'
       - match: '(function_declaration $M?:modifiers $N:simple_identifier $P:function_value_parameters $RT?:type_identifier $B?:function_body)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M $P $B)'
 
-      # Class-likes
       - match: '(companion_object $N:type_identifier $B:class_body)'
         replace: '(__def (__defname @$N) (__class) (__impl) $B)'
       - match: '(companion_object $B:class_body)'
@@ -241,7 +219,6 @@ stages:
 
   - name: data-components
     rules:
-      # A data class destructures by its primary-constructor order
       - match: '(__def $$$A (modifiers (class_modifier "data")) $$$B (primary_constructor $$$P) $$$C)'
         replace: '(__def $$$A (modifiers (class_modifier "data")) $$$B (__positional $$$P) $$$C)'
   - name: ssa-cleanup

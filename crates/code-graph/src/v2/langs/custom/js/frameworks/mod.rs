@@ -1,8 +1,3 @@
-//! Anything that requires knowing about Vue/Svelte/Astro before running
-//! the standard JS analyzer lives here. The rest of the pipeline only
-//! calls `has_embedded_scripts` / `extract_scripts` / `combine_scripts`
-//! and the per-framework analyzer hooks re-exported below.
-
 pub(in crate::v2::langs::custom::js) mod react;
 mod vue;
 
@@ -32,28 +27,12 @@ pub fn extract_scripts<'a>(
     })
 }
 
-/// Source text derived from an SFC's `<script>` blocks, flattened into
-/// one buffer so the analyzer sees a single module instead of N.
 pub struct CombinedScripts {
-    /// Concatenation of every `<script>` block, separated by a newline
-    /// so two blocks never merge into one statement.
     pub source: String,
-    /// `true` iff at least one source block was TypeScript; the
-    /// combined source is analysed as TS in that case.
     pub is_typescript: bool,
-    /// Number of script blocks combined. Zero means "no `<script>`
-    /// block was found at all"; callers fall back to the raw source.
     pub block_count: usize,
 }
 
-/// Fold every `<script>` block in an SFC into one analyzer input.
-///
-/// A single OXC parse + SemanticBuilder run covers every block,
-/// eliminating the per-block merge path (and the silent-overwrite
-/// bug that merge hid for SFCs with both `<script>` and
-/// `<script setup>`). Block scopes flatten into one module, which
-/// is fine for def / import / call extraction — Vue's runtime
-/// scoping rules are not what we model.
 pub fn combine_scripts(source: &str, extension: &str) -> Result<CombinedScripts, AnalyzerError> {
     let blocks = extract_scripts(source, extension)?;
     let mut combined = String::new();
@@ -63,11 +42,6 @@ pub fn combine_scripts(source: &str, extension: &str) -> Result<CombinedScripts,
             is_typescript = true;
         }
         if !combined.is_empty() {
-            // `;\n` instead of `\n` so ASI-defeating tokens at the end
-            // of one block (open paren, arithmetic operator, template
-            // literal) cannot statement-merge with the start of the
-            // next block. Misleading merges silently corrupt downstream
-            // def/range data and can mask whole assignments.
             combined.push_str(";\n");
         }
         if combined.len().saturating_add(block.source_text.len()) as u64

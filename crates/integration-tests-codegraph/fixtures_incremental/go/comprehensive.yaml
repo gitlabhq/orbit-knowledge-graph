@@ -75,8 +75,6 @@ fixtures:
       }
 
 tests:
-  # ── Definitions ──
-
   - name: "All structs and interfaces defined with correct FQNs"
     query: |
       MATCH (d:Definition)
@@ -116,8 +114,6 @@ tests:
       - { row: { name: "NewUserService", fqn: "main.NewUserService" } }
       - { row: { name: "main", fqn: "main.main" } }
 
-  # ── Struct embedding ──
-
   - name: "Admin extends User via struct embedding"
     query: |
       MATCH (caller:Definition)-[e:EXTENDS]->(callee:Definition)
@@ -125,8 +121,6 @@ tests:
       RETURN callee.fqn AS parent
     assert:
       - { row: { parent: "main.User" } }
-
-  # ── Simple function calls from main ──
 
   - name: "main calls exactly NewDatabase, NewUserService, FindUser, Greet, Promote, Query"
     queries:
@@ -143,7 +137,6 @@ tests:
           - { row: { callee: "main.NewUserService" } }
           - { row: { callee: "main.Promote" } }
           - { row: { callee: "main.Query" } }
-      # No false positives: main does NOT call Close, Save, or DeleteUser
       - query: |
           MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
           WHERE caller.fqn = 'main.main'
@@ -151,8 +144,6 @@ tests:
           RETURN callee.name
         assert:
           - { empty: true }
-
-  # ── Method chaining via return types ──
 
   - name: "db.Query resolves to Database.Query via NewDatabase return type"
     queries:
@@ -162,7 +153,6 @@ tests:
           RETURN callee.fqn AS callee
         assert:
           - { row_count: 1 }
-      # No false positive to Close
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.fqn = 'main.main' AND callee.fqn = 'main.Close'
@@ -170,9 +160,6 @@ tests:
         assert:
           - { empty: true }
 
-  # ── Promoted method via embedding ──
-
-  # corrected: cross-file Calls rows are unique per caller and target
   - name: "admin.Greet resolves via User embedding"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -180,8 +167,6 @@ tests:
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
-
-  # ── Intra-service method calls ──
 
   - name: "DeleteUser calls exactly FindUser and Save"
     queries:
@@ -193,7 +178,6 @@ tests:
         assert:
           - { row: { callee: "main.FindUser" } }
           - { row: { callee: "main.Save" } }
-      # No false positive to other UserService methods
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.fqn = 'main.DeleteUser'

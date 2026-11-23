@@ -35,7 +35,6 @@ impl DslLanguage for HclDsl {
 
     fn scopes() -> Vec<ScopeRule> {
         vec![
-            // on_scope injects a child def for the resource name (second label).
             scope("block", "Resource")
                 .def_kind(DefKind::Class)
                 .when(has_child_text("resource"))
@@ -68,7 +67,6 @@ impl DslLanguage for HclDsl {
                 .when(has_child_text("provider"))
                 .no_scope()
                 .name_from(nth_label(0)),
-            // The label becomes an iterator variable (e.g. ingress.value).
             scope("block", "Dynamic")
                 .def_kind(DefKind::Property)
                 .when(has_child_text("dynamic"))
@@ -78,8 +76,6 @@ impl DslLanguage for HclDsl {
                 .when(has_child_text("terraform"))
                 .no_scope()
                 .name_from(child_of_kind("identifier")),
-            // locals attributes become property defs via on_scope, not a scope rule,
-            // to avoid matching attributes in other block types.
         ]
     }
 
@@ -119,8 +115,6 @@ impl DslLanguage for HclDsl {
     }
 }
 
-/// For resource and data blocks with two labels, injects a child def named by
-/// the second label, producing FQNs like `aws_instance.web`.
 fn hcl_on_scope(
     node: &N<'_>,
     defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
@@ -187,15 +181,6 @@ fn hcl_on_scope(
                 }
             }
         }
-        // Variable/Module blocks are `.no_scope()`, so the scope rule pushed a
-        // single flat def whose fqn equals its name (e.g. "region"). The engine's
-        // bare-name cross-file strategy (GlobalName) only admits a non-type-container
-        // def when fqn != name, so flat Variable defs were unreachable across files
-        // (var.x is defined in variables.tf but referenced from main.tf). Re-anchor
-        // the fqn under the reference namespace ("var"/"module") so a bare `var.x` /
-        // `module.x` reference resolves through the CAPPED GlobalName strategy.
-        // References stay bare in hcl_rewrite_ref; this is the def-side half.
-        // `last.name` (not `last.fqn`) keeps this idempotent.
         Some(ns @ ("variable" | "module")) => {
             let expected = if ns == "variable" {
                 "Variable"
@@ -215,11 +200,8 @@ fn hcl_on_scope(
     false
 }
 
-/// Terraform built-in namespaces that aren't user-defined references.
 const TF_BUILTIN_NAMESPACES: &[&str] = &["each", "self", "count", "path", "terraform"];
 
-/// Rewrites `variable_expr` references to include the first `get_attr` sibling,
-/// producing dot-separated names like `aws_vpc.main` that match resource FQNs.
 fn hcl_rewrite_ref(node: &N<'_>, name: &str) -> Option<String> {
     if node.kind().as_ref() != "variable_expr" {
         return None;
@@ -240,19 +222,9 @@ fn hcl_rewrite_ref(node: &N<'_>, name: &str) -> Option<String> {
         .find(|c| c.kind().as_ref() == "identifier")
         .map(|c| c.text().to_string())?;
 
-    // Rewrite strategy is split by how the engine resolves the result:
-    //  - Bare names (var.x → "x", module.x → "x") route through the CAPPED
-    //    GlobalName strategy, matching the namespaced def fqn (var.x / module.x)
-    //    that hcl_on_scope produces — bounded cross-directory fan-out.
-    //  - Dotted names (local.x → "locals.x", data/resource → "type.name") match
-    //    a dotted def fqn via the engine's UNBOUNDED by_fqn fast path: full recall
-    //    but cross-directory over-resolution (a known engine gap — there is no
-    //    directory/module-scoped resolution strategy for HCL's flat namespace).
     match name {
-        // var.x → "x": resolves to the namespaced `var.x` def via GlobalName.
         "var" => Some(attr_name),
         "local" => Some(format!("locals.{attr_name}")),
-        // module.x → "x": resolves to the namespaced `module.x` def via GlobalName.
         "module" => Some(attr_name),
         "data" => {
             let attrs: Vec<_> = parent
@@ -287,14 +259,6 @@ impl HasRules for HclRules {
             scopes,
             spec,
             vec![ResolveStage::SSA, ResolveStage::ImportStrategies],
-            // No ScopeFqnWalk: HCL has no lexical-scope-relative name resolution.
-            // Worse, since hcl_on_scope namespaces variable/module fqns (var.x /
-            // module.x), ScopeFqnWalk would walk a bare ref up to the "var"/"module"
-            // segment and do an UNBOUNDED global by_fqn match, fanning a single
-            // `var.region` ref out to every same-named variable across every module
-            // directory in the repo. SameFile then the CAPPED GlobalName keep
-            // bare-ref resolution bounded; dotted refs (resource/data/local) never
-            // reach these strategies — they resolve via the engine's by_fqn fast path.
             vec![ImportStrategy::SameFile, ImportStrategy::GlobalName],
             ReceiverMode::None,
             ".",
@@ -705,11 +669,6 @@ data "aws_ami" "ubuntu" {
 
     #[test]
     fn variable_and_module_fqns_are_namespaced_but_output_provider_stay_flat() {
-        // var.x / module.x refs stay bare in hcl_rewrite_ref; namespacing the def
-        // fqn (so fqn != name) is what lets the capped GlobalName strategy resolve
-        // them across files. Output/Provider stay flat on purpose: nothing
-        // references them by a bare name, so admitting them to GlobalName would
-        // only add cross-file false positives.
         let defs = parse_defs(
             r#"
 variable "region" { default = "us-east-1" }

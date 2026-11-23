@@ -1,12 +1,3 @@
-# C rewrite rules.
-# Handles: #include as wildcard imports (quoted paths relative to the file),
-# functions and prototypes, structs, unions, enums, typedefs, calls, locals,
-# control flow. Definitions hang off the file stem (stem::name).
-#
-# Known gaps (engine, not rules):
-# - A file has one wildcard slot, so with several includes only the last
-#   include receives unresolved calls.
-
 config:
   stdlib: [
       { module: assert.h, symbols: [assert] },
@@ -102,7 +93,6 @@ stages:
       - match: '(declaration declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier)))'
         replace: '(__defname @$N)'
         tag: { exports: '@$N' }
-      # Definitions (prototypes stay declarations)
       - match: '(function_definition declarator: (function_declarator declarator: (parenthesized_declarator (pointer_declarator (function_declarator declarator: $N:identifier parameters: $P)))) body: $B)'
         replace: '(__def (__defname @$N) (__function) $P $B)'
       - match: '(function_definition declarator: (pointer_declarator declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier parameters: $P))) body: $B)'
@@ -139,7 +129,6 @@ stages:
         replace: '(__ssa_loop $C $B)'
       - match: '(do_statement body: $B condition: $C)'
         replace: '(__ssa_loop $B $C)'
-      # Types
       - match: '(struct_specifier name: $N:type_identifier body: $B)'
         replace: '(__def (__defname @$N) (__struct) $B)'
       - match: '(union_specifier name: $N:type_identifier body: $B)'

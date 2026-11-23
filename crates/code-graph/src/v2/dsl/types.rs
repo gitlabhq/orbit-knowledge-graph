@@ -8,10 +8,6 @@ use crate::v2::types::{DefKind, DefinitionMetadata};
 
 use super::extractors::MetadataRule;
 
-/// A per-family import rewriter. Given an import (mutated in place) plus the
-/// importing module's scope, the FQN separator, and the importing file's path,
-/// it may rewrite the import path and optionally return a local-binding
-/// scope-name override.
 pub type ImportRewriter = dyn Fn(&mut crate::v2::types::CanonicalImport, Option<&str>, &str, &str) -> Option<String>
     + Send
     + Sync;
@@ -90,8 +86,6 @@ impl ScopeRule {
         self
     }
 
-    /// Use this hook only when an `Extract` chain cannot express the name.
-    /// The hook replaces `name_from`. `None` falls back to `default_name`.
     pub fn name_hook(mut self, hook: NameHookFn) -> Self {
         self.name_hook = Some(hook);
         self
@@ -203,9 +197,6 @@ pub struct ChainConfig {
     pub super_kinds: &'static [&'static str],
     pub field_access: Vec<FieldAccessEntry>,
     pub constructor: &'static [(&'static str, &'static str)],
-    /// When the constructor's type field has this kind, decompose it
-    /// into chain steps (Ident for the base, Field for nested parts,
-    /// New for the final segment) instead of treating it as a single name.
     pub qualified_type_kinds: &'static [&'static str],
 }
 
@@ -273,28 +264,15 @@ pub struct ImportRule {
     pub(crate) kinds: Vec<&'static str>,
     condition: Option<Pred>,
     path: Extract,
-    /// None = whole-module import.
     symbol: Option<Extract>,
-    /// None = no aliasing.
     alias: Option<Extract>,
-    /// Static label for import_type (default: "Import").
     pub(crate) label: &'static str,
-    /// Classify import type from the node (overrides label if Some).
     pub(crate) classify: Option<fn(&N<'_>) -> &'static str>,
-    /// If set, walk children of these kinds and produce one import per child.
-    /// The path is extracted from the parent, name from each child.
     pub(crate) multi_child_kinds: Option<&'static [&'static str]>,
-    /// When a child matches this kind, name comes from `name` field, alias from `alias` field.
     pub(crate) alias_child_kind: Option<&'static str>,
-    /// When a child matches this kind, a wildcard import is emitted with
-    /// `wildcard: true` and name from `wildcard_symbol`.
     pub(crate) wildcard_child_kind: Option<&'static str>,
     pub(crate) wildcard_symbol: &'static str,
-    /// If true, ALL imports from this rule are treated as wildcard
-    /// (e.g. C# `using MyApp.Models;` imports all types in the namespace).
     pub(crate) always_wildcard: bool,
-    /// If set, split a scoped name at this separator into (path, name).
-    /// e.g. `"."` splits `java.util.List` → path=`java.util`, name=`List`.
     pub(crate) split_last: Option<&'static str>,
 }
 
@@ -439,8 +417,6 @@ pub trait DslLanguage: Send + Sync + Default {
         LanguageParser::TreeSitter
     }
 
-    /// Use the filename (without extension) as the root scope.
-    /// For C/C++ where the file is the only namespace.
     fn file_scope() -> bool {
         false
     }
@@ -489,13 +465,9 @@ pub struct BindingRule {
     pub kinds: Vec<&'static str>,
     pub binding_kind: crate::v2::types::BindingKind,
     pub name_fields: &'static [&'static str],
-    /// Alternative to name_fields: arbitrary Extract pipeline for name.
     pub name_extract: Option<Extract>,
-    /// When set, replaces `name_extract`/`name_fields`, for names an `Extract`
-    /// chain cannot express; a hook returning `None` binds nothing.
     pub name_hook: Option<NameHookFn>,
     pub value_field: Option<&'static str>,
-    /// Alternative to value_field: arbitrary Extract pipeline for RHS value node.
     pub value_extract: Option<Extract>,
     pub instance_attr_prefixes: &'static [&'static str],
     pub type_extract: Option<TypeExtract>,
@@ -575,10 +547,6 @@ impl BindingRule {
         Some(current.text().to_string())
     }
 
-    /// Extract ALL names from a binding node. For nodes with multiple
-    /// name fields (e.g. Go `func Foo(a, b Repository)` where the
-    /// `parameter_declaration` has two `name` children), returns all.
-    /// Falls back to `extract_name` for single-name bindings.
     pub fn extract_names(&self, node: &N<'_>) -> Vec<String> {
         if self.name_hook.is_some() || self.name_extract.is_some() {
             return self.extract_name(node).into_iter().collect();
@@ -607,9 +575,6 @@ impl BindingRule {
         None
     }
 
-    /// Extract a type from a constructor call on the RHS.
-    /// For `x = User.new(params)`, returns `Some("User")` when `"new"` is in
-    /// `constructor_methods`. For non-constructor calls, returns `None`.
     pub fn extract_constructor_type(
         &self,
         node: &N<'_>,
@@ -637,7 +602,6 @@ impl BindingRule {
         None
     }
 
-    /// Returns the callee/identifier/object name for SSA alias chasing.
     pub fn extract_rhs_name(&self, node: &N<'_>, spec: &LanguageSpec) -> Option<String> {
         let value_node = if let Some(extract) = &self.value_extract {
             extract.navigate(node)?
@@ -732,15 +696,8 @@ impl LoopRule {
 
 #[derive(Default)]
 pub struct SsaConfig {
-    /// Variable names written as `LocalDef(class_def_idx)` when entering a
-    /// type scope. e.g. `&["self"]` for Python, `&["this", "self"]` for Java.
     pub self_names: &'static [&'static str],
-    /// Variable name for the super-class reference. Written as
-    /// `LocalDef(super_def_idx)` when entering a class with super_types.
     pub super_name: Option<&'static str>,
-    /// Method names that act as constructors. When a binding RHS is
-    /// `Receiver.new(args)`, the SSA value is `Type(Receiver)` instead
-    /// of `Alias(new)`. e.g. `&["new"]` for Ruby.
     pub constructor_methods: &'static [&'static str],
 }
 
@@ -769,9 +726,6 @@ pub struct CustomParse {
     pub links: crate::v2::types::FileLinks,
 }
 
-/// `Custom` replaces tree-sitter parsing wholesale. It receives the parse CPU budget
-/// and must honor it if it parses with tree-sitter; the walk phases have no budget,
-/// so it must be robust to pathological input on its own.
 #[derive(Clone, Copy, Default)]
 pub enum LanguageParser {
     #[default]
@@ -780,46 +734,19 @@ pub enum LanguageParser {
 }
 pub type ImportTargetPathHook = fn(&crate::v2::types::CanonicalImport, &str) -> Option<String>;
 
-/// Language-specific escape hatches. All fields default to `None`.
-/// The engine calls each hook if set, otherwise uses default behavior.
 #[derive(Default)]
 pub struct LanguageHooks {
     pub module_scope: Option<fn(&str, &str) -> Option<String>>,
-    /// Inject extra definitions after scope matching (e.g. Ruby attr_reader).
     pub on_scope: Option<ScopeHookFn>,
-    /// Path-aware variant of `on_scope` for definition extraction that
-    /// dispatches on filename (e.g. YAML document types). Takes precedence when set.
     pub on_scope_with_path: Option<PathScopeHookFn>,
-    /// Override import extraction (e.g. Ruby require/require_relative).
     pub on_import: Option<fn(&N<'_>, &mut Vec<crate::v2::types::CanonicalImport>) -> bool>,
-    /// Path-aware variant of `on_import` for extraction that dispatches
-    /// on filename (e.g. YAML document types). Takes precedence when set.
     pub on_import_with_path: Option<PathImportHookFn>,
-    /// Override the identifier an import writes into SSA.
     pub import_scope_name: Option<ImportScopeNameHook>,
-    /// Override the target FQN used by type-resolution import maps.
     pub import_target_path: Option<ImportTargetPathHook>,
-    /// Node kinds that are return statements. When encountered, the engine
-    /// captures the SSA value of the returned expression and writes it as
-    /// the enclosing function's inferred return type.
     pub return_kinds: &'static [&'static str],
-    /// When a scope def is created, scan the parent node's children for
-    /// siblings of these kinds and emit reference PendingRefs attributed
-    /// to the new def. Handles decorators/annotations that are CST siblings
-    /// of the decorated function/class definition.
     pub adopt_sibling_refs: &'static [&'static str],
-    /// Build an import rewriter from the current parse family's file paths.
-    /// Resolves language-specific source-root or relative import prefixes.
     pub import_rewriter: Option<ImportRewriterBuilder>,
-    /// Node kinds that represent expression-bodied function bodies
-    /// (e.g. Kotlin's `function_body` when it contains `=`).
-    /// When the engine encounters one of these nodes with a `=` child,
-    /// all refs within are treated as implicit returns.
     pub expression_body_kinds: &'static [&'static str],
-    /// Rewrite a reference name after extraction. Called with the AST
-    /// node and the extracted name. Returns `Some(new_name)` to replace,
-    /// `None` to keep the original. Used by Ruby to resolve
-    /// `obj.send(:foo)` as `obj.foo`.
     pub ref_name_rewrite: Option<fn(&N<'_>, &str) -> Option<String>>,
 }
 
@@ -864,16 +791,11 @@ pub struct LanguageSpec {
     pub loops: Vec<LoopRule>,
     pub chain_config: Option<ChainConfig>,
     pub(crate) package_node: Option<(&'static str, Extract)>,
-    /// Use the filename (without extension) as the root scope for all
-    /// top-level definitions. For languages without namespaces/modules
-    /// (C, C++, header files) where the file IS the scope.
     pub(crate) file_scope: bool,
     pub(crate) parser: LanguageParser,
     pub(crate) hooks: LanguageHooks,
     pub ssa_config: SsaConfig,
 
-    // Dispatch tables: node_kind → indices into the corresponding rule Vec.
-    // Built once at construction, O(1) lookup per node during walk.
     pub scope_dispatch: FxHashMap<&'static str, Vec<usize>>,
     pub ref_dispatch: FxHashMap<&'static str, Vec<usize>>,
     pub import_dispatch: FxHashMap<&'static str, Vec<usize>>,
@@ -938,8 +860,6 @@ impl LanguageSpec {
         self
     }
 
-    /// Declare the node kind for package/namespace declarations.
-    /// These push a file-wide scope but don't produce a definition.
     pub fn package(mut self, kind: &'static str, name: Extract) -> Self {
         self.package_node = Some((kind, name));
         self

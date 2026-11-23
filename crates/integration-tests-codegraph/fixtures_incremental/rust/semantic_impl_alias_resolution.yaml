@@ -26,7 +26,6 @@ fixtures:
 
 tests:
   - name: "trait impl methods attach to the underlying ADT rather than the import alias"
-    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (d:Definition)
@@ -38,7 +37,6 @@ tests:
       - { row: { fqn: "domain::Service::run" } }
 
   - name: "alias-based impl container names are not emitted"
-    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (d:Definition)

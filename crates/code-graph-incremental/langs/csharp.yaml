@@ -1,13 +1,3 @@
-# C# rewrite rules.
-# Handles: namespaces (block and file-scoped), using directives (namespace,
-# static, alias), classes, structs, records, interfaces, enums, fields,
-# properties, constructors, methods, this./base.
-# calls, implicit-this calls, control flow, bindings.
-#
-# Known gaps (engine, not rules):
-# - `using Ns;` imports a namespace, not a file; the resolver resolves files.
-# - Same-namespace siblings without a using need a namespace scope.
-
 config:
   stdlib: [{ module: System },
       { module: System/Math, symbols: [Abs, Acos, Acosh, Asin, Asinh, Atan,
@@ -27,7 +17,6 @@ config:
 stages:
   - name: imports
     rules:
-      # Namespaces first, before qualified names collapse
       - match: '(namespace_declaration name: $N body: (declaration_list $$$B))'
         replace: '(namespace_declaration (cs_pkg (__package @$N $N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*")))) $$$B)'
         tag: { import_type: WildcardImport }
@@ -67,12 +56,9 @@ stages:
         replace: '(__ssa_branch $$$V)'
       - match: '(throw_expression $$$V)'
         replace: '(__ssa_branch $$$V)'
-      # Type parameters are names bound in the type's scope; their count is the
-      # generic arity that tells C<T> apart from C when parts merge.
       - match: '(type_parameter_list $$$T:type_parameter)'
         replace: '(type_parameter_list $$$T->__binding)'
 
-      # Types collapse to a bare identifier
       - match: '(generic_name $T:identifier)'
         replace: '(identifier @$T)'
       - match: '(nullable_type $T:identifier)'
@@ -80,19 +66,15 @@ stages:
       - match: '(qualified_name name: $T:identifier)'
         replace: '(cs_qualified @$T)'
 
-      # Attributes → decorators
       - match: '(attribute name: $N:identifier)'
         replace: '(__decorator @$N)'
 
-      # this.x → __ivar
       - match: '(member_access_expression (this) name: $N:identifier)'
         replace: '(__ivar @$N)'
 
-      # base list → supertypes
       - match: '(base_list $$$T:identifier)'
         replace: '(base_list $$$T=>__supertype)'
 
-      # Parameters
       - match: '(parameter type: $T:identifier name: $N:identifier)'
         replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
       - match: '(parameter name: $N:identifier)'
@@ -141,7 +123,6 @@ stages:
 
   - name: classify
     rules:
-      # Locals
       - match: '(variable_declaration type: (implicit_type) (variable_declarator name: $N:identifier $V:__call))'
         replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(variable_declaration type: (implicit_type) (variable_declarator name: $N:identifier $V:__ssa_branch))'
@@ -163,7 +144,6 @@ stages:
       - match: '(variable_declaration (variable_declarator name: $N:identifier))'
         replace: '(cs_local (__binding @$N (__declaration)))'
 
-      # Assignments
       - match: '(assignment_expression left: $N:__ivar right: $R:__call)'
         replace: '(__binding $N (__rhs $R))'
       - match: '(assignment_expression left: $N:__ivar right: $R)'
@@ -173,7 +153,6 @@ stages:
       - match: '(assignment_expression left: $N:identifier right: $R)'
         replace: '(__binding @$N (__rhs @$R $R))'
 
-      # Control flow
       - match: '(if_statement condition: $C consequence: $Q alternative:? $A)'
         replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
       - match: '(switch_statement value: $V body: $B)'
@@ -195,7 +174,6 @@ stages:
       - match: '(do_statement body: $B)'
         replace: '(__ssa_loop $B)'
 
-      # Members
       - match: '(field_declaration $$$PRE (variable_declaration type: $T:identifier (variable_declarator name: $N:identifier $$$V)))'
         replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))) $$$V)'
       - match: '(field_declaration $$$PRE (variable_declaration (variable_declarator name: $N:identifier $$$V)))'
@@ -207,7 +185,6 @@ stages:
       - match: '(enum_member_declaration name: $N:identifier)'
         replace: '(__def (__defname @$N) (__enum_variant))'
 
-      # Callables
       - match: '(method_declaration $$$PRE returns: $RT:identifier name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $$$PRE $P (__call (__callee @$RT $RT)) $B)'
       - match: '(method_declaration $$$PRE name: $N:identifier parameters: $P body:? $B)'
@@ -217,7 +194,6 @@ stages:
       - match: '(local_function_statement $$$PRE name: $N:identifier parameters: $P body: $B)'
         replace: '(__def (__defname @$N) (__function) $$$PRE $P $B)'
 
-      # Types (after members)
       - match: '(class_declaration $$$PRE name: $N:identifier (base_list $S:__supertype $$$REST) body: (declaration_list $$$B))'
         replace: '(__def (__defname @$N) (__class) $$$PRE $S $$$REST (__binding (__ivar "base") (__rhs (__call (__callee @$S)))) $$$B)'
       - match: '(class_declaration $$$PRE name: $N:identifier $$$ANN body: (declaration_list $$$B))'

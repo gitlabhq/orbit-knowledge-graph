@@ -1,6 +1,3 @@
-//! `FileResolver` resolves one reference at a time via `resolve()`.
-//! No intermediate collections — the caller drives iteration.
-
 use crate::trace_event;
 use crate::v2::pipeline::LanguageContext;
 use crate::v2::sentinel::{FileGuard, Killed};
@@ -27,14 +24,9 @@ pub struct RefData<'a> {
     pub enclosing_def: Option<u32>,
 }
 
-/// Per-file resolver with caches. Create once per file, call `resolve()` per ref.
 pub struct FileResolver<'a> {
     ctx: ResolveCtx<'a>,
-    /// Sentinel guard — sets kill flag on timeout, sends FileDone on drop.
-    /// None when running without a sentinel (tests, custom pipelines).
     _guard: Option<FileGuard>,
-    /// Edges from definitions to external imported symbols. Stored
-    /// separately so they don't interfere with the failed_chains check.
     import_edges: Vec<(NodeIndex, NodeIndex, GraphEdge)>,
     import_edge_keys: FxHashSet<(NodeIndex, NodeIndex, EdgeKind)>,
 }
@@ -68,8 +60,6 @@ impl<'a> FileResolver<'a> {
         }
     }
 
-    /// Construct without a `LanguageContext` — used by custom pipelines
-    /// (e.g. JS) that manage their own rules and settings.
     pub fn from_parts(
         graph: &'a CodeGraph,
         file_node: NodeIndex,
@@ -106,7 +96,6 @@ impl<'a> FileResolver<'a> {
         }
     }
 
-    /// `from_parts` has no sentinel guard, so its caller must arm the flag itself.
     pub fn set_kill_flag(&mut self, kill_flag: Arc<std::sync::atomic::AtomicBool>) {
         self.ctx.kill_flag = kill_flag;
     }
@@ -124,13 +113,10 @@ impl<'a> FileResolver<'a> {
         std::mem::take(&mut self.import_edges)
     }
 
-    /// Dumps the collected resolver trace events. Call after all refs are resolved.
     pub fn dump_trace(&self, header: &str) {
         self.ctx.tracer.dump_grouped(header);
     }
 
-    /// Registers inferred return types (def index -> return type name) for this file.
-    /// Checked only when the graph's metadata has no explicit return type.
     pub fn set_inferred_returns(&mut self, returns: &[(u32, String)]) {
         for (def_idx, rt) in returns {
             if let Some(&node) = self.ctx.def_nodes.get(*def_idx as usize) {
@@ -139,7 +125,6 @@ impl<'a> FileResolver<'a> {
         }
     }
 
-    /// Returns `Err(Killed)` if the sentinel has timed out this file.
     pub fn resolve(
         &mut self,
         name: &str,
@@ -173,10 +158,6 @@ impl<'a> FileResolver<'a> {
             .map(|did| (NodeKind::Definition, Some(graph.defs[did.0 as usize].kind)))
             .unwrap_or((NodeKind::File, None));
 
-        // A member call on a non-self receiver cannot resolve to
-        // the enclosing function. `stream_->Foo()` inside `Foo()`
-        // is not recursion. But `this->Foo()` or `self.foo()` IS
-        // a legitimate self-call, and bare `Foo()` can be recursion.
         let receiver_is_other = chain.is_some_and(|c| {
             matches!(
                 c.first(),
@@ -332,13 +313,8 @@ struct ResolveCtx<'a> {
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
     nested_cache: FxHashMap<String, Vec<NodeIndex>>,
     inferred_returns: FxHashMap<NodeIndex, String>,
-    /// Precomputed or lazily built include index for C/C++ resolution.
     include_index: Option<std::sync::Arc<super::graph::IncludeIndex>>,
-    /// Cached BFS result: paths of files reachable via transitive includes
-    /// from this file. Computed once on first IncludeGraph resolve call.
     include_reachable: Option<rustc_hash::FxHashSet<String>>,
-    /// Precomputed symbol re-export index. Shared across resolvers, set before
-    /// Phase 2 when the language provides a builder hook.
     reexport_index: Option<std::sync::Arc<super::graph::ReexportIndex>>,
 }
 
@@ -482,8 +458,6 @@ impl<'a> ResolveCtx<'a> {
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        // `\u{1}` never appears in an FQN, so one combined key is collision-free
-        // and avoids the second per-probe allocation.
         let key = format!("{scope_fqn}\u{1}{member_name}");
         if let Some(cached) = self.nested_cache.get(key.as_str()) {
             if !cached.is_empty() {
@@ -502,8 +476,6 @@ impl<'a> ResolveCtx<'a> {
             result.extend_from_slice(direct);
         }
 
-        // Fallback: try implicit sub-scopes (e.g. Kotlin Companion objects).
-        // Foo.bar() → Foo.Companion.bar()
         if result.is_empty() {
             for &sub in self.rules.implicit_sub_scopes {
                 let sub_scope = format!("{scope_fqn}{}{sub}", self.rules.fqn_separator);
@@ -524,18 +496,9 @@ impl<'a> ResolveCtx<'a> {
             }
         }
 
-        // Fallback: find methods whose receiver_type matches scope_fqn
-        // or any of its ancestors. This handles Go methods
-        // (`func (s *Service) Run()`) and promoted methods from embedded
-        // structs (`Service` embeds `Logger`, `svc.Log()` resolves via
-        // Logger's receiver type).
         if result.is_empty() {
             self.graph
                 .lookup_by_receiver_type(scope_fqn, member_name, &mut result);
-            // Walk ancestors for receiver type lookup (struct embedding,
-            // extension functions on parent types). Collects ALL matches
-            // across the full ancestor chain — doesn't early-exit so that
-            // diamond/multiple inheritance cases surface all candidates.
             if result.is_empty() {
                 let scope_nodes = self.graph.resolve_scope_nodes(scope_fqn);
                 for &scope_node in &scope_nodes {
@@ -639,21 +602,10 @@ impl<'a> ResolveCtx<'a> {
     fn resolve_bare(&mut self, r: &RefData<'_>) -> Result<Vec<NodeIndex>, Killed> {
         self.check_killed()?;
 
-        // Qualified-name fast path. For refs whose name contains the
-        // language's FQN separator (e.g. Ruby `Foo::Bar::MAX` from a
-        // standalone `scope_resolution` node), the standard `by_name`
-        // strategies miss them: Definition.name is the leaf only, and
-        // `scope_fqn_walk` always prepends an enclosing scope. Try a
-        // direct by_fqn lookup first so absolute qualified references
-        // resolve to non-type-container definitions like Constants.
         if !r.name.is_empty() && r.name.contains(self.rules.fqn_separator) {
             let matches = self.graph.lookup_fqn(r.name);
             if !matches.is_empty() {
                 if self.settings.same_directory_scope {
-                    // Directory-scoped languages (HCL): a qualified ref such as
-                    // `local.x` / `aws_vpc.this` only addresses its own module
-                    // (directory). Keep same-directory matches; if none, fall
-                    // through rather than bind to an unrelated module's def.
                     let dir = super::imports::dir_of(self.graph.graph[self.file_node].path());
                     let same: Vec<_> = matches
                         .iter()
@@ -907,9 +859,6 @@ impl<'a> ResolveCtx<'a> {
             return self.chain_fallback(r, chain);
         }
 
-        // When a chain starts with a class and the next step is a
-        // constructor (e.g. MergeRequest.new.execute), emit a Calls
-        // edge to the class itself alongside the terminal target.
         let mut base_class_nodes: Vec<NodeIndex> = Vec::new();
         if chain.len() > 1 {
             let next_is_constructor = match &chain[1] {
@@ -994,10 +943,6 @@ impl<'a> ResolveCtx<'a> {
                 }
             }
 
-            // Constructor method hook: when Call("new") or Field("new")
-            // (or similar) finds no nested member, the call returns an
-            // instance of the receiver type. Field variant covers chains
-            // like `Foo.new.bar` where `.new` is an intermediate step.
             if found_nodes.is_empty()
                 && matches!(step, ExpressionStep::Call(_) | ExpressionStep::Field(_))
                 && self.rules.hooks.constructor_methods.contains(&member_name)
@@ -1233,15 +1178,9 @@ impl<'a> ResolveCtx<'a> {
                         ParseValue::Opaque => {}
                     }
                 }
-                // Fallback: when reaching defs produce no types (e.g. chain base
-                // is an untracked name like a same-package class), try resolving
-                // the base name via import strategies to find its FQN, then
-                // global name lookup as a last resort.
                 if types.is_empty()
                     && let ExpressionStep::Ident(name) | ExpressionStep::Call(name) = base_step
                 {
-                    // Language hook: resolve identifier as a type directly.
-                    // Ruby uses this for constants like `Model` that are class names.
                     if let Some(resolve_fn) = self.rules.hooks.resolve_ident_type
                         && let Some(fqn) = resolve_fn(self.graph, name)
                     {
@@ -1257,9 +1196,6 @@ impl<'a> ResolveCtx<'a> {
                         enclosing_def: None,
                     };
                     let mut nodes = self.resolve_bare(&fallback)?;
-                    // GlobalName: last-resort lookup for chain bases only.
-                    // Not in import_strategies to avoid O(candidates) scans
-                    // on every bare identifier ref.
                     if nodes.is_empty() {
                         nodes = self.import_resolver().global_name(name);
                     }

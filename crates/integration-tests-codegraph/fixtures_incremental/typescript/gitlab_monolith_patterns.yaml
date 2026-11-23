@@ -331,7 +331,6 @@ tests:
       - { row: { path: "ee/security_inventory/utils", name: "buildSeverityPath", target: "buildSeverityPath" } }
 
   - name: direct ee Vue imports target the component definition
-    # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -342,7 +341,6 @@ tests:
       - { row: { path: "ee/oncall_schedules/components/add_edit_schedule_form.vue", name: "default", target: "AddEditScheduleForm" } }
 
   - name: Vue SFC extraction emits component and method definitions for monolith files
-    # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
       MATCH (d:Definition)
@@ -364,7 +362,6 @@ tests:
       - { empty: true }
 
   - name: ee Vue barrels preserve explicit default reexports
-    # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)

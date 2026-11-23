@@ -76,8 +76,6 @@ fn unread_sources_and_manifests_remain_in_the_graph_and_report() {
     }
 }
 
-/// A language parses only when production's classification says Parse for
-/// its files; Haskell and OCaml are configured but never classified so.
 #[test]
 fn every_configured_language_parses_when_classified_for_parsing() {
     for (lang, entry) in all_languages() {

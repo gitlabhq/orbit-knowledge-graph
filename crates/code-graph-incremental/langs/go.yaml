@@ -1,17 +1,3 @@
-# Go rewrite rules.
-# Handles: package clause, imports, struct/interface/func/method defs,
-# receiver methods (as __impl wrappers named after the receiver type),
-# composite literals as typed bindings, selector calls, control flow.
-#
-# Packages are directories: each file re-exports its directory (`./*`), so
-# files of one package see each other, and an import names the imported
-# package's directory, which go.mod's module path maps onto the repository.
-#
-# Known gaps (engine, not rules):
-# - The DSL cannot see a node's parent, so package-level and function-local
-#   var/const declarations get the same treatment: every var/const is a
-#   __def plus an SSA __binding.
-
 config:
   stdlib:
       - module: builtin
@@ -94,19 +80,16 @@ stages:
       - match: '(return_statement $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
 
-      # *T and T[...] collapse to the bare type identifier (field is kept)
       - match: '(generic_type type: $T:type_identifier)'
         replace: '(type_identifier @$T)'
       - match: '(pointer_type $T:type_identifier)'
         replace: '(type_identifier @$T)'
 
-      # T{...} composite literal: keep the type name, keep the body for nested calls
       - match: '(composite_literal type: $T:type_identifier body: $B)'
         replace: '(__struct_lit @$T $B)'
       - match: '(unary_expression operand: $O:__struct_lit)'
         replace: '$O'
 
-      # Parameters: typed → SSA-typed binding; grouped `a, b T` → two bindings
       - match: '(parameter_declaration name: $A:identifier name: $B:identifier type: $T:type_identifier)'
         replace: '(parameter_declaration (__binding @$A (__ssa_typed @$T)) (__binding @$B (__ssa_typed @$T)))'
       - match: '(parameter_declaration name: $N:identifier type: $T:type_identifier)'
@@ -118,7 +101,6 @@ stages:
 
   - name: retag-expressions
     rules:
-      # `(f())` carries the value of the call it wraps
       - match: '(parenthesized_expression $V:__call)'
         replace: '$V'
       - match: '(selector_expression operand: $O:__member field: $F)'
@@ -135,19 +117,15 @@ stages:
 
   - name: imports
     rules:
-      # alias "path/pkg"
       - match: '(import_spec name: $A:package_identifier path: (interpreted_string_literal $P:interpreted_string_literal_content))'
         replace: '(__import (__source @$P) (__source_path @$P|regex_replace("$", "/*")) (__name @$P|split_last("/") (__alias @$A)))'
-      # . "path/pkg" — every exported name of pkg enters scope
       - match: '(import_spec name: (dot) path: (interpreted_string_literal $P:interpreted_string_literal_content))'
         replace: '(__import (__source @$P) (__source_path @$P|regex_replace("$", "/*")) (__name @$P|split_last("/") (__ssa_hint "*")))'
-      # "path/pkg" and _ "path/pkg"
       - match: '(import_spec path: (interpreted_string_literal $P:interpreted_string_literal_content))'
         replace: '(__import (__source @$P) (__source_path @$P|regex_replace("$", "/*")) (__name @$P|split_last("/")))'
 
   - name: classify
     rules:
-      # Bindings: x := T{} / x := f() / x := y
       - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))'
         replace: '(__binding @$N (__declaration) (__ssa_typed @$R) (__rhs $R))'
       - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__call))'
@@ -161,7 +139,6 @@ stages:
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R))'
         replace: '(__binding @$N (__rhs @$R $R))'
 
-      # var/const: a __def for the graph plus a __binding for SSA
       - match: '(var_spec name: $N:identifier type: $T:type_identifier value: (expression_list $V))'
         replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__ssa_typed @$T) (__rhs $V)))'
       - match: '(var_spec name: $N:identifier type: $T:type_identifier)'
@@ -177,7 +154,6 @@ stages:
       - match: '(const_spec name: $N:identifier)'
         replace: '(__def (__defname @$N) (__constant))'
 
-      # Control flow
       - match: '(if_statement initializer:? $I condition: $COND consequence: $C alternative:? $A)'
         replace: '(__ssa_branch $I $COND (__ssa_arm $C) (__ssa_arm? $A))'
       - match: '(expression_switch_statement value:? $V $$$CASES:expression_case|default_case)'
@@ -189,12 +165,9 @@ stages:
       - match: '(for_statement $$$H body: $B)'
         replace: '(__ssa_loop $$$H $B)'
 
-      # Interface method signatures
       - match: '(method_elem name: $N parameters: $P result:? $RT:type_identifier)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P)'
 
-      # Types
-      # Only a named struct type defines fields; an anonymous struct in a value does not
       - match: '(type_spec name: $N type: (struct_type (field_declaration_list $$$F:field_declaration)))'
         replace: '(__def (__defname @$N) (__struct) $$$F->struct_field)'
       - match: '(type_spec name: $N type: (interface_type $$$M))'
@@ -204,12 +177,9 @@ stages:
       - match: '(type_alias name: $N)'
         replace: '(__def (__defname @$N) (__type_alias))'
 
-      # Functions
       - match: '(function_declaration name: $N parameters: $P result:? $RT:type_identifier body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
 
-      # Receiver methods: wrapped in an __impl named after the receiver type,
-      # so method lookup on the struct reaches them via same-name defs.
       - match: '(method_declaration receiver: (parameter_list $R:(__binding $T:__ssa_typed)) name: $N parameters: $P result:? $RT:type_identifier body: $B)'
         replace: '(__def (__defname @$T) (__impl) (__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $R $P $B))'
       - match: '(method_declaration receiver: (parameter_list (parameter_declaration type: $T:type_identifier)) name: $N parameters: $P result:? $RT:type_identifier body: $B)'
@@ -217,7 +187,6 @@ stages:
 
   - name: ssa-cleanup
     rules:
-      # Struct fields: named → field def; embedded → supertype
       - match: '(struct_field name: $N:field_identifier type: (func_type))'
         replace: '(__def (__defname @$N) (__field_def))'
         tag: { callable: "true" }
@@ -295,7 +264,6 @@ display:
           file_path: '@$M'
           language: '@$M|split_last(".")|map("go:go")'
 
-      # Receiver wrapper: no fqn of its own, so methods hang off the package
       - match: '(__def (__impl))'
         tag:
           entity: Definition

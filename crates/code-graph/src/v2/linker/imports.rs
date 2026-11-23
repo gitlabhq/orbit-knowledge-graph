@@ -1,6 +1,3 @@
-//! All lookups go through `CodeGraph.indexes` (VerifiedMap).
-//! String access goes through `CodeGraph.str(id)` (StringPool).
-
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
 
@@ -16,14 +13,7 @@ pub struct ResolveSettings {
     pub chain_fallback: bool,
     pub compound_key_recovery: bool,
     pub implicit_scope_on_base: bool,
-    /// Maximum number of results from `global_name` before discarding
-    /// as too ambiguous. Prevents fan-out on common names.
     pub global_name_max_results: usize,
-    /// When set, restrict the qualified-name fast path (resolver.rs) to
-    /// definitions in the SAME DIRECTORY as the referencing file. For
-    /// languages whose module scope is a directory (Terraform/HCL), this
-    /// stops a `local.x` / `type.name` reference from resolving to a
-    /// same-named definition in an unrelated module directory.
     pub same_directory_scope: bool,
 }
 
@@ -41,8 +31,6 @@ impl Default for ResolveSettings {
     }
 }
 
-/// The directory portion of a file path (everything before the last `/`),
-/// or `""` for a repo-root file. Used for directory-scoped resolution.
 pub(crate) fn dir_of(path: &str) -> &str {
     match path.rfind('/') {
         Some(i) => &path[..i],
@@ -62,7 +50,6 @@ pub(crate) struct ImportResolver<'a> {
 }
 
 impl<'a> ImportResolver<'a> {
-    /// FQN separator. Returns `&'static str` so it doesn't borrow self.
     #[inline]
     fn sep(&self) -> &'static str {
         self.graph
@@ -101,7 +88,6 @@ impl<'a> ImportResolver<'a> {
             return vec![];
         }
 
-        // Rebuild the imported symbol's FQN from `name`; the alias is only the local handle.
         let symbol_name = import
             .name
             .or(import.alias)
@@ -138,8 +124,6 @@ impl<'a> ImportResolver<'a> {
             }
         }
 
-        // `from pkg import Foo` where `pkg` only re-exports `Foo`: follow the
-        // re-export chain to the defining module.
         if let Some(reexport) = self.reexport_index
             && !imp_path.is_empty()
         {
@@ -166,8 +150,6 @@ impl<'a> ImportResolver<'a> {
             if depth > MAX_REEXPORT_DEPTH || !visited.insert((module.clone(), name.clone())) {
                 continue;
             }
-            // An explicit `from M import name` wins; otherwise the name may come
-            // from any `from M import *` source.
             let next: Vec<(String, String)> = match reexport.named(&module, &name) {
                 Some((m, n)) => vec![(m.to_string(), n.to_string())],
                 None => reexport
@@ -188,9 +170,6 @@ impl<'a> ImportResolver<'a> {
         }
         out.sort_unstable();
         out.dedup();
-        // Bind only on a unique definition. No match (not re-exported here) and
-        // several distinct matches (ambiguous wildcard) both fall through to the
-        // ImportedSymbol fallback.
         if out.len() == 1 { out } else { Vec::new() }
     }
 
@@ -284,9 +263,6 @@ impl<'a> ImportResolver<'a> {
         vec![]
     }
 
-    /// Resolve a bare name against top-level definitions across all files.
-    /// Returns empty if the name is too ambiguous (more than `max_results`
-    /// matches) to avoid O(candidates) fan-out on common names.
     pub fn global_name(&self, name: &str) -> Vec<NodeIndex> {
         let max_results = self.settings.global_name_max_results;
         let results: Vec<NodeIndex> = self
@@ -314,9 +290,6 @@ impl<'a> ImportResolver<'a> {
         results
     }
 
-    /// BFS through the include DAG: starting from this file's includes,
-    /// recursively follow each included header's includes. For each
-    /// reachable header, also search the paired source file (.h -> .c/.cpp).
     fn include_graph(&mut self, name: &str) -> Vec<NodeIndex> {
         let Some(idx) = self.include_index else {
             return Vec::new();

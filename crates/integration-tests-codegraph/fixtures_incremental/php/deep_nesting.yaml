@@ -39,7 +39,6 @@ tests:
           values: [insideIf, nestedIf, nestedLoop, nestedTry, nestedBlock, nestedCall]
 
   - name: "elseIf calls its target after the nesting"
-    # Known gap: in PHP, a call after fifty or more elseif branches does not link, on main too.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

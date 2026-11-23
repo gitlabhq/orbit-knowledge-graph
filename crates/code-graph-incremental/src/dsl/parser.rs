@@ -10,8 +10,6 @@ struct PatParser;
 type PNode<'i> = pest_consume::Node<'i, Rule, ()>;
 type R<T> = Result<T, LoadError>;
 
-/// The next child the grammar promises; a missing one is a grammar bug and
-/// still reported rather than unwound.
 fn next<'i>(it: &mut impl Iterator<Item = PNode<'i>>, what: &str) -> R<PNode<'i>> {
     it.next()
         .ok_or_else(|| LoadError(format!("pattern grammar: missing {what}")))

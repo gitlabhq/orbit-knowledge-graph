@@ -23,7 +23,6 @@ fixtures:
 
 tests:
   - name: a call of an overload declared before the val of its name targets the def
-    # Known gap: a class-body val is a binding, not a def, so the call of its name is typed by the val, on main too.
     skip: true
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)

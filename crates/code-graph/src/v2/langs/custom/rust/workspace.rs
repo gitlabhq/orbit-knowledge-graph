@@ -175,8 +175,6 @@ impl WorkspacePlan {
         self.entries.len()
     }
 
-    /// Inventory indexes this root would own, decided by path matching alone so
-    /// that no database has to be built to find out.
     pub(super) fn candidates(&self, idx: usize) -> &[usize] {
         &self.entries[idx].candidates
     }
@@ -197,8 +195,6 @@ impl WorkspacePlan {
     }
 }
 
-/// The candidate filter and the VFS seed must agree, or a root can claim files
-/// its own database never loaded.
 fn dirs_match(dirs: &loader::Directories, path: &AbsPath) -> bool {
     dirs.include.iter().any(|inc| path.starts_with(inc))
         && !dirs.exclude.iter().any(|ex| path.starts_with(ex))
@@ -231,8 +227,6 @@ fn candidate_file_indexes(
                 }
             }
             loader::Entry::Directories(dirs) => {
-                // Every match sits under one include dir, so walking those path
-                // ranges beats rescanning the whole repo per directory.
                 for include in &dirs.include {
                     let prefix = format!("{}/", include.as_str());
                     let start = by_path
@@ -270,13 +264,6 @@ pub(super) fn relative_path(root_path: &str, file_path: &str) -> String {
     relative_path_if_under_root(root_path, file_path).unwrap_or_else(|| file_path.to_string())
 }
 
-/// Returns `file_path` made relative to `root_path`.
-///
-/// Callers should pass a pre-canonicalized `root_path` (see
-/// `canonical_root_path`) so this function does not need to re-resolve
-/// symlinks such as the macOS `/var` -> `/private/var` redirection on
-/// every invocation. `file_path` is still normalized here because vfs
-/// paths from rust-analyzer can contain unresolved components.
 pub(super) fn relative_path_if_under_root(root_path: &str, file_path: &str) -> Option<String> {
     let root = Path::new(root_path);
     let file = Path::new(file_path);
@@ -389,23 +376,16 @@ fn abs_path_from(path: &Path) -> AbsPathBuf {
         .unwrap_or_else(|| AbsPathBuf::assert(Utf8PathBuf::from("/")))
 }
 
-/// Load a rust-analyzer `ProjectWorkspace` into a fresh `RootDatabase` without
-/// touching `vfs_notify`. Upstream's `load_workspace` spawns a `VfsLoader`
-/// thread and (once `set_config` runs with a non-empty watch list) an inotify
-/// watcher; we bypass both by seeding the `Vfs` straight from the file set the
-/// pipeline already discovered.
 fn load_workspace_no_watcher(
     workspace: &ProjectWorkspace,
     repo_rust_files: &[AbsPathBuf],
 ) -> Result<(RootDatabase, Vfs)> {
-    // Invariant: this function never starts a proc-macro server.
     const _: ProcMacroServerChoice = ProcMacroServerChoice::None;
 
     let mut db = RootDatabase::new(None);
     let mut vfs = Vfs::default();
     let project_folders = ProjectFolders::new(std::slice::from_ref(workspace), &[], None);
 
-    // `repo_rust_files` was already walked by the pipeline; this is a filter, not a second walk.
     for entry in &project_folders.load {
         seed_vfs_from_known_files(&mut vfs, entry, repo_rust_files);
     }
@@ -508,8 +488,6 @@ mod tests {
         );
     }
 
-    /// A crate reached only through a path dependency roots itself as well as
-    /// belonging to the workspace, so both roots must not parse it.
     #[test]
     fn implicit_member_is_claimed_and_parsed_once_by_the_root_workspace() {
         let temp = tempdir().unwrap();
@@ -555,9 +533,6 @@ mod tests {
         assert_eq!(paths, ["a/src/lib.rs", "b/src/lib.rs"]);
     }
 
-    /// Guards the atomic-polyfill advisory mitigation (RUSTSEC-2023-0089). If
-    /// anyone flips our loader to launch a proc-macro server, this test must
-    /// fail so it can't regress silently.
     #[test]
     fn proc_macro_server_is_disabled() {
         let choice = ProcMacroServerChoice::None;

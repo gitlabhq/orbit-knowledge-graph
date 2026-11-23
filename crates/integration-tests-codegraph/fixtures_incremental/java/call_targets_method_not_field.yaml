@@ -91,7 +91,6 @@ tests:
       - { not: true, row: { callee: "Main.Converter.b" } }
 
   - name: a receiver chain through a field types by the field
-    # Known gap: a Java receiver chain through a field is not typed, on main too.
     skip: true
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
