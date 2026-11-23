@@ -15,7 +15,7 @@ use super::{
 use crate::scenario::{self, Seed};
 
 pub(super) trait Engine {
-    fn backend(&self) -> Backend;
+    const BACKEND: Backend;
 
     async fn seed(&self, seed: &Seed, name: &str);
 
@@ -59,14 +59,14 @@ pub(super) async fn run_steps(engine: &impl Engine, steps: &[QueryStep], name: &
     }
 }
 
-async fn run_frontend(
-    engine: &impl Engine,
+async fn run_frontend<E: Engine>(
+    engine: &E,
     (frontend, key): (Frontend, &str),
     query: &str,
     expect: &QueryExpect,
     name: &str,
 ) {
-    let backend = engine.backend().name();
+    let backend = E::BACKEND.name();
     let label = &format!("{name} [{key} on {backend}]");
     expect.validate_pages_exclusive(label);
 

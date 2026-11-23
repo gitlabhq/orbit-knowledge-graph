@@ -243,9 +243,7 @@ struct ClickhouseEngine<'a> {
 }
 
 impl engine::Engine for ClickhouseEngine<'_> {
-    fn backend(&self) -> format::Backend {
-        format::Backend::Clickhouse
-    }
+    const BACKEND: format::Backend = format::Backend::Clickhouse;
 
     async fn seed(&self, seed: &Seed, name: &str) {
         let columns = crate::scenario::seed::fetch_table_columns(self.ctx).await;

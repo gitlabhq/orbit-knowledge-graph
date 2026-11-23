@@ -67,9 +67,7 @@ struct DuckdbEngine<'a> {
 }
 
 impl Engine for DuckdbEngine<'_> {
-    fn backend(&self) -> Backend {
-        Backend::Duckdb
-    }
+    const BACKEND: Backend = Backend::Duckdb;
 
     async fn seed(&self, seed: &Seed, name: &str) {
         seed_local(&self.database, seed, name);
