@@ -33,7 +33,7 @@ data:
   - [tsconfig.json, json]
   - [jsconfig.json, json]
   - [package.json, json]
-  - [webpack.config.js, raw, '[''"]?([@~a-zA-Z_$][@~a-zA-Z0-9_$/-]*)[''"]?\s*:\s*path\.(?:join|resolve)\(__dirname,\s*[''"]([^''"]+)[''"]']
+  - [webpack.config.js, raw, '[''"]?([@~a-zA-Z_$][@~a-zA-Z0-9_$/.-]*)[''"]?\s*:\s*path\.(?:join|resolve)\(\s*__dirname,\s*[''"]([^''"]+)[''"]']
   call_wrappers: [await_expression, as_expression, non_null_expression, parenthesized_expression, satisfies_expression]
   loops: [for_statement, for_in_statement, while_statement, do_statement]
 
@@ -78,6 +78,7 @@ canonicalize:
   - stage: imports
     rewrite:
       - '(export_statement (default) value: $N:identifier)': '(__module_export @$N (__default_export "default"))'
+      - '(export_statement (default) value: $V)': '(__def (__defname "default") (__default_export "default") (__variable) $V) #module_default=true'
       - '(import_type_statement (import_clause (named_imports $$$SPECS:import_specifier)) source: (string $S:string_fragment))': '(__import_type (__source @$S) (__source_path @$S) $$$SPECS->__name)'
       - '(import_type_statement (import_clause (namespace_import $N:identifier)) source: (string $S:string_fragment))': '(__import_type (__source @$S) (__source_path @$S) (__name "*" (__alias @$N)))'
       - '(import_type_statement (import_clause $N:identifier) source: (string $S:string_fragment))': '(__import_type (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
@@ -181,7 +182,7 @@ project:
       - '(__file "/^(ts|js)config\.json$/" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" $V:__str) $$$REST))) $$$OUTER)': '(__file @$ROOT (__source_root @$V | strip("./") $V (__scope "bare_import")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
   - stage: aliases
     rewrite:
-      - '(__alias $V:__str)': '(__alias @$ROOT (__str @$ROOT | tree_path("/") | concat("/", $ROOT | child_sym("__str")) | regex_replace("(^|/)webpack\.config\.js/[^/]+/", "$1") | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1") | regex_replace("^/", "")))'
+      - '(__alias $V:__str)': '(__alias @$ROOT (__str @$ROOT | tree_path("/") | regex_replace("(^|/)webpack\.config\.js/.*$", "") | concat("/", $ROOT | child_sym("__str")) | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1") | regex_replace("^/", "")))'
       - '(path_alias (__arr $V:__str $$$REST))': '(__alias @$ROOT (__str @$V | strip("./") $V))'
   - stage: packages
     rewrite:
@@ -209,6 +210,7 @@ display:
   - stage: module_exports
     rewrite:
       - '(__module_export)': '#file_path=$ROOT | ancestor_tag("file_path")'
+      - '(__def #module_default)': '#fqn=$ROOT | ancestor_tag("file_path") | concat("::", "default")'
   - stage: imports
     rewrite:
       - use: import_entity
