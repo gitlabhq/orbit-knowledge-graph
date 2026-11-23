@@ -274,6 +274,11 @@ pub(crate) fn subset_mismatch(
 ) -> Option<String> {
     match (expected, actual) {
         (serde_json::Value::Object(expected), serde_json::Value::Object(actual)) => {
+            if expected.contains_key(EXACT_KEYS) && expected.len() > 1 {
+                return Some(format!(
+                    "{path}: {EXACT_KEYS} cannot share a map with other keys"
+                ));
+            }
             let (listed, exact) = match expected.get(EXACT_KEYS) {
                 Some(serde_json::Value::Object(listed)) => (listed, true),
                 _ => (expected, false),
