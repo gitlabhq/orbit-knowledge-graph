@@ -151,7 +151,7 @@ def load_ledger() -> list[Entry]:
             sys.exit(f"comment check: ledger entry {raw} needs glob and reason, and only {sorted(LEDGER_KEYS)}")
         rules = frozenset(raw["rules"]) if "rules" in raw else None
         text = raw.get("text")
-        segments = tuple(key(line) for line in text.split("\n")) if text else ()
+        segments = tuple(key(line) for line in text.strip("\n").split("\n")) if text else ()
         entries.append(Entry(raw["glob"], glob_to_regex(raw["glob"]), rules, text, raw["reason"], segments))
     return entries
 
@@ -212,12 +212,12 @@ def tracked() -> list[str]:
 def suppressions() -> list[str]:
     found = []
     for path in tracked():
-        if Path(path).suffix in {".md", ".mdx", ".toml"} or Path(path).resolve() == Path(__file__).resolve():
+        if Path(path).suffix in {".md", ".mdx", ".toml", ".txt"} or Path(path).resolve() == Path(__file__).resolve():
             continue
         text = Path(path).read_text(errors="replace")
         for match in SUPPRESSION.finditer(text):
             ids = match["ids"]
-            if ids is None or "comments-" in ids:
+            if ids is None or "comments-" in ids.split(" -- ", 1)[0]:
                 found.append(f"{path}:{text.count(chr(10), 0, match.start()) + 1}")
     return found
 
