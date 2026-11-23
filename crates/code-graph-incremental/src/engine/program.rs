@@ -208,6 +208,11 @@ impl<T> Cases<T> {
     fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
+
+    /// Whether a node of `kind` has any case to try.
+    fn tries(&self, kind: u16) -> bool {
+        !self.by_kind.get(&kind).unwrap_or(&self.any).is_empty()
+    }
 }
 
 /// A case anchored by a pattern.
@@ -231,12 +236,12 @@ impl<T: Anchored> Cases<T> {
     /// At `c`, each group's first case whose pattern and guard hold, in case
     /// order; `fire` applies it and returns false to stop at this node. Each
     /// attempt is profiled by the case's pattern.
-    fn fire<S: Store>(
-        &self,
+    fn fire<'c, S: Store>(
+        &'c self,
         run: &mut Run<S>,
         w: &mut Scratch<S>,
         c: Cursor<'_, S>,
-        mut fire: impl FnMut(&mut Run<S>, &Scratch<S>, &T) -> bool,
+        mut fire: impl FnMut(&mut Run<S>, &Scratch<S>, &'c T) -> bool,
     ) {
         let mut fired: SmallVec<[u16; 8]> = SmallVec::new();
         let list = self.by_kind.get(&c.kind()).unwrap_or(&self.any);
@@ -1208,8 +1213,13 @@ impl Loader<'_> {
             }
             rules.push(rule);
         }
+        let rules = rules
+            .into_iter()
+            .enumerate()
+            .map(|(at, r)| (at as u16, r))
+            .collect();
         Ok(Stage {
-            rules: Cases::new(rules, |r: &Rewrite| &r.at.kinds),
+            rules: Cases::grouped(rules, |r: &Rewrite| &r.at.kinds),
             repeat: spec.repeat,
         })
     }
@@ -1829,18 +1839,20 @@ impl Phase {
             let mut w = Scratch::<S>::new(self.slots);
             for target in order(tree, true) {
                 sentinels.iter().try_for_each(|s| s.check())?;
+                if !stage.rules.tries(tree.storage.node(target).kind) {
+                    continue;
+                }
                 let fired = {
                     let mut run = self.run(&*tree, env, budget, file);
                     run.graph = Some(graph);
                     run.graph_fi = fi;
-                    let kind = tree.storage.node(target).kind;
-                    stage
-                        .rules
-                        .tried(Some(kind))
-                        .filter_map(|rule| {
-                            Some((rule, self.decide(&mut run, &mut w, rule, target)?.0))
-                        })
-                        .collect::<Vec<_>>()
+                    let c = Cursor::new(run.trees, run.fi, target);
+                    let mut fired = Vec::new();
+                    stage.rules.fire(&mut run, &mut w, c, |run, w, rule| {
+                        fired.push((rule, settle(run, w, rule).0));
+                        true
+                    });
+                    fired
                 };
                 for (rule, tags) in fired {
                     set_tags(tree, target, rule, &tags);
@@ -1874,20 +1886,25 @@ impl Phase {
         let mut w = Scratch::<Mutable>::new(self.slots);
         for target in order(tree, false) {
             sentinels.iter().try_for_each(|s| s.check())?;
-            if tree.storage.is_removed(tree.storage.id(target)) {
+            if tree.storage.is_removed(tree.storage.id(target))
+                || !stage.rules.tries(tree.storage.node(target).kind)
+            {
                 continue;
             }
-            let kind = tree.storage.node(target).kind;
-            for rule in stage.rules.tried(Some(kind)) {
-                let fired = {
-                    let mut run = self.run(&*tree, env, budget, file);
-                    let Some((tags, texts)) = self.decide(&mut run, &mut w, rule, target) else {
-                        continue;
-                    };
+            let fired = {
+                let mut run = self.run(&*tree, env, budget, file);
+                let c = Cursor::new(run.trees, run.fi, target);
+                let mut fired = Vec::new();
+                stage.rules.fire(&mut run, &mut w, c, |run, w, rule| {
+                    let (tags, texts) = settle(run, w, rule);
                     let mut caps = w.caps.clone();
-                    caps[0] = SmallVec::from_elem(tree.storage.id(target), 1);
-                    Fired { caps, tags, texts }
-                };
+                    caps[0] = SmallVec::from_elem(run.trees[0].storage.id(target), 1);
+                    fired.push((rule, Fired { caps, tags, texts }));
+                    !matches!(rule.out, Out::Replace(_))
+                });
+                fired
+            };
+            for (rule, fired) in fired {
                 let at = tree.storage.id(target);
                 match &rule.out {
                     Out::Tag => set_tags(tree, target, rule, &fired.tags),
@@ -1943,51 +1960,46 @@ impl Phase {
         }
         Ok(replaced)
     }
+}
 
-    fn decide<S: Store>(
-        &self,
-        run: &mut Run<S>,
-        w: &mut Scratch<S>,
-        rule: &Rewrite,
-        target: u32,
-    ) -> Option<(Vec<(u32, u32)>, Vec<Vec<u32>>)> {
-        let c = Cursor::new(run.trees, run.fi, target);
-        if !w.matches(run, &rule.at, c) || !w.holds(run, &rule.at) {
-            return None;
-        }
-        let tags = rule
-            .tags
-            .iter()
-            .filter_map(|(key, val)| {
-                let val = match val {
-                    TagVal::Lit(sym) => *sym,
-                    TagVal::Expr(expr) => {
-                        let vals = expr.eval(run, &w.vals);
-                        first_sym(run, &vals)?
-                    }
-                };
-                Some((*key, val))
-            })
-            .collect();
-        let tpls: Vec<&Tpl<Expr>> = match &rule.out {
-            Out::Replace(tpl) => vec![tpl],
-            Out::Append(tpls) => tpls.iter().collect(),
-            Out::Tag => Vec::new(),
-        };
-        let texts = tpls
-            .into_iter()
-            .map(|tpl| {
-                tpl.texts()
-                    .into_iter()
-                    .map(|expr| {
-                        let vals = expr.eval(run, &w.vals);
-                        first_sym(run, &vals).unwrap_or(0)
-                    })
-                    .collect()
-            })
-            .collect();
-        Some((tags, texts))
-    }
+/// A fired rewrite's tag values and template texts, from the captures in `w`.
+fn settle<S: Store>(
+    run: &mut Run<S>,
+    w: &Scratch<S>,
+    rule: &Rewrite,
+) -> (Vec<(u32, u32)>, Vec<Vec<u32>>) {
+    let tags = rule
+        .tags
+        .iter()
+        .filter_map(|(key, val)| {
+            let val = match val {
+                TagVal::Lit(sym) => *sym,
+                TagVal::Expr(expr) => {
+                    let vals = expr.eval(run, &w.vals);
+                    first_sym(run, &vals)?
+                }
+            };
+            Some((*key, val))
+        })
+        .collect();
+    let tpls: Vec<&Tpl<Expr>> = match &rule.out {
+        Out::Replace(tpl) => vec![tpl],
+        Out::Append(tpls) => tpls.iter().collect(),
+        Out::Tag => Vec::new(),
+    };
+    let texts = tpls
+        .into_iter()
+        .map(|tpl| {
+            tpl.texts()
+                .into_iter()
+                .map(|expr| {
+                    let vals = expr.eval(run, &w.vals);
+                    first_sym(run, &vals).unwrap_or(0)
+                })
+                .collect()
+        })
+        .collect();
+    (tags, texts)
 }
 
 struct Fired {
