@@ -259,7 +259,7 @@ tests:
       - { row: { fqn: "ContextUser::deep_value" } }
 
   - name: "qualified constant reference resolves to the Constant Definition"
-    skip: true
+    known_gap: "the Ruby rules rewrite a constant path as a call, and a constant is a value; a value-read form must also keep class reads."
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)-[:IMPORTS]->(callee:Definition)
       WHERE caller.fqn = 'ContextUser::allowed_refs'
@@ -270,7 +270,7 @@ tests:
       - { row: { type: Constant } }
 
   - name: "second qualified constant reference (string-valued) also resolves"
-    skip: true
+    known_gap: "the Ruby rules rewrite a constant path as a call, and a constant is a value; a value-read form must also keep class reads."
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)-[:IMPORTS]->(callee:Definition)
       WHERE caller.fqn = 'ContextUser::default_label'
@@ -281,7 +281,7 @@ tests:
       - { row: { type: Constant } }
 
   - name: "deeply nested constant reference resolves across module chain"
-    skip: true
+    known_gap: "the Ruby rules rewrite a constant path as a call, and a constant is a value; a value-read form must also keep class reads."
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)-[:IMPORTS]->(callee:Definition)
       WHERE caller.fqn = 'ContextUser::deep_value'

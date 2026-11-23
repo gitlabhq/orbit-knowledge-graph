@@ -120,7 +120,7 @@ fixtures:
 
 tests:
   - name: ee_else_ce alias named import targets EE export proxy
-    skip: true
+    known_gap: "The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not."
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/sidebar/components/sidebar_dropdown_widget.vue'
@@ -132,7 +132,7 @@ tests:
       - { row: { import_type: "NamedImport", target: "dropdowni18nText" } }
 
   - name: Vue computed property resolves ee_else_ce helper call
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'ee/app/assets/javascripts/sidebar/components/sidebar_dropdown_widget.vue'
@@ -143,7 +143,7 @@ tests:
       - { row: { caller: "title", callee: "dropdowni18nText" } }
 
   - name: Vue default import of CE component targets primary export proxy
-    skip: true
+    known_gap: "The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not."
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
@@ -154,7 +154,7 @@ tests:
       - { row: { import_type: "DefaultImport", target: "CeBlobOverflowMenu" } }
 
   - name: GraphQL import through ee_else_ce targets primary export proxy
-    skip: true
+    known_gap: "The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not."
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
@@ -165,7 +165,7 @@ tests:
       - { row: { import_type: "DefaultImport", target: "ee/app/assets/javascripts/repository/queries/project_info.query.graphql::default" } }
 
   - name: Asset alias import targets JS helper module
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
@@ -176,7 +176,7 @@ tests:
       - { row: { import_type: "DefaultImport", target: "app/assets/javascripts/lib/utils/icons_path.js::default" } }
 
   - name: Vue monolith helper import from tilde alias resolves to concrete definition
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'

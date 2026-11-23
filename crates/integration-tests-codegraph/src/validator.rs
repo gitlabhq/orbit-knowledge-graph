@@ -29,6 +29,14 @@ pub fn run_suite(
     let mut failures = undeclared_edges(client, ontology);
     for test in &suite.tests {
         if test.skip {
+            failures.push(fail(
+                &test.name,
+                Severity::Error,
+                "replace `skip: true` with `known_gap: <reason>`".to_string(),
+            ));
+            continue;
+        }
+        if test.known_gap.is_some() {
             eprintln!("  [SKIP] \"{}\"", test.name);
             if probe_skipped {
                 failures.extend(probe_test(test, client, ontology));
@@ -638,7 +646,7 @@ fn fail(test: &str, severity: Severity, message: String) -> Failure {
 
 pub fn load_suite(yaml: &str) -> Option<TestSuite> {
     let suite: TestSuite = orbit_utils::yaml::from_str(yaml).expect("Failed to parse YAML suite");
-    if suite.tests.iter().all(|t| t.skip) && suite.steps.is_empty() {
+    if suite.tests.iter().all(|t| t.known_gap.is_some()) && suite.steps.is_empty() {
         eprintln!(
             "[PASS] Suite: {} ({} tests, all skipped)",
             suite.name,

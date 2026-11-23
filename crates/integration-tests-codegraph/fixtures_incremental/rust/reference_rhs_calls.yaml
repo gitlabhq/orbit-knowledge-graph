@@ -127,7 +127,7 @@ tests:
       - { row: { caller: let_mut_reference, callee: touch } }
 
   - name: "a call with an inline import behind a reference in an argument links"
-    skip: true
+    known_gap: "Known gap until !2887: the argument rule before nested-path-call drops the inline import of a path call, so f has no edge here; !2887 restores it."
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = "argument_reference"
@@ -138,7 +138,7 @@ tests:
       - { column_values: { field: callee, values: ["consume", "f"] } }
 
   - name: "a call inside a macro on the right-hand side links"
-    skip: true
+    known_gap: "a macro body is a token tree, so the call inside vec![pick()] has no call node to link."
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name IN ["assign_macro", "fill"] AND callee.name = "pick"

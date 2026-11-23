@@ -59,7 +59,7 @@ tests:
       - { row: { type: "Use" } }
 
   - name: "colliding trait-impl methods are disambiguated with trait name"
-    skip: true
+    known_gap: "Trait dispatch and cross-file trait resolution are incomplete in rust.yaml."
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'

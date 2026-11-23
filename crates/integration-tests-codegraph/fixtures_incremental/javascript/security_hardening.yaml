@@ -167,7 +167,7 @@ tests:
       - { row: { caller: "runFromA", callee: "fromA" } }
 
   - name: Vue virtual class does not collide with a real class of the same name
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (def:Definition)
       WHERE def.file_path = 'src/Collide.vue'

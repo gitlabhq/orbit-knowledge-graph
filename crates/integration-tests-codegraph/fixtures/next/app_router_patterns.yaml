@@ -148,7 +148,7 @@ tests:
       - { row: { file_path: "app/api/health/route.ts", fqn: "POST", type: "Function" } }
 
   - name: Next app router tsconfig aliases resolve local imports
-    skip: true
+    known_gap: "reason not recorded"
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN [
@@ -169,7 +169,7 @@ tests:
       - { row: { file_path: "app/blog/[slug]/page.tsx", path: "@/lib/posts", name: "fetchPost", is_type_only: false, target: "fetchPost" } }
 
   - name: Next app router external Next imports remain unresolved
-    skip: true
+    known_gap: "reason not recorded"
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path IN ['app/layout.tsx', 'app/api/health/route.ts']

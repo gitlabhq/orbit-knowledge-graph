@@ -96,6 +96,8 @@ pub struct TestCase {
     #[serde(default)]
     pub skip: bool,
     #[serde(default)]
+    pub known_gap: Option<String>,
+    #[serde(default)]
     pub debug: bool,
     #[serde(default)]
     pub query: Option<String>,

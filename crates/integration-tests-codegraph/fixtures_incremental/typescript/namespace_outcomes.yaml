@@ -53,7 +53,7 @@ tests:
       - { row: { caller: dynamicExport } }
 
   - name: "known missing exports do not become external calls"
-    skip: true
+    known_gap: "Deferred: suppressing fallback requires proof that the module's exports are complete."
     query: |
       MATCH (caller:Definition)-[:CALLS]->(symbol:ImportedSymbol)
       WHERE caller.file_path = 'main.ts' AND caller.name = 'missing'
