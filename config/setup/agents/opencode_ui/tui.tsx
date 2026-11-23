@@ -3,6 +3,16 @@ import { Plugin } from '@opencode/plugin/tui'
 
 import { type Activity, OrbitUi } from './rpc.ts'
 
+// The TUI part of the OpenCode 2 plugin. It ships as source, not bundled, because OpenCode
+// compiles TUI JSX itself, so it imports nothing but rpc.ts.
+//
+// Activity line, above the prompt (session.composer.top), one blank line above the input:
+//   running:  ◎ Exploring Orbit  Merge requests → Project   (light Orbit blue)
+//   finished: ◎ Explored Orbit  Merge requests → Project    (Orbit blue, then clears)
+//   failed:   ◎ Explored Orbit  Merge requests → Project · failed   (red mark)
+//
+// Usage bar, in the prompt footer (prompt.footer.status), once the session calls Orbit:
+//   3 queries · 3.2k nodes · 20 edges  ◎ GitLab Orbit
 const MARK = '◎'
 const ORBIT_BLUE = '#949dcb'
 const ORBIT_LIGHT = '#b5dedc'
@@ -32,6 +42,7 @@ export default Plugin.define({
       initial: { lines: [] as Activity[], usage: {} as Record<string, Usage>, lastSessionID: '' },
     })
     const timers = new Map<string, ReturnType<typeof setTimeout>>()
+    // Calls whose end arrived. Events are not awaited, so a fast call's end can arrive first.
     const ended = new Set<string>()
 
     // Memory storage outlives a plugin reload but these timers do not, so lines left by the
@@ -72,7 +83,6 @@ export default Plugin.define({
       expire(data.key, data.state === 'start' ? STALE_MS : LINGER_MS)
     })
 
-    // An interrupted call may never send its end. When a session stops, its running lines go.
     const stopSessions = SESSION_STOPPED.map((type) =>
       context.data.on(type, (event) => {
         const sessionID = sessionOf(event)
@@ -120,6 +130,7 @@ export default Plugin.define({
       )
     }
 
+    // render runs once; the reads inside the JSX expressions keep each slot reactive.
     const removeLines = context.ui.slot({
       append: 'session.composer.top',
       render: (props) => (
