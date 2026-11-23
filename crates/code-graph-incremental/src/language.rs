@@ -27,6 +27,7 @@ pub enum SupportLang {
     Swift,
     TypeScript,
     Tsx,
+    Vue,
     Zig,
 }
 
@@ -131,6 +132,7 @@ pub fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
         SupportLang::Swift => Some(include_str!("../langs/swift.yaml")),
         SupportLang::Zig => Some(include_str!("../langs/zig.yaml")),
         SupportLang::Markdown => Some(include_str!("../langs/markdown.yaml")),
+        SupportLang::Vue => Some(include_str!("../langs/vue.yaml")),
         _ => None,
     }
 }

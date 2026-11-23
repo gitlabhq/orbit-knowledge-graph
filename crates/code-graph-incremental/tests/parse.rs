@@ -87,6 +87,7 @@ fn every_configured_language_parses_when_classified_for_parsing() {
         let path = format!("a.{}", entry.extensions()[0]);
         let source: &[u8] = match lang {
             SupportLang::Markdown => b"# x",
+            SupportLang::Vue => b"<script>x</script>",
             _ => b"x",
         };
         write_all(repo.path(), &[(&path, source)]);

@@ -1,0 +1,14 @@
+import: [shapes]
+
+canonicalize:
+  - stage: normalize
+    rewrite:
+      - '(vue_document $$$C)': '%source_file($$$C)'
+  - stage: embed
+    rewrite:
+      - '(vue_script $L:vue_lang)': 'parse($ROOT, @$L)'
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #file_path=@$M #language=vue'

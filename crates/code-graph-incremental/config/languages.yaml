@@ -7,7 +7,7 @@ families:
   jvm:
     members: [java, kotlin, scala]
   js_ts:
-    members: [javascript, typescript, tsx]
+    members: [javascript, typescript, tsx, vue]
 
 languages:
   bash:
@@ -141,6 +141,12 @@ languages:
     fqn_separator: "::"
     package_markers: [package.json]
     index_names: [index]
+
+  vue:
+    extensions: [vue]
+    aliases: [vue]
+    grammar: vue-sfc
+    fqn_separator: "::"
 
   tsx:
     extensions: [tsx]

@@ -41,7 +41,6 @@ fn an_extension_only_one_engine_knows_follows_that_engines_table() {
     for (name, incremental, v2) in [
         ("Dockerfile.hs", false, true),
         ("Dockerfile.ml", false, true),
-        ("Dockerfile.vue", true, false),
         ("Dockerfile.rake", true, false),
     ] {
         assert_eq!(

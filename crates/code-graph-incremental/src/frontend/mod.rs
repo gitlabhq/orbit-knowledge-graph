@@ -4,6 +4,7 @@
 pub mod markdown;
 pub mod project;
 pub mod treesitter;
+pub mod vue;
 
 use crate::engine::Engine;
 use crate::intern::Lang;
@@ -97,10 +98,41 @@ impl Frontend for Markdown {
     }
 }
 
+/// The Vue single-file component reader.
+pub struct Vue;
+
+impl Frontend for Vue {
+    fn name(&self) -> &str {
+        "vue"
+    }
+
+    fn accepts(&self, path: &str) -> bool {
+        SupportLang::from_path(path) == Some(SupportLang::Vue)
+    }
+
+    fn is_named(&self, name: &str) -> bool {
+        SupportLang::from_alias(name) == Some(SupportLang::Vue)
+    }
+
+    fn parse(
+        &self,
+        source: &str,
+        path: &str,
+        lang: &Lang,
+        _: &Limits,
+        budget: &Sentinel,
+    ) -> Result<(Tree, Option<Killed>), Killed> {
+        let tree = vue::parse(source, lang, path);
+        budget.check()?;
+        Ok((tree, None))
+    }
+}
+
 /// The frontend a language's files parse with.
 pub fn for_language(language: SupportLang) -> Box<dyn Frontend> {
     match language {
         SupportLang::Markdown => Box::new(Markdown),
+        SupportLang::Vue => Box::new(Vue),
         language => Box::new(TreeSitter { language }),
     }
 }
