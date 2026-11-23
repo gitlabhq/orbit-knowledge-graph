@@ -196,6 +196,10 @@ def apply_ledger(findings: list[Finding], ledger: list[Entry]) -> list[Finding]:
                 elif len(entry.segments) > 1 and entry.run_at(in_file, index):
                     exempt[index : index + len(entry.segments)] = [True] * len(entry.segments)
                     entry.used += 1
+                else:
+                    continue
+                if entry.text is not None:
+                    break
         remaining.extend(finding for finding, done in zip(in_file, exempt) if not done)
     return sorted(remaining)
 
@@ -208,7 +212,7 @@ def tracked() -> list[str]:
 def suppressions() -> list[str]:
     found = []
     for path in tracked():
-        if Path(path).suffix in {".md", ".mdx"} or Path(path).resolve() == Path(__file__).resolve():
+        if Path(path).suffix in {".md", ".mdx", ".toml"} or Path(path).resolve() == Path(__file__).resolve():
             continue
         text = Path(path).read_text(errors="replace")
         for match in SUPPRESSION.finditer(text):
