@@ -5,13 +5,13 @@ use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::PipelineOutput;
 
-use super::format::{Backend, QueryExpect, QueryScenario, QueryStep};
+use super::format::{QueryExpect, QueryScenario, QueryStep};
 use super::pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
 use super::{
     assert_compilation, assert_output, assert_pagination, assert_repeated_response, read_scenarios,
     repeat_count, step_label, validate_response,
 };
-use crate::scenario::{self, Seed};
+use crate::scenario::{self, Backend, Seed};
 
 pub(super) trait Engine {
     const BACKEND: Backend;

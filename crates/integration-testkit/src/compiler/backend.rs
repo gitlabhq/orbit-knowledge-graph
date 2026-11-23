@@ -1,26 +1,10 @@
 use std::sync::Arc;
 
 use query_engine::compiler;
-use serde::Deserialize;
 
 use super::{Compiled, Expectations, Models, Scenario, clickhouse, hydration_input};
+use crate::scenario::Backend;
 use compiler::config::{self, CompilerCtx};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub(super) enum Backend {
-    ClickHouse,
-    DuckDb,
-}
-
-impl std::fmt::Display for Backend {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::ClickHouse => "clickhouse",
-            Self::DuckDb => "duckdb",
-        })
-    }
-}
 
 impl Backend {
     pub(super) fn compile(

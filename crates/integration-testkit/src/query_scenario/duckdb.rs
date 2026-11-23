@@ -11,17 +11,16 @@ use query_engine::shared::{ExtractionStage, OutputStage, PipelineOutput};
 
 use super::coverage::Coverage;
 use super::engine::{Engine, run_steps, scenarios_for};
-use super::format::Backend;
 use super::seed_preset;
 use super::stages::{LocalCompilationStage, LocalExecutionStage, LocalFinishStage};
-use crate::scenario::Seed;
 use crate::scenario::seed::{group_by_columns, values_insert};
+use crate::scenario::{Backend, Seed};
 
 pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) -> Coverage {
     let root = Path::new(root);
     let ontology = Arc::new(crate::load_unprefixed_ontology());
     let base = seed_preset(Path::new(presets), seed);
-    let scenarios = scenarios_for(root, Backend::Duckdb);
+    let scenarios = scenarios_for(root, Backend::DuckDb);
     assert!(
         !scenarios.is_empty(),
         "no duckdb scenarios under {}",
@@ -68,7 +67,7 @@ struct DuckdbEngine<'a> {
 }
 
 impl Engine for DuckdbEngine<'_> {
-    const BACKEND: Backend = Backend::Duckdb;
+    const BACKEND: Backend = Backend::DuckDb;
 
     async fn seed(&self, seed: &Seed, name: &str) {
         seed_local(&self.database.lock().unwrap(), seed, name);

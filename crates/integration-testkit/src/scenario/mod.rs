@@ -265,6 +265,28 @@ pub(crate) fn database_name(scenario_name: &str) -> String {
         .collect()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Backend {
+    ClickHouse,
+    DuckDb,
+}
+
+impl Backend {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::ClickHouse => "clickhouse",
+            Self::DuckDb => "duckdb",
+        }
+    }
+}
+
+impl std::fmt::Display for Backend {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.name())
+    }
+}
+
 pub(crate) const EXACT_KEYS: &str = "$exact";
 
 pub(crate) fn subset_mismatch(

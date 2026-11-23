@@ -7,7 +7,7 @@ use serde::Deserialize;
 use strum::IntoEnumIterator;
 
 use super::output_format::{OutputExpect, OutputFormat};
-use crate::scenario::Seed;
+use crate::scenario::{Backend, Seed};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -73,22 +73,6 @@ pub struct ScenarioConfig {
     pub backends: Vec<Backend>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Backend {
-    Clickhouse,
-    Duckdb,
-}
-
-impl Backend {
-    pub(super) fn name(self) -> &'static str {
-        match self {
-            Self::Clickhouse => "clickhouse",
-            Self::Duckdb => "duckdb",
-        }
-    }
-}
-
 impl Default for ScenarioConfig {
     fn default() -> Self {
         Self {
@@ -104,7 +88,7 @@ impl Default for ScenarioConfig {
 }
 
 fn clickhouse_only() -> Vec<Backend> {
-    vec![Backend::Clickhouse]
+    vec![Backend::ClickHouse]
 }
 
 fn backends<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Backend>, D::Error> {

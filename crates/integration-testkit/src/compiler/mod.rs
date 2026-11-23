@@ -19,7 +19,7 @@ use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
 use serde::Deserialize;
 
 use crate::query_scenario::{SecurityOverride, rejection_reason, shown_private_detail};
-use backend::Backend;
+use crate::scenario::Backend;
 
 #[derive(Deserialize)]
 #[serde(try_from = "RawScenario")]

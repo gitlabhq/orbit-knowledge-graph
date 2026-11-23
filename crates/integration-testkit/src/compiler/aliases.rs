@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 
-use super::Backend;
+use crate::scenario::Backend;
 
 /// (alias, backend, phase, state field path): `alias` under `physical.<pipeline>` means `<phase>.<path>`.
 #[rustfmt::skip]

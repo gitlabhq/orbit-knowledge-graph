@@ -34,7 +34,7 @@ use stages::MockAuthorizationStage;
 
 use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
-use crate::scenario::{self, Seed};
+use crate::scenario::{self, Backend, Seed};
 use crate::visitor::{NodeExt, ResponseView};
 use crate::{
     SeededColumnResolver, collect_subtest_results, derive_clickhouse_data_model, load_ontology,
@@ -102,7 +102,7 @@ fn seed_preset(presets_dir: &Path, name: &str) -> Seed {
 pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let root = Path::new(root);
     let presets: Arc<Path> = Arc::from(Path::new(presets));
-    let mut scenarios = engine::scenarios_for(root, format::Backend::Clickhouse);
+    let mut scenarios = engine::scenarios_for(root, Backend::ClickHouse);
     assert!(
         !scenarios.is_empty(),
         "no query scenario files found under {}",
@@ -243,7 +243,7 @@ struct ClickhouseEngine<'a> {
 }
 
 impl engine::Engine for ClickhouseEngine<'_> {
-    const BACKEND: format::Backend = format::Backend::Clickhouse;
+    const BACKEND: Backend = Backend::ClickHouse;
 
     async fn seed(&self, seed: &Seed, name: &str) {
         let columns = crate::scenario::seed::fetch_table_columns(self.ctx).await;
