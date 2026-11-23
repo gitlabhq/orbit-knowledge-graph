@@ -68,6 +68,7 @@ async fn serve_lane(runner: Arc<Runner>, lane: LaneId, slots: NonZeroU32) {
                 continue;
             }
         };
+
         if deliveries.is_empty() {
             tokio::select! {
                 biased;

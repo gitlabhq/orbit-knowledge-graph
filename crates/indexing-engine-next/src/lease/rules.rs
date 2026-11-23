@@ -10,19 +10,26 @@ pub struct LeaseRules {
     pub skew_margin: Duration,
 }
 
-impl LeaseRules {
-    fn lease_for(&self, holder: &HolderId, local_now: SystemTime) -> Lease {
-        Lease {
-            holder: holder.clone(),
-            expires_at: local_now + self.ttl,
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Claim {
     holder: HolderId,
     task: TaskId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Hold {
+    holder: HolderId,
+    task: TaskId,
+    fence: Fence,
+    seen: Revision,
+    expires_at: SystemTime,
+    renew_at: SystemTime,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Renewal {
+    Extend(Lease),
+    Lost,
 }
 
 impl Claim {
@@ -62,51 +69,9 @@ impl Claim {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Renewal {
-    Extend(Lease),
-    Lost,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Hold {
-    holder: HolderId,
-    task: TaskId,
-    fence: Fence,
-    seen: Revision,
-    expires_at: SystemTime,
-    renew_at: SystemTime,
-}
-
 impl Hold {
-    pub fn task(&self) -> TaskId {
-        self.task
-    }
-
-    pub fn fence(&self) -> Fence {
-        self.fence
-    }
-
-    pub fn seen_revision(&self) -> Revision {
-        self.seen
-    }
-
-    pub fn expires_at(&self) -> SystemTime {
-        self.expires_at
-    }
-
-    pub fn renew_at(&self) -> SystemTime {
-        self.renew_at
-    }
-
     pub fn is_renew_due(&self, local_now: SystemTime) -> bool {
         local_now >= self.renew_at
-    }
-
-    pub fn time_until_renewal(&self, local_now: SystemTime) -> Duration {
-        self.renew_at
-            .duration_since(local_now)
-            .unwrap_or(Duration::ZERO)
     }
 
     pub fn build_renewal(
@@ -138,5 +103,34 @@ impl Hold {
         entry
             .is_held_by(&self.holder, self.fence.generation, self.seen)
             .then_some(entry.revision)
+    }
+
+    pub fn task(&self) -> TaskId {
+        self.task
+    }
+
+    pub fn fence(&self) -> Fence {
+        self.fence
+    }
+
+    pub fn seen_revision(&self) -> Revision {
+        self.seen
+    }
+
+    pub fn expires_at(&self) -> SystemTime {
+        self.expires_at
+    }
+
+    pub fn renew_at(&self) -> SystemTime {
+        self.renew_at
+    }
+}
+
+impl LeaseRules {
+    fn lease_for(&self, holder: &HolderId, local_now: SystemTime) -> Lease {
+        Lease {
+            holder: holder.clone(),
+            expires_at: local_now + self.ttl,
+        }
     }
 }

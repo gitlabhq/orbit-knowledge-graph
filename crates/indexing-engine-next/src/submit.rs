@@ -7,6 +7,7 @@ use crate::task::{TaskId, TaskMessage};
 
 pub(crate) async fn submit_task(ports: &Ports, message: TaskMessage) -> anyhow::Result<TaskId> {
     let key = message.worker_key();
+
     let now = ports.clock.now().await;
     let entry = ports.pending.read(&key).await?;
     let (pending, found_pending) = match entry.task {
@@ -22,13 +23,11 @@ pub(crate) async fn submit_task(ports: &Ports, message: TaskMessage) -> anyhow::
             (message, false)
         }
     };
-    ports.log.record(
-        now,
-        ProtocolEvent::Submitted {
-            task: pending.task,
-            found_pending,
-        },
-    );
+    let submitted = ProtocolEvent::Submitted {
+        task: pending.task,
+        found_pending,
+    };
+    ports.log.record(now, submitted);
 
     let task = pending.task;
     let now = ports.clock.now().await;

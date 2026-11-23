@@ -7,17 +7,20 @@ pub use rules::{Claim, Hold, LeaseRules, Renewal};
 
 pub(crate) use store::{LeaseStore, LeaseWrite, Leases};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Lease {
+    pub holder: HolderId,
+    pub expires_at: SystemTime,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct HolderId(String);
 
-impl HolderId {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LeaseEntry {
+    pub lease: Option<Lease>,
+    pub revision: Revision,
+    pub generation: Option<Generation>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -32,17 +35,14 @@ pub struct Fence {
     pub revision: Revision,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Lease {
-    pub holder: HolderId,
-    pub expires_at: SystemTime,
-}
+impl HolderId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LeaseEntry {
-    pub lease: Option<Lease>,
-    pub revision: Revision,
-    pub generation: Option<Generation>,
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl LeaseEntry {
