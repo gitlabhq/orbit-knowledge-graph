@@ -215,7 +215,7 @@ display:
     rewrite:
       - use: import_entity
       - '(__import_type)': '#entity=ImportedSymbol #file_path=$ROOT | ancestor_tag("file_path") #source_path=$ROOT | child_sym("__source")'
-      - '(__name)': '#import_type=$ROOT | tag("import_type") | default("NamedImport") #resolved=$ROOT | has_incoming("Imports")'
-      - '(__name "default")': '#import_type=$ROOT | tag("import_type") | default("DefaultImport") #resolved=$ROOT | has_incoming("Imports")'
-      - '(__name "*")': '#import_type=$ROOT | tag("import_type") | default("WildcardImport") #resolved=$ROOT | has_incoming("Imports")'
-      - '(__name "*" (__alias))': '#import_type=$ROOT | tag("import_type") | default("NamespaceImport") #resolved=$ROOT | has_incoming("Imports")'
+      - '(__name)': '#import_type=$ROOT | tag("import_type") | default("NamedImport")'
+      - '(__name "default")': '#import_type=$ROOT | tag("import_type") | default("DefaultImport")'
+      - '(__name "*")': '#import_type=$ROOT | tag("import_type") | default("WildcardImport")'
+      - '(__name "*" (__alias))': '#import_type=$ROOT | tag("import_type") | default("NamespaceImport")'

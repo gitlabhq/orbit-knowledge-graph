@@ -105,5 +105,5 @@ display:
   - stage: imports
     rewrite:
       - use: import_entity
+      - '(__name)': '#import_type=Import'
       - use: aliased_import_type
-      - '(__name)': '#import_type=Import #resolved=$ROOT | has_incoming("Imports")'

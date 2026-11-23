@@ -158,7 +158,6 @@ display:
   - stage: imports
     rewrite:
       - '(__import)': '#entity=ImportedSymbol #file_path=$ROOT | ancestor_tag("file_path") #source_path=$ROOT | tag("resolved_source") | replace("/", ".")'
-      - '(__name "*")': '#import_type=WildcardImport #resolved=$ROOT | has_incoming("Imports")'
+      - '(__name "*")': '#import_type=WildcardImport'
       - use: aliased_import_type
       - '(__import $S:__source $$$A $N:__name $$$B) when @$N | eq(@$S)': '#import_type@__name=Import'
-      - '(__name)': '#resolved=$ROOT | has_incoming("Imports")'

@@ -760,6 +760,7 @@ impl<'a> Loader<'a> {
         let mut templates = Vec::new();
         let mut tag_keys = Vec::new();
         let mut slots = 1;
+        cancelled_tags(spec)?;
         for (at, pair) in spec.pairs.iter().enumerate() {
             let err =
                 |e: LoadError| LoadError(format!("{}: {:?}: {}", pair.origin, pair.pattern, e.0));
@@ -1114,6 +1115,75 @@ fn tables(specs: &BTreeMap<String, TableSpec>) -> Result<(Vec<RowShape>, Tables)
     Ok((rows, tables))
 }
 
+/// Fails when a stage sets a tag that a later rule always overwrites: the
+/// later rule matches every node of its kind, so an earlier rule anchored at
+/// that kind that writes a different value to the same tag never stays,
+/// since the last write wins. The general rule belongs first.
+fn cancelled_tags(spec: &StageSpec) -> Result<(), LoadError> {
+    let anchor = |pattern: &str| -> Option<String> {
+        let mut p = pattern.trim();
+        if let Some(at) = p.find(':').filter(|_| p.starts_with('$')) {
+            p = &p[at + 1..];
+        }
+        let inner = p
+            .strip_prefix('(')
+            .and_then(|p| p.strip_suffix(')'))
+            .unwrap_or(p);
+        let kind = inner.split_whitespace().next()?;
+        let ok = kind.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        ok.then(|| kind.to_owned())
+    };
+    let bare = |pattern: &str| {
+        let p = pattern.trim();
+        let p = p
+            .find(':')
+            .filter(|_| p.starts_with('$'))
+            .map_or(p, |at| &p[at + 1..]);
+        let inner = p
+            .strip_prefix('(')
+            .and_then(|p| p.strip_suffix(')'))
+            .unwrap_or(p);
+        !inner.contains(char::is_whitespace) && !inner.contains(['(', '"', '/', '!', '#', '$'])
+    };
+    let notes = |pair: &Pair| -> Vec<(String, Option<String>, String)> {
+        let Value::String(value) = &pair.value else {
+            return Vec::new();
+        };
+        split_notes(value)
+            .1
+            .into_iter()
+            .map(|(k, kind, v)| (k.to_owned(), kind.map(str::to_owned), v.to_owned()))
+            .collect()
+    };
+    for (later, general) in spec.pairs.iter().enumerate() {
+        if general.when.is_some() || !bare(&general.pattern) {
+            continue;
+        }
+        let Some(kind) = anchor(&general.pattern) else {
+            continue;
+        };
+        let overwrites = notes(general);
+        for specific in &spec.pairs[..later] {
+            if anchor(&specific.pattern).as_deref() != Some(kind.as_str()) {
+                continue;
+            }
+            for (key, on, value) in notes(specific) {
+                let clash = overwrites
+                    .iter()
+                    .any(|(k, o, v)| *k == key && *o == on && *v != value);
+                if clash {
+                    return Err(LoadError(format!(
+                        "{}: stage {}: {:?} sets #{key} on every node {:?} matches, so the earlier \
+                         rule's value never stays; put the general rule first",
+                        general.origin, spec.name, general.pattern, specific.pattern
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Splits `template #key=value #key@kind=value` into the template and its
 /// annotations. An annotation starts at a top-level ` #` or at the start.
 fn split_notes(value: &str) -> (&str, Vec<(&str, Option<&str>, &str)>) {
@@ -1157,4 +1227,48 @@ fn union(mut parts: Vec<Expr>) -> Expr {
 
 fn number(n: u32) -> Expr {
     Expr::Lit(Val::Sym(n))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stage(pairs: &[(&str, &str)]) -> StageSpec {
+        StageSpec {
+            name: "imports".into(),
+            repeat: false,
+            grouped: false,
+            before_regions: false,
+            pairs: pairs
+                .iter()
+                .map(|(pattern, value)| Pair {
+                    pattern: (*pattern).into(),
+                    when: None,
+                    value: Value::String((*value).into()),
+                    origin: "test.yaml".into(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_general_rule_after_a_specific_one_fails_to_load() {
+        let specific_first = stage(&[
+            ("(__name \"default\")", "#import_type=DefaultImport"),
+            ("(__name)", "#import_type=NamedImport"),
+        ]);
+        let error = cancelled_tags(&specific_first).unwrap_err();
+        assert!(
+            error.0.contains("put the general rule first"),
+            "{}",
+            error.0
+        );
+        let general_first = stage(&[
+            ("(__name)", "#import_type=NamedImport"),
+            ("(__name \"default\")", "#import_type=DefaultImport"),
+        ]);
+        assert!(cancelled_tags(&general_first).is_ok());
+        let same_value = stage(&[("(__name \"default\")", "#kind=x"), ("(__name)", "#kind=x")]);
+        assert!(cancelled_tags(&same_value).is_ok());
+    }
 }

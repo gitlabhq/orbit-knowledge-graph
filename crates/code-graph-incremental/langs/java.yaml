@@ -160,5 +160,3 @@ display:
   - stage: imports
     rewrite:
       - use: import_entity
-      - '(__name "*")': '#resolved=$ROOT | has_incoming("Imports")'
-      - '(__name)': '#resolved=$ROOT | has_incoming("Imports")'

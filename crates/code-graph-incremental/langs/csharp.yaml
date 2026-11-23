@@ -129,6 +129,4 @@ display:
   - stage: imports
     rewrite:
       - use: import_entity
-      - '(__name "*")': '#resolved=$ROOT | has_incoming("Imports")'
       - use: aliased_import_type
-      - '(__name)': '#resolved=$ROOT | has_incoming("Imports")'
