@@ -142,14 +142,14 @@ instructions:
       - "**/*.rs"
     instructions: |
       Review against the "Engineering conventions" in CONTRIBUTING.md. Clippy
-      and the comment lints already cover lint-level style and narration
-      comments, so skip those. Comment only on clear violations such as:
-      1. Comments that reference an MR or issue instead of explaining a
-         non-obvious why
-      2. New infrastructure that duplicates an existing helper
-      3. Graph-shape facts (entity names, properties, edges) hardcoded in Rust
+      covers lint-level style, and the comment ban (mise lint:comments) blocks
+      code comments, so skip those. Comment only on clear violations such as:
+      1. New infrastructure that duplicates an existing helper
+      2. Graph-shape facts (entity names, properties, edges) hardcoded in Rust
          instead of read from the ontology
-      4. Tests, code comments, or a crate AGENTS.md left stale by the change
+      3. Tests or a crate AGENTS.md left stale by the change
+      4. A new scripts/linting/comments/ledger.toml entry whose reason does not
+         show why a change to the code cannot replace the comment
       For stale pages under docs/, suggest a follow-up docs MR. Never ask for
       docs/ edits in a code MR; the docs-in-code-mr-check CI job forbids them.
 

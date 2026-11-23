@@ -77,8 +77,8 @@
 "e2e/scripts/patch-ch-siphon-watermark.sh":
 - category: upstream
   reason: "Siphon 0.0.100-beta handles _siphon_watermark but never creates it, so the e2e stack must add it."
-  preview: "# Create the _siphon_watermark column the SDLC indexer queries (gkg!172…"
-  hash: a852c2d96ca3c083
+  preview: "# Create the _siphon_watermark column the SDLC indexer queries."
+  hash: fd63eb6cb3855248
   lines: 4
 - category: upstream
   reason: "ADD COLUMN leaves old rows unstored, so without MATERIALIZE now() recomputes and strands rows."
