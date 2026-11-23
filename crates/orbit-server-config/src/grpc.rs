@@ -23,8 +23,7 @@ pub struct GrpcConfig {
     pub max_connection_age_secs: Option<u64>,
     // Must stay paired with max_connection_age_secs: without a grace value,
     // tonic 0.14.5 panics with "async fn resumed after completion" when the
-    // connection-age timer fires (hyperium/tonic#2522). The server ignores it
-    // when max_connection_age_secs is unset, but it must still be at least 1.
+    // connection-age timer fires (hyperium/tonic#2522).
     #[schemars(range(min = 1))]
     pub max_connection_age_grace_secs: u64,
     pub stream_timeout_secs: u64,
@@ -35,8 +34,6 @@ pub struct GrpcConfig {
     pub max_result_bytes: usize,
 }
 
-/// The maximum connection age and the drain time after it, as the server
-/// builder takes them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MaxConnectionAge {
     pub age: Duration,
@@ -44,8 +41,6 @@ pub struct MaxConnectionAge {
 }
 
 impl GrpcConfig {
-    /// The maximum connection age to apply, or `None` when it is turned off.
-    /// With no age the grace is ignored.
     pub fn max_connection_age(&self) -> Option<MaxConnectionAge> {
         self.max_connection_age_secs.map(|age| MaxConnectionAge {
             age: Duration::from_secs(age),
