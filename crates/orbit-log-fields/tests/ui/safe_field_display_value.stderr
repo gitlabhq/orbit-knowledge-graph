@@ -1,0 +1,7 @@
+error: safe field KIND takes a plain value, not `%`
+ --> tests/ui/safe_field_display_value.rs:2:5
+  |
+2 |     orbit_log_fields::info!(safe(KIND) = %"x", "rejected");
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `$crate::__rewrite` which comes from the expansion of the macro `orbit_log_fields::info` (in Nightly builds, run with -Z macro-backtrace for more info)

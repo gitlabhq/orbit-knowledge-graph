@@ -22,6 +22,10 @@
 
 mod macros;
 
+#[cfg(doctest)]
+#[doc = include_str!("../tests/rejected_fields.md")]
+struct RejectedFields;
+
 #[doc(hidden)]
 // ast-grep-ignore: no-raw-tracing-macro -- the macros of this crate call tracing through this path
 pub use tracing as __tracing;
