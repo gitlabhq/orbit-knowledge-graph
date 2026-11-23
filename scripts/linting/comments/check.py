@@ -198,7 +198,7 @@ def apply_ledger(findings: list[Finding], ledger: list[Entry]) -> list[Finding]:
                     entry.used += 1
                 else:
                     continue
-                if entry.text is not None:
+                if entry.text is not None and entry in exact.get(path, ()):
                     break
         remaining.extend(finding for finding, done in zip(in_file, exempt) if not done)
     return sorted(remaining)
