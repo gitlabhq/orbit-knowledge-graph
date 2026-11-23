@@ -4,7 +4,7 @@
   "self": {
     "vendor": "com.gitlab",
     "name": "orbit_sdlc_indexing",
-    "version": "3-0-0",
+    "version": "3-0-1",
     "format": "jsonschema"
   },
   "type": "object",
@@ -41,9 +41,9 @@
       "maximum": 2147483647
     },
     "entity_type": {
-      "description": "SDLC entity type being indexed, e.g. MergeRequest, Issue, Pipeline.",
+      "description": "Name of the SDLC pipeline being indexed. For a node it is the entity type, e.g. MergeRequest or Pipeline. For an edge it is the generated pipeline name, e.g. HAS_LABEL_siphon_label_links_Label.",
       "type": "string",
-      "maxLength": 64
+      "maxLength": 255
     },
     "indexing_mode": {
       "description": "Whether the run was a full backfill or a watermark-incremental update.",
