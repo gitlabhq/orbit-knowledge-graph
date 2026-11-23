@@ -1,3 +1,9 @@
+## [1.9.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.9.0...v1.9.1) (2026-11-23)
+
+### Fixes
+
+* **duckdb-client:** set the session time zone only when ICU provides it ([874d649](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/874d649d292f717c18e00f92ee5da4d1dd2a131d)) by Bohdan Parkhomchuk
+
 ## [1.9.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.8.0...v1.9.0) (2026-11-23)
 
 ### Features
