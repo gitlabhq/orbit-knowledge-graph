@@ -98,20 +98,20 @@ pub fn derive_scope(
         return None;
     }
 
+    let Some(changed_sources) =
+        replace_templates_with_their_users(source_contents, changed_sources)
+    else {
+        return Some(MigrationScope::Full);
+    };
+
     let mut sdlc_entities: BTreeSet<String> = BTreeSet::new();
     let mut code_changed = false;
 
-    for path in changed_sources {
+    for path in &changed_sources {
         if path == ONTOLOGY_SCHEMA_FILE || path == "reference.yaml" {
             return Some(MigrationScope::Full);
         }
-        if path.ends_with(".sql.j2") {
-            let owners = template_owner_entities(source_contents, path);
-            if owners.is_empty() {
-                return Some(MigrationScope::Full);
-            }
-            sdlc_entities.extend(owners);
-        } else if path.starts_with("nodes/") {
+        if path.starts_with("nodes/") {
             match source_contents
                 .get(path)
                 .map(String::as_str)
@@ -241,11 +241,7 @@ fn parse_derived_name(content: &str) -> Option<String> {
 }
 
 #[derive(Deserialize)]
-struct TemplateOwnerYaml {
-    #[serde(default)]
-    node_type: Option<String>,
-    #[serde(default)]
-    name: Option<String>,
+struct TemplateUserYaml {
     #[serde(default)]
     pipelines: Vec<TemplatePipelineYaml>,
 }
@@ -260,34 +256,48 @@ struct TemplateExtractYaml {
     query: Option<String>,
 }
 
-/// Every node or derived entity whose pipeline `extract.query` resolves to `template_path`.
-fn template_owner_entities(
+/// A changed `.sql.j2` template counts as a change to each YAML that uses it; `None` when one has no user.
+fn replace_templates_with_their_users(
     source_contents: &BTreeMap<String, String>,
-    template_path: &str,
-) -> BTreeSet<String> {
-    let mut owners = BTreeSet::new();
-    for (yaml_path, content) in source_contents {
-        let Some((dir, _)) = yaml_path.rsplit_once('/') else {
+    changed_sources: &BTreeSet<String>,
+) -> Option<BTreeSet<String>> {
+    let mut resolved = BTreeSet::new();
+    for path in changed_sources {
+        if !path.ends_with(".sql.j2") {
+            resolved.insert(path.clone());
             continue;
-        };
-        let Ok(parsed) = orbit_utils::yaml::from_str::<TemplateOwnerYaml>(content) else {
-            continue;
-        };
-        let Some(entity) = parsed.node_type.or(parsed.name) else {
-            continue;
-        };
-        let references_template = parsed.pipelines.iter().any(|pipeline| {
-            pipeline
-                .extract
-                .as_ref()
-                .and_then(|extract| extract.query.as_deref())
-                .is_some_and(|query| format!("{dir}/{query}") == template_path)
-        });
-        if references_template {
-            owners.insert(entity);
         }
+        let users: Vec<&String> = source_contents
+            .iter()
+            .filter(|(yaml_path, content)| uses_template(yaml_path, content, path))
+            .map(|(yaml_path, _)| yaml_path)
+            .collect();
+        if users.is_empty() {
+            return None;
+        }
+        resolved.extend(users.into_iter().cloned());
     }
-    owners
+    Some(resolved)
+}
+
+fn uses_template(yaml_path: &str, content: &str, template_path: &str) -> bool {
+    let Some(dir) = yaml_path
+        .strip_suffix(".yaml")
+        .and_then(|stem| stem.rsplit_once('/'))
+        .map(|(dir, _)| dir)
+    else {
+        return false;
+    };
+    let Ok(parsed) = orbit_utils::yaml::from_str::<TemplateUserYaml>(content) else {
+        return false;
+    };
+    parsed.pipelines.iter().any(|pipeline| {
+        pipeline
+            .extract
+            .as_ref()
+            .and_then(|extract| extract.query.as_deref())
+            .is_some_and(|query| format!("{dir}/{query}") == template_path)
+    })
 }
 
 /// `edges/<stem>.yaml` → the relationship kind, when it resolves in the ontology.
@@ -627,6 +637,29 @@ mod tests {
             &BTreeSet::new(),
         );
         assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["HAS_NOTE"]))));
+    }
+
+    #[test]
+    fn derive_scope_edge_template_maps_to_relationship_kind() {
+        let ontology = Ontology::new().with_edges(["CREATED_MR"]);
+        let embedded = BTreeMap::from([
+            (
+                "edges/created_mr.yaml".to_string(),
+                "pipelines:\n  - name: CREATED_MR\n    extract:\n      query: created_mr.sql.j2\n"
+                    .to_string(),
+            ),
+            (
+                "edges/created_mr.sql.j2".to_string(),
+                "SELECT 1\n".to_string(),
+            ),
+        ]);
+        let scope = derive_scope(
+            &ontology,
+            &embedded,
+            &entities(&["edges/created_mr.sql.j2"]),
+            &BTreeSet::new(),
+        );
+        assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["CREATED_MR"]))));
     }
 
     // calls/defines/extends/imports/on_branch route to gl_code_edge, so an edge
