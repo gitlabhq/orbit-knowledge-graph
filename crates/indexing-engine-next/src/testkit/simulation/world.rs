@@ -11,8 +11,7 @@ use tokio::time::Instant;
 use super::{DatabaseWrite, FaultBudget, SimulatedBroker, SimulatedDatabase, SimulatedKeyValue};
 use crate::event::ProtocolEvent;
 use crate::lease::{Fence, Generation, HolderId, Lease, Revision};
-use crate::task::TaskId;
-use crate::task::TaskMessage;
+use crate::task::{TaskId, TaskMessage};
 
 pub(super) const TICK: Duration = Duration::from_secs(20);
 pub(super) const ACKNOWLEDGE_WAIT_TICKS: u64 = 2;

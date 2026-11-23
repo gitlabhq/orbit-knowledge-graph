@@ -6,10 +6,9 @@ use async_trait::async_trait;
 use rand::RngExt;
 
 use crate::clock::Clock;
-use crate::event::ProtocolEvent;
-use crate::event::ProtocolLog;
-use crate::lease::{Fence, Lease, LeaseEntry, Revision};
-use crate::lease::{LeaseStore, LeaseWrite};
+use crate::event::{ProtocolEvent, ProtocolLog};
+use crate::lane::LaneId;
+use crate::lease::{Fence, Lease, LeaseEntry, LeaseStore, LeaseWrite, Revision};
 use crate::pending::{PendingEntry, PendingStore, PendingWrite};
 use crate::ports::Ports;
 use crate::task::{Delivery, InFlight, TaskMessage, TaskQueue, WorkerKey};
@@ -70,7 +69,7 @@ impl TaskQueue for SimulatedPorts {
         Ok(())
     }
 
-    async fn pull(&self, _lane_id: &str, max: usize) -> anyhow::Result<Vec<Delivery>> {
+    async fn pull(&self, _lane: &LaneId, max: usize) -> anyhow::Result<Vec<Delivery>> {
         self.world.stop_unless_allowed(self.actor).await;
         let Actor::Process {
             index: consumer, ..
@@ -100,7 +99,7 @@ impl TaskQueue for SimulatedPorts {
         Ok(deliveries)
     }
 
-    async fn wait_for_ready(&self, _lane_id: &str) {
+    async fn wait_for_ready(&self, _lane: &LaneId) {
         self.world.stop_unless_allowed(self.actor).await;
         self.world.wait_for_ready_message().await;
     }

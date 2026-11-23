@@ -109,11 +109,10 @@ impl Disposition {
             "the task ran longer than the lane timeout of {}",
             format_duration(lane.timeout)
         );
-        let next_lane = lane.on_timeout.as_deref().and_then(Lane::parse_id);
-        match next_lane {
-            Some((_, to)) if usize::from(attempts_used) < RETRY_BACKOFF.len() => {
-                Self::MoveLane { to }
-            }
+        match &lane.on_timeout {
+            Some(next) if usize::from(attempts_used) < RETRY_BACKOFF.len() => Self::MoveLane {
+                to: next.lane().clone(),
+            },
             _ => Self::retry_or_dead_letter(attempts_used, message),
         }
     }

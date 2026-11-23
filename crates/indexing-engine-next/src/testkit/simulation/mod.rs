@@ -17,7 +17,7 @@ use tokio::task::JoinHandle;
 
 use crate::builder::Engine;
 use crate::config::{EngineConfig, LaneConfig};
-use crate::lane::Lane;
+use crate::lane::{Lane, LaneId};
 use crate::lease::{HolderId, LeaseRules};
 use crate::payload::{TaskInput, Tenant};
 use crate::runner::serve;
@@ -243,7 +243,7 @@ impl Cluster {
         let holder = HolderId::new(format!("p{}-{}", process + 1, self.restarts[process]));
         let actor = self.world.lock().start_process(holder.clone(), process);
         let worker = SimulatedWrite::new(&self.world, actor, process);
-        let lane = Lane::DEFAULT.format_id(SimulatedWrite::NAME);
+        let lane = LaneId::new(SimulatedWrite::NAME, Lane::DEFAULT);
         let config =
             EngineConfig::default().with_lane(lane, LaneConfig::new(NonZeroU32::MIN, LANE_TIMEOUT));
         let engine = match Engine::builder()

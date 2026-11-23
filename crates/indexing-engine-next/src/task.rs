@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::lane::Lane;
+use crate::lane::{Lane, LaneId};
 use crate::payload::{Key, TaskInput, Tenant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -31,8 +31,8 @@ pub(crate) struct Delivery {
 #[async_trait]
 pub(crate) trait TaskQueue: Send + Sync {
     async fn publish(&self, message: TaskMessage) -> anyhow::Result<()>;
-    async fn pull(&self, lane_id: &str, max: usize) -> anyhow::Result<Vec<Delivery>>;
-    async fn wait_for_ready(&self, lane_id: &str);
+    async fn pull(&self, lane: &LaneId, max: usize) -> anyhow::Result<Vec<Delivery>>;
+    async fn wait_for_ready(&self, lane: &LaneId);
 }
 
 #[async_trait]

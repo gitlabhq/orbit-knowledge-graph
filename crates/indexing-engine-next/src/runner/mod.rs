@@ -8,6 +8,7 @@ use tokio::task::{JoinError, JoinSet};
 
 use crate::builder::{Engine, Registry};
 use crate::event::ProtocolEvent;
+use crate::lane::LaneId;
 use crate::lease::{HolderId, LeaseRules, Leases};
 use crate::ports::Ports;
 use crate::worker::Pools;
@@ -34,19 +35,15 @@ pub(crate) async fn serve(engine: &Engine, ports: Ports, holder: HolderId, rules
     });
 
     let mut lanes = JoinSet::new();
-    for (lane_id, config) in &engine.config.lanes {
-        lanes.spawn(serve_lane(
-            Arc::clone(&runner),
-            lane_id.clone(),
-            config.slots,
-        ));
+    for (lane, config) in &engine.config.lanes {
+        lanes.spawn(serve_lane(Arc::clone(&runner), lane.clone(), config.slots));
     }
     while let Some(joined) = lanes.join_next().await {
         resume_if_panicked(joined);
     }
 }
 
-async fn serve_lane(runner: Arc<Runner>, lane_id: String, slots: NonZeroU32) {
+async fn serve_lane(runner: Arc<Runner>, lane: LaneId, slots: NonZeroU32) {
     let slots = usize::try_from(slots.get()).unwrap_or(usize::MAX);
     let mut runs = JoinSet::new();
     loop {
@@ -59,7 +56,7 @@ async fn serve_lane(runner: Arc<Runner>, lane_id: String, slots: NonZeroU32) {
         }
 
         let now = runner.ports.clock.now().await;
-        let deliveries = match runner.ports.queue.pull(&lane_id, free).await {
+        let deliveries = match runner.ports.queue.pull(&lane, free).await {
             Ok(deliveries) => deliveries,
             Err(error) => {
                 orbit_log_fields::warn!(
@@ -75,7 +72,7 @@ async fn serve_lane(runner: Arc<Runner>, lane_id: String, slots: NonZeroU32) {
             tokio::select! {
                 biased;
                 Some(joined) = runs.join_next() => resume_if_panicked(joined),
-                () = runner.ports.queue.wait_for_ready(&lane_id) => {}
+                () = runner.ports.queue.wait_for_ready(&lane) => {}
             }
             continue;
         }

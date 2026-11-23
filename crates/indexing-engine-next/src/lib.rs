@@ -23,7 +23,7 @@ mod worker;
 
 pub use builder::{BuildError, Engine, EngineBuilder};
 pub use config::{ClusterPoolConfig, EngineConfig, LaneConfig, PoolConfig};
-pub use lane::Lane;
+pub use lane::{InvalidLaneId, Lane, LaneId};
 pub use ledger::JobSummary;
 pub use payload::{Key, Payload, Tenant};
 pub use planner::{PlanContext, PlanError, Planner, Submit};
