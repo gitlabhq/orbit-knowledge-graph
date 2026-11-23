@@ -195,18 +195,50 @@ impl<T> Cases<T> {
     }
 }
 
+/// A case anchored by a pattern.
+trait Anchored {
+    fn at(&self) -> &Match;
+}
+
+impl<B> Anchored for (Match, B) {
+    fn at(&self) -> &Match {
+        &self.0
+    }
+}
+
+impl Anchored for Rewrite {
+    fn at(&self) -> &Match {
+        &self.at
+    }
+}
+
+impl<T: Anchored> Cases<T> {
+    /// The first case whose pattern and guard hold at `c`, its captures left
+    /// in `w`; each attempt is profiled by the case's pattern.
+    fn first<S: Store>(
+        &self,
+        run: &mut Run<S>,
+        w: &mut Scratch<S>,
+        c: Cursor<'_, S>,
+    ) -> Option<&T> {
+        self.tried(Some(c.kind())).find(|case| {
+            let m = case.at();
+            let started = run.profiling().then(std::time::Instant::now);
+            let fired = w.matches(run, m, c) && w.holds(run, m);
+            if let Some(s) = started {
+                let spent = s.elapsed();
+                run.profile_rule(m as *const Match as usize, &m.src, fired, spent, spent);
+            }
+            fired
+        })
+    }
+}
+
 impl<'a, T> IntoIterator for &'a Cases<T> {
     type Item = &'a T;
     type IntoIter = std::slice::Iter<'a, T>;
     fn into_iter(self) -> Self::IntoIter {
         self.items.iter()
-    }
-}
-
-impl<T> std::ops::Index<usize> for Cases<T> {
-    type Output = T;
-    fn index(&self, at: usize) -> &T {
-        &self.items[at]
     }
 }
 
@@ -1641,35 +1673,15 @@ impl Phase {
             match &self.body {
                 Body::Edges(groups) => {
                     for rules in groups {
-                        for (m, emits) in rules.tried(Some(c.kind())) {
-                            let started = run.profiling().then(std::time::Instant::now);
-                            let fired = w.matches(run, m, c) && w.holds(run, m);
-                            let matched = started.map(|s| s.elapsed());
-                            if fired {
-                                emits.iter().for_each(|e| e.run(run, &w.vals));
-                            }
-                            if let (Some(s), Some(matching)) = (started, matched) {
-                                run.profile_rule(
-                                    m as *const Match as usize,
-                                    &m.src,
-                                    fired,
-                                    matching,
-                                    s.elapsed(),
-                                );
-                            }
-                            if fired {
-                                break;
-                            }
+                        if let Some((_, emits)) = rules.first(run, &mut w, c) {
+                            emits.iter().for_each(|e| e.run(run, &w.vals));
                         }
                     }
                 }
                 Body::Rows(groups) => {
                     for group in groups {
-                        for (m, rules) in group.tried(Some(c.kind())) {
-                            if w.matches(run, m, c) && w.holds(run, m) {
-                                rules.iter().for_each(|r| r.run(run, &w.vals));
-                                break;
-                            }
+                        if let Some((_, rules)) = group.first(run, &mut w, c) {
+                            rules.iter().for_each(|r| r.run(run, &w.vals));
                         }
                     }
                 }
@@ -1790,19 +1802,21 @@ impl Phase {
             let mut w = Scratch::<S>::new(self.slots);
             for target in order(tree, true) {
                 sentinels.iter().try_for_each(|s| s.check())?;
-                let fired: Vec<(u16, Vec<(u32, u32)>)> = {
+                let fired = {
                     let mut run = self.run(&*tree, env, budget, file);
                     run.graph = Some(graph);
                     run.graph_fi = fi;
-                    candidates(stage, tree, target)
-                        .filter_map(|i| {
-                            let rule = &stage.rules[i as usize];
-                            Some((i, self.decide(&mut run, &mut w, rule, target)?.0))
+                    let kind = tree.storage.node(target).kind;
+                    stage
+                        .rules
+                        .tried(Some(kind))
+                        .filter_map(|rule| {
+                            Some((rule, self.decide(&mut run, &mut w, rule, target)?.0))
                         })
-                        .collect()
+                        .collect::<Vec<_>>()
                 };
-                for (i, tags) in fired {
-                    set_tags(tree, target, &stage.rules[i as usize], &tags);
+                for (rule, tags) in fired {
+                    set_tags(tree, target, rule, &tags);
                 }
             }
         }
@@ -1836,8 +1850,8 @@ impl Phase {
             if tree.storage.is_removed(tree.storage.id(target)) {
                 continue;
             }
-            for i in candidates(stage, tree, target) {
-                let rule = &stage.rules[i as usize];
+            let kind = tree.storage.node(target).kind;
+            for rule in stage.rules.tried(Some(kind)) {
                 let fired = {
                     let mut run = self.run(&*tree, env, budget, file);
                     let Some((tags, texts)) = self.decide(&mut run, &mut w, rule, target) else {
@@ -1972,21 +1986,6 @@ fn order<S: Store>(tree: &Tree<S>, preorder: bool) -> Vec<u32> {
         all.reverse();
     }
     all
-}
-
-fn candidates<'a, S: Store>(
-    stage: &'a Stage,
-    tree: &Tree<S>,
-    target: u32,
-) -> impl Iterator<Item = u16> + 'a {
-    let kind = tree.storage.node(target).kind;
-    stage
-        .rules
-        .by_kind
-        .get(&kind)
-        .unwrap_or(&stage.rules.any)
-        .iter()
-        .copied()
 }
 
 fn set_tags<S: Store>(tree: &mut Tree<S>, target: u32, rule: &Rewrite, tags: &[(u32, u32)]) {
