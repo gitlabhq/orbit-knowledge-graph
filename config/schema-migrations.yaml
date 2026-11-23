@@ -17,12 +17,14 @@
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
 - version: 127
-  scope: "*"
+  scope: sdlc
+  entities:
+  - Pipeline
   note: >-
     Pipeline gains a name property, left-joined from siphon_ci_pipeline_metadata in a new
-    pipeline.sql.j2 extract. The deriver cannot map a node .sql.j2 change, so it fail-safes
-    to a full rebuild; only gl_pipeline changes shape (new name column and text index), but
-    every table re-indexes.
+    pipeline.sql.j2 extract. Only gl_pipeline changes shape (new name column and text index),
+    so only the Pipeline entity re-indexes; the deriver now maps a node .sql.j2 change to its
+    owning node.
 - version: 126
   scope: "*"
   note: >-
