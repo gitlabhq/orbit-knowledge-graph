@@ -13,7 +13,7 @@ components:
     inputs:
       - from: >-
           SKILLS_REPO=gitlab-org/orbit/team/skills;
-          SKILLS_REF=6505b6cc7142b1a7913112e0de3187996e0c6701;
+          SKILLS_REF=650dd3c2cbf9bd64dbfcf32baed829aebbbe0503;
           MODE=full;
           DOCS_REVIEWERS=fneill,z_painter;
           FLOW_USER=44621578;
@@ -171,7 +171,7 @@ routers:
   - from: read_publish
     condition:
       input: "context:read_publish.tool_responses"
-      routes: {fix1: fix1, fix2: fix2, fix3: fix3, fix4: fix4, default_route: end}
+      routes: {fix1: fix1, fix2: fix2, fix3: fix3, fix4: fix4, handoff: handoff, default_route: end}
   - {from: fix1, to: publish}
   - {from: fix2, to: publish}
   - {from: fix3, to: publish}
