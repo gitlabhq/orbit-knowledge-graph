@@ -292,13 +292,7 @@ fn sources(
     let mut bytes = 0u64;
     let mut configs = Vec::new();
     for file in repository.files().filter(|file| file.keeps()) {
-        let name = file.path.rsplit('/').next();
-        if !env
-            .project
-            .parse_files
-            .iter()
-            .any(|p| Some(p.name.as_str()) == name)
-        {
+        if !env.project.reads(&file.path) {
             continue;
         }
         bytes = bytes.saturating_add(file.size);

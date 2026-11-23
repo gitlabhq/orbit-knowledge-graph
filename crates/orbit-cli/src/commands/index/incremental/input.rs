@@ -91,13 +91,8 @@ pub(super) fn split(
         if Some(*family) == owner {
             continue;
         }
-        let names = manifests(*family);
-        paths.extend(
-            unparsed
-                .iter()
-                .filter(|path| names.iter().any(|name| file_name(path) == name))
-                .cloned(),
-        );
+        let reads = manifest_reader(*family);
+        paths.extend(unparsed.iter().filter(|path| reads(path)).cloned());
     }
     if let Some(owner) = owner.filter(|_| !unparsed.is_empty()) {
         families
@@ -109,21 +104,10 @@ pub(super) fn split(
     families
 }
 
-fn manifests(family: SupportLang) -> Vec<String> {
-    code_graph_incremental::Engine::builder(family)
-        .build()
-        .map(|env| {
-            env.project
-                .parse_files
-                .iter()
-                .map(|file| file.name.clone())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn file_name(path: &str) -> &str {
-    path.rsplit('/').next().unwrap_or(path)
+/// Whether a family's project frontend reads the file at a path.
+fn manifest_reader(family: SupportLang) -> impl Fn(&str) -> bool {
+    let env = code_graph_incremental::Engine::builder(family).build().ok();
+    move |path| env.as_ref().is_some_and(|env| env.project.reads(path))
 }
 
 pub(super) fn readers(
@@ -137,12 +121,7 @@ pub(super) fn readers(
     families
         .iter()
         .copied()
-        .filter(|family| {
-            Some(*family) == owner
-                || manifests(*family)
-                    .iter()
-                    .any(|name| file_name(path) == name)
-        })
+        .filter(|family| Some(*family) == owner || manifest_reader(*family)(path))
         .collect()
 }
 
@@ -154,7 +133,7 @@ pub(super) fn split_removed(
     let readers: Vec<_> = families
         .iter()
         .filter(|family| Some(**family) != owner)
-        .map(|family| (family.family(), manifests(*family)))
+        .map(|family| (family.family(), manifest_reader(*family)))
         .collect();
     let mut removed: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
     for path in paths {
@@ -162,8 +141,8 @@ pub(super) fn split_removed(
             removed.entry(language.family()).or_default().push(path);
             continue;
         }
-        for (family, names) in &readers {
-            if names.iter().any(|name| file_name(&path) == name) {
+        for (family, reads) in &readers {
+            if reads(&path) {
                 removed.entry(family).or_default().push(path.clone());
             }
         }

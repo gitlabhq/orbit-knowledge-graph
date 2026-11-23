@@ -1,97 +1,69 @@
+//! Project frontends turn a whole project into one tree: its paths, and the
+//! files a frontend reads by name. The project tree is the first: a tree of
+//! directories and files, with each named manifest's contents inlined.
+
 use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::constants::PATH_SEP;
 use crate::driver::SourceFile;
-use crate::engine::{Engine, ParseFormat, Project};
 use crate::intern::Lang;
-use crate::tree::{Cursor, Node, Tag, Tree};
+use crate::tree::{Node, Tree};
 
-pub struct WalkResult {
-    pub tree: Tree,
-    pub file_tags: Vec<(String, Vec<Tag>)>,
-    /// Every key a file tag can carry, so a reused tree can drop the ones
-    /// that no longer apply before this run's are set.
-    pub tag_keys: Vec<u32>,
+/// Turns a project's paths, and the files it reads, into one tree whose
+/// kinds are the pipeline's.
+pub trait ProjectFrontend: Send + Sync {
+    fn name(&self) -> &str;
+
+    /// Whether the frontend reads the contents of the file at `path`.
+    fn reads(&self, path: &str) -> bool;
+
+    /// The project's tree, from every path and the contents of the files it
+    /// reads.
+    fn build(&self, paths: &[&str], files: &[SourceFile], lang: &Lang) -> Tree;
 }
 
-pub struct ProjectTree<'a> {
-    lang: &'a Lang,
-    env: Option<&'a Engine>,
-    project: &'a Project,
-    paths: &'a [&'a str],
-    files: Option<&'a [SourceFile]>,
-    tree: Tree,
+#[derive(Clone)]
+pub enum ParseFormat {
+    Json,
+    Toml,
+    Raw(regex::Regex),
 }
 
-impl<'a> ProjectTree<'a> {
-    pub fn directory_tree(lang: &'a Lang, paths: &'a [&'a str]) -> Tree {
-        static NO_PROJECT: std::sync::LazyLock<Project> =
-            std::sync::LazyLock::new(Project::default);
-        let mut pt = Self::new(lang, None, &NO_PROJECT, paths, None);
-        pt.build_dir_tree();
-        pt.tree
+/// A manifest the project tree inlines, by file name, and how to read it.
+#[derive(Clone)]
+pub struct ParseFile {
+    pub name: String,
+    pub format: ParseFormat,
+}
+
+/// A tree of the project's directories and files; a file named in
+/// `parse_files` gets its contents inlined under it.
+#[derive(Default)]
+pub struct ProjectTree {
+    pub parse_files: Vec<ParseFile>,
+}
+
+impl ProjectFrontend for ProjectTree {
+    fn name(&self) -> &str {
+        "project"
     }
 
-    pub fn tree(env: &'a Engine, paths: &'a [&'a str], files: Option<&'a [SourceFile]>) -> Tree {
-        Self::build(env, paths, files).tree
-    }
-
-    fn new(
-        lang: &'a Lang,
-        env: Option<&'a Engine>,
-        project: &'a Project,
-        paths: &'a [&'a str],
-        files: Option<&'a [SourceFile]>,
-    ) -> Self {
-        Self {
-            lang,
-            env,
-            project,
-            paths,
-            files,
-            tree: Tree::new(Node {
-                kind: lang.tree_kinds().root,
-                named: true,
-                ..Default::default()
-            }),
-        }
-    }
-
-    pub fn build(
-        env: &'a Engine,
-        paths: &'a [&'a str],
-        files: Option<&'a [SourceFile]>,
-    ) -> WalkResult {
-        let mut pt = Self::new(&env.lang, Some(env), &env.project, paths, files);
-        let phase = env.pipeline.phase_over("project");
-        let tag_keys = env
-            .project
-            .rules
+    fn reads(&self, path: &str) -> bool {
+        let name = path.rsplit(PATH_SEP).next();
+        self.parse_files
             .iter()
-            .flat_map(|&r| phase.tag_keys(r))
-            .collect();
-        pt.build_dir_tree();
-        pt.run_stages();
-        let file_tags = pt.collect_file_tags();
-        WalkResult {
-            tree: pt.tree,
-            file_tags,
-            tag_keys,
-        }
+            .any(|p| Some(p.name.as_str()) == name)
     }
 
-    fn build_dir_tree(&mut self) {
-        let file_contents: FxHashMap<&str, &str> = self
-            .files
-            .unwrap_or(&[])
+    fn build(&self, paths: &[&str], files: &[SourceFile], lang: &Lang) -> Tree {
+        let contents: FxHashMap<&str, &str> = files
             .iter()
             .map(|f| (f.path.as_str(), f.content.as_str()))
             .collect();
-
         let mut kids: Vec<FxHashSet<(&str, bool)>> = vec![FxHashSet::default()];
         let mut dirs: FxHashMap<(usize, &str), usize> = FxHashMap::default();
-        for &path in self.paths {
+        for &path in paths {
             let parts: Vec<&str> = path.split(PATH_SEP).filter(|p| !p.is_empty()).collect();
             let mut dir = 0;
             for (i, &part) in parts.iter().enumerate() {
@@ -114,91 +86,42 @@ impl<'a> ProjectTree<'a> {
                 kids
             })
             .collect();
-
-        self.add_children(&dirs, &kids, &file_contents);
-    }
-
-    fn add_children(
-        &mut self,
-        dirs: &FxHashMap<(usize, &str), usize>,
-        kids: &[Vec<(&str, bool)>],
-        file_contents: &FxHashMap<&str, &str>,
-    ) {
+        let mut tree = Tree::new(Node {
+            kind: lang.tree_kinds().root,
+            named: true,
+            ..Default::default()
+        });
         let mut path: Vec<&str> = Vec::new();
-        let mut stack = vec![(0, self.tree.root, 0)];
-        while let Some((dir, parent_nid, next)) = stack.pop() {
+        let mut stack = vec![(0, tree.root, 0)];
+        while let Some((dir, parent, next)) = stack.pop() {
             let Some(&(segment, is_file)) = kids[dir].get(next) else {
                 path.pop();
                 continue;
             };
-            stack.push((dir, parent_nid, next + 1));
-            let tk = self.lang.tree_kinds();
-            let kind = if is_file { tk.file } else { tk.dir };
-            let sym = self.lang.syms.intern(segment);
-            let nid = self.tree.append(
-                parent_nid,
+            stack.push((dir, parent, next + 1));
+            let tk = lang.tree_kinds();
+            let node = tree.append(
+                parent,
                 Node {
-                    kind,
+                    kind: if is_file { tk.file } else { tk.dir },
                     named: true,
-                    sym,
+                    sym: lang.syms.intern(segment),
                     ..Default::default()
                 },
             );
-            if is_file {
-                if let Some(spec) = self
-                    .project
-                    .parse_files
-                    .iter()
-                    .find(|pf| pf.name == segment)
-                {
-                    let full_path = path.iter().chain([&segment]).join(PATH_SEP);
-                    if let Some(content) = file_contents.get(full_path.as_str()) {
-                        inline_config(content, &spec.format, nid, &mut self.tree, self.lang);
-                    }
-                }
-            } else {
+            if !is_file {
                 path.push(segment);
-                stack.push((dirs[&(dir, segment)], nid, 0));
+                stack.push((dirs[&(dir, segment)], node, 0));
+                continue;
             }
-        }
-    }
-
-    fn run_stages(&mut self) {
-        let Some(env) = self.env else {
-            return;
-        };
-        let phase = env.pipeline.phase_over("project");
-        let run = crate::sentinel::Sentinel::disabled();
-        for &rules in &env.project.rules {
-            let _ = crate::engine::run_tree(phase, &mut self.tree, 0, Some(rules), env, None, &run);
-        }
-    }
-
-    fn collect_file_tags(&self) -> Vec<(String, Vec<Tag>)> {
-        self.tree.root().fold_tree(Vec::new(), |out, file, _w| {
-            if !file.is(self.lang.tree_kinds().file) {
-                return;
-            }
-            let mut tags: Vec<Tag> = Vec::new();
-            for node in std::iter::once(file).chain(file.ancestors()) {
-                for tag in self.tree.tags.get(&node.index()).into_iter().flatten() {
-                    if !tags.iter().any(|t| t.key == tag.key) {
-                        tags.push(*tag);
-                    }
+            if let Some(spec) = self.parse_files.iter().find(|pf| pf.name == segment) {
+                let full = path.iter().chain([&segment]).join(PATH_SEP);
+                if let Some(content) = contents.get(full.as_str()) {
+                    inline_config(content, &spec.format, node, &mut tree, lang);
                 }
             }
-            out.push((self.node_path(file), tags));
-        })
-    }
-
-    fn node_path(&self, cursor: Cursor) -> String {
-        let mut parts: Vec<&str> = std::iter::once(cursor)
-            .chain(cursor.ancestors())
-            .take_while(|n| !n.is(self.lang.tree_kinds().root))
-            .map(|n| self.lang.syms.resolve(n.sym()))
-            .collect();
-        parts.reverse();
-        parts.join(PATH_SEP)
+        }
+        tree
     }
 }
 
@@ -358,7 +281,9 @@ mod tests {
             .stack_size(256 * 1024)
             .spawn(move || {
                 let lang = Lang::new();
-                ProjectTree::directory_tree(&lang, &[path.as_str()]).len()
+                ProjectTree::default()
+                    .build(&[path.as_str()], &[], &lang)
+                    .len()
             })
             .unwrap()
             .join()

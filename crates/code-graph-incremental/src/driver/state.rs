@@ -10,7 +10,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
 use crate::engine::Engine;
-use crate::file_tree::{ProjectTree, WalkResult};
 use crate::intern::{Interner, Lang};
 use crate::language::SupportLang;
 use crate::sentinel::Limits;
@@ -35,14 +34,26 @@ pub struct State {
 }
 
 impl State {
-    pub(crate) fn project_tree(&self, env: &Engine) -> WalkResult {
+    /// The project tree after the project phase, with each file's tags and
+    /// those of the directories above it, and every tag key the phase sets.
+    fn project_tree(&self, env: &Engine) -> (Tree, Vec<(String, Vec<Tag>)>, Vec<u32>) {
         let paths: Vec<_> = self
             .trees
             .iter()
             .map(|tree| tree.label.as_str())
             .chain(self.configs.iter().map(|file| file.path.as_str()))
             .collect();
-        ProjectTree::build(env, &paths, Some(&self.configs))
+        let mut tree = env.project.build(&paths, &self.configs, &env.lang);
+        let phase = env.pipeline.phase_over("project");
+        let run = crate::sentinel::Sentinel::disabled();
+        for rules in 0..phase.rule_sets() {
+            let _ = crate::engine::run_tree(phase, &mut tree, 0, Some(rules), env, None, &run);
+        }
+        let keys = (0..phase.rule_sets())
+            .flat_map(|r| phase.tag_keys(r))
+            .collect();
+        let tags = file_tags(&tree, &env.lang);
+        (tree, tags, keys)
     }
 
     pub fn new(_: &Engine) -> Self {
@@ -86,33 +97,25 @@ impl State {
 
     /// The project tree after the project phase, Compact, for family phases.
     pub(crate) fn project_compact(&self, env: &Engine) -> Tree<Compact> {
-        let paths: Vec<_> = self
-            .trees
-            .iter()
-            .map(|tree| tree.label.as_str())
-            .chain(self.configs.iter().map(|file| file.path.as_str()))
-            .collect();
-        let tree = crate::file_tree::ProjectTree::tree(env, &paths, Some(&self.configs));
-        tree.compact_and_remap()
+        self.project_tree(env).0.compact_and_remap()
     }
 
     /// Sets on each tree the tags the project phase put on its file and the
     /// directories above it.
     pub(crate) fn project(&mut self, env: &Engine) {
-        let walk = self.project_tree(env);
+        let (_, file_tags, tag_keys) = self.project_tree(env);
         let by_path: FxHashMap<&str, usize> = self
             .trees
             .iter()
             .enumerate()
             .map(|(i, t)| (t.label.as_str(), i))
             .collect();
-        let tags: Vec<(usize, Vec<Tag>)> = walk
-            .file_tags
+        let tags: Vec<(usize, Vec<Tag>)> = file_tags
             .iter()
             .filter_map(|(path, tags)| Some((*by_path.get(path.as_str())?, tags.clone())))
             .collect();
         for tree in &mut self.trees {
-            tree.clear_tags(0, &walk.tag_keys);
+            tree.clear_tags(0, &tag_keys);
         }
         for (i, tags) in tags {
             for tag in tags {
@@ -714,4 +717,30 @@ fn renumber(file: &mut StoredFile, to: impl Fn(u32) -> Option<u32>) -> Option<()
         edge.to_tree = to(edge.to_tree)?;
     }
     Some(())
+}
+
+/// Each file of a project tree by path, with its tags and those of the
+/// directories above it, nearest first.
+fn file_tags(tree: &Tree, lang: &crate::intern::Lang) -> Vec<(String, Vec<Tag>)> {
+    let kinds = lang.tree_kinds();
+    tree.root().fold_tree(Vec::new(), |out, file, _| {
+        if !file.is(kinds.file) {
+            return;
+        }
+        let mut tags: Vec<Tag> = Vec::new();
+        for node in std::iter::once(file).chain(file.ancestors()) {
+            for tag in tree.tags.get(&node.index()).into_iter().flatten() {
+                if !tags.iter().any(|t| t.key == tag.key) {
+                    tags.push(*tag);
+                }
+            }
+        }
+        let mut parts: Vec<&str> = std::iter::once(file)
+            .chain(file.ancestors())
+            .take_while(|n| !n.is(kinds.root))
+            .map(|n| lang.syms.resolve(n.sym()))
+            .collect();
+        parts.reverse();
+        out.push((parts.join(crate::constants::PATH_SEP), tags));
+    })
 }

@@ -6,7 +6,6 @@ pub mod constants;
 pub mod driver;
 pub mod edge;
 pub mod engine;
-pub mod file_tree;
 pub mod frontend;
 pub mod intern;
 pub mod language;

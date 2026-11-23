@@ -2,6 +2,7 @@
 //! one per language it reads; a file goes to the first that accepts it.
 
 pub mod markdown;
+pub mod project;
 pub mod treesitter;
 
 use crate::engine::Engine;

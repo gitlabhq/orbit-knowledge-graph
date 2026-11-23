@@ -1,6 +1,6 @@
 //! An engine: the pipeline compiled over every family member's rules in one
-//! interner, its mounted frontends, the project settings as the members'
-//! union, and the budgets. Built once and shared between runs.
+//! interner, its mounted frontends, and the budgets. Built once and shared
+//! between runs.
 
 use crate::engine::Registration;
 use crate::engine::lang::DataSpec;
@@ -13,7 +13,8 @@ pub struct Engine {
     /// The mounted frontends, the engine's own language first.
     pub frontends: Vec<Mounted>,
     pub lang: Lang,
-    pub project: Project,
+    /// The mounted project frontend, which builds the project tree.
+    pub project: Box<dyn crate::frontend::project::ProjectFrontend>,
     pub limits: Limits,
     pub pipeline: crate::engine::Pipeline,
 }
@@ -22,28 +23,6 @@ pub struct Engine {
 pub struct Mounted {
     pub frontend: Box<dyn crate::frontend::Frontend>,
     pub rules: usize,
-}
-
-#[derive(Clone)]
-pub enum ParseFormat {
-    Json,
-    Toml,
-    Raw(regex::Regex),
-}
-
-#[derive(Clone)]
-pub struct ParseFile {
-    pub name: String,
-    pub format: ParseFormat,
-}
-
-/// What the project tree reads for the whole family: each member's rule
-/// index in member order, and the members' settings merged.
-#[derive(Default)]
-pub struct Project {
-    pub rules: Vec<usize>,
-    pub lookup_from: Vec<u16>,
-    pub parse_files: Vec<ParseFile>,
 }
 
 /// How an engine is configured: the family it serves, the modules it
@@ -135,7 +114,7 @@ impl Engine {
             },
             modules,
         )?;
-        let project = project(&pipeline, &lang, sources.len())?;
+        let project = Box::new(project(&pipeline, sources.len())?);
         Ok(Self {
             frontends,
             pipeline,
@@ -171,22 +150,14 @@ fn texts(spec: Option<&DataSpec>) -> Vec<&str> {
     }
 }
 
+/// The project tree frontend, inlining every language's `parse_files`.
 fn project(
     pipeline: &crate::engine::Pipeline,
-    lang: &Lang,
     files: usize,
-) -> Result<Project, LoadError> {
-    let mut project = Project {
-        rules: (0..files).collect(),
-        ..Project::default()
-    };
+) -> Result<crate::frontend::project::ProjectTree, LoadError> {
+    use crate::frontend::project::{ParseFile, ParseFormat, ProjectTree};
+    let mut project = ProjectTree::default();
     for index in 0..files {
-        for kind in texts(pipeline.setting(index, "lookup_from")) {
-            let kind = lang.intern_kind(kind);
-            if !project.lookup_from.contains(&kind) {
-                project.lookup_from.push(kind);
-            }
-        }
         let Some(DataSpec::List(entries)) = pipeline.setting(index, "parse_files") else {
             continue;
         };
