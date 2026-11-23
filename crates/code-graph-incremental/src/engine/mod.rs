@@ -19,7 +19,7 @@ use crate::modules;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Compact, Edge, EdgeKind, Mutable, Node, Storage};
 pub use program::{Def, Part, Phase, Pipeline, RowShape, resolution};
-pub use walk::{run_tree, run_trees, scope_budget};
+pub use walk::{run_family, run_tree, run_trees, scope_budget};
 
 pub type Tree<S = Compact> = crate::tree::Tree<S>;
 pub type Cursor<'a, S = Compact> = crate::tree::Cursor<'a, S>;
@@ -858,11 +858,13 @@ pub struct EdgeIndex {
 type EdgeKey = (EdgeKind, u32, u32);
 
 impl EdgeIndex {
-    pub fn new(edges: &[Edge]) -> Self {
+    pub fn new<'a>(edges: impl IntoIterator<Item = &'a Edge>) -> Self {
+        let mut incoming = FxHashSet::default();
         let mut outgoing: FxHashMap<_, SmallVec<[Loc; 2]>> = FxHashMap::default();
         let mut unresolved: FxHashMap<_, SmallVec<[Loc; 2]>> = FxHashMap::default();
         let mut sites: FxHashMap<_, SmallVec<[(Loc, Loc); 1]>> = FxHashMap::default();
         for e in edges {
+            incoming.insert((e.kind, e.to_tree, e.to_node));
             let (from, to) = (e.from_loc(), e.to_loc());
             let key = (e.kind, e.from_tree, e.from_node);
             outgoing.entry(key).or_default().push(to);
@@ -877,10 +879,7 @@ impl EdgeIndex {
             }
         }
         Self {
-            incoming: edges
-                .iter()
-                .map(|e| (e.kind, e.to_tree, e.to_node))
-                .collect(),
+            incoming,
             outgoing,
             unresolved,
             sites,

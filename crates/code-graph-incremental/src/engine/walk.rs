@@ -5,6 +5,7 @@
 
 use indextree::NodeId;
 use rayon::prelude::*;
+use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
 use super::pattern::{self, Cap, Pat};
@@ -41,12 +42,70 @@ pub fn run_tree<S: Store>(
     };
     let mut edges = Vec::new();
     for pass in phase.passes(rules) {
-        while on.walk(pass, tree, &mut edges)? && pass.repeat {
+        settle(|| {
+            if !(on.walk(pass, tree, &mut edges)? && pass.repeat) {
+                return Ok(false);
+            }
             budget.check()?;
             file.check()?;
-        }
+            Ok(true)
+        })?;
     }
     Ok(edges)
+}
+
+/// Runs a phase on a family's files, the project tree last in `trees`, with
+/// the graph so far; an `until: stable` phase reruns with its own edges in
+/// the graph until they stop changing. The edges it adds, and the reason it
+/// stopped early, if it did.
+pub fn run_family(
+    phase: &Phase,
+    trees: &[Tree<Compact>],
+    base: &[Edge],
+    env: &Env,
+    budget: &Sentinel,
+) -> Result<(Vec<Edge>, Option<Killed>), Killed> {
+    let project = trees.len() as u32 - 1;
+    let known: FxHashSet<Edge> = base.iter().copied().collect();
+    let (mut found, mut last, mut stopped) = (Vec::new(), FxHashSet::default(), None);
+    settle(|| {
+        let graph = EdgeIndex::new(base.iter().chain(&found));
+        let edges = match run_trees(
+            phase,
+            trees,
+            project as usize,
+            Some(project),
+            &graph,
+            env,
+            budget,
+        ) {
+            Ok((edges, _)) => edges,
+            Err(killed) if !killed.cancelled => {
+                stopped = Some(killed);
+                return Ok(false);
+            }
+            Err(killed) => return Err(killed),
+        };
+        let mut seen = FxHashSet::default();
+        found = edges
+            .into_iter()
+            .filter(|e| !known.contains(e) && seen.insert(*e))
+            .collect();
+        let changed = seen != last;
+        last = seen;
+        Ok(phase.until_stable && changed)
+    })?;
+    Ok((found, stopped))
+}
+
+/// Runs `round` until it reports no change, or the fixpoint bound.
+fn settle<E>(mut round: impl FnMut() -> Result<bool, E>) -> Result<(), E> {
+    for _ in 0..super::MAX_FIXPOINT_ROUNDS {
+        if !round()? {
+            break;
+        }
+    }
+    Ok(())
 }
 
 /// Runs a phase on the first `walk` trees of a family in parallel, over all

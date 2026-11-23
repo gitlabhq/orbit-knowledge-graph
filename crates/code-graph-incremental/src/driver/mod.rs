@@ -92,9 +92,6 @@ pub fn reindex(
     Ok((state, report))
 }
 
-/// A bound on reruns of a family phase; each round replaces the last one's edges.
-const MAX_FAMILY_ROUNDS: usize = 32;
-
 /// The phases before the first that needs more than its own tree, and the rest.
 fn split(env: &Env) -> (&[Phase], &[Phase]) {
     let phases = env.pipeline.phases.as_slice();
@@ -230,46 +227,12 @@ fn finish(env: &Env, state: &mut State, run: &Sentinel, report: &mut Report) -> 
             "project" => state.project(env),
             "graph" => {}
             "family" => {
-                let base = state.edges.len();
-                let mut last: std::collections::HashSet<Edge> = Default::default();
-                for _ in 0..MAX_FAMILY_ROUNDS {
-                    let graph = EdgeIndex::new(&state.edges);
-                    let project = state.trees.len() as u32;
-                    state.trees.push(state.project_compact(env));
-                    let found = engine::run_trees(
-                        phase,
-                        &state.trees,
-                        project as usize,
-                        Some(project),
-                        &graph,
-                        env,
-                        run,
-                    )
-                    .map(|(edges, _)| edges);
-                    state.trees.pop();
-                    let known: std::collections::HashSet<Edge> =
-                        state.edges[..base].iter().copied().collect();
-                    let mut seen = std::collections::HashSet::new();
-                    let found = match found {
-                        Ok(found) => found,
-                        Err(killed) if !killed.cancelled => {
-                            report.skipped.push(killed);
-                            break;
-                        }
-                        Err(killed) => return Err(killed.into()),
-                    };
-                    let found: Vec<Edge> = found
-                        .into_iter()
-                        .filter(|e| !known.contains(e) && seen.insert(*e))
-                        .collect();
-                    let stable = seen == last;
-                    state.edges.truncate(base);
-                    state.edges.extend(found);
-                    last = seen;
-                    if !phase.until_stable || stable {
-                        break;
-                    }
-                }
+                state.trees.push(state.project_compact(env));
+                let ran = engine::run_family(phase, &state.trees, &state.edges, env, run);
+                state.trees.pop();
+                let (found, stopped) = ran?;
+                report.skipped.extend(stopped);
+                state.edges.extend(found);
             }
             _ => {
                 let graph = EdgeIndex::new(&state.edges);
