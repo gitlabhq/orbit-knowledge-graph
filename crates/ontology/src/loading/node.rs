@@ -873,6 +873,16 @@ impl ExtractYaml {
         match self.query.as_str() {
             GENERATED_QUERY => Ok(ExtractQuery::Generated { filter }),
             file if file.ends_with(".sql.j2") => {
+                let yaml_stem = Path::new(yaml_path)
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy())
+                    .unwrap_or_default();
+                let expected = format!("{yaml_stem}.sql.j2");
+                if file != expected {
+                    return Err(OntologyError::Validation(format!(
+                        "pipeline '{pipeline_name}': extract.query must be '{expected}', named after its YAML file"
+                    )));
+                }
                 let sql_path = Path::new(yaml_path)
                     .parent()
                     .map(|dir| dir.join(file))
@@ -1333,6 +1343,36 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("extract.filter requires query: generated"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_rejects_a_template_named_after_another_file() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  order_by: [id]
+                  query: other_node.sql.j2
+                transform:
+                  type: datafusion
+            "#,
+        );
+        let err = result.expect_err("a template named after another file should be rejected");
+        assert!(
+            err.to_string()
+                .contains("extract.query must be 'test_node.sql.j2'"),
             "got: {err}"
         );
     }
