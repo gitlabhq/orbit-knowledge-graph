@@ -13,6 +13,8 @@ use crate::sentinel::Limits;
 
 pub struct Env {
     pub export_config: crate::backend::tables::ExportConfig,
+    /// The mounted frontends, the env's own language first.
+    pub frontends: Vec<Box<dyn crate::frontend::Frontend>>,
     pub lang: Lang,
     pub lang_id: SupportLang,
     pub members: Vec<SupportLang>,
@@ -139,7 +141,15 @@ impl Env {
             modules,
         )?;
         let project = project(&pipeline, &lang, sources.len())?;
+        let mut frontends = vec![crate::frontend::for_language(
+            lang_id,
+            limits.max_tree_depth,
+        )];
+        for &member in members.iter().filter(|&&m| m != lang_id) {
+            frontends.push(crate::frontend::for_language(member, limits.max_tree_depth));
+        }
         Ok(Self {
+            frontends,
             export_config,
             pipeline,
             project,
