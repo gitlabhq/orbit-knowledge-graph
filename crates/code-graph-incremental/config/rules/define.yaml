@@ -200,7 +200,7 @@ define:
     or union(owner, other_parts(owner)) | supers | members(name, role)
   other_parts(ROOT): >-
     minus(union(select_all(file($ROOT), '(__def $N:__defname)', $ROOT | child_sym("__defname")),
-    select_all(project, '(__def $N:__defname)', $ROOT | child_sym("__defname"))), $ROOT)
+    select_project('(__def $N:__defname)', $ROOT | child_sym("__defname"))), $ROOT)
     | impl_pair($ROOT)
   impl_pair(ROOT, owner):
     '(__def (__impl))': '$ROOT'

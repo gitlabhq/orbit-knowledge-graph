@@ -1,4 +1,5 @@
 pub mod core;
+pub mod names;
 pub mod ssa;
 pub mod text;
 
@@ -6,6 +7,7 @@ use crate::engine::{Cursor, Cx, Module, Registration, Store, Vals, register};
 
 pub static ALL: &[Registration] = &[
     register::<core::Core>(),
+    register::<names::Names>(),
     register::<ssa::Ssa>(),
     register::<text::Text>(),
 ];
@@ -57,5 +59,8 @@ macro_rules! function {
     };
     (@arg one) => { $crate::engine::Arg::One };
     (@arg set) => { $crate::engine::Arg::Set };
+    (@arg edge) => { $crate::engine::Arg::Edge };
+    (@arg pattern) => { $crate::engine::Arg::Pattern };
+    (@arg rest) => { $crate::engine::Arg::Rest };
 }
 use function;

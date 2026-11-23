@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde_json::Value;
 
-use super::expr::{Expr, IndexSpec, Op, Scope};
+use super::expr::{Expr, IndexSpec, Scope};
 use super::lang::{DataSpec, DefBody, DefSpec, Pair, RuleFiles, StageSpec};
 use super::pattern::{self, Slots, Tpl};
 use super::program::{
@@ -17,7 +17,7 @@ use super::program::{
 use super::{FnId, Kind, Val, Vals};
 use crate::error::LoadError;
 use crate::intern::Lang;
-use crate::tree::{CallResolution, EdgeKind};
+use crate::tree::EdgeKind;
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -810,17 +810,18 @@ impl<'a> Loader<'a> {
         let mut writes = Vec::new();
         if !replace {
             for (key, val) in tags.drain(..) {
-                writes.push(Expr::Op(
-                    Op::Tag(key, tag_on.unwrap_or(0)),
-                    Box::new([Expr::Var(0), val]),
+                let on = u32::from(tag_on.unwrap_or(0));
+                writes.push(core(
+                    "set_tag",
+                    vec![number(key), number(on), Expr::Var(0), val],
                 ));
             }
         }
         for tpl in tpls {
-            let mut args = vec![Expr::Var(0)];
+            let mut args = vec![number(templates.len() as u32), Expr::Var(0)];
             args.extend(tags.iter().map(|(_, val)| val.clone()));
             args.extend(tpl.texts().into_iter().cloned());
-            writes.push(Expr::Op(Op::Build(templates.len() as u16), args.into()));
+            writes.push(core("build", args));
             templates.push(Template {
                 case,
                 tpl,
@@ -961,29 +962,25 @@ impl<'a> Loader<'a> {
         let to = self.parse(to, slots, true)?;
         let from = match from {
             Some(f) => self.parse(f, slots, true)?,
-            None => Expr::Op(Op::Scope, Box::new([Expr::Var(0)])),
+            None => core("scope", vec![Expr::Var(0)]),
         };
         let site = match site {
             Some(s) => self.parse(s, slots, true)?,
             None => Expr::Empty,
         };
-        Ok(match res.filter(|name| resolution(name).is_none()) {
-            None => Expr::Op(
-                Op::Edge(kind, res.and_then(resolution).unwrap_or_default()),
-                Box::new([from, to, site]),
-            ),
-            Some(name) => {
+        let kind = number(u32::from(kind.0));
+        Ok(match res {
+            Some(name) if resolution(name).is_none() => {
                 let slot = slots.borrow_mut().slot("TARGET");
                 let of = self.parse(name, slots, true)?;
-                Expr::Every(
-                    Box::new(to),
-                    slot,
-                    Box::new(Expr::Op(
-                        Op::Edge(kind, CallResolution::default()),
-                        Box::new([from, Expr::Var(slot), site, of]),
-                    )),
-                )
+                let edge = core("edge", vec![kind, from, Expr::Var(slot), site, of]);
+                Expr::Every(Box::new(to), slot, Box::new(edge))
             }
+            Some(name) => {
+                let fixed = Expr::Lit(Val::Sym(self.lang.syms.intern(name)));
+                core("edge", vec![kind, from, to, site, fixed])
+            }
+            None => core("edge", vec![kind, from, to, site, Expr::Empty]),
         })
     }
 
@@ -1050,9 +1047,9 @@ impl<'a> Loader<'a> {
         });
         let shape = u16::try_from(rows.len() - 1)
             .map_err(|_| LoadError("more than 65536 row shapes".into()))?;
-        let mut args = vec![Expr::Var(0)];
+        let mut args = vec![number(u32::from(shape)), Expr::Var(0)];
         args.extend(exprs);
-        Ok(Expr::Op(Op::Row(shape), args.into()))
+        Ok(core("row", args))
     }
 }
 
@@ -1113,4 +1110,14 @@ fn union(mut parts: Vec<Expr>) -> Expr {
         1 => parts.pop().unwrap_or(Expr::Empty),
         _ => Expr::Union(parts.into()),
     }
+}
+
+/// A call to one of the core module's functions.
+fn core(name: &str, args: Vec<Expr>) -> Expr {
+    let id = super::lookup("core", name).expect("the core module declares the rule writes");
+    Expr::Call(id, args.into())
+}
+
+fn number(n: u32) -> Expr {
+    Expr::Lit(Val::Sym(n))
 }

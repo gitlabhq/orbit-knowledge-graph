@@ -4,13 +4,13 @@ data:
 define:
   file_at(path):
     '_ when path | regex_match("(^|/)[*]$")': >-
-      select_all(project, '(__source_file)' by $ROOT | regex_replace("/?[^/]*$", ""), path | regex_replace("/?[*]$", ""))
-      or select_all(project, '(__source_file $P:__package)' by package_path($P), path | regex_replace("/?[*]$", ""))
+      select_project('(__source_file)' by $ROOT | regex_replace("/?[^/]*$", ""), path | regex_replace("/?[*]$", ""))
+      or select_project('(__source_file $P:__package)' by package_path($P), path | regex_replace("/?[*]$", ""))
     '_': >-
-      select_all(project, '(__source_file)' by $ROOT | stem, path)
-      or select_all(project, '(__source_file)' by $ROOT | collapse_index(%index_files), path)
-      or file(select_all(project, '(__source_file $P:__package (__def $ROOT:__defname))' by package_path($P) | concat("/", $ROOT), path))
-      or file(select_all(project, '(__source_file (__def $ROOT:__defname))' by package_path($ROOT), path))
+      select_project('(__source_file)' by $ROOT | stem, path)
+      or select_project('(__source_file)' by $ROOT | collapse_index(%index_files), path)
+      or file(select_project('(__source_file $P:__package (__def $ROOT:__defname))' by package_path($P) | concat("/", $ROOT), path))
+      or file(select_project('(__source_file (__def $ROOT:__defname))' by package_path($ROOT), path))
   package_path(ROOT): '$ROOT | regex_replace("[.]|::|[\\\\]", "/")'
   roots(at): >-
     select_all(project(), '(__dir $D:__source_root)') | tree_path("/")
@@ -47,7 +47,7 @@ define:
     '(__call)': '$ROOT | sited(calls) | returned or $ROOT | type'
     '(__binding $R:__rhs)': '$R | tail | producing or $ROOT | type'
     '_': '$ROOT | type'
-  linked_file(ROOT): "select_all(project, '(__source_file)' by $ROOT, @ROOT)"
+  linked_file(ROOT): "select_project('(__source_file)' by $ROOT, @ROOT)"
   linked_section(ROOT, anchor): "select_all(linked_file($ROOT), '(__def $N:__anchor)', @anchor)"
   returned(ROOT):
     '_ when $ROOT | returns | is_class': '$ROOT | returns'

@@ -8,7 +8,6 @@ use super::pattern::Slots;
 use super::{Arg, FnId, Kind, Run, Store, Val, Vals, function, lookup, module_of};
 use crate::error::LoadError;
 use crate::intern::Lang;
-use crate::tree::{CallResolution, EdgeKind};
 
 #[derive(Clone)]
 pub enum Expr {
@@ -23,51 +22,6 @@ pub enum Expr {
     First(Box<Expr>, u16, Box<Expr>),
     /// The values every element's body yields.
     Every(Box<Expr>, u16, Box<Expr>),
-    Op(Op, Box<[Expr]>),
-}
-
-/// The engine's own operations over trees and the graph.
-#[derive(Clone, Copy)]
-pub enum Op {
-    /// Matches of a declared index directly in a scope.
-    Select(u32),
-    /// Matches of a declared index anywhere under a node.
-    SelectAll(u32),
-    /// Matches of a declared index in every file.
-    SelectProject(u32),
-    Enclose,
-    /// The innermost scope above a node, or the node itself at the root.
-    Scope,
-    /// Every ancestor of a node, innermost first.
-    Ancestors,
-    Follow(EdgeKind),
-    /// The targets of edges of a kind made at a node.
-    Site(EdgeKind),
-    File,
-    /// The project tree's root.
-    Project,
-    /// The first set without the values of the second.
-    Minus,
-    /// The set if it holds exactly one value.
-    Unique,
-    /// The values that stand for an instance of a type, not the type itself.
-    Instances,
-    /// Each node value, an instance as its type's node.
-    Nodes,
-    /// The last value of a set.
-    Last,
-    /// Writes an edge from each node of the first set to each of the second,
-    /// at the third's first node; a fourth set names the call resolution.
-    Edge(EdgeKind, CallResolution),
-    /// Writes one row of a shape at the first set's node per combination of
-    /// the other sets' values.
-    Row(u16),
-    /// Tags each node of the first set, or the first node of a kind under
-    /// it, with the first symbol of the second.
-    Tag(u32, u16),
-    /// Builds a template at the first set's node from the first symbol of
-    /// each other set: its tag values, then its texts.
-    Build(u16),
 }
 
 /// A `select` pattern and its key, shared by every phase so trees can keep
@@ -116,7 +70,7 @@ impl Expr {
                 f(Err(*def));
                 each(args, f);
             }
-            Expr::Union(parts) | Expr::Op(_, parts) => each(parts, f),
+            Expr::Union(parts) => each(parts, f),
             Expr::Or(a, b) | Expr::First(a, _, b) | Expr::Every(a, _, b) => {
                 a.calls(f);
                 b.calls(f);
@@ -135,7 +89,7 @@ pub(super) fn apply<S: Store>(cx: &mut Run<S>, id: FnId, args: &[Vals]) -> Vals 
     let spread = sig
         .iter()
         .zip(args)
-        .position(|(arg, vals)| *arg != Arg::Set && vals.len() != 1);
+        .position(|(arg, vals)| *arg == Arg::One && vals.len() != 1);
     let Some(at) = spread else {
         return cx.call(id, args);
     };
@@ -323,67 +277,6 @@ impl<'s> Parser<'s, '_> {
             }
             "first" | "every" => return self.each(word, piped),
             "union" => return Ok(Expr::Union(self.args(piped)?.into())),
-            "minus" | "unique" | "instances" | "nodes" | "last" => {
-                let args = self.args(piped)?;
-                let (op, arity) = match word {
-                    "minus" => (Op::Minus, 2),
-                    "unique" => (Op::Unique, 1),
-                    "nodes" => (Op::Nodes, 1),
-                    "last" => (Op::Last, 1),
-                    _ => (Op::Instances, 1),
-                };
-                if args.len() != arity {
-                    return Err(self.error(&format!("{word} takes {arity} arguments")));
-                }
-                return Ok(Expr::Op(op, args.into()));
-            }
-            "select" | "select_all" => return self.select(word, piped),
-            "project" => {
-                if !(self.eat("(") && self.eat(")")) {
-                    return Err(self.error("project() takes no arguments"));
-                }
-                return Ok(Expr::Op(Op::Project, Box::new([])));
-            }
-            "enclose" | "scope" | "ancestors" | "file" => {
-                let args = self.args(piped)?;
-                if args.len() != 1 {
-                    return Err(self.error(&format!("{word} takes 1 argument")));
-                }
-                let op = match word {
-                    "enclose" => Op::Enclose,
-                    "scope" => Op::Scope,
-                    "ancestors" => Op::Ancestors,
-                    _ => Op::File,
-                };
-                return Ok(Expr::Op(op, args.into()));
-            }
-            "follow" | "sited" => {
-                let site = word == "sited";
-                let mut args: Vec<Expr> = piped.into_iter().collect();
-                if !self.eat("(") {
-                    return Err(self.error("follow(node, kind)"));
-                }
-                if args.is_empty() {
-                    args.push(self.expr()?);
-                    if !self.eat(",") {
-                        return Err(self.error("follow(node, kind)"));
-                    }
-                }
-                self.space();
-                let kind = self.ident();
-                let kind = self.scope.lang.edge_kind(kind).ok_or_else(|| {
-                    self.error(&format!("edge kind {kind} is not in pipeline.yaml edges"))
-                })?;
-                if !self.eat(")") {
-                    return Err(self.error("expected )"));
-                }
-                let op = if site {
-                    Op::Site(kind)
-                } else {
-                    Op::Follow(kind)
-                };
-                return Ok(Expr::Op(op, args.into()));
-            }
             _ => {}
         }
         if let Some(&(def, arity)) = self.scope.defs.get(word) {
@@ -409,11 +302,7 @@ impl<'s> Parser<'s, '_> {
                     .modules
                     .iter()
                     .find(|m| lookup(m, name).is_some())
-                    .ok_or_else(|| {
-                        self.error(&format!(
-                            "no definition, operation or module function {name}"
-                        ))
-                    })?;
+                    .ok_or_else(|| self.error(&format!("no definition or function {name}")))?;
                 (module.as_str(), name)
             }
         };
@@ -427,15 +316,54 @@ impl<'s> Parser<'s, '_> {
         if f.kind == Kind::Effect && !self.scope.effects {
             return Err(self.error(&format!("{module}.{name} has effects")));
         }
-        let mut args = self.args(piped)?;
+        let mut args = self.typed_args(f.sig, piped)?;
+        let rest = f.sig.last() == Some(&Arg::Rest);
         if f.sig.last() == Some(&Arg::Set) && args.len() > f.sig.len() {
-            let rest = args.split_off(f.sig.len() - 1);
-            args.push(Expr::Union(rest.into()));
+            let more = args.split_off(f.sig.len() - 1);
+            args.push(Expr::Union(more.into()));
         }
-        if args.len() != f.sig.len() {
+        if args.len() != f.sig.len() && !(rest && args.len() >= f.sig.len() - 1) {
             return Err(self.error(&format!("{module}.{name} takes {} arguments", f.sig.len())));
         }
         Ok(Expr::Call(id, args.into()))
+    }
+
+    /// A call's arguments, each read as its signature says: an expression,
+    /// an edge kind's name, or a declared index's pattern. A pattern with no
+    /// key and nothing after it is keyed by the empty text.
+    fn typed_args(&mut self, sig: &[Arg], piped: Option<Expr>) -> Result<Vec<Expr>, LoadError> {
+        let mut args: Vec<Expr> = piped.into_iter().collect();
+        if !self.eat("(") || self.eat(")") {
+            return Ok(args);
+        }
+        loop {
+            let arg = sig[args.len().min(sig.len().saturating_sub(1))];
+            match arg {
+                Arg::Edge => {
+                    self.space();
+                    let name = self.ident();
+                    let kind = self.scope.lang.edge_kind(name).ok_or_else(|| {
+                        self.error(&format!("edge kind {name} is not in pipeline.yaml edges"))
+                    })?;
+                    args.push(Expr::Lit(Val::Sym(u32::from(kind.0))));
+                }
+                Arg::Pattern => {
+                    let (id, keyless) = self.index()?;
+                    args.push(Expr::Lit(Val::Sym(id)));
+                    if keyless {
+                        args.push(Expr::Lit(Val::Sym(self.scope.lang.syms.intern(""))));
+                        return Ok(args);
+                    }
+                }
+                _ => args.push(self.expr()?),
+            }
+            if self.eat(")") {
+                return Ok(args);
+            }
+            if !self.eat(",") {
+                return Err(self.error("expected , or )"));
+            }
+        }
     }
 
     /// `first(list, x => body)`: the first element's body that is not empty.
@@ -471,29 +399,12 @@ impl<'s> Parser<'s, '_> {
     }
 
     /// `select(scope, 'pattern' [by key], key)` and `select_all(region | project, …)`.
-    fn select(&mut self, word: &str, piped: Option<Expr>) -> Result<Expr, LoadError> {
-        if !self.eat("(") {
-            return Err(self.error("select(region, 'pattern', key)"));
-        }
-        let mut args: Vec<Expr> = Vec::new();
-        let mut project = false;
-        match piped {
-            Some(region) => args.push(region),
-            None if !self.rest().trim_start().starts_with("project(")
-                && self.keyword("project") =>
-            {
-                project = true
-            }
-            None => args.push(self.expr()?),
-        }
-        if !project && args.len() == 1 && !self.eat(",") {
-            return Err(self.error("expected , after the region"));
-        }
-        if project && !self.eat(",") {
-            return Err(self.error("expected , after project"));
-        }
+    /// `'pattern' [by key]`, declared once across the rules: its id, and
+    /// whether it has no key and ends the call.
+    fn index(&mut self) -> Result<(u32, bool), LoadError> {
+        self.space();
         if !self.eat("'") {
-            return Err(self.error("the pattern of a select is a quoted literal"));
+            return Err(self.error("an index pattern is a quoted literal"));
         }
         let pattern = self.quoted('\'')?.to_owned();
         let key = match self.keyword("by") {
@@ -520,34 +431,14 @@ impl<'s> Parser<'s, '_> {
             false => key,
         };
         let spec = IndexSpec { pattern, key };
-        let id = {
-            let mut indexes = self.scope.indexes.borrow_mut();
-            match indexes.iter().position(|i| *i == spec) {
-                Some(at) => at,
-                None => {
-                    indexes.push(spec);
-                    indexes.len() - 1
-                }
+        let mut indexes = self.scope.indexes.borrow_mut();
+        let id = match indexes.iter().position(|i| *i == spec) {
+            Some(at) => at,
+            None => {
+                indexes.push(spec);
+                indexes.len() - 1
             }
-        } as u32;
-        match keyless {
-            true => args.push(Expr::Lit(Val::Sym(self.scope.lang.syms.intern("")))),
-            false => {
-                if !self.eat(",") {
-                    return Err(self.error("expected , before the key"));
-                }
-                args.push(self.expr()?);
-                if !self.eat(")") {
-                    return Err(self.error("expected )"));
-                }
-            }
-        }
-        let op = match (word, project) {
-            ("select", false) => Op::Select(id),
-            ("select_all", false) => Op::SelectAll(id),
-            ("select_all", true) => Op::SelectProject(id),
-            _ => return Err(self.error("select takes a scope; use select_all for project")),
         };
-        Ok(Expr::Op(op, args.into()))
+        Ok((id as u32, keyless))
     }
 }

@@ -7,7 +7,7 @@
 use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
-use super::expr::{Expr, Op, apply};
+use super::expr::{Expr, apply};
 use std::time::{Duration, Instant};
 
 use super::program::{Cases, DefImpl, Scratch};
@@ -58,7 +58,6 @@ enum Step {
 enum Task<'e> {
     Eval(&'e Expr, usize),
     Union(usize),
-    Op(Op, usize),
     Call(FnId, usize),
     Or(&'e Expr, usize),
     LoopStart {
@@ -181,11 +180,6 @@ impl<'e, S: Store> Machine<'e, S> {
                     out.extend(part);
                 }
                 self.values.push(out);
-            }
-            Task::Op(op, n) => {
-                let args = self.take(n);
-                let found = run.operate(op, &args);
-                self.values.push(found);
             }
             Task::Call(id, n) => {
                 let args = self.take(n);
@@ -380,7 +374,6 @@ impl<'e, S: Store> Machine<'e, S> {
         }
         let (then, parts) = match expr {
             Expr::Union(parts) => (Task::Union(parts.len()), parts),
-            Expr::Op(op, parts) => (Task::Op(*op, parts.len()), parts),
             Expr::Call(id, parts) => (Task::Call(*id, parts.len()), parts),
             Expr::Def(def, parts) => (Task::MapStart(*def, parts.len()), parts),
             Expr::Or(a, b) => {

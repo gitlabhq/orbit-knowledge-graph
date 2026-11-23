@@ -18,7 +18,7 @@ use crate::constants::{RED_ZONE, STACK_SEGMENT};
 use crate::env::Env;
 use crate::modules;
 use crate::sentinel::{Killed, Sentinel};
-use crate::tree::{CallResolution, Compact, Edge, EdgeKind, Mutable, Node, Storage};
+use crate::tree::{Compact, Edge, EdgeKind, Mutable, Node, Storage};
 pub use program::{Def, Part, Phase, Pipeline, RowShape, resolution};
 pub use walk::{run_tree, run_trees, scope_budget};
 
@@ -150,6 +150,8 @@ pub fn one(val: Val) -> Vals {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
     Pure,
+    /// Pure and cheap: called each time, never cached.
+    Inline,
     Flow,
     Effect,
 }
@@ -158,6 +160,12 @@ pub enum Kind {
 pub enum Arg {
     One,
     Set,
+    /// An edge kind's name, a number once the rules load.
+    Edge,
+    /// `'pattern' [by key]`: a declared index, its id once the rules load.
+    Pattern,
+    /// Any further sets, last in a signature.
+    Rest,
 }
 
 /// One part of a cache key: an argument, or a value derived from a node
@@ -402,6 +410,13 @@ pub struct Entry {
     key: &'static [KeyPart],
     uses: &'static [(&'static str, &'static str)],
     pub required: bool,
+}
+
+impl Entry {
+    /// The kind of argument `at`; past the signature, its last.
+    pub fn arg(&self, at: usize) -> Arg {
+        self.sig[at.min(self.sig.len().saturating_sub(1))]
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -711,240 +726,6 @@ impl<'t, S: Store> Run<'t, S> {
         self.killed.is_none()
     }
 
-    /// Runs one of the engine's operations on evaluated arguments.
-    pub(crate) fn operate(&mut self, op: expr::Op, args: &[Vals]) -> Vals {
-        use expr::Op;
-        let nodes = |vals: &Vals| {
-            vals.iter()
-                .filter_map(|v| v.loc())
-                .collect::<SmallVec<[Loc; 2]>>()
-        };
-        let keys = |run: &Self, vals: &Vals| {
-            vals.iter()
-                .filter_map(|&v| run.text_of(v))
-                .collect::<SmallVec<[u32; 2]>>()
-        };
-        let mut out = Vals::new();
-        let push = |out: &mut Vals, v: Val| {
-            if !out.contains(&v) {
-                out.push(v);
-            }
-        };
-        match op {
-            Op::Select(id) | Op::SelectAll(id) => {
-                let Some(indexed) = self.indexed else {
-                    return out;
-                };
-                for at in nodes(&args[0]) {
-                    let anchor = match op {
-                        Op::Select(_) => at.node,
-                        _ => WHOLE,
-                    };
-                    for key in keys(self, &args[1]) {
-                        for &node in indexed
-                            .piece(at.fi, id)
-                            .get(&(anchor, key))
-                            .into_iter()
-                            .flatten()
-                        {
-                            let found = Loc { fi: at.fi, node };
-                            let inside = anchor != WHOLE
-                                || at.node == 0
-                                || Cursor::new(self.trees, found.fi, found.node)
-                                    .ancestors()
-                                    .any(|a| a.index() == at.node);
-                            if inside {
-                                push(&mut out, Val::Node(found));
-                            }
-                        }
-                    }
-                }
-            }
-            Op::SelectProject(id) => {
-                let Some(indexed) = self.indexed else {
-                    return out;
-                };
-                for key in keys(self, &args[0]) {
-                    for &found in indexed.family(id).get(&key).into_iter().flatten() {
-                        push(&mut out, Val::Node(found));
-                    }
-                }
-            }
-            Op::Enclose => {
-                for at in nodes(&args[0]) {
-                    let mut next = self.scope_above(at);
-                    while let Some(scope) = next {
-                        push(&mut out, Val::Node(scope));
-                        next = self.scope_above(scope);
-                    }
-                }
-            }
-            Op::Ancestors => {
-                for at in nodes(&args[0]) {
-                    for a in Cursor::new(self.trees, at.fi, at.node).ancestors() {
-                        push(&mut out, Val::Node(a.into()));
-                    }
-                }
-            }
-            Op::Follow(kind) => {
-                let Some(graph) = self.graph else {
-                    return out;
-                };
-                for at in nodes(&args[0]) {
-                    for &to in graph
-                        .outgoing
-                        .get(&(kind, at.fi, at.node))
-                        .into_iter()
-                        .flatten()
-                    {
-                        push(&mut out, Val::Node(to));
-                    }
-                }
-            }
-            Op::Site(kind) => {
-                let Some(graph) = self.graph else {
-                    return out;
-                };
-                for at in nodes(&args[0]) {
-                    for &(_, to) in graph
-                        .sites
-                        .get(&(kind, at.fi, at.node))
-                        .into_iter()
-                        .flatten()
-                    {
-                        push(&mut out, Val::Node(to));
-                    }
-                }
-            }
-            Op::Minus => {
-                for &v in &args[0] {
-                    if !args[1].contains(&v) {
-                        push(&mut out, v);
-                    }
-                }
-            }
-            Op::Unique => {
-                if let [v] = args[0].as_slice() {
-                    push(&mut out, *v);
-                }
-            }
-            Op::Instances => {
-                for &v in &args[0] {
-                    if matches!(v, Val::Type(_)) {
-                        push(&mut out, v);
-                    }
-                }
-            }
-            Op::Nodes => {
-                for &v in &args[0] {
-                    if let Val::Node(l) | Val::Type(l) = v {
-                        push(&mut out, Val::Node(l));
-                    }
-                }
-            }
-            Op::Last => {
-                if let Some(&v) = args[0].last() {
-                    push(&mut out, v);
-                }
-            }
-            Op::Project => {
-                if let Some(project) = self.project {
-                    push(
-                        &mut out,
-                        Val::Node(Loc {
-                            fi: project,
-                            node: 0,
-                        }),
-                    );
-                }
-            }
-            Op::File => {
-                for at in nodes(&args[0]) {
-                    push(&mut out, Val::Node(Loc { fi: at.fi, node: 0 }));
-                }
-            }
-            Op::Scope => {
-                for at in nodes(&args[0]) {
-                    push(&mut out, Val::Node(self.scope_above(at).unwrap_or(at)));
-                }
-            }
-            Op::Edge(kind, fixed) => {
-                let site = args[2].first().and_then(|v| v.loc()).map(|l| l.node);
-                let call_resolution = match args.get(3).and_then(|v| v.first()) {
-                    Some(&Val::Sym(name)) => {
-                        program::resolution(self.lang_ref.syms.resolve(name)).unwrap_or_default()
-                    }
-                    Some(_) => CallResolution::default(),
-                    None => fixed,
-                };
-                for from in nodes(&args[0]) {
-                    for to in nodes(&args[1]) {
-                        self.edges.push(Edge {
-                            site,
-                            call_resolution,
-                            ..Edge::new(from.fi, from.node, to.fi, to.node, kind)
-                        });
-                    }
-                }
-            }
-            Op::Row(shape) => self.row(shape, args),
-            Op::Tag(key, on) => {
-                if let Some(val) = self.first_sym(&args[1]) {
-                    for at in nodes(&args[0]) {
-                        self.writes.push(Write::Tag {
-                            at: at.node,
-                            key,
-                            on,
-                            val,
-                        });
-                    }
-                }
-            }
-            Op::Build(template) => {
-                if let Some(at) = args[0].first().and_then(|v| v.loc()) {
-                    let syms = args[1..].iter().map(|v| self.first_sym(v)).collect();
-                    self.writes.push(Write::Build {
-                        template,
-                        at: at.node,
-                        syms,
-                    });
-                }
-            }
-        }
-        out
-    }
-
-    /// The first symbol of a set: a symbol, or a node's own text.
-    fn first_sym(&self, vals: &Vals) -> Option<u32> {
-        vals.iter().find_map(|&v| match v {
-            Val::Sym(s) => Some(s),
-            Val::Node(loc) => Some(self.sym_at(loc)).filter(|&s| s != 0),
-            _ => None,
-        })
-    }
-
-    /// One row per combination of the column values; a column with no value
-    /// is empty.
-    fn row(&mut self, shape: u16, args: &[Vals]) {
-        let Some(at) = args[0].first().and_then(|v| v.loc()) else {
-            return;
-        };
-        let cols = &args[1..];
-        let total: usize = cols.iter().map(|v| v.len().max(1)).product();
-        for mut n in 0..total {
-            let values = cols
-                .iter()
-                .map(|v| {
-                    let len = v.len().max(1);
-                    let value = v.get(n % len).copied();
-                    n /= len;
-                    value
-                })
-                .collect();
-            self.rows.push(Row { shape, at, values });
-        }
-    }
-
     fn stamp(&self, deps: u8) -> u64 {
         stamp(&self.epochs, deps)
     }
@@ -952,7 +733,7 @@ impl<'t, S: Store> Run<'t, S> {
     fn key(&self, id: FnId, f: &Entry, args: &[Vals]) -> Key {
         let mut key = SmallVec::new();
         let arg = |key: &mut SmallVec<[Val; 4]>, at: usize| {
-            if f.sig[at] == Arg::Set {
+            if matches!(f.arg(at), Arg::Set | Arg::Rest) {
                 key.push(Val::Sym(args[at].len() as u32));
             }
             key.extend_from_slice(&args[at]);
@@ -1003,8 +784,10 @@ impl<'t, S: Store> Run<'t, S> {
         let f = function(id);
         let invoke = S::hooks(&modules::ALL[usize::from(f.slot)]).invoke;
         let reading = std::mem::replace(&mut self.reading, deps);
-        if f.kind == Kind::Effect {
-            self.reading = u8::MAX;
+        if matches!(f.kind, Kind::Effect | Kind::Inline) {
+            if f.kind == Kind::Effect {
+                self.reading = u8::MAX;
+            }
             let found = invoke(self, f.slot, f.index, args);
             self.reading = reading;
             return found;
@@ -1218,7 +1001,7 @@ fn stamp(epochs: &[u64; SLOTS], mut deps: u8) -> u64 {
 /// A write to the tree a run reads, applied after the node that made it:
 /// a tag on `at`, or on the first node of kind `on` under it; or a template
 /// built at `at` from the first symbol of each of its sets.
-enum Write {
+pub enum Write {
     Tag {
         at: u32,
         key: u32,
@@ -1435,6 +1218,30 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
 
     pub fn emit(&mut self, edge: Edge) {
         self.run.edges.push(edge);
+    }
+
+    pub fn row(&mut self, row: Row) {
+        self.run.rows.push(row);
+    }
+
+    /// Writes the run's tree once the node being fired is done.
+    pub fn write_tree(&mut self, write: Write) {
+        self.run.writes.push(write);
+    }
+
+    /// The innermost scope above `at`, or none at the root.
+    pub fn scope_above(&mut self, at: Loc) -> Option<Loc> {
+        self.run.scope_above(at)
+    }
+
+    /// One tree's piece of a declared rule index, in a run that has them.
+    pub fn piece(&self, fi: u32, id: u32) -> Option<&'t crate::tree::Piece> {
+        Some(self.run.indexed?.piece(fi, id))
+    }
+
+    /// A declared rule index's whole-tree matches across the family, by key.
+    pub fn family(&self, id: u32) -> Option<&'t FxHashMap<u32, Vec<Loc>>> {
+        Some(self.run.indexed?.family(id))
     }
 
     pub fn emitted(&self) -> usize {
