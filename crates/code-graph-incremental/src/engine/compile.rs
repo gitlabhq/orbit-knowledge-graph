@@ -286,23 +286,33 @@ fn compile_phase(
         }
         false => false,
     };
-    let (passes, by_lang) = match grouped {
+    let (passes, by_lang, region_by_lang) = match grouped {
         false => {
             let mut passes = Vec::new();
-            let mut by_lang = Vec::new();
+            let (mut by_lang, mut regions) = (Vec::new(), Vec::new());
             for (at, own) in langs.iter().enumerate() {
-                let mut mine = Vec::new();
+                let (mut mine, mut inside) = (Vec::new(), Vec::new());
                 for stage in own.iter().chain(&shared) {
-                    mine.push(passes.len() as u16);
+                    let list = if stage.before_regions {
+                        &mut inside
+                    } else {
+                        &mut mine
+                    };
+                    list.push(passes.len() as u16);
                     passes.push(loader.stage(stage, at as u8, post)?);
                 }
                 by_lang.push(mine);
+                regions.push(inside);
             }
-            (passes, by_lang)
+            (passes, by_lang, regions)
         }
         true => {
             let pass = loader.groups(&shared, &langs, post)?;
-            (vec![pass], vec![vec![0]; langs.len()])
+            (
+                vec![pass],
+                vec![vec![0]; langs.len()],
+                vec![Vec::new(); langs.len()],
+            )
         }
     };
     let used = modules_reached(registry, &links, &passes, defs);
@@ -336,6 +346,7 @@ fn compile_phase(
         indexers: Vec::new().into(),
         passes,
         by_lang,
+        region_by_lang,
     })
 }
 

@@ -233,11 +233,22 @@ pub struct Phase {
     pub(super) passes: Vec<Pass>,
     /// Per language: its passes, in order.
     pub(super) by_lang: Vec<Vec<u16>>,
+    /// Per language: the passes it runs inside its files' regions, before
+    /// each region's own.
+    pub(super) region_by_lang: Vec<Vec<u16>>,
 }
 
 impl Phase {
     pub(super) fn passes(&self, rules: usize) -> impl Iterator<Item = &Pass> {
         self.by_lang
+            .get(rules)
+            .into_iter()
+            .flatten()
+            .map(|&at| &self.passes[usize::from(at)])
+    }
+
+    pub(super) fn region_passes(&self, rules: usize) -> impl Iterator<Item = &Pass> {
+        self.region_by_lang
             .get(rules)
             .into_iter()
             .flatten()

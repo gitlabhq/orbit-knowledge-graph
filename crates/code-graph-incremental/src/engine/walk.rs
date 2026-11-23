@@ -49,25 +49,38 @@ pub fn run_tree<S: Store>(
             break;
         }
         for (region, rules) in pending {
-            let on = On {
-                phase,
-                rules,
-                region,
-                engine,
-                graph,
-                fi,
-                budget,
-                file: &file,
-            };
-            for pass in phase.passes(rules) {
-                settle(|| {
-                    if !(on.walk(pass, tree, &mut edges, &mut outputs)? && pass.repeat) {
-                        return Ok(false);
-                    }
-                    budget.check()?;
-                    file.check()?;
-                    Ok(true)
-                })?;
+            let host = region == HOST;
+            let walks = [
+                (
+                    own,
+                    phase
+                        .region_passes(own)
+                        .filter(|_| !host)
+                        .collect::<Vec<_>>(),
+                ),
+                (rules, phase.passes(rules).collect()),
+            ];
+            for (rules, passes) in walks {
+                let on = On {
+                    phase,
+                    rules,
+                    region,
+                    engine,
+                    graph,
+                    fi,
+                    budget,
+                    file: &file,
+                };
+                for pass in passes {
+                    settle(|| {
+                        if !(on.walk(pass, tree, &mut edges, &mut outputs)? && pass.repeat) {
+                            return Ok(false);
+                        }
+                        budget.check()?;
+                        file.check()?;
+                        Ok(true)
+                    })?;
+                }
             }
         }
     }
@@ -202,23 +215,33 @@ pub fn run_trees(
         .map(|fi| {
             let tree = &trees[fi];
             let file = tree_budget(phase, engine, &tree.label);
-            let regions = regions(tree, engine, engine.rules_index(&tree.label));
+            let own = engine.rules_index(&tree.label);
+            let regions = regions(tree, engine, own);
             let (mut edges, mut outputs) = (Vec::new(), Outputs::default());
             for &(region, rules) in &regions {
-                let mut run = Run::new(trees, fi as u32, rules, engine, phase, &scope, &file);
-                run.graph = Some(graph);
-                run.graph_fi = fi as u32;
-                run.indexed = Some(&indexed);
-                run.files = files;
-                run.project = project;
-                run.start_modules();
-                for pass in phase.passes(rules) {
-                    let nodes = region_nodes(tree, &regions, region, pass.post);
-                    fire_from(&mut run, pass, &nodes, 0);
+                let inside: Vec<_> = match region == HOST {
+                    true => Vec::new(),
+                    false => phase.region_passes(own).collect(),
+                };
+                for (rules, passes) in [(own, inside), (rules, phase.passes(rules).collect())] {
+                    if passes.is_empty() {
+                        continue;
+                    }
+                    let mut run = Run::new(trees, fi as u32, rules, engine, phase, &scope, &file);
+                    run.graph = Some(graph);
+                    run.graph_fi = fi as u32;
+                    run.indexed = Some(&indexed);
+                    run.files = files;
+                    run.project = project;
+                    run.start_modules();
+                    for pass in passes {
+                        let nodes = region_nodes(tree, &regions, region, pass.post);
+                        fire_from(&mut run, pass, &nodes, 0);
+                    }
+                    let (e, o) = run.end()?;
+                    edges.extend(e);
+                    outputs.merge(o);
                 }
-                let (e, o) = run.end()?;
-                edges.extend(e);
-                outputs.merge(o);
             }
             Ok((edges, outputs))
         })

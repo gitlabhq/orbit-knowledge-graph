@@ -33,6 +33,9 @@ pub struct StageSpec {
     pub name: String,
     pub repeat: bool,
     pub grouped: bool,
+    /// Runs inside the file's regions, before each region's own rules,
+    /// instead of over the file's own nodes.
+    pub before_regions: bool,
     pub pairs: Vec<Pair>,
 }
 
@@ -311,6 +314,7 @@ impl Loader<'_> {
                         name: kind,
                         repeat: false,
                         grouped: true,
+                        before_regions: false,
                         pairs: self.pairs(&at, scope, pairs, 0)?,
                     })
                 })
@@ -326,6 +330,7 @@ impl Loader<'_> {
                 name: phase.to_owned(),
                 repeat: false,
                 grouped: false,
+                before_regions: false,
                 pairs: self.pairs(&at, scope, section, 0)?,
             }]),
             Value::Null => Ok(Vec::new()),
@@ -365,6 +370,15 @@ impl Loader<'_> {
             _ => return Err(err(format!("{at}: a stage has a name: `stage: <name>`"))),
         };
         let repeat = matches!(map.remove("repeat"), Some(Value::Bool(true)));
+        let before_regions = match map.remove("before") {
+            None => false,
+            Some(Value::String(s)) if s == "regions" => true,
+            Some(other) => {
+                return Err(err(format!(
+                    "{at}: stage {name}: before is `regions`, not {other}"
+                )));
+            }
+        };
         let pairs = map.remove("rewrite").unwrap_or(Value::Array(Vec::new()));
         if let Some(key) = map.keys().next() {
             return Err(err(format!("{at}: stage {name}: unknown key {key}")));
@@ -374,6 +388,7 @@ impl Loader<'_> {
             name,
             repeat,
             grouped: false,
+            before_regions,
         });
         Ok(())
     }
