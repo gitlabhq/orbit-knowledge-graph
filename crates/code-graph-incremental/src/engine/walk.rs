@@ -12,7 +12,7 @@ use super::graph::End;
 use super::pattern::{self, Cap, Pat};
 use super::program::{Pass, Phase, Scratch, Template, order};
 use super::{
-    Compact, Cursor, Graph, Indexed, Input, Loc, Outputs, Run, Store, Tree, WHOLE, Write, machine,
+    Compact, Cursor, Graph, Indexed, Input, Loc, Outputs, Run, Store, Tree, WHOLE, Write, vm,
 };
 use crate::engine::Engine;
 use crate::intern::Lang;
@@ -382,7 +382,7 @@ fn fire_from<'t, S: Store>(
             continue;
         }
         let fi = run.input.fi;
-        machine::fire(run, &pass.cases, pass.slots, Loc { fi, node });
+        vm::fire(run, &pass.cases, pass.slots, Loc { fi, node });
         if !run.writes.is_empty() {
             break;
         }

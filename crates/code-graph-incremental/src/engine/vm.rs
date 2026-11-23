@@ -1,4 +1,4 @@
-//! Evaluates expressions and calls on explicit stacks: tasks still to do,
+//! The rule VM: evaluates expressions and calls on explicit stacks: tasks still to do,
 //! the values they produce, and the slot vectors they read. A cached call,
 //! to a definition or a module function, is a frame here: its value is
 //! looked up or computed, and a cycle through it reruns its body until its
@@ -109,7 +109,7 @@ enum Frame<'e, S: Store> {
 
 /// The stacks of one evaluation; a run keeps one set and reuses it, and a
 /// call back into the rules from module code takes a fresh set.
-pub(super) struct Machine<'e, S: Store> {
+pub(super) struct Vm<'e, S: Store> {
     tasks: Vec<Task<'e>>,
     frames: Vec<Frame<'e, S>>,
     values: Vec<Vals>,
@@ -119,7 +119,7 @@ pub(super) struct Machine<'e, S: Store> {
     scratch: Vec<Scratch<S>>,
 }
 
-impl<S: Store> Default for Machine<'_, S> {
+impl<S: Store> Default for Vm<'_, S> {
     fn default() -> Self {
         Self {
             tasks: Vec::new(),
@@ -132,23 +132,23 @@ impl<S: Store> Default for Machine<'_, S> {
     }
 }
 
-/// Runs `start` on the run's machine, or on a fresh one when module code
+/// Runs `start` on the run's vm, or on a fresh one when module code
 /// calls back in while the run's is busy; the value it leaves.
-fn on_machine<'t, S: Store>(
+fn on_vm<'t, S: Store>(
     run: &mut Run<'t, S>,
-    start: impl FnOnce(&mut Machine<'t, S>, &mut Run<'t, S>),
+    start: impl FnOnce(&mut Vm<'t, S>, &mut Run<'t, S>),
 ) -> Vals {
-    let mut m = run.machine.take().unwrap_or_default();
+    let mut m = run.vm.take().unwrap_or_default();
     start(&mut m, run);
     let found = m.run(run);
     m.release_envs();
-    run.machine = Some(m);
+    run.vm = Some(m);
     found
 }
 
 /// The value of `expr` with `caps` as its slots.
 pub(super) fn eval<'t, S: Store>(run: &mut Run<'t, S>, expr: &'t Expr, caps: &[Vals]) -> Vals {
-    on_machine(run, |m, _| {
+    on_vm(run, |m, _| {
         let env = m.env(caps.iter().cloned());
         m.tasks.push(Task::Eval(expr, env));
     })
@@ -156,7 +156,7 @@ pub(super) fn eval<'t, S: Store>(run: &mut Run<'t, S>, expr: &'t Expr, caps: &[V
 
 /// The value of a call to module function `id`, as module code makes it.
 pub(super) fn call<S: Store>(run: &mut Run<'_, S>, id: FnId, args: &[Vals]) -> Vals {
-    on_machine(run, |m, run| {
+    on_vm(run, |m, run| {
         let fns = &run.phase.defs;
         m.call(run, fns, Callee::Native(id), args.iter().cloned().collect())
     })
@@ -164,13 +164,13 @@ pub(super) fn call<S: Store>(run: &mut Run<'_, S>, id: FnId, args: &[Vals]) -> V
 
 /// Fires `cases` at `node`: each group's first case that holds.
 pub(super) fn fire<'t, S: Store>(run: &mut Run<'t, S>, cases: &'t Cases, slots: usize, node: Loc) {
-    on_machine(run, |m, run| {
+    on_vm(run, |m, run| {
         let args = SmallVec::from_elem(SmallVec::from_elem(Val::Node(node), 1), 1);
         m.try_cases(run, cases, slots, args);
     });
 }
 
-impl<'e, S: Store> Machine<'e, S> {
+impl<'e, S: Store> Vm<'e, S> {
     fn run<'t>(&mut self, run: &mut Run<'t, S>) -> Vals
     where
         't: 'e,

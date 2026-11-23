@@ -153,7 +153,7 @@ pub struct Run<'t, S: Store = Compact> {
     pub(super) round: u64,
     pub(super) profile: Option<Box<profile::Profile>>,
     /// The evaluator's stacks, reused by each evaluation of this run.
-    pub(super) machine: Option<machine::Machine<'t, S>>,
+    pub(super) vm: Option<vm::Vm<'t, S>>,
     /// Each node's nearest ancestor that is a scope or the root, filled on use.
     pub(super) scopes: FxHashMap<Loc, Option<Loc>>,
 }
@@ -177,7 +177,7 @@ impl<'t, S: Store> Run<'t, S> {
             cycle_reads: FxHashSet::default(),
             round: 0,
             profile: profile::ON.then(Box::default),
-            machine: None,
+            vm: None,
             scopes: FxHashMap::default(),
         }
     }
@@ -280,7 +280,7 @@ impl<'t, S: Store> Run<'t, S> {
     /// A module function's result, cached; it stays valid until a state the
     /// function can read is written.
     pub(super) fn call(&mut self, id: FnId, args: &[Vals]) -> Vals {
-        machine::call(self, id, args)
+        vm::call(self, id, args)
     }
 
     /// Starts the phase's modules on the run's tree.

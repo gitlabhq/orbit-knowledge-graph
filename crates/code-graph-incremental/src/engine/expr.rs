@@ -79,7 +79,7 @@ impl Expr {
     }
 
     pub fn eval<'t, S: Store>(&'t self, cx: &mut Run<'t, S>, caps: &[Vals]) -> Vals {
-        super::machine::eval(cx, self, caps)
+        super::vm::eval(cx, self, caps)
     }
 }
 

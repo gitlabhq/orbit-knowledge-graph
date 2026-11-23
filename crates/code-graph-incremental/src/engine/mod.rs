@@ -4,11 +4,11 @@ mod expr;
 mod graph;
 mod host;
 pub mod lang;
-mod machine;
 pub mod pattern;
 pub mod profile;
 mod program;
 mod run;
+mod vm;
 mod walk;
 
 use smallvec::SmallVec;
