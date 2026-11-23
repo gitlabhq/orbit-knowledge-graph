@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --quiet
 # /// script
 # requires-python = ">=3.11"
-# dependencies = []
+# dependencies = ["pyyaml>=6.0"]
 # ///
 from __future__ import annotations
 
@@ -14,13 +14,19 @@ import os
 import re
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
+
+import yaml
 
 HERE = Path(__file__).resolve().parent
 CONFIG = HERE / "sgconfig.yml"
-LEDGER = HERE / "ledger.toml"
-LEDGER_KEYS = {"glob", "rules", "text", "reason"}
+LEDGER = HERE / "ledger"
+LEDGER_KEYS = {"category", "reason", "preview", "hash", "lines", "rules"}
+CATEGORIES = {
+    "safety", "security", "compliance", "upstream", "contract", "invariant",
+    "magic-value", "known-gap", "tool-read", "generated", "vendored", "test-data",
+}
+PREVIEW_CHARS = 72
 SUPPRESSION = re.compile(r"ast-grep-ignore(?P<ids>:[^\n]*)?")
 NO_IGNORE = [arg for kind in ("hidden", "dot", "exclude", "global", "parent", "vcs") for arg in ("--no-ignore", kind)]
 SHEBANG = re.compile(r"#!\S+( \S+)*")
@@ -65,20 +71,27 @@ the code. Remove each comment above and fix the root cause in the code:
   The comment explains a decision.
     Put it in the MR description or the commit message.
 
-Exception process: if no step applies and a reviewer agrees, add an entry to
-scripts/linting/comments/ledger.toml. Code owners approve each change to it.
-An entry without "text" exempts every comment in the files that "glob" matches.
-An entry with "text" exempts only that exact comment. A multi-line "text"
-exempts the block only while every line is unchanged and in order. "rules" limits the entry
-to some comments-* rules. Each entry needs a reason, and an entry that exempts
-no comment fails the check.
+Exception process: if no step applies and a reviewer agrees, add an entry to the
+area file under scripts/linting/comments/ledger/. Code owners approve each change.
+Print a ready entry for the comment block at a line, then fill in the reason:
 
-  [[entry]]
-  glob = "crates/example/src/lib.rs"
-  text = "// the exact comment text"
-  reason = "why no change to the code can replace this comment"
+  mise run lint:comments -- --entry crates/example/src/lib.rs:42
+
+  crates/example/src/lib.rs:
+  - category: invariant
+    reason: why no change to the code can replace this comment
+    preview: "// the first line of the comment"
+    hash: 3f2a9c1e5b7d4a60
+    lines: 2
+
+The hash covers every line of the block, so an edit to a kept comment fails
+until you print the entry again and update it in the same MR. An entry without
+a hash exempts every comment in the files that its path glob matches. "rules"
+limits an entry to some comments-* rules. An entry that exempts no comment fails.
+Categories: {categories}.
 
 Inline suppression (ast-grep-ignore) of the comment rules is not allowed."""
+GUIDE = GUIDE.replace("{categories}", ", ".join(sorted(CATEGORIES)))
 
 HINTS = [
     (re.compile(r"\b(todo|fixme|xxx)\b", re.I), "open an issue for this work"),
@@ -100,33 +113,52 @@ Finding = collections.namedtuple("Finding", "path line text rule")
 
 @dataclasses.dataclass
 class Entry:
-    glob: str
+    path: str
     pattern: re.Pattern
     rules: frozenset[str] | None
-    text: str | None
+    category: str
     reason: str
-    segments: tuple[str, ...] = ()
+    preview: str
+    hash: str | None
+    lines: int
+    source: str
     used: int = 0
 
-    def covers(self, finding: Finding) -> bool:
-        return (
-            self.pattern.fullmatch(finding.path) is not None
-            and (self.rules is None or finding.rule in self.rules)
-            and (self.text is None or key(finding.text) == key(self.text))
-        )
+    def allows(self, finding: Finding) -> bool:
+        return self.rules is None or finding.rule in self.rules
 
     def run_at(self, findings: list[Finding], start: int) -> bool:
-        run = findings[start : start + len(self.segments)]
-        return len(run) == len(self.segments) and all(
-            finding.line == run[0].line + offset
-            and key(finding.text) == segment
-            and (self.rules is None or finding.rule in self.rules)
-            for offset, (finding, segment) in enumerate(zip(run, self.segments))
+        run = findings[start : start + self.lines]
+        return (
+            len(run) == self.lines
+            and all(follows(prev, nxt) for prev, nxt in zip(run, run[1:]))
+            and all(self.allows(finding) for finding in run)
+            and block_hash(run) == self.hash
         )
 
 
 def key(text: str) -> str:
     return hashlib.sha256(" ".join(text.split()).encode()).hexdigest()[:16]
+
+
+def follows(prev: Finding, nxt: Finding) -> bool:
+    return nxt.path == prev.path and nxt.line == prev.line + prev.text.count("\n") + 1
+
+
+def block_hash(run: list[Finding]) -> str:
+    return key("\n".join(finding.text for finding in run))
+
+
+def preview(text: str) -> str:
+    first = text.strip().splitlines()[0].strip()
+    return first if len(first) <= PREVIEW_CHARS else first[: PREVIEW_CHARS - 1] + "…"
+
+
+def area_file(path: str) -> str:
+    parts = path.split("/")
+    if parts[0] == "crates" and len(parts) > 2:
+        return f"crates/{parts[1]}.yaml"
+    return f"{parts[0]}.yaml" if len(parts) > 1 else "root.yaml"
 
 
 def is_directive(text: str, line: int) -> bool:
@@ -145,14 +177,19 @@ def glob_to_regex(glob: str) -> re.Pattern:
 
 def load_ledger() -> list[Entry]:
     entries = []
-    for raw in tomllib.loads(LEDGER.read_text()).get("entry", []):
-        unknown = set(raw) - LEDGER_KEYS
-        if unknown or "glob" not in raw or not raw.get("reason", "").strip():
-            sys.exit(f"comment check: ledger entry {raw} needs glob and reason, and only {sorted(LEDGER_KEYS)}")
-        rules = frozenset(raw["rules"]) if "rules" in raw else None
-        text = raw.get("text")
-        segments = tuple(key(line) for line in text.strip("\n").split("\n")) if text else ()
-        entries.append(Entry(raw["glob"], glob_to_regex(raw["glob"]), rules, text, raw["reason"], segments))
+    for file in sorted(LEDGER.rglob("*.yaml")):
+        source = str(file.relative_to(HERE))
+        for path, items in (yaml.safe_load(file.read_text()) or {}).items():
+            for raw in items:
+                unknown = set(raw) - LEDGER_KEYS
+                if unknown or raw.get("category") not in CATEGORIES or not str(raw.get("reason", "")).strip():
+                    sys.exit(f"comment check: {source}: entry for {path} needs a category from {sorted(CATEGORIES)}, a reason, and only {sorted(LEDGER_KEYS)}")
+                if ("hash" in raw) != ("lines" in raw):
+                    sys.exit(f"comment check: {source}: entry for {path} needs both hash and lines, or neither")
+                rules = frozenset(raw["rules"]) if "rules" in raw else None
+                entries.append(
+                    Entry(path, glob_to_regex(path), rules, raw["category"], raw["reason"], raw.get("preview", ""), raw.get("hash"), int(raw.get("lines", 0)), source)
+                )
     return entries
 
 
@@ -178,7 +215,7 @@ def apply_ledger(findings: list[Finding], ledger: list[Entry]) -> list[Finding]:
     exact: dict[str, list[Entry]] = collections.defaultdict(list)
     globbed = []
     for entry in ledger:
-        (globbed if any(char in entry.glob for char in "*?") else exact[entry.glob]).append(entry)
+        (globbed if any(char in entry.path for char in "*?") else exact[entry.path]).append(entry)
     by_file: dict[str, list[Finding]] = collections.defaultdict(list)
     for finding in findings:
         by_file[finding.path].append(finding)
@@ -190,18 +227,41 @@ def apply_ledger(findings: list[Finding], ledger: list[Entry]) -> list[Finding]:
             for index, finding in enumerate(in_file):
                 if exempt[index]:
                     continue
-                if entry.covers(finding):
-                    exempt[index] = True
-                    entry.used += 1
-                elif len(entry.segments) > 1 and entry.run_at(in_file, index):
-                    exempt[index : index + len(entry.segments)] = [True] * len(entry.segments)
-                    entry.used += 1
-                else:
+                if entry.hash is None:
+                    if entry.allows(finding):
+                        exempt[index] = True
+                        entry.used += 1
                     continue
-                if entry.text is not None and entry in exact.get(path, ()):
+                if any(exempt[index : index + entry.lines]) or not entry.run_at(in_file, index):
+                    continue
+                exempt[index : index + entry.lines] = [True] * entry.lines
+                entry.used += 1
+                if path in exact and entry in exact[path]:
                     break
         remaining.extend(finding for finding, done in zip(in_file, exempt) if not done)
     return sorted(remaining)
+
+
+def block_at(findings: list[Finding], path: str, line: int) -> list[Finding]:
+    in_file = [finding for finding in findings if finding.path == path]
+    index = next((i for i, finding in enumerate(in_file) if finding.line <= line <= finding.line + finding.text.count("\n")), None)
+    if index is None:
+        sys.exit(f"comment check: no comment at {path}:{line}")
+    start = end = index
+    while start > 0 and follows(in_file[start - 1], in_file[start]):
+        start -= 1
+    while end + 1 < len(in_file) and follows(in_file[end], in_file[end + 1]):
+        end += 1
+    return in_file[start : end + 1]
+
+
+def entry_for(location: str) -> int:
+    path, _, line = location.rpartition(":")
+    run = block_at(scan(), path, int(line))
+    item = {"category": "invariant", "reason": "why no change to the code can replace this comment", "preview": preview(run[0].text), "hash": block_hash(run), "lines": len(run)}
+    print(f"# scripts/linting/comments/ledger/{area_file(path)}")
+    print(yaml.safe_dump({path: [item]}, sort_keys=False, allow_unicode=True, width=1000), end="")
+    return 0
 
 
 def tracked() -> list[str]:
@@ -212,7 +272,7 @@ def tracked() -> list[str]:
 def suppressions() -> list[str]:
     found = []
     for path in tracked():
-        if Path(path).suffix in {".md", ".mdx", ".toml", ".txt"} or Path(path).resolve() == Path(__file__).resolve():
+        if Path(path).suffix in {".md", ".mdx", ".toml", ".txt"} or LEDGER in Path(path).resolve().parents or Path(path).resolve() == Path(__file__).resolve():
             continue
         text = Path(path).read_text(errors="replace")
         for match in SUPPRESSION.finditer(text):
@@ -242,16 +302,18 @@ def check() -> int:
         status = 1
     for entry in ledger:
         if entry.used == 0:
-            print(f"comment check: ledger entry {entry.glob!r} exempts no comment. Remove it from ledger.toml.")
+            print(f"comment check: {entry.source}: {entry.path} {entry.preview!r} exempts no comment. Update it with --entry, or remove it.")
             status = 1
     return status
 
 
 def main() -> int:
-    argparse.ArgumentParser(description="Block code comments that ledger.toml does not allow.").parse_args()
+    parser = argparse.ArgumentParser(description="Block code comments that the comment ledger does not allow.")
+    parser.add_argument("--entry", metavar="PATH:LINE", help="print a ledger entry for the comment block at PATH:LINE")
+    args = parser.parse_args()
     top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True)
     os.chdir(top.stdout.strip())
-    return check()
+    return entry_for(args.entry) if args.entry else check()
 
 
 if __name__ == "__main__":
