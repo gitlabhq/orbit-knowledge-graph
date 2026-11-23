@@ -401,10 +401,12 @@ impl Component {
 )]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum SkillKind {
-    /// A thin skill that loads the real one when the agent reads it.
+    #[value(help = "A thin skill that loads the real one when the agent reads it")]
     #[default]
     Wrapper,
-    /// The skill tree itself, for agents that cannot run commands when they load a skill.
+    #[value(
+        help = "The skill tree itself, for agents that cannot run commands when they load a skill"
+    )]
     Full,
 }
 
