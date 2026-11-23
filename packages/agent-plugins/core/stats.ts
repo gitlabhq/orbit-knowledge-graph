@@ -80,7 +80,6 @@ function columnFields(text: string): ColumnFields[] {
     .map((item) => Object.fromEntries([...item.matchAll(/^\s*(?:- )?(\w+):\s*(.*)$/gm)].map((m) => [m[1] ?? '', m[2]?.trim()])))
 }
 
-// The response has no DISTINCT flag: a property count is plain only under its derived name; any other name reads as DISTINCT.
 function plainCounts(columns: ColumnFields[]): ColumnFields[] {
   return columns.filter(
     ({ function: fn, name, target = '', property }) => fn === 'count' && name && (!property || name === `count_${target}_${property}`),

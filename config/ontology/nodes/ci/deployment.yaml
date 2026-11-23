@@ -1,5 +1,3 @@
-# config/ontology/nodes/ci/deployment.yaml
-
 node_type: Deployment
 domain: ci
 description: A deployment of a specific commit to a CI/CD environment

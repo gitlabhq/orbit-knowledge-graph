@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Upload local CLI binary tarballs (and matching .sha256 files) to the
-# project's Generic Package Registry, then attach them as asset links on the
-# GitLab Release that semantic-release created on `main` for $CI_COMMIT_TAG.
-#
-# Required env (provided by GitLab CI on tag pipelines):
-#   CI_COMMIT_TAG, CI_API_V4_URL, CI_PROJECT_ID, CI_JOB_TOKEN
-
 : "${CI_COMMIT_TAG:?CI_COMMIT_TAG is required}"
 : "${CI_API_V4_URL:?CI_API_V4_URL is required}"
 : "${CI_PROJECT_ID:?CI_PROJECT_ID is required}"
@@ -65,9 +58,6 @@ upload_package() {
   done
 }
 
-# semantic-release's @semantic-release/git plugin pushes the tag, which fires
-# this pipeline; @semantic-release/gitlab creates the release in a later step
-# of the same job. Poll briefly so the asset-link calls don't 404.
 wait_for_release() {
   local url="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases/${CI_COMMIT_TAG}"
   for attempt in $(seq 1 30); do

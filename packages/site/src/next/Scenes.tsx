@@ -10,9 +10,6 @@ const SCENES = [
   { label: "Why the code changed", search: CROSS_SEARCHES.find((item) => item.id === "why")!, chat: false },
 ];
 
-// On a phone, each example plays on its own as it scrolls into view, with its map above it, instead of the
-// clickable demo. A finished thread sits hidden under the live one, so the scene keeps its height while it plays.
-// Without `chat`, a scene is only its question, a taller map, and the answer in one line once the map is done.
 function Scene({ label, search, chat }: { label: string; search: Search; chat: boolean }) {
   const root = useRef<HTMLElement>(null);
   const [start, setStart] = useState<number | null>(null);
@@ -39,7 +36,6 @@ function Scene({ label, search, chat }: { label: string; search: Search; chat: b
     return () => window.clearTimeout(timer);
   }, [search, start, stage]);
 
-  // A copy for each start, so the map replays the route each time the scene comes back into view.
   const shown = useMemo(() => (start === null ? null : { ...search }), [search, start]);
   const id = `scene-${search.id}`;
   return (
@@ -76,7 +72,6 @@ function Scene({ label, search, chat }: { label: string; search: Search; chat: b
   );
 }
 
-// `only` picks the scenes by search, such as the third-party one in its own section.
 export function Scenes({ only }: { only: string[] }) {
   return (
     <div className="next-scenes not-prose">

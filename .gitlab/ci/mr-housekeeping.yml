@@ -3,8 +3,6 @@ mr-housekeeping:
   image: registry.gitlab.com/gitlab-org/cli:v1.102.0
   tags:
     - saas-linux-small-amd64
-  # Run independently of stage order so the blocking manual release job can't
-  # gate it; on the solo schedule this is the only job anyway.
   needs: []
   variables:
     HOUSEKEEPING_TASKS: "stale milestone-assignee"

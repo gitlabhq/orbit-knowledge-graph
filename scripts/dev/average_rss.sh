@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# Parse --legacy flag (v2 is the production default; pass --legacy to opt
-# into the v1 indexer for back-to-back memory comparisons).
 LEGACY_FLAG=""
 POSITIONAL=()
 for arg in "$@"; do
@@ -18,10 +16,8 @@ if [ -z "$1" ]; then
   exit 1
 fi
 
-# Configuration: Sampling interval in seconds (default: 0.025 = 25ms)
 SAMPLING_INTERVAL=${2:-0.025}
 
-# Build the binary first
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ORBIT_BIN="$REPO_ROOT/target/release/orbit"
@@ -33,20 +29,16 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# Start the process in the background
 "$ORBIT_BIN" index $LEGACY_FLAG "$1" > /dev/null 2>&1 &
 PROCESS_PID=$!
 
-# Wait a moment for the process to start
 sleep 0.1
 
-# Check if the process actually started
 if ! kill -0 $PROCESS_PID 2>/dev/null; then
   echo '{"error": "Failed to start gkg process"}'
   exit 1
 fi
 
-# Initialize variables
 total_rss=0
 num_samples=0
 max_rss=0
@@ -55,9 +47,7 @@ samples=()
 
 echo "Monitoring process gkg index process(pid=$PROCESS_PID, path=$1, v2=$V2_FLAG, sampling_interval=$SAMPLING_INTERVAL ms)..." >&2
 
-# Sample RSS while the process is running
 while kill -0 $PROCESS_PID 2>/dev/null; do
-  # Use ps to get RSS in KB (works on both Mac and Linux)
   rss_kb=$(ps -p $PROCESS_PID -o rss= 2>/dev/null | tr -d ' ')
   
   if [ -n "$rss_kb" ] && [ "$rss_kb" -gt 0 ]; then
@@ -65,12 +55,10 @@ while kill -0 $PROCESS_PID 2>/dev/null; do
     num_samples=$((num_samples + 1))
     samples+=($rss_kb)
     
-    # Track max
     if [ $rss_kb -gt $max_rss ]; then
       max_rss=$rss_kb
     fi
     
-    # Track min
     if [ $min_rss -eq -1 ] || [ $rss_kb -lt $min_rss ]; then
       min_rss=$rss_kb
     fi
@@ -79,15 +67,12 @@ while kill -0 $PROCESS_PID 2>/dev/null; do
   sleep $SAMPLING_INTERVAL
 done
 
-# Wait for the process to fully complete
 wait $PROCESS_PID
 EXIT_CODE=$?
 
-# Calculate average
 if [ $num_samples -gt 0 ]; then
   average_rss=$((total_rss / num_samples))
   
-  # Convert to MB and GB
   average_rss_mb=$(echo "scale=2; $average_rss / 1024" | bc)
   average_rss_gb=$(echo "scale=2; $average_rss / 1024 / 1024" | bc)
   
@@ -98,14 +83,11 @@ if [ $num_samples -gt 0 ]; then
   min_rss_gb=$(echo "scale=2; $min_rss / 1024 / 1024" | bc)
   total_time=$(echo "scale=2; $num_samples*$SAMPLING_INTERVAL" | bc)
   
-  # ── ASCII chart ──────────────────────────────────────────
   CHART_HEIGHT=20
-  NUM_BANDS=${3:-8}  # configurable via 3rd arg, default 8
+  NUM_BANDS=${3:-8}
 
-  # Bucket samples into NUM_BANDS time bands
   samples_per_band=$(( (num_samples + NUM_BANDS - 1) / NUM_BANDS ))
 
-  # For each band: compute min, avg, max, p95
   band_mins=()
   band_avgs=()
   band_maxs=()
@@ -131,7 +113,6 @@ if [ $num_samples -gt 0 ]; then
     done
     b_avg=$((b_sum / count))
 
-    # Sort for p95
     IFS=$'\n' sorted_band=($(sort -n <<< "${sorted_band[*]}")); unset IFS
     p95_idx=$(( count * 95 / 100 ))
     if [ $p95_idx -ge $count ]; then p95_idx=$((count - 1)); fi
@@ -147,12 +128,10 @@ if [ $num_samples -gt 0 ]; then
 
   actual_bands=${#band_maxs[@]}
 
-  # Y-axis scale: round max up to nearest GB
   max_gb_ceil=$(echo "($max_rss + 1048575) / 1048576" | bc)
   if [ "$max_gb_ceil" -lt 1 ]; then max_gb_ceil=1; fi
   y_max=$((max_gb_ceil * 1048576))
 
-  # Column width per band (total chart ~60 chars)
   col_w=$(( 60 / actual_bands ))
   if [ $col_w -lt 5 ]; then col_w=5; fi
   chart_w=$((col_w * actual_bands))
@@ -162,7 +141,6 @@ if [ $num_samples -gt 0 ]; then
   echo "  ▓ = p95-max   █ = avg-p95   ░ = min-avg" >&2
   echo "" >&2
 
-  # Render rows top-down
   for (( row=CHART_HEIGHT; row>=1; row-- )); do
     threshold=$(( y_max * row / CHART_HEIGHT ))
     lower=$(( y_max * (row - 1) / CHART_HEIGHT ))
@@ -179,9 +157,7 @@ if [ $num_samples -gt 0 ]; then
       bp95=${band_p95s[$b]}
       bmax=${band_maxs[$b]}
 
-      # For each char in the column
       for (( c=0; c<col_w; c++ )); do
-        # Row midpoint in KB
         mid=$(( (threshold + lower) / 2 ))
         if [ $mid -le $bmax ] && [ $mid -ge $bp95 ]; then
           printf "▓" >&2
@@ -197,12 +173,10 @@ if [ $num_samples -gt 0 ]; then
     echo "" >&2
   done
 
-  # X-axis
   printf "       └" >&2
   for (( c=0; c<chart_w; c++ )); do printf "─" >&2; done
   echo "" >&2
 
-  # Time labels
   printf "        " >&2
   for (( b=0; b<actual_bands; b++ )); do
     t=${band_times[$b]}
@@ -213,7 +187,6 @@ if [ $num_samples -gt 0 ]; then
   echo "" >&2
   echo "" >&2
 
-  # Output structured JSON
   echo "{
   \"path\": \"$1\",
   \"v2\": $([ -n "$V2_FLAG" ] && echo "true" || echo "false"),

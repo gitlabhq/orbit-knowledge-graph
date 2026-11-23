@@ -1,9 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-// The whole lookup (git, index listing, grep, context) shares one budget: a search result should not
-// stall for long. An indexed lookup takes well under a second. The cap keeps the Claude Code hook
-// inside its own timeout.
 export const DEFAULT_TIMEOUT_MS = 1500;
 export const MAX_TIMEOUT_MS = 4000;
 const MAX_DEFINITION_CHARS = 1800;
@@ -11,8 +8,6 @@ const MAX_CONNECTIONS_CHARS = 1200;
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
 const execFileAsync = promisify(execFile);
-// Exit codes of `orbit grep`: like rg it exits 1 for no match; 75 (EX_TEMPFAIL) means the local graph
-// stayed locked past the wait limit.
 const EXIT_NO_MATCH = 1;
 const EXIT_BUSY = 75;
 const FAILED = Symbol("failed");
@@ -28,7 +23,6 @@ export function lookupTimeoutMs(value) {
   return requested > 0 ? Math.min(requested, MAX_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS;
 }
 
-// Orbit stores native paths (`C:\repo`); git prints `C:/repo`.
 function samePath(left, right) {
   const normal = (path) => (process.platform === "win32" ? path.replace(/\\/g, "/").toLowerCase() : path);
   return normal(String(left)) === normal(right);
@@ -51,11 +45,6 @@ function definitionLocation(definition) {
   return match ? { name: match[1], location: match[2] } : undefined;
 }
 
-/**
- * The `orbit context` block of the definition at `location`: its `name  [Kind]  path:range` header and
- * the `Connections (N indexed):` lines (callers and callees). Context orders several definitions
- * differently from grep, so the block is chosen by the header's location.
- */
 export function extractConnections(output, location) {
   const lines = output.split("\n");
   for (let index = 0; index < lines.length; index++) {
@@ -82,10 +71,8 @@ function budgeted(timeoutMs, signal) {
         killSignal: "SIGKILL",
         signal,
         maxBuffer: MAX_OUTPUT_BYTES,
-        // A lock held by an index run must fail the lookup now, not hold it until the budget kills it.
         env: { ...process.env, NO_COLOR: "1", ORBIT_WAIT_TIMEOUT_MS: "0" },
       });
-      // A launcher that wants to prompt (for a download, say) must see end of input, not wait.
       running.child.stdin?.end();
       const { stdout } = await running;
       return { stdout, status: 0 };
@@ -132,19 +119,15 @@ export async function lookupDefinition(term, cwd, { launchers, timeoutMs = DEFAU
   if (!index) return {};
   const { launcher, database, top } = index;
   const [command, ...prefix] = launcher;
-  // Without a path, `orbit grep` also searches the GitLab group behind `origin` over the network.
   const grep = await exec(command, [...prefix, "grep", "--no-index", "--db", database, term, top], cwd);
   if (grep === OVERSIZED) return {};
   if (grep === FAILED) return aborted();
-  // No match and a busy graph are normal: nothing to add, and the next search may work. Any other
-  // non-zero exit is a failure.
   if (grep.status === EXIT_BUSY) return { busy: true };
   if (grep.status === EXIT_NO_MATCH) return {};
   if (grep.status !== 0) return aborted();
   const definition = extractDefinition(grep.stdout);
   if (!definition) return {};
   const found = definitionLocation(definition);
-  // Grep matching ignores case and `_`; context needs the exact name from the definition header.
   const context = found && (await exec(command, [...prefix, "context", "--no-index", "--db", database, found.name], cwd));
   const connections = context && context !== FAILED && context !== OVERSIZED && context.status === 0 ? extractConnections(context.stdout, found.location) : undefined;
   const name = launcher.join(" ");

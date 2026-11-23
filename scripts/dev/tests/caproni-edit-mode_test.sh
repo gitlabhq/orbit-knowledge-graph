@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Tests for scripts/dev/caproni-edit-mode.sh that need no cluster, no mirrord, and no cargo.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -9,11 +8,10 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 failures=0
 
-check() { # name, expected, actual
+check() {
   if [[ "$2" == "$3" ]]; then printf '[ok] %s\n' "$1"; else printf '[fail] %s: expected %q, got %q\n' "$1" "$2" "$3"; failures=$((failures + 1)); fi
 }
 
-# A fake target/debug tree with a stand-in binary and two fips artifact directories.
 FAKE_TARGET="$TMP/target/debug"
 mkdir -p "$FAKE_TARGET/build/aws-lc-fips-sys/aaaa/out/build/artifacts" "$FAKE_TARGET/build/aws-lc-fips-sys/bbbb/out/build/artifacts"
 FAKE_BINARY="$FAKE_TARGET/gkg-server"
@@ -38,29 +36,22 @@ check "probe port rewritten" "0.0.0.0:9395" "$(yq '.probe_server.bind_address' "
 check "other keys untouched" "gkg" "$(yq '.graph.database' "$overlay")"
 check "grpc bind untouched" "0.0.0.0:50054" "$(yq '.grpc_bind_address' "$overlay")"
 check "overlay is private" "600" "$(stat -c '%a' "$overlay" 2>/dev/null || stat -f '%Lp' "$overlay")"
-# The server refuses a config where metrics.prometheus.port disagrees with the probe
-# bind address, so the deprecated key must go when the port moves.
 check "deprecated prometheus port removed" "null" "$(yq '.metrics.prometheus.port' "$overlay")"
 check "prometheus stays enabled" "true" "$(yq '.metrics.prometheus.enabled' "$overlay")"
 
 out="$(yq() { local a; [[ -p /dev/stdin ]] || { echo "yq stdin is not a pipe" >&2; return 1; }; for a in "$@"; do [[ -e "$a" ]] && { echo "yq opened $a" >&2; return 1; }; done; command yq "$@"; }; write_overlay webserver 2>&1 || true)"
 check "pod config reaches yq on stdin" "0.0.0.0:9394" "$(yq '.probe_server.bind_address' "$out" 2>/dev/null)"
 
-# malformed_pod_config_fails: a yq failure must not produce a header-only overlay.
 printf 'probe_server: [unclosed\n' >"$TMP/bad.yaml"
 rc=0; out="$(POD_CONFIG="$TMP/bad.yaml" write_overlay dispatcher 2>&1)" || rc=$?
 check "malformed pod config fails" "1" "$rc"
 check "no overlay left behind" "no" "$([[ -f "$TMP/.dev/caproni-dispatcher.yaml" ]] && echo yes || echo no)"
 
-# missing_pod_config_errors: outside mirrord the pod config does not exist.
 out="$(ORBIT_POD_CONFIG="$TMP/does-not-exist.yaml" bash "$SCRIPT" webserver 2>&1 || true)"
 check "missing pod config names caproni run" "yes" "$(grep -q 'caproni run' <<<"$out" && echo yes || echo no)"
 
-# build_stamps_only_on_relink: the stamp the mirrord-side processes watch follows the size and
-# mtime of the binary, so a no-op build restarts nothing, a failed build leaves the running
-# servers alone, and a relink by any cargo (the watcher's or one run by hand) is noticed.
 FAKE_ARTIFACT="$FAKE_BINARY"
-fake_cargo() { # ok|fail -> prints what cargo's JSON stream would say
+fake_cargo() {
   case "$1" in
     fail) echo '{"reason":"build-finished","success":false}'; return 101 ;;
     *) printf '{"reason":"compiler-artifact","target":{"name":"orbit-server"},"filenames":["/elsewhere"],"fresh":false}\n{"reason":"compiler-artifact","target":{"name":"gkg-server"},"filenames":["%s"],"fresh":true}\n{"reason":"build-finished","success":true}\n' "$FAKE_ARTIFACT" ;;
@@ -78,18 +69,15 @@ check "failed build reports failure" "1" "$rc"
 check "failed build leaves the stamp alone" "no" "$([[ "$STAMP" -nt "$TMP/marker" ]] && echo yes || echo no)"
 check "failed build leaves no message file" "0" "$(ls "$TMP"/.dev/cargo-messages.* 2>/dev/null | wc -l | tr -d ' ')"
 cargo_build() { fake_cargo ok; }
-printf 'linked again by some cargo\n' >"$FAKE_ARTIFACT" # an external relink, then a fresh watcher build
+printf 'linked again by some cargo\n' >"$FAKE_ARTIFACT"
 build >/dev/null
 check "relink by any cargo refreshes the stamp" "yes" "$([[ "$STAMP" -nt "$TMP/marker" ]] && echo yes || echo no)"
-cp -p "$FAKE_BINARY" "$FAKE_BINARY.new" && mv "$FAKE_BINARY.new" "$FAKE_BINARY" # macOS re-copies the uplifted binary every build
+cp -p "$FAKE_BINARY" "$FAKE_BINARY.new" && mv "$FAKE_BINARY.new" "$FAKE_BINARY"
 touch "$TMP/marker2"; sleep 1
 build >/dev/null
 check "re-copied uplift without a relink leaves the stamp alone" "no" "$([[ "$STAMP" -nt "$TMP/marker2" ]] && echo yes || echo no)"
 
-# one_watcher_per_checkout: every reloader declares the build watcher, so whichever starts
-# first owns the lock and the rest idle instead of racing cargo. Caproni starts all four in
-# the same instant, and after a normal exit the lock is stale, so both cases are raced here.
-race_for_lock() { # label -> files race.<label>.N holding won|lost
+race_for_lock() {
   local label="$1" i
   for i in 1 2 3 4; do
     (bash -c "sleep 0.3; ORBIT_POD_CONFIG='$FIXTURE' GENERATED_DIR_OVERRIDE='$TMP/.dev' source '$SCRIPT'; if acquire_watch_lock; then echo won; sleep 2; else echo lost; fi" >"$TMP/race.$label.$i") &
@@ -99,12 +87,9 @@ race_for_lock() { # label -> files race.<label>.N holding won|lost
 }
 rm -f "$WATCH_LOCK"
 check "first watcher takes the lock" "0" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
-# A live holder looks like a watcher that has not exec'd watchexec yet: this script, sourced.
-# (the trailing `:` stops bash from exec'ing sleep in place of itself)
 bash -c "ORBIT_POD_CONFIG='$FIXTURE' GENERATED_DIR_OVERRIDE='$TMP/.dev' source '$SCRIPT'; sleep 60; :" & live_pid=$!
 sleep 0.5; echo "$live_pid" >"$WATCH_LOCK"
 check "second watcher is refused while the first lives" "1" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
-# A racer that read the same dead pid, but claims only after the winner replaced the lock.
 check "a late takeover leaves the new holder alone" "1" "$(replace_stale_lock "$WATCH_LOCK" 999999999 >/dev/null 2>&1; echo $?)"
 check "the new holder keeps the lock" "$live_pid" "$(cat "$WATCH_LOCK")"
 echo 999999999 >"$WATCH_LOCK"; echo "$live_pid" >"$WATCH_LOCK.stale.999999999"
@@ -127,19 +112,12 @@ echo 999999999 >"$WATCH_LOCK"
 check "simultaneous watchers, stale lock: one holder" "1" "$(race_for_lock stale)"
 check "no stale remnants left behind" "0" "$(ls "$TMP"/.dev/gkg-build.pid.stale.* 2>/dev/null | wc -l | tr -d ' ')"
 
-# watcher_shape: the build watcher must see a checkout under an ignored parent path and must
-# not kill a running cargo when a second save lands.
 watch_args="${WATCH_ARGS[*]}"
 check "watcher ignores no gitignore" "yes" "$(grep -q -- '--ignore-nothing' <<<"$watch_args" && echo yes || echo no)"
 check "watcher queues instead of restarting cargo" "yes" "$(grep -q -- '--on-busy-update=queue' <<<"$watch_args" && echo yes || echo no)"
 check "watcher covers crates, config and the root manifests" "yes" "$(grep -q -- '-w crates' <<<"$watch_args" && grep -q -- '-w config' <<<"$watch_args" && grep -q -- '-w Cargo.toml' <<<"$watch_args" && grep -q -- '-w Cargo.lock' <<<"$watch_args" && echo yes || echo no)"
 check "watcher does not watch the repo root itself" "no" "$(grep -qE -- '(-W|--watch-non-recursive) ' <<<"$watch_args" && echo yes || echo no)"
 
-# launch_sets_library_path: a raw gkg-server needs the aws-lc-fips-sys artifacts on the
-# loader path, which cargo run would have added for us.
-# exec is shadowed by a function so the test sees the environment the launcher hands over.
-# (macOS purges DYLD_* on exec of SIP-protected binaries such as /usr/bin/env, so a fake
-# script binary cannot report it.)
 out="$(exec() { printf 'dyld=%s\nld=%s\nargs=%s\n' "${DYLD_FALLBACK_LIBRARY_PATH:-}" "${LD_LIBRARY_PATH:-}" "$*"; }; launch indexer "$overlay")"
 check "launcher passes mode and config" "args=$FAKE_BINARY --mode=indexer --config=$overlay" "$(grep '^args=' <<<"$out")"
 check "launcher adds every fips artifacts dir (macOS)" "yes" "$(grep '^dyld=' <<<"$out" | grep -q 'aws-lc-fips-sys/aaaa/out/build/artifacts' && grep '^dyld=' <<<"$out" | grep -q 'aws-lc-fips-sys/bbbb/out/build/artifacts' && echo yes || echo no)"
@@ -148,15 +126,12 @@ rm -rf "$FAKE_TARGET/build"
 out="$(bash -c "ORBIT_POD_CONFIG='$FIXTURE' GENERATED_DIR_OVERRIDE='$TMP/.dev' ORBIT_BINARY_OVERRIDE='$FAKE_BINARY' source '$SCRIPT'; exec() { printf 'args=%s ld=%s\n' \"\$*\" \"\${LD_LIBRARY_PATH-unset}\"; }; launch webserver '$overlay'" 2>&1 || true)"
 check "launcher runs without fips artifacts" "args=$FAKE_BINARY --mode=webserver --config=$overlay ld=unset" "$out"
 
-# project_file: the reloaders must agree with the wrapper.
 PROJECT="$HERE/../../../caproni-project.yaml"
-matches_pattern() { # path -> yes if any read_only pattern of the first reloader matches
+matches_pattern() {
   local path="$1" pat
   while IFS= read -r pat; do [[ "$path" =~ $pat ]] && { echo yes; return; }; done < <(yq -r '.reloaders.orbit-webserver.mirror.filesystem.read_only[]' "$PROJECT")
   echo no
 }
-# The server checks that /etc/secrets itself exists before walking it, so the mirrord
-# read-only pattern must match the directory path as well as the files under it.
 check "pattern matches the secrets dir" "yes" "$(matches_pattern /etc/secrets)"
 check "pattern matches a secret file" "yes" "$(matches_pattern /etc/secrets/gitlab/jwt/verifying_key)"
 check "pattern matches the config dir" "yes" "$(matches_pattern /app/config)"

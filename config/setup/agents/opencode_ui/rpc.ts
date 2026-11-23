@@ -1,20 +1,14 @@
 import { Rpc } from '@opencode/plugin/rpc'
 
 export type Activity = {
-  /** The tool call ID, which pairs a start with its end. */
   key: string
   state: 'start' | 'end'
-  /** The running label, for example "Exploring Orbit". */
   active: string
-  /** The finished label, for example "Explored Orbit". */
   done: string
-  /** What the call reads, for example "Merge requests → Project". */
   detail: string
-  /** Other commands the shell call runs, for example "  + rm". */
   others?: string
   sessionID: string
   failed?: boolean
-  /** Nodes the response returned, plus the nodes a count(...) aggregate covered. */
   nodes?: number
   edges?: number
 }

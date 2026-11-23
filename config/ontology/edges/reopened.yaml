@@ -1,5 +1,3 @@
-# config/ontology/edges/reopened.yaml
-
 description: User who reopened a merge request or work item (ADR 013)
 
 variants:
@@ -13,14 +11,6 @@ variants:
     scope: prune_to_target
     description: "User reopened a work item."
 
-# Reopen is a `resource_state_events` row (state = 5), never a system-note
-# action. The CHECK on `resource_state_events` guarantees exactly one of
-# (issue_id, merge_request_id, epic_id) is set per row, so each issuable side
-# is its own ETL filtered on the relevant FK plus the reopened state.
-#
-# `state = 5` == `reopened` in Rails `ResourceStateEvent`:
-#   app/models/resource_state_event.rb (enum :state ... .merge(reopened: 5))
-#   app/models/concerns/issuable.rb STATE_ID_MAP (opened:1, closed:2, merged:3, locked:4)
 indexer:
   reindex: [siphon_resource_state_events]
 pipelines:

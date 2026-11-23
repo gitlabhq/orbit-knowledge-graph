@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Installs the kube tooling the e2e job needs. Idempotent so it can be called
-# from both before_script and after_script (GitLab SaaS runs after_script in a
-# fresh container, so anything installed during the job is gone by then).
 set -euo pipefail
 
 KUBECTL_VERSION="${KUBECTL_VERSION:-1.35.2}"

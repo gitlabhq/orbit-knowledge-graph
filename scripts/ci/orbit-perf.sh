@@ -1,23 +1,13 @@
 #!/usr/bin/env bash
-# Orchestrator for the orbit-perf CI job (see .gitlab/ci/orbit-perf.yml).
-#
-# Brings up gitlab-dev-stack + Orbit with caproni (config in
-# scripts/ci/orbit-perf/caproni), seeds gkg's ClickHouse with an
-# xtask-generated synthetic graph (bulk Parquet load, bypassing siphon/seed/
-# indexing), and runs the gRPC load test (xtask loadtest) against gkg.
-#
-# Env (from the CI job): SYNTH_CONFIG, ROUNDS, CONCURRENCY, WARMUP_ROUNDS, SEED,
-# LOAD_JOBS, GKG_IMAGE, GKG_IMAGE_TAG.
 set -euo pipefail
 
-ROOT="$(pwd)"                                   # knowledge-graph checkout (xtask lives here)
+ROOT="$(pwd)"
 SYNTH_CONFIG="${SYNTH_CONFIG:-crates/xtask/simulator_small.yaml}"
 ROUNDS="${ROUNDS:-5}"
 CONCURRENCY="${CONCURRENCY:-20}"
 WARMUP_ROUNDS="${WARMUP_ROUNDS:-1}"
 SEED="${SEED:-42}"
 LOAD_JOBS="${LOAD_JOBS:-4}"
-# ClickHouse gets requests = limits after DDL; leaves room for the webserver (2 CPU / 8Gi) on 8 vCPU / 32 GB.
 CH_CPU="${CH_CPU:-4}"
 CH_MEMORY="${CH_MEMORY:-16Gi}"
 CAPRONI_DIR="$ROOT/scripts/ci/orbit-perf/caproni"
@@ -25,13 +15,11 @@ GKG_SELECTOR="app.kubernetes.io/name=gkg,app.kubernetes.io/component=webserver"
 DISPATCHER_SELECTOR="app.kubernetes.io/name=gkg,app.kubernetes.io/component=dispatcher"
 
 log() { echo "==> $*" >&2; }
-# The synth profile optimises Arrow, Parquet and zstd for data generation.
 xtask() { mise exec -- cargo run --profile synth -p xtask -- "$@"; }
 cap() { mise -C "$CAPRONI_DIR" exec -- caproni -c "$CAPRONI_DIR/caproni.yaml" "$@"; }
 kc()  { cap kubectl "$@"; }
 chq() { cap kubectl -n gitlab-dev-stack exec -i gitlab-dev-stack-clickhouse-0 -c clickhouse -- clickhouse-client "$@"; }
 
-# Scratch files, removed on every exit; loadtest-results.md is the only output.
 UP_LOG="$ROOT/caproni-up.log"
 MAP_FILE="$ROOT/.synth_table_map"
 NODE_IDS="$ROOT/.loadtest_node_ids"
@@ -50,26 +38,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Runner hardware, so a shift in numbers can be matched to a different machine.
 CPU_MODEL="$(grep -m1 '^model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//')" || true
 CPU_COUNT="$(nproc 2>/dev/null)" || true
 RUNNER_INFO="${CPU_COUNT:-?} vCPU · ${CPU_MODEL:-unknown CPU}"
 log "runner: ${RUNNER_INFO}"
 
-# ---------------------------------------------------------------------------
-# 1. Start the stack in the background; it does not depend on the synth data.
-# ---------------------------------------------------------------------------
 log "[1/4] bringing up gitlab-dev-stack + Orbit in the background"
 mise -C "$CAPRONI_DIR" install
-# CI tests the commit's own image; local runs keep the tag in values/gkg.yaml.
 if [ -n "${GKG_IMAGE_TAG:-}" ]; then
   sed -i "s|^  tag: .*|  tag: \"${GKG_IMAGE_TAG}\"|" "$CAPRONI_DIR/values/gkg.yaml"
   log "     gkg image tag: ${GKG_IMAGE_TAG}"
 fi
-# Blocks until the image is pushed (built in parallel by the pipeline's docker-build job).
 wait_for_image() {
   [ -n "${GKG_IMAGE_TAG:-}" ] || return 0
-  # Log in like the other registry scripts, so an auth failure can't pass for "not pushed yet".
   if [ -n "${CI_REGISTRY_PASSWORD:-}" ]; then
     echo "$CI_REGISTRY_PASSWORD" | mise -C "$CAPRONI_DIR" exec -- docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY" >/dev/null \
       || log "     docker login failed, continuing without credentials (anonymous reads work)"
@@ -91,8 +72,6 @@ wait_for_image() {
   log "     image not pushed after 15 min; did the pipeline's docker-build job fail or not run?"
   return 1
 }
-# Once the webserver is Ready (DDL done, schema active): stop background work and
-# pin ClickHouse's CPU and memory. Runs before the bulk load, so the restart loses nothing.
 quiet_cluster() {
   kc -n gitlab scale deploy/gkg-dispatcher --replicas=0
   local gone=0
@@ -101,15 +80,11 @@ quiet_cluster() {
     sleep 2
   done
   [ "$gone" = 1 ] || { echo "dispatcher pod still present after 120s" >&2; return 1; }
-  # Strategic merge keyed by container name, so a sidecar cannot shift the target.
   kc -n gitlab-dev-stack patch statefulset gitlab-dev-stack-clickhouse --type=strategic -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"clickhouse\",\"resources\":{\"requests\":{\"cpu\":\"${CH_CPU}\",\"memory\":\"${CH_MEMORY}\"},\"limits\":{\"cpu\":\"${CH_CPU}\",\"memory\":\"${CH_MEMORY}\"}}}]}}}}"
   kc -n gitlab-dev-stack rollout status statefulset/gitlab-dev-stack-clickhouse --timeout=600s
-  # The schema watch runs over NATS, so the webserver should stay Ready; check anyway.
   kc wait -n gitlab --for=condition=Ready pod -l "$GKG_SELECTOR" --timeout=300s
-  # Refreshable views would refresh mid-test; STOP VIEWS does not survive a restart, so it goes last.
   chq -q "SYSTEM STOP VIEWS" </dev/null
 }
-# fd 3 keeps the image-wait messages in the live job log; the rest goes to UP_LOG.
 exec 3>&2
 (
   wait_for_image 2>&3
@@ -120,9 +95,6 @@ exec 3>&2
 ) >"$UP_LOG" 2>&1 &
 UP_PID=$!
 
-# ---------------------------------------------------------------------------
-# 2. Build xtask + generate the synthetic graph (Parquet).
-# ---------------------------------------------------------------------------
 log "[2/4] generating synthetic graph ($SYNTH_CONFIG)"
 xtask synth generate -c "$SYNTH_CONFIG" --force
 OUT_DIR="$(grep -E '^\s*output_dir:' "$SYNTH_CONFIG" | head -1 | awk '{print $2}' | tr -d '"'"'"'')"
@@ -130,13 +102,8 @@ OUT_DIR="${OUT_DIR:-gl_synthetic_data}"
 ORG_DIR="$ROOT/$OUT_DIR/org_1"
 [ -d "$ORG_DIR" ] || { echo "synth output not found at $ORG_DIR" >&2; exit 1; }
 log "     synth output: $ORG_DIR ($(ls "$ORG_DIR" | tr '\n' ' ')) "
-# Node ids the scenarios pin, as <entity> TAB <id> TAB <label>; checked after the load.
 xtask loadtest --list-node-ids > "$NODE_IDS"
 
-# Authoritative parquet-file -> ClickHouse table map, straight from the ontology
-# the generator used. filename = node_type.lower()+'.parquet'; table =
-# destination_table (explicit) or the gl_<name> default. edges.parquet -> gl_edge.
-# Pure shell (the rust build image ships no python3).
 {
   echo "edges=gl_edge"
   find "$ROOT/config/ontology/nodes" -name '*.yaml' | while read -r f; do
@@ -156,17 +123,12 @@ if ! wait "$UP_PID"; then
 fi
 cat "$UP_LOG" >&2
 
-# Digest of the image the webserver actually runs, so the report names exact bits.
 GKG_IMAGE_ID="$(kc -n gitlab get pod -l "$GKG_SELECTOR" \
   -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="gkg-webserver")].imageID}')" || true
 GKG_IMAGE_DIGEST="${GKG_IMAGE_ID##*@}"
 log "     gkg webserver image: ${GKG_IMAGE_ID:-unknown}"
 
-# ---------------------------------------------------------------------------
-# 3. Bulk-load the Parquet into gkg's versioned ClickHouse tables.
-# ---------------------------------------------------------------------------
 log "[3/4] loading synthetic graph into gkg ClickHouse"
-# Sort by version number, not lexically: a plain DESC ranks v9 above v72.
 PFX=""
 for _ in $(seq 1 60); do
   PFX="$(chq -q "SELECT name FROM system.tables WHERE database='gkg' AND name LIKE '%gl_file' ORDER BY toInt32OrZero(extract(name, '^v([0-9]+)_')) DESC LIMIT 1" 2>/dev/null | sed 's/_gl_file$//' | tr -d '[:space:]')" || true
@@ -179,9 +141,6 @@ log "     discovered gkg table prefix: $PFX"
 INSERT_SETTINGS="input_format_skip_unknown_fields=1, input_format_parquet_allow_missing_columns=1"
 : > "$FAILED"
 
-# Streams one Parquet into the pod's clickhouse-client over `exec -i` stdin
-# (no kubectl cp / --file, which vary across versions). Missing columns
-# (_version/_deleted/*_tags) fall back to their DDL defaults.
 load_one() {
   local pq="$1" tbl="$2"
   if chq --database gkg --query "INSERT INTO \`${tbl}\` SETTINGS ${INSERT_SETTINGS} FORMAT Parquet" < "$pq"; then
@@ -191,8 +150,7 @@ load_one() {
   fi
 }
 
-# Largest first so the edge table does not start last; LOAD_JOBS inserts at a time.
-# shellcheck disable=SC2012  # generated lowercase names; ls -S gives size order
+# shellcheck disable=SC2012
 while read -r pq; do
   stem="$(basename "$pq" .parquet)"
   suffix="$(grep -E "^${stem}=" "$MAP_FILE" | head -1 | cut -d= -f2)"
@@ -210,9 +168,6 @@ if [ -s "$FAILED" ]; then
   exit 1
 fi
 
-# Merge every table down to its final parts, so background merges cannot run
-# during the load test and every run reads the same part layout.
-# OPTIMIZE can outlast clickhouse-client's default 300s receive timeout.
 : > "$OPT_FAILED"
 optimize_one() {
   local tbl="$1"
@@ -222,7 +177,6 @@ optimize_one() {
     echo "$tbl" >> "$OPT_FAILED"
   fi
 }
-# Captured first so a failed lookup fails the job instead of optimizing nothing.
 TABLES="$(chq -q "SELECT name FROM system.tables WHERE database='gkg' AND startsWith(name, '${PFX}_') AND engine LIKE '%MergeTree' ORDER BY total_bytes DESC" </dev/null)"
 [ -n "$TABLES" ] || { echo "no gkg.${PFX}_* tables to optimize" >&2; exit 1; }
 opt_start=$SECONDS
@@ -238,7 +192,6 @@ if [ -s "$OPT_FAILED" ]; then
 fi
 log "     OPTIMIZE FINAL done in $(( SECONDS - opt_start ))s"
 
-# Settled = no merges running and the active part count unchanged across two polls.
 settle_start=$SECONDS
 prev_parts=""
 settled=0
@@ -258,8 +211,6 @@ if [ "$settled" != 1 ]; then
 fi
 log "     merges settled after $(( SECONDS - settle_start ))s (${parts} active parts)"
 
-# Dictionaries (e.g. traversal paths, HASHED over project/group) cache their
-# source tables; reload them so lookups see the freshly loaded rows.
 DICTS="$(chq -q "SELECT name FROM system.dictionaries WHERE database='gkg' AND startsWith(name, '${PFX}_') ORDER BY name" </dev/null)"
 [ -n "$DICTS" ] || log "     warning: no gkg.${PFX}_* dictionaries to reload"
 while read -r dict; do
@@ -274,7 +225,6 @@ for t in gl_merge_request gl_note gl_edge gl_project gl_group gl_user; do
   log "       ${PFX}_${t} = ${n}"
 done
 
-# Every pinned id must be a row of its entity's table, or its scenario measures an empty lookup.
 MISSING=()
 while IFS=$'\t' read -r entity id; do
   lc="$(printf '%s' "$entity" | tr '[:upper:]' '[:lower:]')"
@@ -298,18 +248,13 @@ if [ "${#MISSING[@]}" -gt 0 ]; then
 fi
 log "     scenario node ids present: $(cut -f1,2 "$NODE_IDS" | sort -u | wc -l | tr -d ' ') checked"
 
-# ---------------------------------------------------------------------------
-# 4. Port-forward gkg gRPC + run the gRPC load test (xtask loadtest).
-# ---------------------------------------------------------------------------
 log "[4/4] running gRPC load test (rounds=$ROUNDS concurrency=$CONCURRENCY warmup_rounds=$WARMUP_ROUNDS seed=$SEED)"
 
 kc -n gitlab port-forward svc/gkg-webserver 50054:50054 >"$PF_LOG" 2>&1 &
 PF_PID=$!
-# ClickHouse HTTP for the load test's server-side query stats; best effort, not checked.
 kc -n gitlab-dev-stack port-forward svc/gitlab-dev-stack-clickhouse 8123:8123 >"$CH_PF_LOG" 2>&1 &
 CH_PF_PID=$!
 
-# Fail fast rather than load-testing a dead endpoint.
 ready=0
 for _ in $(seq 1 30); do
   if ! kill -0 "$PF_PID" 2>/dev/null; then
@@ -334,16 +279,12 @@ export GKG_JWT_SECRET
 GKG_JWT_SECRET="$(kc -n gitlab get secret gitlab-dev-stack-gkg-secrets -o jsonpath='{.data.gitlab-jwt-signing-key}' | base64 -d)"
 [ -n "$GKG_JWT_SECRET" ] || { echo "could not read gkg JWT signing key" >&2; exit 1; }
 
-# The image's only ClickHouse user (it replaces `default`); it reads system.query_log and can SYSTEM FLUSH LOGS.
 export ORBIT_PERF_CLICKHOUSE_URL=http://127.0.0.1:8123 ORBIT_PERF_CLICKHOUSE_USER=gitlab-dev-stack ORBIT_PERF_CLICKHOUSE_PASSWORD
 ORBIT_PERF_CLICKHOUSE_PASSWORD="$(kc -n gitlab get secret gitlab-dev-stack-gkg-secrets -o jsonpath='{.data.graph-password}' | base64 -d)" \
   || ORBIT_PERF_CLICKHOUSE_PASSWORD=""
-# A missing key reads as empty with exit 0, so check the value too.
 [ -n "$ORBIT_PERF_CLICKHOUSE_PASSWORD" ] \
   || log "     could not read the ClickHouse password; server-side stats may be missing"
 
-# Peak container memory during the load test, from the kubelet Summary API (the
-# gkg image may have no shell to read cgroups from). Best effort: never fails the job.
 CH_NS=gitlab-dev-stack CH_POD=gitlab-dev-stack-clickhouse-0 CH_CONTAINER=clickhouse
 GKG_NS=gitlab GKG_CONTAINER=gkg-webserver
 GKG_POD="$(kc -n "$GKG_NS" get pod -l "$GKG_SELECTOR" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)" || GKG_POD=""
@@ -353,7 +294,6 @@ CH_NODE="$(pod_field "$CH_NS" "$CH_POD" '{.spec.nodeName}')"
 GKG_NODE="$(pod_field "$GKG_NS" "$GKG_POD" '{.spec.nodeName}')"
 CH_LIMIT="$(mem_limit "$CH_NS" "$CH_POD" "$CH_CONTAINER")"
 GKG_LIMIT="$(mem_limit "$GKG_NS" "$GKG_POD" "$GKG_CONTAINER")"
-# Sample with the kubectl binary directly: mise + caproni per call cost CPU on the measured runner.
 KUBECTL_BIN="$(mise -C "$CAPRONI_DIR" which kubectl 2>/dev/null)" || KUBECTL_BIN=""
 mise -C "$CAPRONI_DIR" exec -- k3d kubeconfig get caproni > "$SAMPLE_KUBECONFIG" 2>/dev/null || true
 if [ -n "$KUBECTL_BIN" ] && "$KUBECTL_BIN" --kubeconfig "$SAMPLE_KUBECONFIG" get --raw /healthz >/dev/null 2>&1; then
@@ -363,9 +303,7 @@ else
   log "     direct kubectl unavailable; memory sampling goes through caproni"
   skc() { kc "$@"; }
 fi
-# Node's Summary API document with whitespace removed, so the awk below can match on it.
 node_summary() { skc get --raw "/api/v1/nodes/$1/proxy/stats/summary" 2>/dev/null | tr -d ' \t\n'; }
-# workingSetBytes of one container (args: summary namespace pod container); empty if absent.
 working_set() {
   awk -v ns="$2" -v pod="$3" -v c="$4" 'BEGIN { RS = "\"podRef\":" }
     index($0, "{\"name\":\"" pod "\",\"namespace\":\"" ns "\"") == 1 {
@@ -376,7 +314,6 @@ working_set() {
       exit
     }' <<< "$1"
 }
-# Keeps the max of each container in MEM_PEAK, sampling about every 5s until killed.
 sample_memory() {
   local ch_max="" gkg_max="" json ch gkg
   while :; do
@@ -390,7 +327,6 @@ sample_memory() {
     sleep 5
   done
 }
-# Kubernetes quantity (16Gi, 8G, 512Mi, plain bytes) to bytes; empty if unparseable.
 to_bytes() {
   awk -v q="$1" 'BEGIN {
     if (!match(q, /^[0-9.]+/)) exit
@@ -404,7 +340,6 @@ to_bytes() {
     if (known) printf "%.0f\n", n
   }'
 }
-# Same units as the report's Peak mem column: B, else KiB/MiB/GiB/TiB with one decimal.
 fmt_bytes() {
   awk -v b="$1" 'BEGIN {
     if (b < 1024) { printf "%d B\n", b; exit }
@@ -413,7 +348,6 @@ fmt_bytes() {
     printf "%.1f %s\n", b, u[i]
   }'
 }
-# "<peak> of <limit> (<pct>%)", or "unknown" without a sample.
 mem_cell() {
   local peak="$1" limit
   if [ -z "$peak" ] || [ "$peak" = unknown ]; then echo unknown; return; fi
@@ -444,7 +378,6 @@ if [ -s "$MEM_PEAK" ]; then read -r CH_PEAK GKG_PEAK < "$MEM_PEAK"; fi
 MEM_LINE="Memory peak during the load test: ClickHouse $(mem_cell "$CH_PEAK" "$CH_LIMIT") · gkg $(mem_cell "$GKG_PEAK" "$GKG_LIMIT")"
 log "     $MEM_LINE"
 
-# Header, the loadtest's Run line, the memory line, then the rest of its report.
 REPORT="$ROOT/loadtest-results.md"
 {
   echo "## Orbit perf: gRPC load test"
@@ -459,6 +392,5 @@ REPORT="$ROOT/loadtest-results.md"
   tail -n +2 "$LT_OUT"
 } > "$REPORT"
 
-# Report the partial results above, then fail like before if the load test did.
 [ "$LT_STATUS" = 0 ] || { echo "xtask loadtest failed (exit $LT_STATUS)" >&2; exit "$LT_STATUS"; }
 log "done. results in loadtest-results.md"

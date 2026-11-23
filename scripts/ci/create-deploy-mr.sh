@@ -1,16 +1,4 @@
 #!/usr/bin/env bash
-#
-# Opens the gl-infra/argocd/apps MR that bumps the gkg image tag for
-# orbit-stg and orbit-prd to the version of the current tag pipeline, then
-# posts a review request to Slack. Runs from the release-deploy-mr CI job.
-#
-# Idempotent: if the deploy branch already has an open MR the script logs it
-# and exits, so a retried job never opens a duplicate. Set DRY_RUN=true to
-# print the diff and MR body without pushing, creating the MR, or posting.
-#
-# After opening the MR it closes the bot's older open deploy MRs (lower
-# version, same branch pattern) and adds a "superseded" note. Their branches stay
-# for rollback. Every step is fail-soft so the sweep never fails the release job.
 
 set -euo pipefail
 
@@ -29,8 +17,6 @@ APPS_PROJECT_ID="${APPS_PROJECT//\//%2F}"
 
 log() { printf '%s\n' "$*" >&2; }
 
-# Prints "<iid> <branch>" for each open bot deploy MR whose version is lower
-# than VERSION, skipping the MR with IID $1 (empty when none was created).
 list_obsolete_mrs() {
   local new_iid="$1" iid branch open_mrs
   open_mrs="$(glab api --paginate "projects/${APPS_PROJECT_ID}/merge_requests?state=opened&author_username=${BOT_AUTHOR}&per_page=100" \
@@ -45,7 +31,6 @@ list_obsolete_mrs() {
       done || true
 }
 
-# Closes obsolete deploy MRs and prints the closed refs ("!1 !2") to stdout.
 close_obsolete_mrs() {
   local new_iid="$1" iid branch closed=()
   while read -r iid branch; do
@@ -88,8 +73,6 @@ for env in orbit-stg orbit-prd; do
   [[ "$(read_tag "$values")" == "$VERSION" ]] || { log "Failed to bump ${env} to ${VERSION}"; exit 1; }
 done
 
-# The deployed tag predates the shallow CI clone, so fetch it explicitly to
-# read its schema version.
 new_schema="$(awk '/^schema:/ { print $2 }' config/versions.yaml)"
 old_schema=""
 if git fetch --quiet origin "refs/tags/v${deployed}:refs/tags/v${deployed}" --no-tags --depth=1 2>/dev/null; then

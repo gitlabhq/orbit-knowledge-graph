@@ -1,5 +1,3 @@
-# config/ontology/edges/updated_by.yaml
-
 description: User who most recently updated an entity (non-content changes)
 
 variants:

@@ -1,5 +1,3 @@
-# config/ontology/nodes/source_code/file.yaml
-
 node_type: File
 domain: source_code
 description: A source code file within a repository

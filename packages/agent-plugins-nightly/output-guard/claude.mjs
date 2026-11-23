@@ -7,8 +7,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { alreadyGuarded, parseOutputLimit, readEnds, shrinkEnds, shrinkOutput } from "./core.mjs";
 
-// Claude Code re-persists a replaced result over about 30,000 characters and shows only a 2 KB preview of it
-// (observed on 2.1.312), so the limit stops below that: a larger one would show the model less.
 const MAX_LIMIT = 29_000;
 
 function shrinkField(text, limit, persistedPath) {
@@ -31,8 +29,6 @@ export function run(input, env = process.env) {
   const stdout = shrinkField(response.stdout, limit, response.persistedOutputPath);
   const stderr = shrinkField(response.stderr, limit);
   if (stdout === undefined && stderr === undefined) return null;
-  // Without the persisted-output fields Claude Code does not wrap the result in its own "too large" preview,
-  // which would show only the start of the cut output and hide the tail and the marker.
   const { persistedOutputPath, persistedOutputSize, ...rest } = response;
   return {
     hookSpecificOutput: {
@@ -47,6 +43,5 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const output = run(JSON.parse(readFileSync(0, "utf8")));
     if (output) process.stdout.write(`${JSON.stringify(output)}\n`);
   } catch {
-    // A guard failure must never disturb the session.
   }
 }

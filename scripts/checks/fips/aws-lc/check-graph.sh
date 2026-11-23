@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Checks the dependency graphs from Cargo.lock: the server must resolve the
-# AWS-LC FIPS module and no ring, while the orbit CLI stays non-FIPS because
-# aws-lc-fips-sys does not build for its Windows and macOS targets.
 set -euo pipefail
 
 expect_absent() {

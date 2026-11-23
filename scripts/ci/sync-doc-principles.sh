@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-#
-# Refetch the distilled GitLab documentation principles into
-# .ai/principles/distilled/ and open (or refresh) a merge request when any of
-# them changed upstream. Runs from a scheduled pipeline
-# (.gitlab/ci/doc-principles-sync.yml); DRY_RUN=true logs the diff and stops
-# before pushing.
-#
-# Only documentation*.md is synced; the upstream directory also holds backend,
-# frontend, database, Ruby, and Vue principles that do not apply here. Files
-# are added and updated, never deleted.
 
 set -euo pipefail
 
@@ -26,9 +16,6 @@ TITLE="docs: sync documentation principles from gitlab-org/gitlab"
 
 log() { printf '==> %s\n' "$*" >&2; }
 
-# Upstream is a public project, so these reads need no token. A fetch failure
-# is treated as transient: warn and exit clean rather than turning the
-# schedule red, matching scripts/vendored/gitlab_system_note_actions/check.sh.
 fetch() {
   curl -sf --max-time 30 --retry 4 --retry-all-errors --retry-connrefused --retry-max-time 120 "$@"
 }
@@ -54,15 +41,11 @@ fi
 
 mkdir -p "$LOCAL_DIR"
 
-# Compared file by file rather than through git, so the run is correct whether
-# or not the target files are already tracked.
 changed=()
 
 for name in $files; do
   encoded="${SOURCE_PATH//\//%2F}%2F${name}"
   target="${LOCAL_DIR}/${name}"
-  # Staged next to the target so a partial download never lands as the file
-  # itself, and so the result keeps the directory's permissions.
   if ! fetch -o "${target}.tmp" "${API}/projects/${SOURCE_PROJECT}/repository/files/${encoded}/raw?ref=${SOURCE_REF}"; then
     log "WARNING: could not fetch ${name}; skipping this run."
     rm -f "${target}.tmp"
@@ -73,8 +56,6 @@ for name in $files; do
     continue
   fi
 
-  # Byte-exact mirror: the upstream files carry their own generator banner and
-  # source_checksum, and the newline check only requires a trailing newline.
   mv "${target}.tmp" "$target"
   changed+=("$name")
 done
@@ -103,7 +84,6 @@ git checkout -B "$BRANCH"
 git add "$LOCAL_DIR"
 git commit -m "$TITLE"
 
-# Named remote so git never echoes the token back into the job log.
 git remote set-url origin "https://oauth2:${TOKEN}@${SERVER_HOST}/${PROJECT_PATH}.git"
 git push --force origin "HEAD:${BRANCH}"
 
@@ -116,7 +96,6 @@ if [ -n "$existing" ]; then
   exit 0
 fi
 
-# Quick actions silently ignore unknown usernames.
 assign_line=""
 if glab api "users?username=${ASSIGNEE}" \
   | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin) else 1)'; then
@@ -125,9 +104,6 @@ else
   log "WARNING: assignee '${ASSIGNEE}' not found; opening the MR unassigned."
 fi
 
-# No apostrophes in this body: bash 3.2, which is what macOS ships, scans a
-# command substitution for its closing paren before it handles the heredoc,
-# so a lone quote in here fails `bash -n` on a contributor machine.
 body="$(cat <<EOF
 ### What does this MR do and why?
 

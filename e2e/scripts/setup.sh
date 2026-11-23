@@ -6,14 +6,6 @@ log "E2E Setup (SHA: $E2E_SHA)"
 if [[ -z "$E2E_EXTERNAL_GITLAB_NS" ]]; then
 "$E2E_DIR/scripts/cleanup-stale-namespaces.sh"
 
-# Clean cluster-scoped resources orphaned by previous e2e runs whose owning
-# namespace has been torn down. The GitLab chart 9.11.x installs cluster-scoped
-# resources (GatewayClass "gitlab-gw", ClusterRole/ClusterRoleBinding for the
-# bundled envoy-gateway controller) that survive `kubectl delete ns` and that
-# helm validates by `meta.helm.sh/release-namespace` annotation; a stale entry
-# from a prior e2e-<oldsha>-gitlab release blocks subsequent installs in any
-# new e2e-<sha>-gitlab namespace with:
-#   "<Kind> <name> exists and cannot be imported into the current release"
 log "Cleaning orphaned e2e cluster-scoped resources"
 EXISTING_E2E_NS=$($KC get ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
   | tr ' ' '\n' | grep '^e2e-' || true)
@@ -28,16 +20,10 @@ for r in json.load(sys.stdin).get('items', []):
         print(r['metadata']['name'])
 " 2>/dev/null) || true
   for orphan in $ORPHANS; do
-    # 1. Mark for deletion (--wait=false avoids hanging on finalizers).
     $KC delete "$kind" "$orphan" \
       --ignore-not-found=true --wait=false --timeout=30s 2>/dev/null || true
-    # 2. Strip finalizers so the API server actually removes the object;
-    #    gateway-api/envoy-gateway controllers from a torn-down namespace
-    #    are gone, so their finalizers will never reconcile on their own.
     $KC patch "$kind" "$orphan" --type=merge \
       -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
-    # 3. Poll up to 30s for actual removal — helm install fails if the
-    #    object is still present (even with deletionTimestamp set).
     for _ in $(seq 1 30); do
       $KC get "$kind" "$orphan" >/dev/null 2>&1 || break
       sleep 1
@@ -47,7 +33,6 @@ done
 
 fi
 
-# Generate random credentials
 log "Generating secrets"
 : "${E2E_JWT_KEY:=$(openssl rand -base64 32)}"
 : "${E2E_CH_DEFAULT_PASS:=$(openssl rand -base64 24)}"
@@ -67,19 +52,14 @@ export E2E_CH_GRAPH_PASS E2E_CH_GRAPH_READ_PASS E2E_PG_SIPHON_PASS E2E_CH_GITLAB
 export E2E_GITLAB_ROOT_PASS
 export E2E_PG_GITLAB_PASS E2E_PG_POSTGRES_PASS E2E_PG_REPLICATION_PASS E2E_REDIS_PASS
 
-# Root CA for gRPC TLS (pre-existing cluster resource from cert-manager)
 log "Extracting root CA from cert-manager"
 : "${E2E_ROOT_CA_B64:=$($KC get secret root-ca-secret -n cert-manager \
   -o jsonpath='{.data.ca\.crt}')}"
 export E2E_ROOT_CA_B64
 
-# Regenerate siphon CDC config from gitlab-org/gitlab SSOT at the pinned ref.
-# Output (cdc-producer.yaml, cdc-consumer.yaml) is consumed by values/siphon.yaml.gotmpl.
 log "Syncing siphon CDC tables from SSOT"
 "$E2E_DIR/scripts/sync-cdc-tables.sh"
 
-# Both self-gate on their prerequisites, so they overlap the sync. Watermark
-# stays after sync: it enumerates tables the siphon consumer creates.
 if [[ -n "$E2E_EXTERNAL_GITLAB_NS" ]]; then
   true &
 else

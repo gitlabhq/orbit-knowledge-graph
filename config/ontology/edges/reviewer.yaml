@@ -1,5 +1,3 @@
-# config/ontology/edges/reviewer.yaml
-
 description: Review assignment relationship between users and merge requests
 
 variants:

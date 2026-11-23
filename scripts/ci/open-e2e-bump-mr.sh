@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-#
-# Open (or refresh) the rolling e2e pin-bump MR. Runs from a scheduled
-# pipeline (.gitlab/ci/e2e-pin-bump.yml); DRY_RUN=true logs the diff and
-# stops before pushing.
 
 set -euo pipefail
 
@@ -46,7 +42,6 @@ git checkout -B "$BRANCH"
 git add "$VERSIONS"
 git commit -m "chore(e2e): auto-bump siphon, gitlab, and gkg pins to current"
 
-# Named remote so git never echoes the token back into the job log.
 git remote set-url origin "https://oauth2:${TOKEN}@${SERVER_HOST}/${PROJECT_PATH}.git"
 git push --force origin "HEAD:${BRANCH}"
 
@@ -59,7 +54,6 @@ if [ -n "$existing" ]; then
   exit 0
 fi
 
-# Quick actions silently ignore unknown usernames.
 assign_line=""
 if glab api "users?username=${ASSIGNEE}" \
   | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin) else 1)'; then

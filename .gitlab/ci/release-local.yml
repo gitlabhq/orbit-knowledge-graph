@@ -1,13 +1,3 @@
-# Build and publish the `orbit` local CLI.
-#
-# "Local CLI" distinguishes this binary (the user-facing `orbit` command for
-# code indexing on a developer machine) from the gkg-server image we ship
-# elsewhere in this pipeline.
-#
-# Build and publish run on tag pipelines (`vX.Y.Z`) on the canonical project.
-# Linux builds and smoke tests also run on main when their inputs change.
-# A manual darwin build job also appears in MR pipelines that change the darwin build inputs.
-
 .local-cli-infra-retry:
   retry:
     max: 2
@@ -181,10 +171,6 @@ local-cli-build-windows-amd64:
   variables:
     PLATFORM: darwin
   before_script:
-    # macos-15-xcode-16 ships with rustup but no toolchain pre-selected; the
-    # project mise.toml is bypassed here because the runner's system-wide mise
-    # config drags in heavy unrelated tools (ruby/maven/dotnet/...) that fail
-    # to install and aren't needed to compile the orbit binary.
     - command -v rustup || (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --no-modify-path)
     - export PATH="$HOME/.cargo/bin:$PATH"
     - export RUST_VERSION="$(awk -F'\"' '/^channel = / { print $2 }' rust-toolchain.toml)"

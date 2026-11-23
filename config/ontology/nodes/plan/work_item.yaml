@@ -1,5 +1,3 @@
-# config/ontology/nodes/plan/work_item.yaml
-
 node_type: WorkItem
 domain: plan
 description: A work item representing an issue, epic, task, incident, or other trackable unit of work

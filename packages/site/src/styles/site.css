@@ -1438,9 +1438,6 @@ html.mobile-menu-open .site-shell > header {
   }
 }
 
-/* iOS edge to edge: with viewport-fit=cover the page runs under the status bar and the toolbar, so the top
-   bar and the phone menu step down by the status bar's height, and a landing page paints its dark band
-   color on the canvas behind both strips and the overscroll. */
 html.page-landing {
   background: var(--band-dark);
 }
@@ -1453,15 +1450,12 @@ html.page-landing {
   padding-top: calc(env(safe-area-inset-top) + 3.5rem + 1rem);
 }
 
-/* The field under the last section reaches past the home indicator, so it runs off the bottom of the screen. */
 @media (max-width: 47.99rem) {
   .page-end .gravity-globe {
     margin-bottom: calc(-10rem - 16rem - env(safe-area-inset-bottom));
   }
 }
 
-/* The last section follows another dark one, and its band still runs past the bottom, so the field under
-   it reaches the end of the page. */
 .page-dark + .page-dark.page-dark-bottom {
   clip-path: inset(-1px -100vmax -100vmax);
 }
@@ -1545,7 +1539,6 @@ html.page-landing {
     padding-top: 0;
   }
 
-  /* site-kit's glow reaches 10rem past each side, which would scroll the page sideways on a phone. */
   .page-glow::before,
   .page-glow::after {
     inset-inline: -1.5rem;
@@ -1603,7 +1596,6 @@ html.page-landing {
     background: var(--gl-background-color-subtle, transparent);
   }
 
-  /* site-kit closes the dialog on any click whose target is the dialog itself, which includes this pseudo-element. */
   dialog[aria-label="Search"]::before {
     content: "Cancel";
     grid-area: cancel;

@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Install llvm-mingw under /opt/llvm-mingw. We delete libc++/libunwind
-# import libs so the linker can't pick them up alongside the static
-# archives `-static-libstdc++` requested — without this the build links
-# both and orbit.exe ends up needing libc++.dll/libunwind.dll at runtime.
 set -euo pipefail
 
 VERSION="${LLVM_MINGW_VERSION:-20260505}"

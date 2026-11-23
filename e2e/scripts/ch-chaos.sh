@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Kill one ClickHouse replica while the stack is busy, then wait for it to rejoin.
-# Usage: ch-chaos.sh backfill|indexing   (no-op unless E2E_CH_REPLICAS > 1)
-# A DDL issued while a replica is down blocks for distributed_ddl_task_timeout and
-# fails, so the first kill runs after the GitLab migrations and dictionary patches.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 PHASE="${1:?usage: ch-chaos.sh backfill|indexing}"

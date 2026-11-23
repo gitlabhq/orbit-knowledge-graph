@@ -4,7 +4,6 @@ import type { PluginContext, ToolExecuteAfter, ToolExecuteBefore } from '@openco
 
 import type { Activity } from './rpc.ts'
 
-// OpenCode resolves @opencode/plugin at runtime. Stand in for the two helpers the plugin calls.
 mock.module('@opencode/plugin', () => ({ Plugin: { define: <T>(definition: T) => definition } }))
 mock.module('@opencode/plugin/rpc', () => ({ Rpc: { define: <T>(definition: T) => definition } }))
 

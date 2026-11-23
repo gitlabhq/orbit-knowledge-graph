@@ -1,5 +1,4 @@
-# shellcheck shell=bash disable=SC2034  # variables are for the sourcing scripts
-# run.sh exports BOT_USERNAME and BOT_USER_ID before it starts a task.
+# shellcheck shell=bash disable=SC2034
 
 PROJECT_ID="${CI_PROJECT_ID:?CI_PROJECT_ID is required}"
 DRY_RUN="${DRY_RUN:-true}"
@@ -10,9 +9,6 @@ log() { printf '%s\n' "$*" >&2; }
 
 api() { glab api "$@"; }
 
-# GitLab timestamps vary (".000Z", "+00:00"); strip the fractional part so GNU
-# date parses every variant. Empty/null inputs return 0 (treated as ancient by
-# callers only where that is safe — see get_last_activity_epoch in stale.sh).
 to_epoch() {
   local timestamp="${1:-}"
   if [ -z "$timestamp" ] || [ "$timestamp" = "null" ]; then

@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Create the _siphon_watermark column the SDLC indexer queries (gkg!1729).
-# Siphon 0.0.100-beta handles the column but does NOT create it: it omits it
-# from every insert so ClickHouse fills the DEFAULT. We add it to every siphon
-# CDC table plus the non-siphon_-prefixed ontology source tables.
 set -euo pipefail
 
 # shellcheck source=lib.sh
@@ -14,16 +10,6 @@ ch_query() {
     sh -c 'clickhouse-client -n --user default --password "$CLICKHOUSE_PASSWORD"'
 }
 
-# Default now64() matches what siphon expects ClickHouse to manage. The
-# MATERIALIZE is essential: ADD COLUMN leaves pre-existing snapshot rows
-# un-stored, so a now() default is recomputed at read time and pins their
-# watermark to the current instant, racing the indexer checkpoint forward and
-# stranding rows replicated mid-run. MATERIALIZE writes a concrete value to
-# those rows so the watermark is stable, exactly as it is for rows siphon
-# inserts after the column exists.
-#
-# One multiquery batch: per-table kubectl execs cost ~1.3s each on the
-# setup critical path.
 TABLES=$(ch_query "SELECT name FROM system.tables \
   WHERE database = 'datalake' AND name LIKE 'siphon\_%' \
     AND engine NOT IN ('MaterializedView', 'View', 'Dictionary', 'Null') FORMAT TSV")

@@ -40,7 +40,6 @@ export default Plugin.define({
   id: 'orbit-ui',
   async setup(ctx) {
     const rpc = await ctx.rpc.register(OrbitUi, {})
-    // Never awaited and never thrown: the UI must not slow down or fail a tool call.
     const send = (event: ToolExecuteBefore | ToolExecuteAfter, state: Activity['state']) => {
       try {
         const activity = activityOf(event, state)

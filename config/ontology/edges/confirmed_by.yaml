@@ -1,5 +1,3 @@
-# config/ontology/edges/confirmed_by.yaml
-
 description: User who confirmed a vulnerability
 table: gl_sec_edge
 

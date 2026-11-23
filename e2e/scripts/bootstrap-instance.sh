@@ -1,23 +1,4 @@
 #!/usr/bin/env bash
-# Bootstrap the e2e GitLab instance: activate the license and mint a root PAT
-# in a single gitlab-rails runner invocation.
-#
-# Each `gitlab-rails runner` call cold-boots the entire Rails app (~60s on the
-# toolbox image). Doing both operations in one invocation saves one full boot
-# on every e2e setup.
-#
-# Prereqs (in place by the time helmfile sync finishes):
-#   - global.extraEnv on the gitlab chart sets GITLAB_LICENSE_MODE=test and
-#     CUSTOMER_PORTAL_URL=https://customers.staging.gitlab.com on every Rails
-#     component, so the staging-signed license decrypts and the activation
-#     client talks to staging.
-#   - Activation code lives in the `gitlab-license-code` secret in the
-#     `gitlab-agent-e2e-harness` namespace (synced from GCP Secret Manager via
-#     ExternalSecret), key `code`.
-#
-# Idempotent: re-activation is skipped when License.current is a non-expired
-# cloud license; PAT creation uses find_or_create_by and rotates when the
-# plaintext token is unrecoverable.
 
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -36,8 +17,6 @@ if [[ -z "$ACTIVATION_CODE" ]]; then
   exit 1
 fi
 
-# Gate on the migrations Job, not the toolbox pod: toolbox goes Running
-# before migrations finish and rails-runner crashes on an unmigrated DB.
 MIGRATIONS=""
 for _ in $(seq 1 360); do
   MIGRATIONS=$($KC get jobs -n "$NS_GITLAB" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
@@ -67,11 +46,6 @@ if [[ -z "$TOOLBOX" ]]; then
   exit 1
 fi
 
-# Status messages go to stderr; only the PAT lands on stdout so the bash
-# capture below picks it up cleanly. Activation code is passed via ARGV so it
-# never appears in the pod's process list.
-# Retry up to 3 times — rails-runner can fail on transient connectivity issues
-# when the webservice is still warming up.
 PAT=""
 for attempt in 1 2 3; do
   PAT=$($KC exec -i -n "$NS_GITLAB" "$TOOLBOX" -c toolbox -- \
@@ -128,8 +102,6 @@ if [[ -z "$PAT" || ${#PAT} -lt 20 ]]; then
   exit 1
 fi
 
-# Robot runner runs in NS_GKG; secrets are namespace-scoped so the PAT lives
-# there directly.
 $KC -n "$NS_GKG" create secret generic "$SECRET_NAME" \
   --from-literal=pat="$PAT" \
   --dry-run=client -o yaml | $KC apply -f -

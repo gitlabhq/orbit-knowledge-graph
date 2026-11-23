@@ -1,31 +1,11 @@
-# Central version pinning for e2e components.
-# Chart versions used by helmfile.yaml.gotmpl, image versions by values/*.yaml.gotmpl.
-# CI can override GKG image via E2E_GKG_IMAGE / E2E_GKG_TAG env vars.
-
 siphon:
   chart: "2.4.2"
   image:
     repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
     tag: "0.0.163-beta"
 gitlab:
-  # Devel (nightly) chart from gitlab-devel/gitlab. The chart version,
-  # gitlab-org/gitlab ref, and CNG image digests below are all bumped
-  # together by scripts/bump-gitlab-pins.sh — run that script to catch up
-  # to the current master. Pinning the chart alone is not enough because
-  # every CNG image defaults to :master (a moving tag); the `images.*.digest`
-  # entries force specific digests so every pod pulls identical rails code.
   chart: "10.5.1-2993129602"
-  # Git ref of `gitlab-org/gitlab` used to fetch SSOT siphon table definitions
-  # (`db/siphon/tables/*.yml`) when running `scripts/sync-cdc-tables.sh`.
-  # Pinned to a master commit so siphon's view of the schema matches the
-  # pinned CNG images.
   ref: "ec0e8b7afef079cd4e26d187ae6135252df21796"
-  # Per-component digest pins. Consumed by values/gitlab.yaml.gotmpl which
-  # renders them as "master@<digest>" tags. Pinning every Rails-adjacent image
-  # avoids version skew between webservice (Rails) and its workhorse sidecar:
-  # the orbit-query payload contract changed shape on master, so an unpinned
-  # `:master` workhorse can deserialize the pinned webservice's payload into
-  # an empty Authorization header and silently 502.
   images:
     webservice:
       digest: "sha256:ce5b8e1cebe7481d0d1e34cbbd7add45c370505b9fa3310e9157d0caf678cf1e"
@@ -70,12 +50,8 @@ gkg:
 nats:
   chart: "2.15.0"
 postgresql:
-  # bitnami/postgresql chart line that ships PG 17 (the version GitLab 19.0
-  # will require — releasing 2026-05-21).
   chart: "16.7.27"
   image:
-    # Bitnami's main registry switched to paid in Aug 2025; the legacy free
-    # mirror still publishes the same tags.
     repository: bitnamilegacy/postgresql
     tag: "17.6.0-debian-12-r4"
 redis:

@@ -1,21 +1,5 @@
-# Local-development overlay applied on top of the embedded config/default.yaml. Holds tuning that
-# suits a laptop and the Caproni dev stack, and must NOT be promoted into config/default.yaml, which
-# underlays production.
-#
-# The mise dev tasks do not pass this file to --config directly: scripts/dev/orbit-native-dev.sh
-# deep-merges it with the values it reads from the Caproni cluster (ClickHouse passwords, JWT keys,
-# GitLab URL), the mode's probe port, and the Git-ignored config/dev.local.yaml (personal overrides,
-# highest priority) into .dev/<mode>.yaml.
-#
-# ClickHouse and NATS are reached through the port-forwards `mise run dev:connect` opens on these
-# addresses. The gRPC listener binds all interfaces because GitLab Rails calls it from inside the
-# Caproni VM through the repointed orbit-webserver Service; 127.0.0.1 would be unreachable from there.
-
 grpc_bind_address: "0.0.0.0:50054"
 
-# consumer_name matches the Helm chart. Native mode and Caproni edit mode run the same binary and
-# so share one versioned JetStream work-queue stream, which allows one consumer per filter subject;
-# a different name here would make the two paths reject each other's consumers for an hour.
 nats:
   url: "nats://127.0.0.1:4222"
   consumer_name: "gkg-indexer"

@@ -64,8 +64,6 @@ function orbitRenderers(toolName: string, theirs: ToolRenderers | undefined): To
   }
 }
 
-// Pi keeps only the tail of a long result and names the full file in `details`. The output guard of
-// the nightly channel shortens it first and names its spill file only in the text it leaves.
 const FULL_OUTPUT = /Full output: ([^\s\]]+)/
 
 function responseText(event: ToolResultEvent): string {
@@ -110,7 +108,6 @@ function show(ctx: ExtensionContext): void {
 }
 
 export default function (pi: ExtensionApi) {
-  // Older Pi has no renderer hook, and an extension that throws on load is reported at every start.
   if (typeof pi.registerToolRenderer !== 'function') return
   pi.registerToolRenderer((toolName, next) => {
     const theirs = next()

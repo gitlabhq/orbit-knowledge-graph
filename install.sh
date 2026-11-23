@@ -1,15 +1,4 @@
 #!/bin/bash
-# Orbit local CLI (`orbit`) installation script.
-# Supports macOS (darwin) and Linux on x86_64 and aarch64.
-#
-# Usage:
-#   curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash
-#   curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash -s -- --version v0.51.0
-#   curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash -s -- --libc musl
-#   curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash -s -- --force
-#
-# Or, after downloading:
-#   bash install.sh
 
 set -euo pipefail
 
@@ -222,8 +211,6 @@ install_orbit() {
     fi
     echo "Installing the Orbit local CLI ${VERSION}..."
 
-    # Tarballs are published to the project's Generic Package Registry under
-    # 'orbit-cli/<version>/<artifact>'. The version segment omits the leading 'v'.
     local pkg_version="${VERSION#v}"
     local pkg_base="https://gitlab.com/api/v4/projects/${project_id}/packages/generic/orbit-cli/${pkg_version}"
     local download_url="${pkg_base}/${artifact_name}"

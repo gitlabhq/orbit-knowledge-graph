@@ -3,7 +3,19 @@
 # requires-python = ">=3.10"
 # dependencies = ["pyyaml>=6.0"]
 # ///
-"""
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+from bisect import bisect_right
+from dataclasses import dataclass
+from pathlib import Path
+
+import yaml
+
+USAGE = """
 Prose lint for the text this repo ships to LLMs and reviewers.
 
 Scores prompt yaml, the setup block, skills, agent guides, the glossary, and
@@ -16,17 +28,6 @@ Usage:
 
 Exit codes: 0 clean, 1 findings, 2 the lint could not run.
 """
-from __future__ import annotations
-
-import os
-import re
-import subprocess
-import sys
-from bisect import bisect_right
-from dataclasses import dataclass
-from pathlib import Path
-
-import yaml
 
 SCOPE = (
     "AGENTS.md",
@@ -288,8 +289,6 @@ def git(*args: str) -> str:
 
 
 def changed_files(base: str) -> list[str]:
-    # GitLab defines the variable as an empty string outside merged-results
-    # pipelines, so a default on the lookup never applies there.
     head = os.environ.get("CI_MERGE_REQUEST_SOURCE_BRANCH_SHA") or "HEAD"
     for commit in (base, head):
         if subprocess.run(["git", "cat-file", "-e", f"{commit}^{{commit}}"], capture_output=True).returncode:
@@ -313,7 +312,7 @@ def main(argv: list[str]) -> int:
         in_scope = set(scoped_files())
         files = [f for f in argv if f in in_scope]
     else:
-        print(__doc__, file=sys.stderr)
+        print(USAGE, file=sys.stderr)
         return 2
     if not files:
         print("prose lint: no files in scope.")

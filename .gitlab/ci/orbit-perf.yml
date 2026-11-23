@@ -1,12 +1,6 @@
-# Orbit performance test: seeds a synthetic graph into a real caproni + Orbit
-# stack and replays the query corpus over gRPC (scripts/ci/orbit-perf.sh).
-# Main: every commit, serialized. MRs: orbit-perf:mr, automatic when the query
-# path changes, manual otherwise; it posts the report as an MR comment.
 orbit-perf:
   extends: .orbit-perf-base
-  # No needs on docker-build-amd64: the script waits for this commit's image.
   needs: []
-  # Each run is a full cluster and one datapoint: never cancel, never overlap.
   interruptible: false
   resource_group: orbit-perf
   variables:
@@ -14,12 +8,10 @@ orbit-perf:
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
-    # Solo schedules also run on the default branch.
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       allow_failure: true
 
-# Paths that affect query performance; a change here runs the MR job automatically.
 .orbit-perf-query-path-changes:
   changes:
     - crates/query-engine/**/*
@@ -39,7 +31,6 @@ orbit-perf:
     - .gitlab/ci/orbit-perf-base.yml
     - .gitlab/ci/orbit-perf-mr.yml
 
-# No strategy: depend, so the merge does not wait for the perf run.
 orbit-perf:mr:
   stage: benchmark
   needs: []

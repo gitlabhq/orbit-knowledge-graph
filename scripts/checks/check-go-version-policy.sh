@@ -1,26 +1,4 @@
 #!/usr/bin/env bash
-# Check the Go modules in this repo and the Go images CI uses for them against
-# the Go versions GitLab ships:
-# https://docs.gitlab.com/development/go_guide/go_upgrade/#supporting-multiple-go-versions
-#
-# For every go.mod:
-#   - the go directive patch version must be .0
-#   - the go directive minor and any toolchain directive minor must not exceed
-#     the oldest minor CNG ships on the last three released N-N-stable branches
-# For every golang:X.Y image in CI_FILE:
-#   - the minor must not exceed that same minor
-#   - the minor must be at least every module's go minor (golang images set
-#     GOTOOLCHAIN=local, so an older image cannot build the module)
-# Only a scalar `image: golang:X.Y` line in CI_FILE is detected; images set
-# through variables, anchors or other files are not checked.
-# All violations are reported before the script exits non-zero. Failures to
-# fetch or parse CNG data also exit non-zero.
-#
-# Offline testing overrides (each one skips the matching lookup):
-#   SHIPPED_GO_VERSIONS  CNG GO_VERSION of the last three released stable
-#                        branches, e.g. "1.26.10 1.27.3 1.27.3"
-#   GO_MODS              space-separated go.mod paths (default: all in the repo)
-#   CI_FILE              CI config to scan for golang images (default .gitlab-ci.yml)
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -40,7 +18,6 @@ minor_of() {
   echo "$1" | cut -d. -f1,2
 }
 
-# True when minor $1 is greater than minor $2.
 minor_gt() {
   [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n 1)" = "$1" ] && [ "$1" != "$2" ]
 }
@@ -56,9 +33,6 @@ list_cng_stable_branches() {
   done
 }
 
-# CNG cuts a stable branch a few days before the release, and the policy
-# excludes the active milestone, so the newest branch is dropped until CNG has
-# tagged its vX.Y.0.
 fetch_shipped_go_versions() {
   local branches newest_tag tag_status branch stable_yml stable_version versions=""
   branches=$(list_cng_stable_branches | sort -uV | tail -n 4)

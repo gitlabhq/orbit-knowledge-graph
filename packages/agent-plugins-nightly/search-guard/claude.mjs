@@ -7,8 +7,6 @@ import { fileURLToPath } from "node:url";
 import { isGuardDisabled, lookupDefinition, lookupTimeoutMs } from "./core.mjs";
 import { analyzeSearch, normalizeTerm, orbitTerms } from "./parse.mjs";
 
-// Claude Code copies this file as is, so the launcher is found at run time: `glab orbit` first, then a
-// standalone `orbit` on the PATH.
 const LAUNCHERS = [["glab", "orbit"], ["orbit"]];
 
 function isExistingFile(path, cwd) {
@@ -19,7 +17,6 @@ function isExistingFile(path, cwd) {
   }
 }
 
-/** A private per-user directory: the plugin data dir, else `~/.cache/orbit`. Undefined when it is not ours. */
 function stateDirectory(env) {
   const directory = env.CLAUDE_PLUGIN_DATA || join(env.XDG_CACHE_HOME || join(homedir(), ".cache"), "orbit");
   mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -42,7 +39,6 @@ function readState(env, sessionId) {
   }
 }
 
-/** Written to a fresh file and renamed over the state, so a planted symlink is replaced, not followed. */
 function writeState(env, sessionId, state) {
   try {
     const path = statePath(env, sessionId);
