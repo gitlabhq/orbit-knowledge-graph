@@ -8,7 +8,7 @@ use super::Loc;
 use crate::tree::{Edge, EdgeKind};
 
 /// An edge's kind, file and node at one end.
-type End = (EdgeKind, u32, u32);
+pub type End = (EdgeKind, u32, u32);
 
 /// The edges of a family, by kind: from each node, to each node, and at each
 /// site.
@@ -18,6 +18,18 @@ pub struct Graph {
     outgoing: FxHashMap<End, SmallVec<[Loc; 2]>>,
     unlabelled: FxHashMap<End, SmallVec<[Loc; 2]>>,
     sites: FxHashMap<End, SmallVec<[(Loc, Loc); 1]>>,
+}
+
+/// Every end a graph read can look an edge up by: its source, its target,
+/// and the node it was made at.
+pub fn ends(e: &Edge) -> impl Iterator<Item = End> {
+    let site = e.site.map(|site| (e.kind, e.from_tree, site));
+    [
+        (e.kind, e.from_tree, e.from_node),
+        (e.kind, e.to_tree, e.to_node),
+    ]
+    .into_iter()
+    .chain(site)
 }
 
 impl Graph {

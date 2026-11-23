@@ -8,6 +8,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
+use super::graph::End;
 use super::pattern::{self, Cap, Pat};
 use super::program::{Pass, Phase, Scratch, Template, order};
 use super::{
@@ -142,8 +143,10 @@ fn region_nodes<S: Store>(
 
 /// Runs a phase on a family's files, the project tree last in `trees`, with
 /// the graph so far; an `until: stable` phase reruns with its own edges in
-/// the graph until they stop changing. The edges it adds, and the reason it
-/// stopped early, if it did.
+/// the graph until they stop changing. A rerun walks only the files that
+/// read an end of an edge the last round added or dropped; the others would
+/// write what they wrote. The edges it adds, and the reason it stopped early,
+/// if it did.
 pub fn run_family(
     phase: &Phase,
     trees: &[Tree<Compact>],
@@ -153,35 +156,50 @@ pub fn run_family(
 ) -> Result<(Vec<Edge>, Option<Killed>), Killed> {
     let project = trees.len() as u32 - 1;
     let known: FxHashSet<Edge> = base.iter().copied().collect();
-    let (mut found, mut last, mut stopped) = (Vec::new(), FxHashSet::default(), None);
+    let mut runs: Vec<Option<FileRun>> = (0..project).map(|_| None).collect();
+    let mut walk: Vec<usize> = (0..project as usize).collect();
+    let (mut last, mut stopped): (Vec<Edge>, _) = (Vec::new(), None);
+    let found_in = |runs: &[Option<FileRun>]| {
+        let mut seen = FxHashSet::default();
+        runs.iter()
+            .flatten()
+            .flat_map(|run| run.edges.iter().copied())
+            .filter(|e| !known.contains(e) && seen.insert(*e))
+            .collect::<Vec<Edge>>()
+    };
     settle(|| {
-        let graph = Graph::new(base.iter().chain(&found));
-        let edges = match run_trees(
-            phase,
-            trees,
-            project as usize,
-            Some(project),
-            &graph,
-            engine,
-            budget,
-        ) {
-            Ok((edges, _)) => edges,
+        let graph = Graph::new(base.iter().chain(&last));
+        let done = match run_files(phase, trees, &walk, Some(project), &graph, engine, budget) {
+            Ok(done) => done,
             Err(killed) if !killed.cancelled => {
                 stopped = Some(killed);
                 return Ok(false);
             }
             Err(killed) => return Err(killed),
         };
-        let mut seen = FxHashSet::default();
-        found = edges
-            .into_iter()
-            .filter(|e| !known.contains(e) && seen.insert(*e))
+        for (&fi, run) in walk.iter().zip(done) {
+            runs[fi] = Some(run);
+        }
+        let found = found_in(&runs);
+        let (now, before): (FxHashSet<Edge>, FxHashSet<Edge>) = (
+            found.iter().copied().collect(),
+            last.iter().copied().collect(),
+        );
+        let changed: FxHashSet<End> = now
+            .symmetric_difference(&before)
+            .flat_map(super::graph::ends)
             .collect();
-        let changed = seen != last;
-        last = seen;
-        Ok(phase.until_stable && changed)
+        last = found;
+        walk = (0..project as usize)
+            .filter(|&fi| {
+                runs[fi]
+                    .as_ref()
+                    .is_some_and(|run| !run.reads.is_disjoint(&changed))
+            })
+            .collect();
+        Ok(phase.until_stable && !walk.is_empty())
     })?;
-    Ok((found, stopped))
+    Ok((found_in(&runs), stopped))
 }
 
 /// Runs `round` until it reports no change, or the fixpoint bound.
@@ -207,17 +225,47 @@ pub fn run_trees(
     engine: &Engine,
     budget: &Sentinel,
 ) -> Result<(Vec<Edge>, Outputs), Killed> {
+    let files: Vec<usize> = (0..walk).collect();
+    let (mut edges, mut outputs) = (Vec::new(), Outputs::default());
+    for run in run_files(phase, trees, &files, project, graph, engine, budget)? {
+        edges.extend(run.edges);
+        outputs.merge(run.outputs);
+    }
+    Ok((edges, outputs))
+}
+
+/// What one file's run of a phase wrote, and the graph ends it read.
+struct FileRun {
+    edges: Vec<Edge>,
+    outputs: Outputs,
+    reads: FxHashSet<End>,
+}
+
+/// Runs a phase on the given files of a family in parallel, each region of a
+/// file under its own rules.
+fn run_files(
+    phase: &Phase,
+    trees: &[Tree<Compact>],
+    walk: &[usize],
+    project: Option<u32>,
+    graph: &Graph,
+    engine: &Engine,
+    budget: &Sentinel,
+) -> Result<Vec<FileRun>, Killed> {
     let scope = scope_budget(phase, engine, budget);
     let files = project.unwrap_or(trees.len() as u32);
     let indexed = Indexed::new(phase, trees, files as usize, engine, &scope);
-    let found: Vec<Result<(Vec<Edge>, Outputs), Killed>> = (0..walk)
-        .into_par_iter()
-        .map(|fi| {
+    walk.par_iter()
+        .map(|&fi| {
             let tree = &trees[fi];
             let file = tree_budget(phase, engine, &tree.label);
             let own = engine.rules_index(&tree.label);
             let regions = regions(tree, engine, own);
-            let (mut edges, mut outputs) = (Vec::new(), Outputs::default());
+            let mut done = FileRun {
+                edges: Vec::new(),
+                outputs: Outputs::default(),
+                reads: FxHashSet::default(),
+            };
             for &(region, rules) in &regions {
                 let inside: Vec<_> = match region == HOST {
                     true => Vec::new(),
@@ -238,21 +286,15 @@ pub fn run_trees(
                         let nodes = region_nodes(tree, &regions, region, pass.post);
                         fire_from(&mut run, pass, &nodes, 0);
                     }
-                    let (e, o) = run.end()?;
-                    edges.extend(e);
-                    outputs.merge(o);
+                    let (edges, outputs) = run.end()?;
+                    done.edges.extend(edges);
+                    done.outputs.merge(outputs);
+                    done.reads.extend(run.graph_reads.take());
                 }
             }
-            Ok((edges, outputs))
+            Ok(done)
         })
-        .collect();
-    let (mut edges, mut outputs) = (Vec::new(), Outputs::default());
-    for result in found {
-        let (e, o) = result?;
-        edges.extend(e);
-        outputs.merge(o);
-    }
-    Ok((edges, outputs))
+        .collect()
 }
 
 /// What a walk over one tree reads besides the tree.

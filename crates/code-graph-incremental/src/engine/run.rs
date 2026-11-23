@@ -114,6 +114,8 @@ pub struct Run<'t, S: Store = Compact> {
     pub(super) killed: Option<Killed>,
     pub(super) max_edges: usize,
     pub(super) graph: Option<&'t Graph>,
+    /// The graph ends the run looked edges up by.
+    pub(super) graph_reads: std::cell::RefCell<Vec<super::graph::End>>,
     pub(super) files: u32,
     pub(super) project: Option<u32>,
     pub(super) indexed: Option<&'t Indexed<'t, S>>,
@@ -198,6 +200,7 @@ impl<'t, S: Store> Run<'t, S> {
             killed: None,
             max_edges: 0,
             graph: None,
+            graph_reads: Default::default(),
             files: trees.len() as u32,
             project: None,
             indexed: None,

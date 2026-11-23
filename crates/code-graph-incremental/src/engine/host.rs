@@ -489,21 +489,37 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
             fi: self.run.graph_fi,
             node,
         };
+        self.run
+            .graph_reads
+            .borrow_mut()
+            .push((kind, at.fi, at.node));
         self.run.graph.is_some_and(|g| g.has(kind, incoming, at))
     }
 
     /// The targets of `from`'s edges of `kind` in the graph so far.
     pub fn targets(&self, kind: EdgeKind, from: Loc) -> &'t [Loc] {
+        self.run
+            .graph_reads
+            .borrow_mut()
+            .push((kind, from.fi, from.node));
         self.run.graph.map_or(&[], |g| g.targets(kind, from))
     }
 
     /// The targets of `from`'s edges of `kind` that carry no label.
     pub fn unlabelled_targets(&self, kind: EdgeKind, from: Loc) -> &'t [Loc] {
+        self.run
+            .graph_reads
+            .borrow_mut()
+            .push((kind, from.fi, from.node));
         self.run.graph.map_or(&[], |g| g.unlabelled(kind, from))
     }
 
     /// The edges of `kind` made at `site`, as (from, to).
     pub fn at_site(&self, kind: EdgeKind, site: Loc) -> &'t [(Loc, Loc)] {
+        self.run
+            .graph_reads
+            .borrow_mut()
+            .push((kind, site.fi, site.node));
         self.run.graph.map_or(&[], |g| g.at_site(kind, site))
     }
 
