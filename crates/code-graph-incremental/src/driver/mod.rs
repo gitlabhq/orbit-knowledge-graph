@@ -14,7 +14,7 @@ use rayon::prelude::*;
 pub use repository::{Options, WORKER_STACK_BYTES, repository};
 pub use state::{SNAPSHOT_VERSION, SourceFile, State};
 
-use crate::engine::{self, EdgeIndex, Phase, Walk};
+use crate::engine::{self, EdgeIndex, Phase};
 use crate::env::Env;
 use crate::error::Error;
 use crate::language::SupportLang;
@@ -157,18 +157,17 @@ fn one_file(
     let mut at = Stage::Mutable(tree);
     for phase in phases {
         let started = std::time::Instant::now();
-        if phase.walk == Walk::Fixpoint {
-            let Stage::Mutable(tree) = &mut at else {
-                return Err(Killed::limit(phase.label, &file.path, 0, 0));
-            };
-            engine::rewrite_tree(phase, tree, env, run)?;
-        } else {
-            let tree = at.compact(env);
-            match phase.walk {
-                Walk::Flow => edges.extend(engine::run_tree(phase, tree, env, run)?),
-                _ => engine::tag_tree(phase, tree, 0, env, &EdgeIndex::new(&edges), run)?,
+        let graph = EdgeIndex::new(&edges);
+        let found = match phase.builds() {
+            true => {
+                let Stage::Mutable(tree) = &mut at else {
+                    return Err(Killed::limit(phase.label, &file.path, 0, 0));
+                };
+                engine::run_tree(phase, tree, 0, None, env, Some(&graph), run)?
             }
-        }
+            false => engine::run_tree(phase, at.compact(env), 0, None, env, Some(&graph), run)?,
+        };
+        edges.extend(found);
         if *engine::profile::ON {
             engine::profile::phase(&phase.name, started);
         }
@@ -237,15 +236,17 @@ fn finish(env: &Env, state: &mut State, run: &Sentinel, report: &mut Report) -> 
                     let graph = EdgeIndex::new(&state.edges);
                     let project = state.trees.len() as u32;
                     state.trees.push(state.project_compact(env));
-                    let found = engine::run_family(
+                    let found = engine::run_trees(
                         phase,
                         &state.trees,
+                        project as usize,
                         Some(project),
                         &state.edges,
                         &graph,
                         env,
                         run,
-                    );
+                    )
+                    .map(|(edges, _)| edges);
                     state.trees.pop();
                     let known: std::collections::HashSet<Edge> =
                         state.edges[..base].iter().copied().collect();
@@ -266,29 +267,23 @@ fn finish(env: &Env, state: &mut State, run: &Sentinel, report: &mut Report) -> 
                     state.edges.truncate(base);
                     state.edges.extend(found);
                     last = seen;
-                    if phase.walk != Walk::Fixpoint || stable {
+                    if !phase.until_stable || stable {
                         break;
                     }
                 }
             }
             _ => {
                 let graph = EdgeIndex::new(&state.edges);
+                if phase.builds() {
+                    return Err(Error::Load(crate::LoadError::new(format!(
+                        "phase {} rewrites after the trees are compact",
+                        phase.name
+                    ))));
+                }
                 for (fi, tree) in state.trees.iter_mut().enumerate() {
-                    match phase.walk {
-                        Walk::Each => engine::tag_tree(phase, tree, fi as u32, env, &graph, run)?,
-                        Walk::Flow => {
-                            let edges = engine::run_tree(phase, tree, env, run)?;
-                            state
-                                .edges
-                                .extend(edges.into_iter().map(|e| e.in_file(fi as u32)));
-                        }
-                        Walk::Fixpoint => {
-                            return Err(Error::Load(crate::LoadError::new(format!(
-                                "phase {} rewrites after the trees are compact",
-                                phase.name
-                            ))));
-                        }
-                    }
+                    let fi = fi as u32;
+                    let edges = engine::run_tree(phase, tree, fi, None, env, Some(&graph), run)?;
+                    state.edges.extend(edges.into_iter().map(|e| e.in_file(fi)));
                 }
             }
         }

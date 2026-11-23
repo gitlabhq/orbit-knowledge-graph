@@ -170,7 +170,7 @@ impl<'a> ProjectTree<'a> {
         let phase = env.pipeline.phase_over("project");
         let run = crate::sentinel::Sentinel::disabled();
         for &rules in &env.project.rules {
-            let _ = crate::engine::rewrite_tree_with(phase, &mut self.tree, env, rules, &run);
+            let _ = crate::engine::run_tree(phase, &mut self.tree, 0, Some(rules), env, None, &run);
         }
     }
 

@@ -62,9 +62,12 @@ pub enum Op {
     /// Writes one row of a shape at the first set's node per combination of
     /// the other sets' values.
     Row(u16),
-    /// Records that case `n` of a stage fired, with the first symbol of each
-    /// set.
-    Fired(u16),
+    /// Tags each node of the first set, or the first node of a kind under
+    /// it, with the first symbol of the second.
+    Tag(u32, u16),
+    /// Builds a template at the first set's node from the first symbol of
+    /// each other set: its tag values, then its texts.
+    Build(u16),
 }
 
 /// A `select` pattern and its key, shared by every phase so trees can keep

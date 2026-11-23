@@ -1,9 +1,11 @@
+mod compile;
 mod expr;
 pub mod lang;
 mod machine;
 pub mod pattern;
 pub mod profile;
 mod program;
+mod walk;
 
 use std::any::Any;
 use std::marker::PhantomData;
@@ -17,7 +19,8 @@ use crate::env::Env;
 use crate::modules;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{CallResolution, Compact, Edge, EdgeKind, Mutable, Node, Storage};
-pub use program::{Def, Part, Phase, Pipeline, RowShape, Walk, resolution};
+pub use program::{Def, Part, Phase, Pipeline, RowShape, resolution};
+pub use walk::{run_tree, run_trees, scope_budget};
 
 pub type Tree<S = Compact> = crate::tree::Tree<S>;
 pub type Cursor<'a, S = Compact> = crate::tree::Cursor<'a, S>;
@@ -28,6 +31,10 @@ pub trait Store: Storage<Node = Node> + Sized + 'static {
     fn call<M: Module>(f: &Function<M>) -> Call<M, Self>;
     fn hooks(r: &Registration) -> &Hooks<Self>;
     fn derive(d: &Derive) -> fn(Cursor<'_, Self>) -> u32;
+    /// The tree as one templates can build in, if this storage allows it.
+    fn writable(tree: &mut Tree<Self>) -> Option<&mut Tree<Mutable>>;
+    /// The trees as module indexes read them, if this storage is theirs.
+    fn compact(trees: &[Tree<Self>]) -> Option<&[Tree<Compact>]>;
 }
 
 impl Store for Compact {
@@ -40,6 +47,12 @@ impl Store for Compact {
     fn derive(d: &Derive) -> fn(Cursor<'_, Self>) -> u32 {
         d.compact
     }
+    fn writable(_: &mut Tree<Self>) -> Option<&mut Tree<Mutable>> {
+        None
+    }
+    fn compact(trees: &[Tree<Self>]) -> Option<&[Tree<Compact>]> {
+        Some(trees)
+    }
 }
 
 impl Store for Mutable {
@@ -51,6 +64,12 @@ impl Store for Mutable {
     }
     fn derive(d: &Derive) -> fn(Cursor<'_, Self>) -> u32 {
         d.mutable
+    }
+    fn writable(tree: &mut Tree<Self>) -> Option<&mut Tree<Mutable>> {
+        Some(tree)
+    }
+    fn compact(_: &[Tree<Self>]) -> Option<&[Tree<Compact>]> {
+        None
     }
 }
 
@@ -221,8 +240,9 @@ impl<'t, S: Store> Indexed<'t, S> {
         trees[fi as usize]
             .indexes
             .piece(phase.index_count, id as usize, || {
-                let mut run = Run::new(trees, fi, env, phase, budget, budget);
-                phase.piece(&mut run, Cursor::new(trees, fi, 0), id)
+                let rules = env.rules_index(&trees[fi as usize].label);
+                let mut run = Run::new(trees, fi, rules, env, phase, budget, budget);
+                walk::piece(phase, &mut run, Cursor::new(trees, fi, 0), id)
             })
     }
 
@@ -567,8 +587,8 @@ pub struct Run<'t, S: Store = Compact> {
     data: &'t [Vals],
     edges: Vec<Edge>,
     rows: Vec<Row>,
-    /// The stage cases that fired at the node, each with what its value wrote.
-    fired: Vec<(u16, Vec<Option<u32>>)>,
+    /// The tree writes of the node being fired, applied once it is done.
+    writes: Vec<Write>,
     states: Box<[Box<dyn Any>]>,
     epochs: [u64; SLOTS],
     reading: u8,
@@ -578,6 +598,7 @@ pub struct Run<'t, S: Store = Compact> {
     round: u64,
     profile: Option<Box<profile::Profile>>,
     roles: &'t [program::Roles],
+    phase_modules: &'t [u8],
     /// The evaluator's stacks, reused by each evaluation of this run.
     machine: Option<machine::Machine<'t, S>>,
     /// Each node's nearest ancestor that is a scope or the root, filled on use.
@@ -588,12 +609,12 @@ impl<'t, S: Store> Run<'t, S> {
     fn new(
         trees: &'t [Tree<S>],
         fi: u32,
+        rules: usize,
         env: &'t Env,
         phase: &'t Phase,
         budget: &'t Sentinel,
         file: &'t Sentinel,
     ) -> Self {
-        let rules = env.rules_index(&trees[fi as usize].label);
         let mut run = Self::detached(trees, fi, &env.lang, &phase.links, budget, file);
         run.max_edges = env.limits.max_file_edges;
         run.lang = rules;
@@ -602,6 +623,7 @@ impl<'t, S: Store> Run<'t, S> {
         run.overrides = phase.overrides.get(rules);
         run.enclosing_kinds = &phase.enclosing;
         run.roles = &phase.roles;
+        run.phase_modules = &phase.modules;
         run
     }
 
@@ -637,7 +659,7 @@ impl<'t, S: Store> Run<'t, S> {
             data: &[],
             edges: Vec::new(),
             rows: Vec::new(),
-            fired: Vec::new(),
+            writes: Vec::new(),
             states: modules::ALL.iter().map(|m| (m.state)()).collect(),
             epochs: [0; SLOTS],
             reading: u8::MAX,
@@ -646,6 +668,7 @@ impl<'t, S: Store> Run<'t, S> {
             round: 0,
             profile: profile::ON.then(Box::default),
             roles: &[],
+            phase_modules: &[],
             machine: None,
             scopes: FxHashMap::default(),
         }
@@ -865,21 +888,39 @@ impl<'t, S: Store> Run<'t, S> {
                 }
             }
             Op::Row(shape) => self.row(shape, args),
-            Op::Fired(case) => {
-                let writes = args
-                    .iter()
-                    .map(|vals| {
-                        vals.iter().find_map(|&v| match v {
-                            Val::Sym(s) => Some(s),
-                            Val::Node(loc) => Some(self.sym_at(loc)).filter(|&s| s != 0),
-                            _ => None,
-                        })
-                    })
-                    .collect();
-                self.fired.push((case, writes));
+            Op::Tag(key, on) => {
+                if let Some(val) = self.first_sym(&args[1]) {
+                    for at in nodes(&args[0]) {
+                        self.writes.push(Write::Tag {
+                            at: at.node,
+                            key,
+                            on,
+                            val,
+                        });
+                    }
+                }
+            }
+            Op::Build(template) => {
+                if let Some(at) = args[0].first().and_then(|v| v.loc()) {
+                    let syms = args[1..].iter().map(|v| self.first_sym(v)).collect();
+                    self.writes.push(Write::Build {
+                        template,
+                        at: at.node,
+                        syms,
+                    });
+                }
             }
         }
         out
+    }
+
+    /// The first symbol of a set: a symbol, or a node's own text.
+    fn first_sym(&self, vals: &Vals) -> Option<u32> {
+        vals.iter().find_map(|&v| match v {
+            Val::Sym(s) => Some(s),
+            Val::Node(loc) => Some(self.sym_at(loc)).filter(|&s| s != 0),
+            _ => None,
+        })
     }
 
     /// One row per combination of the column values; a column with no value
@@ -1068,11 +1109,32 @@ impl<'t, S: Store> Run<'t, S> {
         found
     }
 
-    fn finish(mut self) -> Vec<Edge> {
+    /// Starts the phase's modules on the run's tree.
+    fn start_modules(&mut self) {
+        for &slot in self.phase_modules {
+            (S::hooks(&modules::ALL[usize::from(slot)]).start)(self, slot, 0);
+        }
+    }
+
+    /// Finishes the phase's modules; the edges, without repeats, and rows
+    /// the run wrote, unless it was stopped.
+    fn end(mut self) -> Result<(Vec<Edge>, Vec<Row>), Killed> {
+        if let Some(killed) = self.killed.take() {
+            return Err(killed);
+        }
+        for &slot in self.phase_modules.iter().rev() {
+            (S::hooks(&modules::ALL[usize::from(slot)]).finish)(&mut self, slot);
+        }
+        if let Some(killed) = self.killed.take() {
+            return Err(killed);
+        }
         let mut seen = FxHashSet::default();
         self.edges
             .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.call_resolution)));
-        std::mem::take(&mut self.edges)
+        Ok((
+            std::mem::take(&mut self.edges),
+            std::mem::take(&mut self.rows),
+        ))
     }
 
     pub(crate) fn profiling(&self) -> bool {
@@ -1153,105 +1215,21 @@ fn stamp(epochs: &[u64; SLOTS], mut deps: u8) -> u64 {
 
 /// Runs a tree phase over one file: each module of the phase starts, the walk
 /// runs, then each module finishes in reverse order.
-pub fn run_tree(
-    phase: &Phase,
-    tree: &Tree<Compact>,
-    env: &Env,
-    budget: &Sentinel,
-) -> Result<Vec<Edge>, Killed> {
-    let file = &tree_budget(phase, env, &tree.label);
-    let trees = std::slice::from_ref(tree);
-    let indexes = Indexes::new(&env.lang, trees, &[], &phase.modules);
-    let indexed = Indexed::new(phase, trees, 1, env, budget);
-    let mut run = Run::new(trees, 0, env, phase, budget, file);
-    run.indexes = Some(&indexes);
-    run.indexed = Some(&indexed);
-    let root = tree.root();
-    for &slot in &phase.modules {
-        (Compact::hooks(&modules::ALL[usize::from(slot)]).start)(&mut run, slot, root.index());
-    }
-    phase.flow(&mut run, root, false);
-    for &slot in phase.modules.iter().rev() {
-        if let Some(killed) = run.killed.take() {
-            return Err(killed);
-        }
-        (Compact::hooks(&modules::ALL[usize::from(slot)]).finish)(&mut run, slot);
-    }
-    match run.killed.take() {
-        Some(killed) => Err(killed),
-        None => Ok(run.finish()),
-    }
-}
-
-/// The phase's per-tree budget, on thread CPU time; unbounded when the phase
-/// declares none.
-fn tree_budget(phase: &Phase, env: &Env, label: &str) -> Sentinel {
-    let ms = phase
-        .budget
-        .tree
-        .as_deref()
-        .and_then(|name| env.limits.ms(name))
-        .unwrap_or(u64::MAX);
-    Sentinel::new(phase.label, label, ms).on_thread_cpu()
-}
-
-/// A phase's per-scope budget, a child of `run`.
-pub fn scope_budget(phase: &Phase, env: &Env, run: &Sentinel) -> Sentinel {
-    let ms = phase
-        .budget
-        .scope
-        .as_deref()
-        .and_then(|name| env.limits.ms(name))
-        .unwrap_or(u64::MAX);
-    run.child(phase.label, "", ms)
-}
-
-/// Runs a family phase: the phase's walk on each file in parallel, over all
-/// the family's trees and the graph so far. Each file has its own memo.
-pub fn run_family(
-    phase: &Phase,
-    trees: &[Tree<Compact>],
-    project: Option<u32>,
-    edges: &[Edge],
-    graph: &EdgeIndex,
-    env: &Env,
-    budget: &Sentinel,
-) -> Result<Vec<Edge>, Killed> {
-    use rayon::prelude::*;
-    let scope = scope_budget(phase, env, budget);
-    let indexes = Indexes::new(&env.lang, trees, edges, &phase.modules);
-    let files = project.unwrap_or(trees.len() as u32) as usize;
-    let indexed = Indexed::new(phase, trees, files, env, &scope);
-    let edges: Vec<Result<Vec<Edge>, Killed>> = (0..files)
-        .into_par_iter()
-        .map(|fi| {
-            let file = tree_budget(phase, env, &trees[fi].label);
-            let mut run = Run::new(trees, fi as u32, env, phase, &scope, &file);
-            run.graph = Some(graph);
-            run.graph_fi = fi as u32;
-            run.indexes = Some(&indexes);
-            run.indexed = Some(&indexed);
-            run.files = files as u32;
-            run.project = project;
-            let root = Cursor::new(trees, fi as u32, 0);
-            for &slot in &phase.modules {
-                (Compact::hooks(&modules::ALL[usize::from(slot)]).start)(&mut run, slot, 0);
-            }
-            phase.flow(&mut run, root, false);
-            for &slot in phase.modules.iter().rev() {
-                (Compact::hooks(&modules::ALL[usize::from(slot)]).finish)(&mut run, slot);
-            }
-            match run.killed.take() {
-                Some(killed) => Err(killed),
-                None => Ok(run.finish()),
-            }
-        })
-        .collect();
-    let mut out = Vec::new();
-    for result in edges {
-        out.extend(result?);
-    }
-    Ok(out)
+/// A write to the tree a run reads, applied after the node that made it:
+/// a tag on `at`, or on the first node of kind `on` under it; or a template
+/// built at `at` from the first symbol of each of its sets.
+enum Write {
+    Tag {
+        at: u32,
+        key: u32,
+        on: u16,
+        val: u32,
+    },
+    Build {
+        template: u16,
+        at: u32,
+        syms: Vec<Option<u32>>,
+    },
 }
 
 /// A row a `row:` hook emitted at `at`: the values of its shape's columns,
@@ -1260,83 +1238,6 @@ pub struct Row {
     pub shape: u16,
     pub at: Loc,
     pub values: Box<[Option<Val>]>,
-}
-
-/// Runs a graph phase: the phase's walk on every tree, the project tree
-/// included and each root visited, in parallel with the graph so far.
-pub fn run_graph(
-    phase: &Phase,
-    trees: &[Tree<Compact>],
-    project: u32,
-    edges: &[Edge],
-    env: &Env,
-    budget: &Sentinel,
-) -> Result<Vec<Row>, Killed> {
-    use rayon::prelude::*;
-    let scope = scope_budget(phase, env, budget);
-    let graph = EdgeIndex::new(edges);
-    let indexes = Indexes::new(&env.lang, trees, edges, &phase.modules);
-    let indexed = Indexed::new(phase, trees, project as usize, env, &scope);
-    let rows: Vec<Result<Vec<Row>, Killed>> = (0..trees.len())
-        .into_par_iter()
-        .map(|fi| {
-            let file = tree_budget(phase, env, &trees[fi].label);
-            let mut run = Run::new(trees, fi as u32, env, phase, &scope, &file);
-            run.graph = Some(&graph);
-            run.graph_fi = fi as u32;
-            run.indexes = Some(&indexes);
-            run.indexed = Some(&indexed);
-            run.files = project;
-            run.project = Some(project);
-            let root = Cursor::new(trees, fi as u32, 0);
-            phase.flow(&mut run, root, true);
-            match run.killed.take() {
-                Some(killed) => Err(killed),
-                None => Ok(std::mem::take(&mut run.rows)),
-            }
-        })
-        .collect();
-    let mut out = Vec::new();
-    for result in rows {
-        out.extend(result?);
-    }
-    Ok(out)
-}
-
-/// Applies a rewrite phase to one tree in place.
-pub fn rewrite_tree(
-    phase: &Phase,
-    tree: &mut Tree<Mutable>,
-    env: &Env,
-    budget: &Sentinel,
-) -> Result<(), Killed> {
-    let file = tree_budget(phase, env, &tree.label);
-    phase.rewrite(tree, env, budget, &file)
-}
-
-/// Applies a rewrite phase to one tree with the rules at index `rules`.
-pub fn rewrite_tree_with(
-    phase: &Phase,
-    tree: &mut Tree<Mutable>,
-    env: &Env,
-    rules: usize,
-    budget: &Sentinel,
-) -> Result<(), Killed> {
-    let file = tree_budget(phase, env, &tree.label);
-    phase.rewrite_with(tree, env, rules, budget, &file)
-}
-
-/// Sets the tags of a tag-only phase on one tree.
-pub fn tag_tree<S: Store>(
-    phase: &Phase,
-    tree: &mut Tree<S>,
-    fi: u32,
-    env: &Env,
-    graph: &EdgeIndex,
-    budget: &Sentinel,
-) -> Result<(), Killed> {
-    let file = tree_budget(phase, env, &tree.label);
-    phase.tag(tree, fi, env, graph, budget, &file)
 }
 
 /// Which nodes of the graph have an edge of each kind, by direction.

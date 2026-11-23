@@ -10,7 +10,7 @@ use smallvec::SmallVec;
 use super::expr::{Expr, Op, apply};
 use std::time::{Duration, Instant};
 
-use super::program::{Case, Cases, DefImpl, Scratch};
+use super::program::{Cases, DefImpl, Scratch};
 use super::{Cursor, FnId, Key, Loc, MAX_FIXPOINT_ROUNDS, Memo, Run, Store, Val, Vals, truthy};
 
 type Args = SmallVec<[Vals; 3]>;
@@ -34,7 +34,7 @@ struct Pending {
 /// fired and the union of their values.
 struct Trying<'e, S: Store> {
     list: &'e [u16],
-    cases: &'e Cases<Case>,
+    cases: &'e Cases,
     at: usize,
     args: Args,
     w: Scratch<S>,
@@ -146,12 +146,7 @@ pub(super) fn call_def<'t, S: Store>(run: &mut Run<'t, S>, def: u16, args: &[Val
 }
 
 /// Fires `cases` at `node`: each group's first case that holds.
-pub(super) fn fire<'t, S: Store>(
-    run: &mut Run<'t, S>,
-    cases: &'t Cases<Case>,
-    slots: usize,
-    node: Loc,
-) {
+pub(super) fn fire<'t, S: Store>(run: &mut Run<'t, S>, cases: &'t Cases, slots: usize, node: Loc) {
     let mut m = run.machine.take().unwrap_or_default();
     m.try_cases(
         run,
@@ -444,7 +439,7 @@ impl<'e, S: Store> Machine<'e, S> {
             .and_then(|o| o.get(&def).copied())
             .unwrap_or(def);
         let d = &fns[usize::from(def)];
-        let key: Key = (FnId(u16::MAX - def), d.key(run, &args));
+        let key: Key = (FnId(u16::MAX - def), d.key(&args));
         match run.memo.entries.get(&key) {
             Some(Memo::Busy(partial)) => {
                 let partial = partial.clone();
@@ -531,13 +526,7 @@ impl<'e, S: Store> Machine<'e, S> {
     }
 
     /// Queues trying `cases` on `args`, whose first set holds one value.
-    fn try_cases<'t>(
-        &mut self,
-        run: &mut Run<'t, S>,
-        cases: &'e Cases<Case>,
-        slots: usize,
-        args: Args,
-    ) {
+    fn try_cases<'t>(&mut self, run: &mut Run<'t, S>, cases: &'e Cases, slots: usize, args: Args) {
         let node = args[0].first().and_then(|v| v.loc());
         let kind = node.map(|h| Cursor::new(run.trees, h.fi, h.node).kind());
         let list = kind
@@ -699,7 +688,7 @@ fn attempted<S: Store>(run: &mut Run<'_, S>, t: &Trying<'_, S>, fired: bool) {
     let total = started.elapsed();
     run.profile_rule(
         m as *const _ as usize,
-        m.src(),
+        &m.src,
         fired,
         t.matched.unwrap_or(total),
         total,
