@@ -1,0 +1,62 @@
+"bench/manifests/standalone-ch.yaml":
+- category: contract
+  reason: "The manifest mirrors the e2e chart StatefulSet so patch-ch-dicts.sh works unchanged"
+  preview: "# Standalone ClickHouse for the RA bench harness."
+  hash: 71a95be666cfdd17
+  lines: 2
+"bench/scripts/deploy-mock-git-server.sh":
+- category: invariant
+  reason: "An unpinned upgrade pulls a newer chart whose values schema mismatches the release; the code cannot show that risk"
+  preview: "# Pin to the installed chart version to avoid schema mismatches."
+  hash: db6a50e23ef6274a
+  lines: 1
+"bench/scripts/import-dump-job.sh":
+- category: security
+  reason: "Containment rule that the datalake dump never leaves GCP"
+  preview: "# Submit an in-cluster Job that imports the datalake dump from GCS into"
+  hash: 813fdf759faefbcb
+  lines: 3
+"bench/scripts/infra.sh":
+- category: upstream
+  reason: "The Kubernetes and Helm Terraform providers cannot plan before the cluster exists, which forces a two-phase apply."
+  preview: "# Two-phase apply: the kubernetes/helm providers need the cluster to"
+  hash: 8f549ce472a13e5f
+  lines: 3
+- category: invariant
+  reason: "Cert-manager CRs need the CRDs from phase 2, so this order is required; the order alone does not say why"
+  preview: "# Phase 3: cert-manager CRs (need CRDs from phase 2)."
+  hash: 07546babbefc1681
+  lines: 1
+- category: invariant
+  reason: "Checkpoint tables live in the graph DB and grants survive DROP DATABASE, so a wipe re-indexes safely"
+  preview: "# Wipe the graph DB (keep datalake) and restart GKG. Dropping and"
+  hash: e0deb4377e29c870
+  lines: 4
+"bench/scripts/provision.sh":
+- category: upstream
+  reason: "Kubernetes volumeClaimTemplates are immutable, so the StatefulSet must be deleted before re-apply"
+  preview: "# StatefulSet volumeClaimTemplates are immutable; delete before re-appl…"
+  hash: 3b13559108977ec3
+  lines: 1
+- category: invariant
+  reason: "Passwords must be hex so sed and SQL quoting never break"
+  preview: "# --- 4. Create databases and users ---"
+  hash: 334f2d4cfa78fbc6
+  lines: 2
+- category: invariant
+  reason: "The dump keeps old watermarks, so without the epoch reset the dispatcher never sees the data"
+  preview: "# --- 8. Reset dispatcher checkpoints to epoch so it re-indexes all dum…"
+  hash: 99a5bbbbfe064c54
+  lines: 3
+"bench/scripts/run-corpus.sh":
+- category: invariant
+  reason: "A top-level group path is required so queries see the full namespace"
+  preview: "# Use a top-level group path so queries see the full namespace, not a s…"
+  hash: 60bb8613c5a2d242
+  lines: 1
+"bench/scripts/slos.sh":
+- category: invariant
+  reason: "Code tasks are excluded from the SDLC success rate because empty repos retry and dead-letter by design"
+  preview: "# --- 2. Messages processed (Cloud Monitoring counter, all pods) ---"
+  hash: 7f09df60b0680137
+  lines: 2

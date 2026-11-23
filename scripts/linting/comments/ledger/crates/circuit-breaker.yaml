@@ -1,0 +1,6 @@
+"crates/circuit-breaker/src/breaker.rs":
+- category: invariant
+  reason: "A non-counted error still closes a half-open circuit because the service answered; signatures cannot show this"
+  preview: "/// Like [`call`](Self::call), but `classifier` decides which errors"
+  hash: 9c2382c6d648ba18
+  lines: 4

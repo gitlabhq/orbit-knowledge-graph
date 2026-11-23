@@ -1,0 +1,997 @@
+"crates/indexer/duckdb/src/lib.rs":
+- category: invariant
+  reason: "All transforms share one in-memory database so the process runs a single DuckDB thread pool"
+  preview: "/// Every transform shares one in-memory database, so the process runs …"
+  hash: 52244cb817fd7c87
+  lines: 1
+- category: invariant
+  reason: "The lock only guards a clone, so recovering a poisoned lock is safe"
+  preview: "// The lock only guards cloning, so a panic while it is held leaves no …"
+  hash: f1f165e1ddaac29b
+  lines: 1
+"crates/indexer/src/analytics/context.rs":
+- category: invariant
+  reason: "The indexer cannot tell scheduled from manual backfills, so campaign dispatches map to Scheduled"
+  preview: "/// What triggered an indexing run. The indexer can't tell a scheduled"
+  hash: c25d31b06ceddd17
+  lines: 3
+- category: contract
+  reason: "The Iglu schemas cap these fields at i64::MAX, so values clamp instead of wrapping negative"
+  preview: "/// Clamp to `i64::MAX` so an over-range count can't wrap to a negative,"
+  hash: 5535bb2a58b22c1f
+  lines: 2
+"crates/indexer/src/analytics/observer.rs":
+- category: contract
+  reason: "Errored and no-op runs are skipped so the cost-attribution dataset and collector stay clean."
+  preview: "//! [`SnowplowIndexingObserver`] accumulates per-dispatch stats and, on"
+  hash: 4ed02613030dedc1
+  lines: 6
+- category: invariant
+  reason: "The scheduler re-dispatches every namespace each minute, so idle runs must not emit analytics events"
+  preview: "/// A run that read and wrote nothing is an idle incremental poll: the …"
+  hash: 91198d34277b45db
+  lines: 3
+"crates/indexer/src/checkpoint.rs":
+- category: contract
+  reason: "The pipeline appends .plan_name to this prefix, and namespace checkpoints share the prefix plus a dot"
+  preview: "/// The checkpoint key prefix for a given namespace, e.g. `ns.100`."
+  hash: 3728151e36450df1
+  lines: 4
+- category: invariant
+  reason: "The floor is persisted so a resumed run rebuilds the same window"
+  preview: "/// `floor` is `None` for a backfill (start of time); it is persisted s…"
+  hash: 018944296b98b06f
+  lines: 1
+- category: invariant
+  reason: "A cursored checkpoint must resume its original window and never widen to the full range"
+  preview: "/// A cursored checkpoint must resume its original window, never widen …"
+  hash: 347dd35c86241970
+  lines: 1
+- category: invariant
+  reason: "A page write from an overlapping run must not hide a completion, so indexed_at uses its own rule"
+  preview: "// The newest row wins per key, except `indexed_at`: a page write from …"
+  hash: 3a7325f70c198705
+  lines: 2
+- category: upstream
+  reason: "ClickHouse rejects async inserts on quorum-write clusters, so single-row inserts pin async elsewhere"
+  preview: "// Single-row inserts must pin async batching regardless of durability,…"
+  hash: 91ade09fa369fb25
+  lines: 3
+- category: invariant
+  reason: "A flush-time now64 default would let a buffered progress row outrank a later completion."
+  preview: "/// Flush-time `now64` defaults would let a buffered progress row outra…"
+  hash: d9fb5b96965ae93f
+  lines: 1
+"crates/indexer/src/clickhouse/writer.rs":
+- category: invariant
+  reason: "Async_insert is pinned so many small per-page inserts coalesce into fewer parts"
+  preview: "/// Both variants pin `async_insert` so the many small per-page inserts…"
+  hash: a5a1097bde9dfd7a
+  lines: 1
+- category: upstream
+  reason: "ClickHouse insert error codes are not stable enough to classify, so all transient inserts retry"
+  preview: "/// Blanket-retries a transient ClickHouse insert (its error codes are …"
+  hash: 92e2178d8d6aa815
+  lines: 1
+"crates/indexer/src/engine/durability.rs":
+- category: invariant
+  reason: "Durable is required where a dropped write is unrecoverable because the watermark advances without NATS retry"
+  preview: "/// Whether a write blocks until the store confirms it durably landed. …"
+  hash: cccf6b4d9897f676
+  lines: 2
+- category: invariant
+  reason: "Full runs must persist completion while incremental runs may lose it; the struct cannot show why"
+  preview: "/// Full: data writes coalesce server-side (Durable), completion must p…"
+  hash: 88210432cd4db309
+  lines: 1
+"crates/indexer/src/engine/handler.rs":
+- category: tool-read
+  reason: "Rustdoc compiles and runs the doc example as a doctest"
+  preview: "//! Handlers process messages from specific topics."
+  hash: 23821bc0f2da852f
+  lines: 21
+- category: contract
+  reason: "The engine redelivers this variant without spending an attempt or dead-lettering; the variant cannot show that."
+  preview: "/// Never got capacity to run; redelivered without spending an attempt …"
+  hash: 77141aa734c639dd
+  lines: 1
+- category: contract
+  reason: "The name is a metrics label and a config lookup key, so it must stay stable"
+  preview: "/// Should be a stable identifier; used for metrics labeling and config…"
+  hash: 25ea5f607de28f99
+  lines: 1
+"crates/indexer/src/engine/mod.rs":
+- category: tool-read
+  reason: "Rustdoc compiles the no_run doc example as a doctest"
+  preview: "//! The engine subscribes to topics, dispatches messages to handlers, a…"
+  hash: 5ffe5defde57e63e
+  lines: 30
+- category: tool-read
+  reason: "Rustdoc compiles and runs the doc example as a doctest"
+  preview: "/// Builder for constructing an [`Engine`]."
+  hash: dd71d6e96ae541a4
+  lines: 19
+- category: tool-read
+  reason: "Rustdoc compiles and runs the doc example as a doctest"
+  preview: "/// The ETL engine that processes messages through registered handlers."
+  hash: 8218b5989e47716b
+  lines: 25
+- category: invariant
+  reason: "The outcome precedence order decides retries and dead-letters; violating it changes delivery silently."
+  preview: "/// Precedence: Exhausted > Dropped > RetryRequested > Backpressure > T…"
+  hash: fbe63efa4ea15260
+  lines: 3
+- category: invariant
+  reason: "Contention must not spend a delivery attempt, so this branch must skip the redeliver check"
+  preview: "// Skips the `should_redeliver` check below: contention must not spend …"
+  hash: 84fc20f7cc5133c1
+  lines: 1
+- category: invariant
+  reason: "MockHandler rewrites deserialization errors, so this test needs its own handler to return the real variant"
+  preview: "/// `MockHandler` rewrites deserialization errors as processing errors,…"
+  hash: a8142f3f3bb6baea
+  lines: 2
+- category: invariant
+  reason: "Without the inflight permit gate, NATS ack_wait timeouts cause infinite redelivery"
+  preview: "/// Validates the backpressure mechanism in the listen loop."
+  hash: 841bc82b0eea2819
+  lines: 5
+"crates/indexer/src/engine/retry.rs":
+- category: invariant
+  reason: "The test runs in real time so a final-attempt retry proves no backoff sleep happens"
+  preview: "// Real time (no start_paused): a final-attempt Retry must exhaust with…"
+  hash: 107d83dd0bdeb51c
+  lines: 1
+"crates/indexer/src/engine/types.rs":
+- category: invariant
+  reason: "Subscription identity uses only stream and subject; other fields do not affect Hash or Eq"
+  preview: "/// Identity (Hash/Eq) uses only `stream` + `subject`. The remaining fi…"
+  hash: 7490af6e9ba7da62
+  lines: 2
+- category: invariant
+  reason: "With no retry policy a transient failure is acked, not retried; the Option cannot show that"
+  preview: "/// The global retry policy, or `None` when no retry is configured (a t…"
+  hash: a40f6d46fd927b12
+  lines: 2
+- category: tool-read
+  reason: "Rustdoc compiles and runs the doc example as a doctest"
+  preview: "/// A message envelope containing payload and metadata."
+  hash: af9e2392b8b44d9c
+  lines: 26
+- category: invariant
+  reason: "The attempt count starts at 1, which retry checks rely on; an off-by-one fails silently"
+  preview: "/// Starts at 1."
+  hash: 8e4d512d8fb11347
+  lines: 1
+- category: tool-read
+  reason: "Rustdoc compiles and runs the doc example as a doctest"
+  preview: "/// A typed event that can be published to a specific subscription."
+  hash: 6b41a5a09aacad9b
+  lines: 23
+"crates/indexer/src/engine/worker_pool.rs":
+- category: invariant
+  reason: "The group permit must be taken before the global permit, or a group waiter reserves global capacity"
+  preview: "/// Acquires the group permit first, then the global permit. This order…"
+  hash: dc78315827db5d9c
+  lines: 4
+"crates/indexer/src/locking.rs":
+- category: invariant
+  reason: "The std Mutex is never held across an await; renew takes &self because index_project borrows the guard"
+  preview: "// std Mutex, never held across an await: renew is &self because index_…"
+  hash: b30ce39e4c970ec7
+  lines: 1
+- category: invariant
+  reason: "After a lost lock the key belongs to another holder, so drop must not release it"
+  preview: "/// Drop without releasing: after `LockError::Lost` the key belongs to …"
+  hash: 4d34fe431f845d5e
+  lines: 1
+"crates/indexer/src/modules/code/arrow_converter.rs":
+- category: invariant
+  reason: "The tag cache is the last reader of node payloads, so release must follow it"
+  preview: "// The tag cache is the last reader of the definition and import payloa…"
+  hash: 7f828b41383ffd08
+  lines: 2
+- category: invariant
+  reason: "These columns are constant per batch, an indexer fact, so they stay out of the ontology"
+  preview: "/// Constant for every row in a batch, so the wire encoding collapses e…"
+  hash: 070f14c86e29eaa1
+  lines: 2
+- category: contract
+  reason: "Only the wire encoding changes; the ClickHouse column stays Array(String)"
+  preview: "// A handful of tag values repeat across every edge row. Only"
+  hash: ca59dec854278c65
+  lines: 2
+- category: contract
+  reason: "Project_id and branch exist only on gl_code_edge; other edge tables reject them"
+  preview: "// Columns that only exist on gl_code_edge. Sub-batches going"
+  hash: 61a10f67f6e0dcc6
+  lines: 2
+- category: invariant
+  reason: "Take would copy the whole batch while the original is live, so single-table routing avoids it"
+  preview: "// Every semantic edge kind usually routes to one table, and `take`"
+  hash: caedcfd54186476d
+  lines: 2
+- category: magic-value
+  reason: "These pairs were chosen because their unmasked FxHash sets the high bit; the literals cannot say so"
+  preview: "// Project/branch pairs whose unmasked FxHash output has the"
+  hash: 59787ded748efb8c
+  lines: 2
+"crates/indexer/src/modules/code/handler.rs":
+- category: contract
+  reason: "The dispatcher filter ignores branch, so any non-empty sentinel satisfies the schema and dedupes dispatch"
+  preview: "/// Sentinel branch value written to the checkpoint when the project is"
+  hash: d2dd5bdf2e17445e
+  lines: 5
+- category: magic-value
+  reason: "A timed-out job is likely transiently slow, so the policy retries once before dead-letter"
+  preview: "/// A timed-out job is likely transiently slow: retry once, then dead-l…"
+  hash: 9e0cc9dd31307d90
+  lines: 1
+- category: invariant
+  reason: "The heartbeat lives in this future so it cannot leak and ticks through the blocking parse"
+  preview: "/// Heartbeat lives in this future (not a spawned task), so it can't le…"
+  hash: a962dd4fd2ef5a1e
+  lines: 1
+- category: invariant
+  reason: "A project gone from Rails is terminal and acked to avoid DLQ churn from a stale dispatcher view"
+  preview: "/// Returns `Ok(Some((branch, project_info)))` when the branch is known,"
+  hash: 853a7001a333bee5
+  lines: 5
+- category: invariant
+  reason: "Without a checkpoint the dispatcher republishes the deleted project forever."
+  preview: "// Mirror the empty-repository path: write a checkpoint so the"
+  hash: f376838b02952135
+  lines: 4
+- category: invariant
+  reason: "Redeliveries share one dispatch, so counting each would exhaust MAX_CODE_ATTEMPTS"
+  preview: "// Redeliveries share one dispatch; counting each would exhaust MAX_COD…"
+  hash: ab303f6668efa8f1
+  lines: 1
+"crates/indexer/src/modules/code/metrics.rs":
+- category: invariant
+  reason: "Queue time is off the work budget, so without this metric a starved pod is invisible"
+  preview: "/// Queue time is off the work budget, so without this a starved pod is…"
+  hash: 6760c58247b5c6cd
+  lines: 1
+- category: contract
+  reason: ".ts maps to type_script here but java_script in timing metrics, so dashboards must not join them"
+  preview: "/// Path-based because files skip or fault before parsing. `.ts` is `ty…"
+  hash: efe97e28b877c9d6
+  lines: 1
+"crates/indexer/src/modules/code/pipeline.rs":
+- category: invariant
+  reason: "Dropping the timed-out fetch is the only stop; nothing in that phase polls the token"
+  preview: "// Dropping the timed-out fetch is what stops it; nothing in that phase…"
+  hash: 54d4ca8cda6e6e9a
+  lines: 1
+- category: invariant
+  reason: "Fetch plus the longest lane wait can reach ack_wait, so the delivery must refresh first."
+  preview: "// Fetch plus the longest allowed wait can reach ack_wait; refresh the …"
+  hash: a9e5743c9d102b1d
+  lines: 1
+- category: invariant
+  reason: "The blocking parse outlives the dropped future, so it must be cancelled explicitly to stop"
+  preview: "// The blocking parse outlives the dropped future; cancel makes it bail."
+  hash: f5a2f346a849ad69
+  lines: 1
+- category: invariant
+  reason: "The fetch slot must be released before queuing for an indexing slot to pipeline downloads"
+  preview: "// Release the fetch slot before the caller queues for an indexing slot…"
+  hash: 5ac65fef6b3cbd43
+  lines: 2
+- category: invariant
+  reason: "A reserved big lane stops many small repos from starving monorepos; the split alone cannot show why."
+  preview: "// A reserved big lane keeps a flood of small repos from starving monor…"
+  hash: 188168e3b8086abf
+  lines: 1
+- category: invariant
+  reason: "A cancelled run yields a partial graph with no error, so the fatal-error guard misses it"
+  preview: "// A cancelled run yields a partial graph with no error, so the fatal-e…"
+  hash: e520c0d4291b3e2a
+  lines: 1
+- category: invariant
+  reason: "The parse runs on plain threads, so blocking for a slot caps a job at write_max_concurrent slices"
+  preview: "// The parse runs on plain threads: block for a slot so a job holds at …"
+  hash: 9b201081fa141faa
+  lines: 1
+"crates/indexer/src/modules/code/repository/cache.rs":
+- category: contract
+  reason: "The resolver classifies this variant as an empty repository, not a retryable failure."
+  preview: "/// Archive stream ended before any entry was extracted. Surfaced so the"
+  hash: 70f18cd72b7b3cde
+  lines: 3
+- category: invariant
+  reason: "The resolver treats a too-large repo as empty and checkpoints it, not as a retryable failure"
+  preview: "/// The repository exceeded the total-bytes cap. Like `EmptyArchive`, t…"
+  hash: 693cdfd6174691a9
+  lines: 2
+- category: invariant
+  reason: "The detached blocking reader outlives a dropped future, so only the flag stops its next read"
+  preview: "// The detached blocking reader outlives a dropped future; the flag mak…"
+  hash: 91f00d4ee07a6f26
+  lines: 1
+- category: invariant
+  reason: "The blocking task owns the TempDir so a dropped future never writes into a cleaned directory"
+  preview: "// The blocking task owns the `TempDir` for the duration of extraction …"
+  hash: 09894129bd2e7611
+  lines: 4
+- category: magic-value
+  reason: "Two 6-byte files against an 8-byte cap make the second file trip the cap mid-stream"
+  preview: "// Two 6-byte files: the first fits, the second trips the 8-byte total …"
+  hash: 6025d720213fab0f
+  lines: 1
+- category: upstream
+  reason: "GzDecoder fails on a truncated header with an UnexpectedEof-shaped error, which the three bytes trigger"
+  preview: "// First 3 bytes of a gzip header only. GzDecoder fails mid-read with"
+  hash: 26c1b038d5c6f1b0
+  lines: 2
+- category: invariant
+  reason: "Resolver input files must survive the filter even though they are not parsable source"
+  preview: "// Resolver inputs: must survive even though they aren't"
+  hash: efe7e23d86f2f686
+  lines: 4
+"crates/indexer/src/modules/code/repository/mod.rs":
+- category: contract
+  reason: "Orbit-server's content resolver uses this module to parse the Workhorse wire format, so it stays pub"
+  preview: "// pub: consumed by orbit-server's content resolver for Workhorse wire …"
+  hash: b427fbf4bc661612
+  lines: 1
+"crates/indexer/src/modules/code/repository/resolver.rs":
+- category: invariant
+  reason: "Empty repositories must be checkpointed as indexed empty, not retried"
+  preview: "/// `EmptyRepository` is a recognized terminal outcome: the project rec…"
+  hash: 350b6dcbb8bb41e3
+  lines: 3
+- category: invariant
+  reason: "The conversion exists only to satisfy the bound; full_download gives up first, so this path is never reached."
+  preview: "// Satisfies the drive bound; full_download GiveUps the real error so t…"
+  hash: 39042bf38dab3ffb
+  lines: 1
+- category: upstream
+  reason: "Rails answers 500, not 404, for a repository that does not exist"
+  preview: "/// Rails raises 500 for a repository that does not exist."
+  hash: 5eb8e32b88533a6f
+  lines: 1
+- category: contract
+  reason: "Dashboards rely on EmptyArchive staying distinct from NotFound to separate real 404s"
+  preview: "/// HTTP 200 OK with an empty or truncated archive body. Distinct from"
+  hash: 7217951f77562617
+  lines: 2
+- category: upstream
+  reason: "Gitaly visibility lag can clear on retry, so only the size cap is permanent."
+  preview: "/// Only the size cap is known to be permanent; the other reasons can be"
+  hash: ee344536e6160bb4
+  lines: 2
+- category: contract
+  reason: "Backfill resolves the branch through project_info first, so a 404 here means no repository or refs"
+  preview: "/// Backfill resolves the branch through `project_info` first, so the p…"
+  hash: 1ac9793ea91cfa13
+  lines: 2
+"crates/indexer/src/modules/code/repository/storage_lease.rs":
+- category: invariant
+  reason: "Losing a lease stops the download only if the work stops on drop; the legacy extractor needs its own flag"
+  preview: "//! Cross-pod cap on concurrent archive downloads per Gitaly storage."
+  hash: 243bac272e9f02be
+  lines: 4
+- category: invariant
+  reason: "An expired lease may already be another pod's slot, so the code fences without a Lost reply"
+  preview: "// An expired lease may already be another pod's slot, so fence even wi…"
+  hash: f7e4a757ff82344d
+  lines: 1
+- category: invariant
+  reason: "Past the stored expiry the key may belong to another pod, so drop leaves it to its TTL"
+  preview: "/// Releases the slot when the run future is dropped mid-work, unless t…"
+  hash: 29be6464976b47d2
+  lines: 2
+"crates/indexer/src/modules/code/stale_data_cleaner.rs":
+- category: invariant
+  reason: "Correct only while gl_edge holds one branch per project; a UNION wedges mutation replay"
+  preview: "// gl_edge has no project_id/branch, so scope by code source_kind: a fl…"
+  hash: ff7581cf73eb00fa
+  lines: 5
+"crates/indexer/src/modules/namespace_deletion/lower.rs":
+- category: upstream
+  reason: "Without FINAL ClickHouse still shows old live rows, so each run would write a new tombstone"
+  preview: "// FINAL reads the latest row per key. A raw scan still sees the old li…"
+  hash: 79d9e71610ede194
+  lines: 2
+"crates/indexer/src/modules/sdlc/datalake.rs":
+- category: upstream
+  reason: "X-ClickHouse-Summary scan figures can exceed the rows the page returned"
+  preview: "/// Storage-scan figures from the `X-ClickHouse-Summary` header. Greate…"
+  hash: 53e5d546c8f0602c
+  lines: 2
+- category: magic-value
+  reason: "The 1000000-byte cap keeps a String column under the 2GB Arrow offset limit and matches ClickHouse's default."
+  preview: "/// Byte cap for retry blocks, keeping a block's String column under th…"
+  hash: 84c7555862c481af
+  lines: 2
+- category: upstream
+  reason: "Arrow output overflows at 2GB, so the retry byte-caps blocks to stay safe for any row width"
+  preview: "// Retry after a datalake failure (the Arrow 2GB overflow): byte-cap"
+  hash: 09ac961317213ac2
+  lines: 2
+- category: upstream
+  reason: "Arrow columns overflow at the 2 GiB i32 offset cap, so retry drops straight to the floor block size"
+  preview: "/// True when a datalake read failed because an Arrow column hit the 2 …"
+  hash: bf22d9136625fdb8
+  lines: 3
+"crates/indexer/src/modules/sdlc/handler/entity.rs":
+- category: invariant
+  reason: "A parent at its first-pass start re-partitions next dispatch, so Ok keeps it out of error metrics"
+  preview: "// A parent still at its first-pass start re-triggers partitioning next…"
+  hash: 3e81ef4e6776b5b6
+  lines: 1
+- category: invariant
+  reason: "Consolidating past a cursored partition silently drops its id range"
+  preview: "/// Parent watermark for a finished partitioned load, or the partitions…"
+  hash: 4f2081bf6b77eaae
+  lines: 2
+"crates/indexer/src/modules/sdlc/paging.rs":
+- category: magic-value
+  reason: "Two pages are resident during read-ahead, so peak indexer memory is about twice this budget"
+  preview: "/// Two pages are resident during read-ahead, so the indexer peak is ab…"
+  hash: d21fc38eaca7ac09
+  lines: 1
+- category: magic-value
+  reason: "The floor stops a page of a few giant rows from turning paging into a row-by-row crawl"
+  preview: "/// Floor for a shrunken limit so a page of a few giant rows cannot tur…"
+  hash: ade11c5ebeafa626
+  lines: 1
+- category: magic-value
+  reason: "Row width is unknown before the first page, so the start size must suit wide rows"
+  preview: "/// Row width is unknown before the first page, so it starts small enou…"
+  hash: 183bdd9b54baf43e
+  lines: 1
+- category: magic-value
+  reason: "Explains why 64 MiB keeps the decode queue small against the memory budget; the literal cannot say it"
+  preview: "/// A few blocks wait in the decode queue while a page fills; 64 MiB ke…"
+  hash: 0ea5d5dfc8f6bbc5
+  lines: 1
+- category: upstream
+  reason: "65409 is the ClickHouse default max_block_size, so a larger hint is a no-op; code cannot show that"
+  preview: "/// ClickHouse's default `max_block_size` in rows; a hint at or above i…"
+  hash: d0163a4de10790cf
+  lines: 1
+"crates/indexer/src/modules/sdlc/partitioning.rs":
+- category: magic-value
+  reason: "Explains why the bucket count is a target and width derives from span; a fixed width collapses narrow ranges"
+  preview: "/// The probe derives its bucket width from the id span to land near th…"
+  hash: e9d68faf1da3fe7e
+  lines: 2
+- category: invariant
+  reason: "Too few cuts on a scope that passed the probe gate means a silent single-threaded fallback"
+  preview: "// Returned rows cleared the probe's `total_rows >= min_rows` gate, so …"
+  hash: 81a861156e28fd3a
+  lines: 1
+- category: invariant
+  reason: "Leading keys let a cut split inside a dominant path by id, which a path-only cut cannot"
+  preview: "/// Buckets the trailing id key, accumulates row counts in sort-key ord…"
+  hash: bd8e79089d99951e
+  lines: 4
+"crates/indexer/src/modules/sdlc/pipeline.rs":
+- category: invariant
+  reason: "Phase times can sum past duration_ms because extract and write overlap; readers of the metric need this"
+  preview: "// Per-phase time can exceed duration_ms: extract and write overlap via…"
+  hash: 5208864dc2a68267
+  lines: 1
+- category: invariant
+  reason: "The read-ahead overlap bounds peak memory at about two pages; code does not state the bound"
+  preview: "// Overlap the next page's read with this page's writes; peak memory is…"
+  hash: 4d0f401484fd1a75
+  lines: 1
+- category: upstream
+  reason: "An Arrow string overflow clears only with small blocks and each halving re-scans, so the retry jumps to the floor"
+  preview: "// An overflow only clears once blocks are small, and each halving step"
+  hash: da8cc2de97fd5523
+  lines: 2
+- category: invariant
+  reason: "Consuming the page keeps it out of the write and read-ahead window, which bounds memory"
+  preview: "/// Groups output rows by destination table so each table is written as…"
+  hash: b4cdba725269ccd7
+  lines: 3
+- category: invariant
+  reason: "The test uses two blocks so the cursor must come from the last block's last row, not row order"
+  preview: "// Two blocks per page so the cursor must come from the last block's"
+  hash: ffce67f7293e9c6c
+  lines: 2
+- category: invariant
+  reason: "Comparing has_more to the plan budget ends a partition early with rows unread; the test guards this silent failure"
+  preview: "// Comparing `has_more` against the plan's budget rather than the query…"
+  hash: 368d9ccdb9bb5f45
+  lines: 2
+"crates/indexer/src/modules/sdlc/plan/build.rs":
+- category: invariant
+  reason: "Build_plans rejects duplicate names, so a clean build is the assertion; the discarded result hides that"
+  preview: "// `build_plans` rejects duplicate names, so building without error is …"
+  hash: e673f2a0524699d7
+  lines: 1
+- category: contract
+  reason: "The reopened state value 5 comes from the Rails ResourceStateEvent enum; no local code can show the source"
+  preview: "// Source of truth: app/models/resource_state_event.rb (`enum :state ..…"
+  hash: 46b5794c042bc57e
+  lines: 1
+- category: upstream
+  reason: "The INNER JOIN form hit a ClickHouse FillingRightJoinSide OOM, so the plan scans siphon_notes bare"
+  preview: "// Bare siphon_notes scan, not the INNER JOIN that caused FillingRightJ…"
+  hash: eda3465ebfbc171e
+  lines: 1
+"crates/indexer/src/modules/sdlc/plan/extract/generated.rs":
+- category: upstream
+  reason: "Postgres date exceeds ClickHouse Date32 range and one bad row poisons the Arrow batch"
+  preview: "// Postgres `date` exceeds ClickHouse `Date32` (1900..2299); one bad ro…"
+  hash: e374d9abb436efb1
+  lines: 1
+- category: upstream
+  reason: "Postgres bytea can hold non-UTF8 bytes that poison the Arrow batch, so invalid values are hex-encoded"
+  preview: "// Postgres `bytea` can hold non-UTF8 bytes; one bad row poisons the Ar…"
+  hash: 37784de80e2fef29
+  lines: 1
+"crates/indexer/src/modules/sdlc/plan/extract/sql.rs":
+- category: contract
+  reason: "The markers stay in the template because PreparedQuery::to_sql in another file renders them at extraction time"
+  preview: "// Re-emit the per-page markers unchanged so `PreparedQuery::to_sql` re…"
+  hash: ce0f403f7bd11443
+  lines: 1
+"crates/indexer/src/modules/sdlc/plan/mod.rs":
+- category: upstream
+  reason: "A bare id range makes ClickHouse rescan the namespace on each page; the composite window avoids that"
+  preview: "/// Half-open `[lower, upper)` window over the sort-key prefix; a bare …"
+  hash: c0a1f86f00967b7e
+  lines: 1
+- category: upstream
+  reason: "ClickHouse prunes the OR-of-ANDs form, while a packed tuple compare full-scans"
+  preview: "/// OR-of-ANDs `(c0 > v0) OR (c0 = v0 AND c1 > v1) …` — ClickHouse prun…"
+  hash: 150312adbaeecf35
+  lines: 1
+- category: contract
+  reason: "The template markers are substituted later by PreparedQuery::to_sql in another module"
+  preview: "// `{{filters}}`/`{{batch_size}}` markers are substituted by `PreparedQ…"
+  hash: 6bd920ab7ee605e5
+  lines: 1
+- category: invariant
+  reason: "Partitions share one worker permit, so an undivided budget puts many pages in flight under one slot"
+  preview: "/// Partitions share the one worker-pool permit the handler holds, so a…"
+  hash: 4c4891f2ce4810d9
+  lines: 2
+- category: magic-value
+  reason: "The share floor exists because smaller pages cost more round trips than they save"
+  preview: "// Below the config minimum the extra round trips cost more than the sm…"
+  hash: 179bf828d66e0119
+  lines: 2
+- category: invariant
+  reason: "The floor must never raise a share above the operator setting; the test guards that silent overread"
+  preview: "// The floor must not raise a share above what the operator configured,…"
+  hash: 663acff1b540ca57
+  lines: 2
+"crates/indexer/src/modules/sdlc/plan/transform.rs":
+- category: contract
+  reason: "Tag values use the key:value token form that edge tag queries read"
+  preview: "/// Tag key prefix; values become `\"status:failed\"` tokens."
+  hash: 3ea85f640ee8437a
+  lines: 1
+- category: contract
+  reason: "Both tag columns are always emitted so the Arrow schema matches the edge table schema"
+  preview: "// Both tag columns always emitted (empty when unused) so the Arrow sch…"
+  hash: a9f4668b3d5cc608
+  lines: 1
+- category: upstream
+  reason: "DuckDB casts the string column for an int literal compare, so ordinal compares fail at runtime"
+  preview: "// DuckDB resolves `<string column> = <int literal>` by casting the col…"
+  hash: 2bd45a63fa344629
+  lines: 2
+"crates/indexer/src/modules/sdlc/transform/system_notes/emit.rs":
+- category: contract
+  reason: "The encoding matches the edge writers in arrow_converter.rs so the shared BatchWriter path carries these rows"
+  preview: "//! Encoding shape matches the existing edge writers in"
+  hash: 427a61dc0ac67718
+  lines: 4
+- category: contract
+  reason: "The Issue family collapses into WorkItem to match the graph schema and the lower_edge_kind precedent"
+  preview: "/// Collapses the `Issue` family into `WorkItem` to match the upstream …"
+  hash: 4c2febf8e13f5648
+  lines: 3
+- category: contract
+  reason: "These values must mirror the edge YAML filenames in config/ontology/edges; no compile check links them"
+  preview: "/// Values must mirror the edge YAML filenames under `config/ontology/e…"
+  hash: 77420bec98143742
+  lines: 1
+- category: invariant
+  reason: "An empty default project makes the resolver decline unqualified references on the row"
+  preview: "/// Full path of the source note's owning project (e.g. `gitlab-org/git…"
+  hash: e95cb9db91ea81e9
+  lines: 5
+- category: contract
+  reason: "The edge YAML declares merged only on MergeRequest and closed on MR or WorkItem; the match must follow it"
+  preview: "// Edge YAML declares `merged` only on MergeRequest, `closed`"
+  hash: 579c05af0ae712d8
+  lines: 2
+- category: invariant
+  reason: "A panic on one bad row would crash-loop the worker, so the indexer data path skips instead"
+  preview: "// Skip (don't `unreachable!`) on an unexpected action: a"
+  hash: 4ea2ef1fb063034f
+  lines: 3
+- category: invariant
+  reason: "Opened emits no edge because no source-of-truth FK exists for the opener; the design choice is not in code"
+  preview: "// `opened` produces no edge: there is no source-of-truth FK for"
+  hash: 960dad8201ccded3
+  lines: 3
+- category: contract
+  reason: "The edge direction follows the ontology and lands in the noteable partition so inbound-degree queries hit it"
+  preview: "// Edge points from the parsed ref (source) to the noteable"
+  hash: 711ccbef43a93e05
+  lines: 6
+- category: invariant
+  reason: "Self-loops are skipped because they pollute degree counts; the filter alone does not say why"
+  preview: "// Skip self-loops (MR !100 \"mentioned in !100\"): they"
+  hash: 278eba7d63bb49e6
+  lines: 2
+- category: contract
+  reason: "Merged.yaml declares only User to MergeRequest, so the test expects a WorkItem noteable to drop"
+  preview: "// `merged.yaml` only declares User → MergeRequest, so a WorkItem"
+  hash: e20bbbfcd9dd8062
+  lines: 2
+- category: contract
+  reason: "Closed.yaml declares no Commit target, so the test expects the edge to drop"
+  preview: "// `closed.yaml` declares no `Commit` target (no `Commit` node yet)."
+  hash: 2f4b715e95170246
+  lines: 1
+"crates/indexer/src/modules/sdlc/transform/system_notes/mod.rs":
+- category: contract
+  reason: "The key must equal the etl.transform value in system_note.yaml; no compile check links them"
+  preview: "/// Registry key for this transform; also the `etl.transform` value in"
+  hash: c971709d2c36f3fc
+  lines: 2
+- category: invariant
+  reason: "A bare gl_edge name writes to the wrong unprefixed table, so the transform must prefix like lower.rs"
+  preview: "// Every write path targets the current schema version's table-set, so …"
+  hash: 0ae14d8af2392164
+  lines: 4
+- category: upstream
+  reason: "Strict ClickHouse rejects an INSERT that omits a no-DEFAULT column, so empty tag lists are sent"
+  preview: "// Strict ClickHouse rejects an INSERT omitting a no-DEFAULT column, so…"
+  hash: a421ef39fc6e3d25
+  lines: 2
+"crates/indexer/src/modules/sdlc/transform/system_notes/parse.rs":
+- category: contract
+  reason: "The regexes follow the Rails SystemNoteService templates, strict on tokens and loose on verbs to survive copy edits"
+  preview: "//! GFM reference extraction for system note bodies."
+  hash: 93075c06c17f1c38
+  lines: 13
+- category: contract
+  reason: "The enum mirrors Rails ICON_TYPES in system_note_metadata.rb; keep the link for drift checks"
+  preview: "/// The Rails `system_note_metadata.action` value. Mirrors `ICON_TYPES`…"
+  hash: 49223eb9c543751a
+  lines: 3
+- category: contract
+  reason: "Reopened edges come from the reopened.yaml ETL, not system notes, so the action is absent by design"
+  preview: "/// Lifecycle actions whose body is a fixed verb (`\"closed\"`, `\"merged\"…"
+  hash: 431c215d01d87cec
+  lines: 11
+- category: contract
+  reason: "The grammar and the 20-segment and 20-digit bounds come from Rails reference patterns and limits"
+  preview: "// Reference token grammar, derived from Rails:"
+  hash: 365a25d60155d029
+  lines: 12
+- category: invariant
+  reason: "Word boundaries on both sides stop a bare hex run from matching inside a URL fragment"
+  preview: "// Commit SHA refs always include a project prefix when cross-project, …"
+  hash: 9111a1f83f6f21b6
+  lines: 3
+- category: contract
+  reason: "The Rails cross_reference template holds one reference, so the parser takes the first match"
+  preview: "/// Extract all entity references from `body` according to `action`."
+  hash: 179e08f9fec9c752
+  lines: 7
+- category: contract
+  reason: "Documents the Rails system-note body template this arm parses; the template lives in another service"
+  preview: "// Lifecycle: body is the bare verb, no cross-entity ref."
+  hash: de660725f3673571
+  lines: 1
+- category: contract
+  reason: "Documents the Rails system-note body template this arm parses; the template lives in another service"
+  preview: "// Body: \"mentioned in <ref>\"."
+  hash: 0b706735f105fa7e
+  lines: 1
+- category: contract
+  reason: "Documents the Rails system-note body template this arm parses; the template lives in another service"
+  preview: "// Body: \"marked as related to <ref>[, <ref>...]\"."
+  hash: 2fd30a858e3cffcb
+  lines: 2
+- category: contract
+  reason: "Documents the Rails system-note body template this arm parses; the template lives in another service"
+  preview: "// Body: \"removed the relation with <ref>\"."
+  hash: ee9b788d33c56883
+  lines: 1
+- category: contract
+  reason: "Documents the Rails system-note body template this arm parses; the template lives in another service"
+  preview: "// Bodies (hierarchies_service):"
+  hash: 4b2ce49b94d3d909
+  lines: 5
+- category: contract
+  reason: "Documents the Rails system-note body template this arm parses; the template lives in another service"
+  preview: "// Bodies:"
+  hash: 47aebb3bb11aa9f8
+  lines: 3
+- category: contract
+  reason: "Documents the Rails system-note body template this arm parses; the template lives in another service"
+  preview: "// Bodies:"
+  hash: 96342ca72c7ef218
+  lines: 3
+- category: contract
+  reason: "Documents the Rails system-note body template this arm parses; the template lives in another service"
+  preview: "// Body: \"added N commit(s)\\n\\n* <short_sha> - <title>\\n...\""
+  hash: 6bdfceb90da0d434
+  lines: 2
+- category: contract
+  reason: "Documents the Rails system-note body template this arm parses; the template lives in another service"
+  preview: "// Body: variants"
+  hash: 2449fa0c416735de
+  lines: 10
+- category: contract
+  reason: "Rails renders the commit list as SHA - TITLE lines, so the parser anchors on the delimiter to avoid false hex hits"
+  preview: "// Rails formats the list as `<li>SHORTSHA - TITLE</li>` lines (HTML, n…"
+  hash: 36f08ce478982e16
+  lines: 5
+- category: contract
+  reason: "Documents the Rails system-note body template this arm parses; the template lives in another service"
+  preview: "// \"enabled an automatic merge when all merge checks for <SHA> pass\""
+  hash: fb091275b9de244e
+  lines: 2
+- category: invariant
+  reason: "Containment actions stay unrouted because the FK path is the source of truth for WorkItem CONTAINS"
+  preview: "// Containment actions are intentionally unrouted: the FK path"
+  hash: 9c576119f5580a5e
+  lines: 3
+- category: invariant
+  reason: "Downstream edge emission relies on MR refs coming before Issue refs; order breaks silently otherwise"
+  preview: "// Emission order (MR refs before Issue refs) is relied on by downstream"
+  hash: dc96b1a29a53b11b
+  lines: 2
+- category: contract
+  reason: "The Rails compare link URL can hold hex fragments, so the test checks the SHA anchor rejects them"
+  preview: "// The trailing `Compare with previous version` link's URL may contain"
+  hash: 4ededd5a31cbcfa7
+  lines: 3
+- category: security
+  reason: "The digit cap stops regex backtracking on hostile input; a Rails IID never exceeds 19 digits"
+  preview: "// The `\\d{1,20}` cap exists to prevent unbounded backtracking on"
+  hash: 513d5b32c9dbac6d
+  lines: 3
+"crates/indexer/src/modules/sdlc/transform/system_notes/resolve.rs":
+- category: upstream
+  reason: "The clickhouse crate puts params in the URL query string, so lookup arrays must stay bounded"
+  preview: "/// The clickhouse crate serializes params into the URL query string, s…"
+  hash: 88df4f18c25a7078
+  lines: 2
+- category: invariant
+  reason: "The root_prefix bound keeps a range scan and limits resolution to same-top-level references"
+  preview: "/// Batch path -> route lookup. Params: `{paths:Array(String)}`. Returns"
+  hash: 9fdb6b3640844299
+  lines: 8
+- category: upstream
+  reason: "The JSON param channel sends a tuple as [200,5], which ClickHouse rejects, so two arrays are zipped server-side"
+  preview: "/// Batch `(target_project_id, iid)` -> MR id lookup. Same `argMax` ded…"
+  hash: b6190509dc483051
+  lines: 7
+- category: invariant
+  reason: "MENTIONS edges partition by the noteable namespace, not this field, so inbound-degree queries hit gl_edge"
+  preview: "/// The traversal_path here is the *resolved ref's* route namespace, wh…"
+  hash: 8014c4311d0eca32
+  lines: 5
+- category: invariant
+  reason: "An empty default project must not enter the path IN list against siphon_routes.path"
+  preview: "/// Skips empty default projects (the path-IN-list can't tolerate an em…"
+  hash: f17b1ee9f5638f33
+  lines: 2
+- category: invariant
+  reason: "Commit refs add no lookup because no Commit node exists yet; the empty arm alone looks like a bug"
+  preview: "// No `Commit` node yet (ADR 013), so commit refs add no lookup work."
+  hash: e8407a6cd97222b6
+  lines: 1
+- category: invariant
+  reason: "An MR and a work item can share project and iid, so the index must key on kind"
+  preview: "// An MR and a work item can share the same (project, iid); the index"
+  hash: 15de36c13f347b6a
+  lines: 2
+"crates/indexer/src/modules/sdlc/transform/system_notes/vendored/icon_types.rs":
+- category: contract
+  reason: "This is a vendored copy of the Rails ICON_TYPES with a pinned source file and update steps."
+  preview: "//! Vendored copy of Rails `SystemNoteMetadata::ICON_TYPES`."
+  hash: 8f6a8810d9a7e53c
+  lines: 14
+- category: contract
+  reason: "The list must stay a subset of Rails ICON_TYPES; new Rails actions log and drop until added here"
+  preview: "/// Subset of `ICON_TYPES` the parser dispatcher knows how to handle as"
+  hash: 9a5eeeb4cac9e8dc
+  lines: 4
+- category: contract
+  reason: "Reopened edges come from the reopened.yaml ETL, not system notes, so the list omits reopened"
+  preview: "/// Lifecycle actions whose body is a fixed verb and which the parser e…"
+  hash: beb04dc6144f4efa
+  lines: 6
+"crates/indexer/src/modules/sdlc/transform/system_notes/vendored/mod.rs":
+- category: contract
+  reason: "Points to the provenance, pinned SHAs, and CI drift-check scripts that keep vendored constants in sync"
+  preview: "//! Vendored upstream constants. See individual module headers for sour…"
+  hash: 7f8e8e13a5addd79
+  lines: 2
+"crates/indexer/src/nats/broker.rs":
+- category: invariant
+  reason: "The retry limit is unused because drive_forever loops without bound by design"
+  preview: "// unused by drive_forever; the loop is unbounded by design"
+  hash: 5fb39e1f87dda299
+  lines: 1
+- category: upstream
+  reason: "Async-nats max_ack_pending 0 means the NATS server default; code cannot show that sentinel"
+  preview: "// ConsumerConfig::max_ack_pending uses 0 to mean \"NATS server default\"…"
+  hash: e6b89dae9c984d96
+  lines: 1
+- category: invariant
+  reason: "Siphon streams skip events after consumer auto-delete by design, because backfill covers history"
+  preview: "// Unmanaged (Siphon) streams: historical data comes from the datalake …"
+  hash: b8448e354bd5da5a
+  lines: 3
+"crates/indexer/src/nats/message.rs":
+- category: upstream
+  reason: "Each NATS in-progress ack resets ack_wait to its full duration"
+  preview: "/// Tells NATS \"I'm still working on this\" so it doesn't redeliver the …"
+  hash: 670324b43a7df253
+  lines: 3
+"crates/indexer/src/nats/mod.rs":
+- category: contract
+  reason: "The subscription string format stream:subject is a config contract; the examples are compiled doctests"
+  preview: "//! NATS JetStream message broker."
+  hash: 68a1b73748482cd2
+  lines: 44
+"crates/indexer/src/nats/versioning.rs":
+- category: invariant
+  reason: "The constant has no writer but GC needs it to delete streams of older schema versions"
+  preview: "// No writer since the KV progress store was removed. Kept so GC delete…"
+  hash: 0a088761a577b036
+  lines: 1
+- category: invariant
+  reason: "A listing error must abort before deletion, or a partial survey can delete a live release's stream"
+  preview: "// A listing error must abort before any deletion: sweeping on a partial"
+  hash: ab95513e8d6ee0f2
+  lines: 2
+"crates/indexer/src/orchestrator/dispatch/code_backfill.rs":
+- category: invariant
+  reason: "Without the cap, one large namespace holds the work queue until it drains"
+  preview: "/// Uncapped, a namespace larger than the window holds the work queue u…"
+  hash: 4174672db9ad77e6
+  lines: 1
+- category: invariant
+  reason: "Only the backfill path sees the whole fleet, so it alone sets the pending-namespace gauge"
+  preview: "// Only this path sees the whole fleet; a CDC dispatch carries a handfu…"
+  hash: 606842bf94c243c4
+  lines: 1
+- category: invariant
+  reason: "Random order stops the remainder from always landing on the same namespaces"
+  preview: "// Random order so the remainder does not always fall on the same names…"
+  hash: f96a6598dc7e8767
+  lines: 1
+- category: invariant
+  reason: "Fetching checkpoints first lets each batch filter on arrival, so memory holds only the remainder"
+  preview: "// Checkpoints first so each project batch is filtered on arrival, hold…"
+  hash: 5e9986ca1f6c8640
+  lines: 1
+- category: invariant
+  reason: "The shuffle makes FIFO consumers interleave namespaces instead of draining one first"
+  preview: "/// Shuffled so FIFO consumption interleaves the namespaces in a window…"
+  hash: 76a85b0c8de510b3
+  lines: 1
+- category: invariant
+  reason: "Recording each publish as it happens stops a mid-batch failure from losing work already sent"
+  preview: "// Recorded as they happen so a failure mid-batch cannot drop what is a…"
+  hash: c25ff46edd5accb0
+  lines: 1
+"crates/indexer/src/orchestrator/dispatch/namespace_indexing.rs":
+- category: contract
+  reason: "An empty targets list means a full sweep; producers and consumers of the request rely on that"
+  preview: "/// Entity targets to reindex; empty means all (a full sweep)."
+  hash: d0f2746dbd4fd693
+  lines: 1
+"crates/indexer/src/orchestrator/max_deliveries.rs":
+- category: upstream
+  reason: "Discard_new_per_subject makes an exhausted message block its subject forever, so the reconciler deletes it"
+  preview: "//! Reconciles NATS JetStream messages that have exhausted `max_deliver…"
+  hash: 5b23acc4b825fb90
+  lines: 7
+- category: contract
+  reason: "The advisory subject is fixed by the NATS wire protocol and is not configurable"
+  preview: "/// Fixed by the NATS wire protocol, not configurable."
+  hash: 3d1c0deeedc0bb31
+  lines: 1
+- category: invariant
+  reason: "The shared queue group makes JetStream deliver each advisory to one replica, so no lock is needed"
+  preview: "/// Shared across replicas so JetStream delivers each advisory to exact…"
+  hash: 0a0dc35e3c0182c4
+  lines: 1
+- category: upstream
+  reason: "Async-nats 0.49 has no typed struct for the max_deliver advisory, so the fields are declared here"
+  preview: "/// `io.nats.jetstream.advisory.v1.max_deliver` fields this trigger nee…"
+  hash: 64cea737910efe54
+  lines: 1
+- category: invariant
+  reason: "Only the versioned Orbit streams allow one message per subject; Siphon streams do not need this"
+  preview: "/// Only GKG's own versioned streams have this failure mode; e.g. Sipho…"
+  hash: afcba4a4300c8172
+  lines: 1
+"crates/indexer/src/orchestrator/scheduled/backfill_sweep.rs":
+- category: invariant
+  reason: "A migration-gated sweep stranded projects missed in the migration window, so the sweep is coverage-driven"
+  preview: "//! Coverage-driven code-backfill sweep."
+  hash: 5c0b7ca82b0c9b9c
+  lines: 8
+- category: invariant
+  reason: "Datalake unreachable is transient, so the tick records it and retries instead of failing the task"
+  preview: "// Datalake unreachable is transient: record the failure and retry next"
+  hash: 550f7ffbf67ba261
+  lines: 2
+"crates/indexer/src/orchestrator/scheduled/code_stale_sweep.rs":
+- category: invariant
+  reason: "The per-tick cap stops a burst of drained namespaces from delaying later dispatch ticks"
+  preview: "/// Capped per tick so a burst of drained namespaces cannot hold up the…"
+  hash: 54d2cd13ca540ee5
+  lines: 1
+"crates/indexer/src/orchestrator/scheduled/namespace/freshness.rs":
+- category: magic-value
+  reason: "The 15-minute margin keeps a late or slow last sweep inside the scan window"
+  preview: "// The last sweep syncs idle entities; the margin keeps a late or slow …"
+  hash: 2e4b02ef35fc202a
+  lines: 1
+- category: upstream
+  reason: "Dropping the OpenTelemetry gauge handle deregisters its callback, so the unused field must stay"
+  preview: "// Dropping the handle deregisters the gauge callback."
+  hash: eaaf890c9e8a9b5c
+  lines: 1
+- category: invariant
+  reason: "Observing only the last run's plans silently drops plans the served ontology no longer has"
+  preview: "// Observing only the last run's plans drops a plan the served ontology…"
+  hash: c3ea4c8e8c160e20
+  lines: 1
+- category: invariant
+  reason: "The global dispatcher targets now every minute, so a global checkpoint is its sync point"
+  preview: "/// The global dispatcher targets the current time every minute, so a g…"
+  hash: cd92786d8f0de1a2
+  lines: 2
+- category: invariant
+  reason: "Merges keep only the newest row version, so the lag is an upper bound counted from the last sync"
+  preview: "/// An upper bound on how far indexed data trails the datalake: merges …"
+  hash: da1d7e7b256872e2
+  lines: 2
+"crates/indexer/src/orchestrator/scheduled/stale_edge_reconciliation.rs":
+- category: invariant
+  reason: "A set cursor means the run is mid-flight and its edges may not have landed yet."
+  preview: "/// A set cursor means the run is mid-flight, so its edges may not have…"
+  hash: 3849c423258479b4
+  lines: 1
+- category: invariant
+  reason: "A _deleted filter inside the dedup lets a superseded row win and retires valid edges"
+  preview: "// A `_deleted` filter inside either dedup would drop a tombstoned newe…"
+  hash: 4f2a62ffd918387a
+  lines: 2
+"crates/indexer/src/schema/metrics.rs":
+- category: contract
+  reason: "Dashboards read the exposed Prometheus name, which differs from the instrument name"
+  preview: "/// Prometheus exposes this as `gkg_schema_migration_phase_total` after…"
+  hash: 74d258f102ec5c72
+  lines: 2
+- category: contract
+  reason: "Version_band caps label cardinality and dashboards read the exposed Prometheus metric names"
+  preview: "/// The `version_band` label buckets the historical version integer into"
+  hash: c3820039a336950f
+  lines: 5
+"crates/indexer/src/testkit/builders.rs":
+- category: magic-value
+  reason: "Tests pin the worker cap so concurrency assertions do not depend on the host CPU count"
+  preview: "/// Worker cap for test engines. Production derives this from the conta…"
+  hash: 1880c4f8d20bfc1f
+  lines: 2
+"crates/indexer/src/testkit/logs.rs":
+- category: upstream
+  reason: "Tracing-core caches callsite interest from the first registering thread, so a second dispatcher is needed"
+  preview: "// With one live dispatcher, tracing-core caches callsite interest from…"
+  hash: f23bc22fc7ecefed
+  lines: 2

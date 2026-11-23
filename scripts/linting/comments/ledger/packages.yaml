@@ -1,0 +1,250 @@
+"packages/agent-plugins-nightly/output-guard/claude.mjs":
+- category: magic-value
+  reason: "Claude Code re-persists results over about 30,000 characters, so the limit stays below that"
+  preview: "// Claude Code re-persists a replaced result over about 30,000 characte…"
+  hash: f09a13b0b9cd17a9
+  lines: 2
+- category: upstream
+  reason: "Claude Code wraps results with persisted-output fields in a preview that hides the tail"
+  preview: "// Without the persisted-output fields Claude Code does not wrap the re…"
+  hash: 38312ef4d6524149
+  lines: 2
+- category: invariant
+  reason: "A guard failure must never disturb the session; the empty catch cannot say why"
+  preview: "// A guard failure must never disturb the session."
+  hash: da3628dd899b8b32
+  lines: 1
+"packages/agent-plugins-nightly/output-guard/core.mjs":
+- category: security
+  reason: "A quoted marker alone must not count as guarded; sizes must add up"
+  preview: "/**"
+  hash: c0e2ae22781cab74
+  lines: 1
+"packages/agent-plugins-nightly/output-guard/pi.mjs":
+- category: invariant
+  reason: "Without the codemode header and status a truncated failure reads as success"
+  preview: "/**"
+  hash: 7077aa205f414a50
+  lines: 1
+- category: invariant
+  reason: "A guard failure must never disturb the session; the empty catch cannot say why"
+  preview: "// A guard failure must never disturb the session."
+  hash: da3628dd899b8b32
+  lines: 1
+"packages/agent-plugins-nightly/search-guard/claude.mjs":
+- category: upstream
+  reason: "Claude Code copies the file as is, so the launcher is resolved at run time"
+  preview: "// Claude Code copies this file as is, so the launcher is found at run …"
+  hash: de536532b757a714
+  lines: 2
+- category: security
+  reason: "State goes only to a private per-user directory; others are rejected"
+  preview: "/** A private per-user directory: the plugin data dir, else `~/.cache/o…"
+  hash: a08e964f2726ce46
+  lines: 1
+- category: security
+  reason: "Write-then-rename replaces a planted symlink instead of following it"
+  preview: "/** Written to a fresh file and renamed over the state, so a planted sy…"
+  hash: 417a67fcf7b5f1ee
+  lines: 1
+"packages/agent-plugins-nightly/search-guard/core.mjs":
+- category: magic-value
+  reason: "Why the lookup budget is 1500 ms and the cap stays inside the hook timeout"
+  preview: "// The whole lookup (git, index listing, grep, context) shares one budg…"
+  hash: f46715fce3f2e5c0
+  lines: 3
+- category: contract
+  reason: "Exit codes of orbit grep, including 75 for a locked graph"
+  preview: "// Exit codes of `orbit grep`: like rg it exits 1 for no match; 75 (EX_…"
+  hash: ecb3adf991a872a0
+  lines: 2
+- category: contract
+  reason: "Orbit stores native Windows paths while git prints forward slashes"
+  preview: "// Orbit stores native paths (`C:\\repo`); git prints `C:/repo`."
+  hash: 8b58c9f0f46355d7
+  lines: 1
+- category: contract
+  reason: "The guard parses orbit context output whose block order differs from grep"
+  preview: "/**"
+  hash: b1bf54c5383a31cc
+  lines: 1
+- category: invariant
+  reason: "A lock held by an index run must fail the lookup at once, not consume the budget"
+  preview: "// A lock held by an index run must fail the lookup now, not hold it un…"
+  hash: c7e4e7ae46b8e91a
+  lines: 1
+- category: invariant
+  reason: "A launcher that prompts must see end of input instead of hanging"
+  preview: "// A launcher that wants to prompt (for a download, say) must see end o…"
+  hash: ba333ed8b85e4e85
+  lines: 1
+- category: invariant
+  reason: "Without a path orbit grep also searches the remote GitLab group over the network"
+  preview: "// Without a path, `orbit grep` also searches the GitLab group behind `…"
+  hash: 73b56f7779c4156a
+  lines: 1
+- category: contract
+  reason: "No match and busy are normal exit codes; any other non-zero is a failure"
+  preview: "// No match and a busy graph are normal: nothing to add, and the next s…"
+  hash: ab6a171e9db1ecde
+  lines: 2
+- category: contract
+  reason: "Grep matching ignores case and underscores, so context needs the exact header name"
+  preview: "// Grep matching ignores case and `_`; context needs the exact name fro…"
+  hash: 118f0bdbc303025b
+  lines: 1
+"packages/agent-plugins-nightly/search-guard/pi.mjs":
+- category: contract
+  reason: "Setup rewrites the placeholder with the launcher this install uses"
+  preview: "// Setup replaces the placeholder with the launcher this install uses: …"
+  hash: e174454dffebbe06
+  lines: 1
+"packages/agent-plugins-nightly/tests/search-guard-core.test.ts":
+- category: contract
+  reason: "Tests pin the CLI output shapes the guard parses so a change fails loudly"
+  preview: "// The guard parses the Orbit CLI's text output. These tests pin the tw…"
+  hash: 8180d168a53d52df
+  lines: 2
+"packages/agent-plugins-nightly/tests/search-guard-support.ts":
+- category: contract
+  reason: "Keep in sync with crates/orbit-cli/tests/no_index.rs, which pins the same shapes"
+  preview: "// Output shaped like the CLI's for `parse_widget`, which lib.rs define…"
+  hash: 3e2e9abb2f3a47df
+  lines: 3
+"packages/agent-plugins/core/calls.ts":
+- category: upstream
+  reason: "Claude Code and OpenCode 1 name the shell tool bash, OpenCode 2 names it shell"
+  preview: "// Claude Code and OpenCode 1 name their shell tool `Bash` or `bash`; O…"
+  hash: d1cbc57c33843c36
+  lines: 1
+"packages/agent-plugins/core/stats.ts":
+- category: contract
+  reason: "The response has no DISTINCT flag, so the derived name is the only signal."
+  preview: "// The response has no DISTINCT flag: a property count is plain only un…"
+  hash: 5d19f85b56b33ef1
+  lines: 1
+"packages/agent-plugins/opencode/index.spec.ts":
+- category: upstream
+  reason: "OpenCode resolves the plugin package at runtime, so the test must stand in for its helpers"
+  preview: "// OpenCode resolves @opencode/plugin at runtime. Stand in for the two …"
+  hash: 2c33a92ace3d8630
+  lines: 1
+"packages/agent-plugins/opencode/index.ts":
+- category: invariant
+  reason: "The UI send must never be awaited or throw, so it cannot slow or fail a tool call"
+  preview: "// Never awaited and never thrown: the UI must not slow down or fail a …"
+  hash: ec703526fb32430b
+  lines: 1
+"packages/agent-plugins/opencode/tui.tsx":
+- category: upstream
+  reason: "OpenCode compiles TUI JSX itself, so the file ships as source and imports only rpc.ts."
+  preview: "// The TUI part of the OpenCode 2 plugin. It ships as source, not bundl…"
+  hash: 89985bde4f32bc74
+  lines: 10
+- category: contract
+  reason: "This must stay in sync with compact() in core/stats.ts."
+  preview: "// 950, 1.2k, 12k, 1.2M. Same as compact() in core/stats.ts."
+  hash: bea3345260d59209
+  lines: 1
+- category: upstream
+  reason: "OpenCode does not await events, so a fast call's end can arrive before its start"
+  preview: "// Calls whose end arrived. Events are not awaited, so a fast call's en…"
+  hash: 8362464c67bfacee
+  lines: 1
+- category: upstream
+  reason: "OpenCode memory storage outlives a plugin reload but timers do not, so stale lines never clear"
+  preview: "// Memory storage outlives a plugin reload but these timers do not, so …"
+  hash: 7ca587d26b96a178
+  lines: 2
+- category: upstream
+  reason: "OpenCode may never send the end of an interrupted call, so session stop must clear lines."
+  preview: "// An interrupted call may never send its end. When a session stops, it…"
+  hash: a27c09fb54f40387
+  lines: 1
+- category: upstream
+  reason: "The slot render runs once, so reads must stay inside JSX expressions to remain reactive."
+  preview: "// render runs once; the reads inside the JSX expressions keep each slo…"
+  hash: 5377b8448dfd2269
+  lines: 1
+"packages/agent-plugins/pi/index.ts":
+- category: upstream
+  reason: "Pi keeps only the tail and names the full file in details; the guard differs"
+  preview: "// Pi keeps only the tail of a long result and names the full file in `…"
+  hash: 9c2bb7c97e82850e
+  lines: 2
+- category: upstream
+  reason: "Older Pi has no renderer hook and reports a throwing extension on every start"
+  preview: "// Older Pi has no renderer hook, and an extension that throws on load …"
+  hash: 7e919508eeff5ebd
+  lines: 1
+"packages/agent-plugins/scripts/build.ts":
+- category: upstream
+  reason: "OpenCode resolves the plugin package at runtime and parts share rpc.ts, so the bundle keeps them external"
+  preview: "// OpenCode resolves @opencode/plugin at runtime, and the server and TU…"
+  hash: 349229a71dd61b9c
+  lines: 2
+- category: upstream
+  reason: "OpenCode compiles TUI JSX with its own OpenTUI, so the TUI ships as source"
+  preview: "// The TUI part ships as source: OpenCode compiles TUI JSX with its own…"
+  hash: 82f900e0f7de8bb3
+  lines: 1
+- category: upstream
+  reason: "Pi provides pi-tui through its own runtime, so the bundle marks it external"
+  preview: "// Pi loads the extension through its own runtime, which provides the p…"
+  hash: 852b163e6454a248
+  lines: 1
+"packages/site/src/components/MobileMenu.tsx":
+- category: contract
+  reason: "The selector depends on the top bar search button that phones hide behind the menu"
+  preview: "// The search dialog lives in the top bar and opens from its button, wh…"
+  hash: 079eb4b6828ba35b
+  lines: 1
+"packages/site/src/next/Scenes.tsx":
+- category: invariant
+  reason: "A hidden finished thread keeps the scene height while the live one plays"
+  preview: "// On a phone, each example plays on its own as it scrolls into view, w…"
+  hash: 8fda1e15c1c47298
+  lines: 3
+- category: invariant
+  reason: "A fresh copy per start makes the map replay the route on each view"
+  preview: "// A copy for each start, so the map replays the route each time the sc…"
+  hash: 33a9aded16b60986
+  lines: 1
+"packages/site/src/routes/__root.tsx":
+- category: upstream
+  reason: "IOS paints the canvas under the status bar, toolbar, and overscroll"
+  preview: "// A landing page starts and ends on a dark band, so the canvas is dark…"
+  hash: 25ffba8bedb1506a
+  lines: 2
+"packages/site/src/routes/index.tsx":
+- category: magic-value
+  reason: "Why the narrow coordinates run top to bottom: the labels fit on a phone"
+  preview: "// On a phone, the ripple runs top to bottom, so the labels fit: the pa…"
+  hash: 237c11f3d0142773
+  lines: 1
+"packages/site/src/styles/site.css":
+- category: upstream
+  reason: "IOS viewport-fit=cover puts the page under the status bar and toolbar"
+  preview: "/* iOS edge to edge: with viewport-fit=cover the page runs under the st…"
+  hash: 04dae0e6c0d767d2
+  lines: 1
+- category: upstream
+  reason: "The iOS home indicator area extends the field past the screen bottom"
+  preview: "/* The field under the last section reaches past the home indicator, so…"
+  hash: 7d9b6332c6f3f316
+  lines: 1
+- category: invariant
+  reason: "The last dark section band runs past the bottom, so the clip reaches the page end"
+  preview: "/* The last section follows another dark one, and its band still runs p…"
+  hash: b34287414b132329
+  lines: 1
+- category: upstream
+  reason: "Site-kit glow extends 10rem past each side and would scroll the page sideways"
+  preview: "/* site-kit's glow reaches 10rem past each side, which would scroll the…"
+  hash: f0cd3ef65a9dcddc
+  lines: 1
+- category: upstream
+  reason: "Site-kit closes the dialog on clicks whose target is the dialog, including this pseudo-element"
+  preview: "/* site-kit closes the dialog on any click whose target is the dialog i…"
+  hash: 999dd4fc8930b34e
+  lines: 1

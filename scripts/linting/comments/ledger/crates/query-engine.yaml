@@ -1,0 +1,566 @@
+"crates/query-engine/compiler-pipeline-macros/src/ssot.rs":
+- category: invariant
+  reason: "With no granting phase, access is always denied during pipeline execution"
+  preview: "// Generate guard expressions. When no phases grant access,"
+  hash: 6451c5fd6f3357ea
+  lines: 2
+"crates/query-engine/compiler/src/analytics.rs":
+- category: invariant
+  reason: "Query_executed accumulates across ClickHouse round-trips while other fields are written once"
+  preview: "/// `query_executed` accumulates across multiple ClickHouse round-trips…"
+  hash: 9cf589f2916b5e4a
+  lines: 2
+"crates/query-engine/compiler/src/ast/dml.rs":
+- category: upstream
+  reason: "ClickHouse rejects correlated subqueries in parameterized mode, so the query is embedded"
+  preview: "/// Like InSubquery but embeds the query directly instead of referencing"
+  hash: d29f59cb82c0da33
+  lines: 3
+- category: upstream
+  reason: "ClickHouse folds a scalar subquery to a constant before index analysis, so it still prunes the PK"
+  preview: "/// Single-row, single-column subquery used as a value; ClickHouse fold…"
+  hash: 62e81092e0163d1b
+  lines: 2
+- category: upstream
+  reason: "ClickHouse inlines non-recursive CTEs at every reference unless marked MATERIALIZED"
+  preview: "/// When true, emit `name AS MATERIALIZED (...)` so ClickHouse evaluates"
+  hash: 1ec181784f41fb20
+  lines: 4
+- category: security
+  reason: "Identifiers are interpolated raw, so private fields force validation in the constructor"
+  preview: "/// Table and column names are interpolated as raw identifiers (not par…"
+  hash: 1a3931fac343f247
+  lines: 3
+"crates/query-engine/compiler/src/constants.rs":
+- category: security
+  reason: "No internal name may end in a per-node suffix, or a user alias could reproduce it"
+  preview: "// Per-node columns embed a user alias and end in one of these suffixes…"
+  hash: e8c9dce26ba2d8bf
+  lines: 2
+- category: invariant
+  reason: "Validation rejects user identifiers with this prefix, so compiler names never collide with user names."
+  preview: "/// Loaded once at startup from the embedded ontology YAML."
+  hash: 4297281a5bde2dca
+  lines: 3
+- category: invariant
+  reason: "The arm alias stays reserved only because the base alias is reserved"
+  preview: "/// Table alias of one arm in a UNION over several edge tables."
+  hash: 002c285928cc6906
+  lines: 2
+"crates/query-engine/compiler/src/error.rs":
+- category: contract
+  reason: "A new security-relevant error variant must also be wired in metrics failure_reason"
+  preview: "//! Error types for the query engine."
+  hash: 526b754ae3dcba25
+  lines: 5
+- category: security
+  reason: "Only these errors are safe to show verbatim to clients; others can leak internal details."
+  preview: "/// Whether this error only contains user-input validation details"
+  hash: 42acf4a4870c0e32
+  lines: 2
+- category: security
+  reason: "The exhaustive match forces an explicit client-safety decision for every new QueryError variant"
+  preview: "/// Exhaustive test for is_client_safe. If a new QueryError variant is"
+  hash: 5ae1fb81528b9a7f
+  lines: 3
+"crates/query-engine/compiler/src/input.rs":
+- category: security
+  reason: "Identifier and SQL injection checks live in the JSON Schema, not in this module"
+  preview: "//! Security validation (identifiers, SQL injection) is handled by JSON…"
+  hash: 6ace9db7f3a252e0
+  lines: 1
+- category: security
+  reason: "Debug SQL is honored only for team members on SaaS and admins elsewhere."
+  preview: "/// On SaaS: honored for GitLab team members. On self-managed/Dedicated:"
+  hash: 250ec7a9d5aabefe
+  lines: 2
+- category: magic-value
+  reason: "The extra row is a probe that proves has_more without being returned"
+  preview: "/// Rows to fetch from ClickHouse: the page window plus one probe row t…"
+  hash: e5fe6ffe8445dfca
+  lines: 2
+- category: invariant
+  reason: "Text budgets divide by materialized rows, including the skipped prefix, not by returned rows"
+  preview: "/// Rows the final sort materializes: the skipped prefix plus the fetch…"
+  hash: c1c8fc5476a0091a
+  lines: 3
+- category: security
+  reason: "Hydration skips security context injection because the pipeline already authorized the IDs"
+  preview: "/// Internal-only: consolidated hydration for multiple entity types."
+  hash: 626fe13c80004ea0
+  lines: 3
+- category: contract
+  reason: "The server serializes IDs as strings to avoid JavaScript precision loss, so both forms are accepted"
+  preview: "/// Accepts either a JSON integer or a JSON string of digits. Supports …"
+  hash: 1cf5b2c53bb97e25
+  lines: 3
+- category: upstream
+  reason: "This ClickHouse token function needs a text index on the column"
+  preview: "/// Token-boundary match via `hasToken()`. Requires a text index on the…"
+  hash: 7882ce2f40a87f48
+  lines: 1
+- category: upstream
+  reason: "This ClickHouse token function needs a text index on the column"
+  preview: "/// All tokens present via `hasAllTokens()`. Requires a text index on t…"
+  hash: 0a1c8fccafc85543
+  lines: 1
+- category: upstream
+  reason: "This ClickHouse token function needs a text index on the column"
+  preview: "/// Any token present via `hasAnyTokens()`. Requires a text index on th…"
+  hash: e2572a0a1cdf1815
+  lines: 1
+"crates/query-engine/compiler/src/lib.rs":
+- category: tool-read
+  reason: "Rustdoc compiles and runs the example as a doctest"
+  preview: "//! Graph Query Compiler"
+  hash: d8ed1820cc82a032
+  lines: 35
+- category: security
+  reason: "Local mode trusts all data, so no security phases run; code cannot state that trust boundary"
+  preview: "/// Compile a graph query into DuckDB SQL for local execution."
+  hash: ddd5fa4ca6426be9
+  lines: 4
+"crates/query-engine/compiler/src/metrics.rs":
+- category: upstream
+  reason: "The OpenTelemetry counter has no readable handle, so tests need this side channel."
+  preview: "/// Test-only side-channel that lets unit tests verify `count_err` was"
+  hash: 7806cd9ccaed2d03
+  lines: 3
+"crates/query-engine/compiler/src/passes/codegen/clickhouse.rs":
+- category: invariant
+  reason: "SETTINGS go only on top-level SELECT, and values arrive pre-escaped as SQL-safe literals"
+  preview: "// SETTINGS — only on SELECT queries, not INSERT or subqueries/UNION ar…"
+  hash: 8425eb2eb3a1feb6
+  lines: 3
+- category: security
+  reason: "Trust boundary, this path bypasses the security pipeline and must never take user input"
+  preview: "/// # Trust boundary"
+  hash: f2efc43fdce60052
+  lines: 6
+- category: upstream
+  reason: "ClickHouse binds a trailing ORDER BY or LIMIT to the last UNION ALL branch, so the query is wrapped"
+  preview: "// ClickHouse binds a trailing ORDER BY / LIMIT to the last branch of an"
+  hash: 41440c62a2975aae
+  lines: 3
+- category: upstream
+  reason: "ClickHouse binds a trailing LIMIT after bare UNION ALL to the last SELECT only"
+  preview: "// Outer LIMIT must apply to the whole union, not just the last branch."
+  hash: 074d52a9646e8376
+  lines: 3
+"crates/query-engine/compiler/src/passes/codegen/ddl/duckdb.rs":
+- category: invariant
+  reason: "A LowCardinality wrapper alone must never read as non-null"
+  preview: "/// Unwraps `LowCardinality(Nullable(_))` so the wrapper alone never re…"
+  hash: a765e9607e8da757
+  lines: 1
+"crates/query-engine/compiler/src/passes/codegen/duckdb.rs":
+- category: upstream
+  reason: "DuckDB rejects LIMIT and OFFSET in recursive CTE bodies and has no native array bind"
+  preview: "//! DuckDB SQL code generation."
+  hash: 5024dacb8d7f61b1
+  lines: 12
+- category: upstream
+  reason: "_version ordering is a ClickHouse dedup artifact; DuckDB has no _version column or LIMIT BY"
+  preview: "// Filter out _version ORDER BY (ClickHouse dedup artifact — DuckDB"
+  hash: b0834e6d47c75354
+  lines: 2
+- category: upstream
+  reason: "DuckDB has no native array bind, so IN lists expand element by element"
+  preview: "// DuckDB: no native array bind — always expand element-by-element."
+  hash: 1c3f9c269cebf584
+  lines: 1
+"crates/query-engine/compiler/src/passes/codegen/mod.rs":
+- category: security
+  reason: "Settings apply in SQL and at the HTTP level as defense in depth"
+  preview: "/// Resolved query settings. Baked into the SQL SETTINGS clause by code…"
+  hash: 66bcf7919cf2badf
+  lines: 3
+- category: security
+  reason: "This output inlines parameters and must never execute, to prevent injection"
+  preview: "/// **Not for execution** — inlines params into SQL; use parameterized"
+  hash: 32ebb6d882bfb968
+  lines: 2
+"crates/query-engine/compiler/src/passes/errors.rs":
+- category: upstream
+  reason: "Jsonschema Display truncates enum candidates to three and hides oneOf detail"
+  preview: "/// Render a JSON Schema validation error into an actionable message."
+  hash: d05e6fae12bcc0fc
+  lines: 6
+- category: upstream
+  reason: "Jsonschema reports schema_path without ref hops, so it indexes into the schema directly"
+  preview: "/// A `oneOf` with no allowlist to recover still has its schema's"
+  hash: 4b13009474fce5fc
+  lines: 4
+- category: invariant
+  reason: "Every derived oneOf carries one allowlist enum, so the first enum found is the right one"
+  preview: "/// Filter operators nest a `oneOf` inside the property-filter `oneOf`,…"
+  hash: c7c55ad0f0dbcf38
+  lines: 4
+- category: upstream
+  reason: "Matching the jsonschema Display string would silently break on a serialization change"
+  preview: "/// Uses the structured segment iterator rather than matching the `Disp…"
+  hash: a97781a295705634
+  lines: 2
+"crates/query-engine/compiler/src/passes/hydrate.rs":
+- category: security
+  reason: "Dynamic plans must strip admin_only fields here because only static plans rely on RestrictPass"
+  preview: "/// Build the hydration plan for a compiled query."
+  hash: 65c7ff55cda86a75
+  lines: 12
+- category: invariant
+  reason: "Aggregation builds its own SELECT, so no alias exists to match"
+  preview: "// Aggregation builds its own SELECT, so no {alias}_{col} alias exists …"
+  hash: ad8dd9a3d69641f9
+  lines: 1
+- category: security
+  reason: "Hydration is built from the ontology, so admin_only fields must be stripped for non-admins"
+  preview: "/// Pre-resolve column specs for every ontology entity type based on the"
+  hash: 3487b48dc6b963f7
+  lines: 9
+- category: invariant
+  reason: "Virtual columns need an explicit request because they cause external service calls"
+  preview: "// Virtual columns are excluded from dynamic modes: they"
+  hash: c1f05c98fede9a18
+  lines: 3
+- category: security
+  reason: "Wildcard dynamic columns skip RestrictPass and can leak admin-only fields; the test guards that."
+  preview: "// Regression guard: before the fix, `dynamic_columns: \"*\"` on"
+  hash: 0483ec57e4055a27
+  lines: 5
+- category: security
+  reason: "Non-admins must never see admin_only fields even if default_columns is misconfigured"
+  preview: "// Defense-in-depth: even if a developer misconfigures"
+  hash: c12ed49418e28887
+  lines: 3
+"crates/query-engine/compiler/src/passes/lower/columns.rs":
+- category: upstream
+  reason: "ClickHouse stores every column an AS MATERIALIZED body selects, so the body is pruned"
+  preview: "//! Columns a materialized relation must select: ClickHouse stores ever…"
+  hash: e62a794dec4043ff
+  lines: 2
+- category: invariant
+  reason: "An empty set means keep every column, not keep none"
+  preview: "/// An empty set means the relation must keep every column."
+  hash: 43c9ba394c17b632
+  lines: 1
+"crates/query-engine/compiler/src/passes/lower/graph.rs":
+- category: invariant
+  reason: "A materialized reference must expose the inline alias, or predicates and joins dangle"
+  preview: "/// A materialized reference must expose the alias its inline form woul…"
+  hash: fbf2ab507e12116e
+  lines: 1
+"crates/query-engine/compiler/src/passes/lower/query_types/hydration.rs":
+- category: invariant
+  reason: "Arms use LIMIT 1 BY over a plain scan, not FINAL, to keep pruning and projections"
+  preview: "//! Hydration emit: fetch node properties for a set of IDs."
+  hash: d0b2c8263bd4da9a
+  lines: 9
+"crates/query-engine/compiler/src/passes/lower/query_types/neighbors.rs":
+- category: invariant
+  reason: "Neighbors emits its own redaction columns because the center edge column differs per arm"
+  preview: "//! Neighbors emits its own redaction columns directly (rather than rel…"
+  hash: 49b33961697d0ba7
+  lines: 3
+- category: invariant
+  reason: "Denormalized tags are not in the per-arm projection, so they filter the union alias"
+  preview: "// Denorm tags aren't in the per-arm projection, so they filter the uni…"
+  hash: 87b6d24fc5e72e9f
+  lines: 1
+- category: invariant
+  reason: "ArrayFilter, not multiIf, keeps both rows when a self-loop matches both arms"
+  preview: "/// Direction::Both collapsed into a single edge scan (see `fused_both_…"
+  hash: c281d9db75052207
+  lines: 7
+"crates/query-engine/compiler/src/passes/lower/query_types/pathfinding.rs":
+- category: invariant
+  reason: "Edges across namespace depths carry only the deeper path, so intersect yields an empty scope"
+  preview: "// UNION, not intersect: endpoints at different namespace depths are li…"
+  hash: 19695881455d0b33
+  lines: 2
+"crates/query-engine/compiler/src/passes/lower/sql.rs":
+- category: upstream
+  reason: "ClickHouse rejects UNION arms with different column counts, so arms project the shared edge columns"
+  preview: "/// When multiple tables are involved, each UNION arm projects only the"
+  hash: 399537bd567f2b48
+  lines: 4
+- category: invariant
+  reason: "FINAL makes filters see the latest row, not older matching versions"
+  preview: "/// `FINAL` applies the table engine's merge semantics at read time, so…"
+  hash: 1a2eb001edb0a3fc
+  lines: 3
+"crates/query-engine/compiler/src/passes/page.rs":
+- category: invariant
+  reason: "Tie-breakers make the order total, so SKIP windows neither overlap nor drop rows"
+  preview: "//! Row window pass. Runs after lowering establishes the final ORDER BY:"
+  hash: 053981dc0bf654e1
+  lines: 5
+"crates/query-engine/compiler/src/passes/plan/predicates.rs":
+- category: invariant
+  reason: "A text match on a changing column cannot bound a keyed re-read, so that scan keeps FINAL"
+  preview: "/// A text match on a changing column finds rows through the text index…"
+  hash: 14231195e142a4e1
+  lines: 1
+"crates/query-engine/compiler/src/passes/plan/query_types/mod.rs":
+- category: invariant
+  reason: "An empty list means a wildcard, not no allowed kinds"
+  preview: "/// Entity kinds the relationship types allow at each end; empty for a …"
+  hash: d01168263a688cb9
+  lines: 1
+"crates/query-engine/compiler/src/passes/plan/query_types/neighbors.rs":
+- category: invariant
+  reason: "The edge row carries the target's path; a source shares it only where the ontology says"
+  preview: "// The edge row carries the target's path; a source shares it only wher…"
+  hash: 7f56f3a3a1a77b61
+  lines: 1
+"crates/query-engine/compiler/src/passes/plan/reuse.rs":
+- category: invariant
+  reason: "The lowerer emits CTEs in this order, so the list keeps relation order"
+  preview: "// Kept in relation order because the lowerer emits CTEs in this order."
+  hash: 036f8a08842dcca1
+  lines: 1
+"crates/query-engine/compiler/src/passes/restrict.rs":
+- category: security
+  reason: "Aggregation bypasses the Rails redaction layer, so unscoped global nodes are rejected"
+  preview: "//! Field-level access restriction."
+  hash: efa160486bbde578
+  lines: 9
+- category: contract
+  reason: "The tests load the production ontology to catch drift in user.yaml"
+  preview: "// These tests load the embedded production ontology so any drift in"
+  hash: 887a279001f4e6af
+  lines: 2
+"crates/query-engine/compiler/src/passes/security.rs":
+- category: security
+  reason: "Per-entity role scoping closes the aggregation oracle on higher-privilege entities."
+  preview: "//! Security filter injection for multi-tenant isolation."
+  hash: 04184e98f915cba3
+  lines: 21
+- category: security
+  reason: "Tables without authorization metadata fall back to the Reporter role floor"
+  preview: "/// Per-alias role floors come from the query data model."
+  hash: 7cfe18c84180a5e5
+  lines: 2
+- category: security
+  reason: "An empty security context fails closed with an error, since empty results would hide the bug"
+  preview: "// An entirely empty security context is treated as a fail-closed bug:"
+  hash: a8f33c2fd7edc573
+  lines: 8
+- category: magic-value
+  reason: "Developer 30 passes because it is at least the Security Manager floor of 25"
+  preview: "// Paths tagged at Developer (30) still qualify because 30 >= the"
+  hash: 22121940d4729548
+  lines: 2
+"crates/query-engine/compiler/src/passes/security_check.rs":
+- category: security
+  reason: "Every namespaced alias must carry a role-eligible path predicate or fail closed before codegen."
+  preview: "//! Post-compilation safety checks."
+  hash: 38b3ab5bc91552f0
+  lines: 6
+- category: security
+  reason: "The post-check must accept Bool(false) as a valid path filter for aliases with no eligible paths"
+  preview: "/// An AND-chain containing `Bool(false)` short-circuits to zero rows, …"
+  hash: 2b611cf3acd13bcb
+  lines: 5
+- category: security
+  reason: "A nested col = false must not count as a scope proof, or filters bypass the post-check"
+  preview: "/// A `col = false` comparison (or any other non-AND operator whose"
+  hash: 8b011f2fb1a52576
+  lines: 9
+- category: security
+  reason: "Bool(false) OR-ed with other arms still yields rows, so it is not proof of scoping."
+  preview: "/// `Bool(false)` OR-ed with anything is not a dead clause: the OR"
+  hash: 120c6bb22168626b
+  lines: 3
+- category: security
+  reason: "An AND chain with col = false and no startsWith must fail the scope check"
+  preview: "/// Inverse of the previous test: if the AND chain has no Bool(false)"
+  hash: 638cb39de45203cb
+  lines: 4
+"crates/query-engine/compiler/src/passes/settings.rs":
+- category: security
+  reason: "Deployment config can tighten these ceilings but never raise them"
+  preview: "// Deployment config can tighten these compiler-enforced ceilings but c…"
+  hash: 4858e297f1673e77
+  lines: 1
+"crates/query-engine/compiler/src/passes/validate/mod.rs":
+- category: invariant
+  reason: "Int-based enums are valid here because normalization turns them into string labels later"
+  preview: "// Int-based enums are coerced to string labels by normalization before…"
+  hash: 124da1e854d028ed
+  lines: 1
+- category: magic-value
+  reason: "Ranges wider than 100000 ids act as full-table scans, so they stop counting as selective."
+  preview: "/// Maximum span for id_range before it stops counting as selective."
+  hash: d68fd51bd11cc98c
+  lines: 2
+- category: magic-value
+  reason: "BFS cost is O(anchors x E^depth), so the range cap matches the 500 node_ids cap"
+  preview: "/// Tighter id_range cap for path_finding endpoints. The frontier BFS is"
+  hash: 67b7e9aaa1d2bece
+  lines: 3
+- category: magic-value
+  reason: "The row cap matches the 500 node_ids cap"
+  preview: "/// Maximum number of rows the lowerer will resolve from a filtered"
+  hash: 123703fa182760c7
+  lines: 2
+- category: invariant
+  reason: "This check runs last so undefined-node errors take priority"
+  preview: "// Run after individual reference checks so \"undefined node X\" errors"
+  hash: d103ab25da376375
+  lines: 2
+- category: invariant
+  reason: "Both-direction joins defeat ClickHouse indexes; this guard covers paths that skip schema validation"
+  preview: "// \"both\" generates OR joins that defeat CH index usage; schema also re…"
+  hash: 5af540363cbef78f
+  lines: 2
+- category: upstream
+  reason: "ClickHouse rejects lower() and startsWith on non-string columns at execution as an opaque 500"
+  preview: "// ClickHouse rejects lower()/startsWith on non-string columns at"
+  hash: 5a9766ba035eca30
+  lines: 2
+- category: invariant
+  reason: "Each path-finding endpoint must have bounded selectivity because it seeds a BFS frontier"
+  preview: "// Path-finding endpoints seed BFS frontiers, so each endpoint"
+  hash: e5f9c50e351250e8
+  lines: 4
+- category: invariant
+  reason: "An unreferenced node is absent from FROM and silently drops columns or breaks SQL"
+  preview: "/// Every declared node must be referenced by at least one structural f…"
+  hash: 1ff744a138a01287
+  lines: 3
+- category: invariant
+  reason: "Output columns are {node id}_{property}, so a prefix plus underscore collides silently"
+  preview: "/// Output columns are `{node id}_{property}`, so two ids overlap when …"
+  hash: bae6b45e4bd19b49
+  lines: 2
+"crates/query-engine/compiler/src/query_limits.rs":
+- category: contract
+  reason: "Build.rs includes this file and checks matching JSON schema limits, so it must stay independent."
+  preview: "// Shared validation enforces these limits for both JSON and GQL querie…"
+  hash: 45b7beaa499d076a
+  lines: 2
+"crates/query-engine/compiler/src/types.rs":
+- category: magic-value
+  reason: "20 is Reporter, matching the old behavior where Rails published only Reporter+ paths"
+  preview: "/// Default role assumed for a traversal path when the JWT does not sup…"
+  hash: 7e3f23fd8e895b92
+  lines: 3
+- category: contract
+  reason: "Realm values must match CloudConnector.gitlab_realm in Rails"
+  preview: "/// Deployment realm from the JWT `realm` claim. Values match"
+  hash: 4d81c97824e9405e
+  lines: 2
+- category: contract
+  reason: "The values must match Rails Gitlab::Access constants sent in the JWT."
+  preview: "/// GitLab access levels as sent in the JWT `min_access_level` field."
+  hash: 1e21e61a02ceda4e
+  lines: 2
+- category: contract
+  reason: "Access levels are raw Gitlab::Access integers from Rails so comparisons are a direct greater-or-equal"
+  preview: "/// A traversal path the user is entitled to see, plus the exact effect…"
+  hash: e90f3f714e813c44
+  lines: 5
+- category: security
+  reason: "Per-path roles drop paths below required_access_level, which redacts aggregations for Reporters"
+  preview: "/// Security context for request-level isolation."
+  hash: 93f5d2cbf6c594dc
+  lines: 11
+- category: security
+  reason: "Admins bypass the filter because they carry the synthetic org-root path at maximum role."
+  preview: "/// Return the subset of paths where one of the user's access levels me…"
+  hash: 84683ed445b4f987
+  lines: 3
+"crates/query-engine/formatters/src/graph.rs":
+- category: invariant
+  reason: "Serde flatten would emit duplicate keys and silently shadow the struct field for these names"
+  preview: "/// Keys that collide with `GraphNode`'s fixed struct fields under"
+  hash: 56cee669bfe7eac2
+  lines: 5
+- category: invariant
+  reason: "Serialization cannot fail because every value already passed the non-finite float filter"
+  preview: "// GraphResponse holds only strings, primitives, and Values that"
+  hash: 852766f134f3f6e6
+  lines: 3
+- category: upstream
+  reason: "ReplacingMergeTree can leak several _version copies between merges, which duplicates paths"
+  preview: "// Dedupe paths by canonical (node_seq, edge_kinds) tuple. ReplacingMer…"
+  hash: 9968cc9a14ba2f94
+  lines: 4
+- category: upstream
+  reason: "ClickHouse returns multi-_version edge rows before a merge, which show up as duplicate neighbors."
+  preview: "// Collapse multi-`_version` edge rows surfacing as duplicate neighbors."
+  hash: 08567e6a7d8eb5b5
+  lines: 3
+"crates/query-engine/formatters/src/lib.rs":
+- category: contract
+  reason: "The enum mirrors the proto FormatName enum and must stay in sync with it"
+  preview: "/// Concrete encoding of a formatter's output. Mirrors the proto `Forma…"
+  hash: 8ef178ee915ac2d4
+  lines: 2
+- category: contract
+  reason: "The response schema $id major must match RAW_OUTPUT_FORMAT_VERSION major"
+  preview: "// The `$id` in crates/orbit-server/schemas/query_response.json ends wi…"
+  hash: 32839d8134dda628
+  lines: 3
+"crates/query-engine/pipeline/src/error.rs":
+- category: security
+  reason: "Only client_safe messages may reach clients verbatim; others can leak internals"
+  preview: "/// When true the message only describes user-input problems"
+  hash: 309e57be20b773fc
+  lines: 3
+"crates/query-engine/profiler/src/output.rs":
+- category: upstream
+  reason: "Peak memory needs cross-replica system.query_log, which the relay user cannot read"
+  preview: "/// One actual ClickHouse query the run issued (the base query, then on…"
+  hash: 2e6815d8898abeaa
+  lines: 6
+"crates/query-engine/profiler/src/service.rs":
+- category: upstream
+  reason: "A global registry env filter disables the span, so current() returns None"
+  preview: "// The env filter must stay per-layer; as a global registry filter it w…"
+  hash: f0973bfa85e2fa5b
+  lines: 2
+"crates/query-engine/shared/src/hydration.rs":
+- category: contract
+  reason: "The props column arrives as a JSON object of strings, so typed fields need ontology re-typing"
+  preview: "/// `{alias}_props` arrives as a JSON object of strings, so typed field…"
+  hash: e8e877eb73947502
+  lines: 1
+- category: contract
+  reason: "Formatters read row columns named {alias}_{column}"
+  preview: "/// Writes row columns named `{alias}_{column}` so formatters can extra…"
+  hash: f88615fbc99eb957
+  lines: 1
+- category: security
+  reason: "Traversal_paths is the authorized scope, and the center path is never a fallback"
+  preview: "/// Uses pre-resolved column specs from the compilation plan; no ontolo…"
+  hash: 945d6d748c5ba1ab
+  lines: 5
+- category: invariant
+  reason: "Must run after the virtual filter pass because injected columns serve only that comparison"
+  preview: "/// Must run after [`apply_virtual_filters_static`]: filter-injected co…"
+  hash: 11c87c9386e72679
+  lines: 3
+"crates/query-engine/shared/src/stages/output.rs":
+- category: security
+  reason: "Debug SQL is gated by realm and team-member claim, and an unknown realm is denied."
+  preview: "/// Debug SQL is gated by the JWT `is_gitlab_team_member` claim and rea…"
+  hash: 7b5f9f51e3bbc224
+  lines: 7
+"crates/query-engine/shared/src/types.rs":
+- category: contract
+  reason: "Clients read truncated as an explicit incomplete-results signal, so it stays beside has_more."
+  preview: "/// Same signal as `has_more`, kept explicit so clients can detect inco…"
+  hash: 40827eea56046895
+  lines: 1
+"crates/query-engine/types/src/query_result.rs":
+- category: contract
+  reason: "Edge_kinds[i] links dynamic_nodes[i] to dynamic_nodes[i+1]; consumers rely on that alignment"
+  preview: "/// Relationship kinds for each hop in a path finding query."
+  hash: 38d723c39c857208
+  lines: 3
+- category: security
+  reason: "Authorization fails closed; an unverifiable node marks the row unauthorized"
+  preview: "/// Apply authorization results to rows. Fails closed: any row containi…"
+  hash: 860f5e4837e72927
+  lines: 2

@@ -1,0 +1,245 @@
+"config/default.yaml":
+- category: invariant
+  reason: "Defaults must equal production settings because deep-merge leaks map entries into production"
+  preview: "# Single source of truth for every server setting. Compiled into gkg-se…"
+  hash: 919cb5bca7b98b5e
+  lines: 15
+- category: contract
+  reason: "Shows the optional NATS auth and TLS keys and the mount paths deployments use for them"
+  preview: "# username: \"\""
+  hash: b9d48d920054e2ff
+  lines: 5
+- category: contract
+  reason: "The compatibility value must stay in step with the version requirements docs"
+  preview: "# password: \"\""
+  hash: 14cc18cfaafe23be
+  lines: 2
+- category: upstream
+  reason: "A ClickHouse 26.6 bug skips the Siphon watermark index when this setting is on"
+  preview: "# Must stay 0 to avoid a ClickHouse 26.6 bug that skips the Siphon wate…"
+  hash: 61419013b4ac8913
+  lines: 1
+- category: contract
+  reason: "The compatibility value must stay in step with the version requirements docs"
+  preview: "# password: \"\""
+  hash: 14cc18cfaafe23be
+  lines: 2
+- category: contract
+  reason: "The Helm chart sets the same graph defaults in production, so both must stay in sync"
+  preview: "# Universal graph defaults, also set by the Helm chart in production."
+  hash: 8215a2dd90ace759
+  lines: 1
+- category: contract
+  reason: "Names the secret file paths that deployments mount for the setup passwords"
+  preview: "# --mode clickhouse-setup applies config/clickhouse-setup.sql to graph.…"
+  hash: 58585cccc021b5bc
+  lines: 2
+- category: contract
+  reason: "The schedule parser takes six-field cron with seconds first; the strings alone do not show that"
+  preview: "# Six-field cron expressions: sec min hour dom mon dow."
+  hash: 5b48ab6c02e783b7
+  lines: 1
+- category: upstream
+  reason: "The drain window avoids a tonic 0.14.5 panic (hyperium/tonic#2522); the config value cannot show that."
+  preview: "# 5 min, for L4 ILB rebalancing"
+  hash: b20ab362d82ec98a
+  lines: 2
+- category: magic-value
+  reason: "64 KiB because the tonic/hyper 16 KiB default rejects GitLab JWTs with many traversal IDs"
+  preview: "# 64 KiB; tonic/hyper default of 16 KiB is too small for GitLab JWTs ca…"
+  hash: 311855d94e87b4cf
+  lines: 1
+- category: magic-value
+  reason: "The limit is 20x the ClickHouse default to match Siphon"
+  preview: "# 20x ClickHouse default, matches Siphon"
+  hash: 20851578e3a9ff6d
+  lines: 1
+- category: upstream
+  reason: "The Snowplow tracker appends its own path, so the URL must have none"
+  preview: "# true | false; null follows the GitLab product usage data setting"
+  hash: 3a2346621e0655e5
+  lines: 3
+- category: security
+  reason: "Static object-storage credentials must come from the named secret files, not plain config"
+  preview: "# Static credentials are Option fields meant for secret files:"
+  hash: 192781fd663a38d7
+  lines: 2
+- category: upstream
+  reason: "S3 without virtual-host style needs the bucket in the endpoint host"
+  preview: "# identity | static"
+  hash: 76ac1dbd829bdf77
+  lines: 10
+"config/dev.yaml":
+- category: contract
+  reason: "The overlay must not be promoted to default.yaml and is deep-merged by the dev script; YAML cannot state that"
+  preview: "# Local-development overlay applied on top of the embedded config/defau…"
+  hash: 9a53748aafb0add8
+  lines: 12
+- category: contract
+  reason: "Consumer_name must match the Helm chart, or the two paths reject each other's JetStream consumers"
+  preview: "# consumer_name matches the Helm chart. Native mode and Caproni edit mo…"
+  hash: 1340be6a1b89841f
+  lines: 3
+"config/ontology/edges/created_mr.yaml":
+- category: magic-value
+  reason: "Link_type 1 and 0 have a meaning no column name shows, and the edges are best effort"
+  preview: "# link_type 1 is a merge request the flow created; 0 is the one it was …"
+  hash: 3ce78c683c432b5a
+  lines: 3
+"config/ontology/edges/reopened.yaml":
+- category: contract
+  reason: "State 5 is the Rails ResourceStateEvent reopened value, and the Rails CHECK sets one issuable FK per row."
+  preview: "# Reopen is a `resource_state_events` row (state = 5), never a system-n…"
+  hash: 4e49cff1d47cbb00
+  lines: 8
+"config/ontology/nodes/agents/agent_session.yaml":
+- category: security
+  reason: "The session is delegated to read_code on purpose; read_duo_workflow would hide it from project readers"
+  preview: "# Project-delegated on purpose: the session's existence is visible to a…"
+  hash: 4889e069583eda1f
+  lines: 4
+"config/ontology/nodes/container_registry/container_repository.yaml":
+- category: invariant
+  reason: "NULL status coerces to empty, and enum columns stay non-nullable across the ontology"
+  preview: "# Source siphon_container_repositories.status is Nullable(Int16); NULL …"
+  hash: 31d21cfe3f4407a4
+  lines: 5
+"config/ontology/nodes/core/group.yaml":
+- category: invariant
+  reason: "Tables[0] is the partition-probe base and must carry traversal_path and id"
+  preview: "# tables[0] is the partition-probe base: it must carry traversal_path +…"
+  hash: 1a02965c3c90fbfc
+  lines: 3
+"config/ontology/nodes/core/project.yaml":
+- category: contract
+  reason: "Rails rejects duplicate redaction entries with 400, so Project must share read_code with code entities"
+  preview: "# Temporary: aligned with source-code entities so Project + code traver…"
+  hash: 7a141bf858682697
+  lines: 4
+- category: invariant
+  reason: "Tables[0] is the partition-probe base and must carry traversal_path and id"
+  preview: "# tables[0] is the partition-probe base: it must carry traversal_path +…"
+  hash: 3895c6dbb723623e
+  lines: 3
+"config/ontology/nodes/security/vulnerability.yaml":
+- category: security
+  reason: "Security Manager is the minimum role for security resources and drops Reporter paths; the YAML value cannot show that policy"
+  preview: "# Security Manager is the minimum GitLab role designed to view security"
+  hash: 008fd3f5d9479678
+  lines: 8
+"config/ontology/nodes/source_code/commit.yaml":
+- category: contract
+  reason: "Decoded_sha and the masked hash must match merge_request.yaml, or edges point at missing nodes"
+  preview: "# Emitted from merge_requests (Siphon has no commit table). Duplicate"
+  hash: 301e9ae022f67497
+  lines: 10
+"config/ontology/reference.yaml":
+- category: invariant
+  reason: "An etl query overrides automatic query generation from the properties"
+  preview: "# using this overrides automatic query gen via the properties fields ab…"
+  hash: 325977611a4b7140
+  lines: 1
+"config/ontology/schema.yaml":
+- category: contract
+  reason: "Stats partition on this column, with an empty key for global entities"
+  preview: "# Stats are partitioned by this column for namespace-level granularity."
+  hash: 0d85a3670e975d2d
+  lines: 4
+"config/schema-migrations.fingerprint.yaml":
+- category: contract
+  reason: "The file is generated, and drift requires a schema bump or snapshot"
+  preview: "# GENERATED by `mise schema:bump` or `mise schema:snapshot` — do not ed…"
+  hash: 4cc1f8a1621cc12b
+  lines: 6
+"config/schema-migrations.yaml":
+- category: contract
+  reason: "Defines ledger scope semantics and the widen-only rule that CI enforces"
+  preview: "#"
+  hash: 674c08eceb0e4bde
+  lines: 16
+"config/seeds/virtual_content.yaml":
+- category: contract
+  reason: "SeededColumnResolver loads this file and matches entries against hydrated depends_on properties"
+  preview: "# Virtual column content for data correctness tests, loaded by"
+  hash: 54c5f31ba1a3468f
+  lines: 4
+"config/setup/agents/duo.yaml":
+- category: upstream
+  reason: "Duo creates its config dir only on first run, so the glab-installed binary path must also count."
+  preview: "# Duo creates its config dir on first run, so the binary glab installs …"
+  hash: d211b563a999907f
+  lines: 1
+"config/setup/agents/opencode.yaml":
+- category: upstream
+  reason: "OpenCode lacks PreToolUse injection and skips single-file plugin entries; the config cannot show these host limits"
+  preview: "# OpenCode has no PreToolUse-style context injection, so orbit.js appen…"
+  hash: de41ca4935997f25
+  lines: 5
+"config/setup/agents/opencode_ui/tui.tsx":
+- category: upstream
+  reason: "OpenCode compiles TUI JSX itself, so this file ships as source and imports only rpc.ts"
+  preview: "// The TUI part of the OpenCode 2 plugin. It ships as source, not bundl…"
+  hash: 89985bde4f32bc74
+  lines: 10
+- category: contract
+  reason: "This function must match compact() in core/stats.ts; keep in sync"
+  preview: "// 950, 1.2k, 12k, 1.2M. Same as compact() in core/stats.ts."
+  hash: bea3345260d59209
+  lines: 1
+- category: invariant
+  reason: "Events are not awaited, so an end can arrive before its start; the set guards that order."
+  preview: "// Calls whose end arrived. Events are not awaited, so a fast call's en…"
+  hash: 8362464c67bfacee
+  lines: 1
+- category: invariant
+  reason: "OpenCode memory storage survives a plugin reload but timers do not, so stale lines must be cleared at start"
+  preview: "// Memory storage outlives a plugin reload but these timers do not, so …"
+  hash: 7ca587d26b96a178
+  lines: 2
+- category: upstream
+  reason: "OpenCode may never send the end event for an interrupted call, so stop events clear lines"
+  preview: "// An interrupted call may never send its end. When a session stops, it…"
+  hash: a27c09fb54f40387
+  lines: 1
+- category: upstream
+  reason: "The slot render runs once and reactivity comes from reads inside JSX; a framework fact code cannot show"
+  preview: "// render runs once; the reads inside the JSX expressions keep each slo…"
+  hash: 5377b8448dfd2269
+  lines: 1
+"config/setup/opencode_plugin.js":
+- category: upstream
+  reason: "OpenCode 2 calls setup() and OpenCode 1.3.4+ calls server(), so one file must import nothing from OpenCode."
+  preview: "// One default export carries both plugin APIs and imports nothing from…"
+  hash: 2ccdc406e4995aa2
+  lines: 2
+"config/versions.yaml":
+- category: contract
+  reason: "Versions deserializes this file strictly and shell scripts read it via yq"
+  preview: "# Pinned versions and upstream revisions. Deserialized into"
+  hash: 320ee31abb2bc723
+  lines: 3
+- category: contract
+  reason: "The schema version prefixes every versioned table and must be bumped through the mise task"
+  preview: "# Graph schema version; prefixes every versioned ClickHouse table (vN_)."
+  hash: 2322c05ab17d82d2
+  lines: 2
+- category: contract
+  reason: "The DSL version must be bumped when the schema or compiler validation changes accepted queries"
+  preview: "# Accepted query-DSL shape. Bump when graph_query.schema.json or the"
+  hash: db5fe405607b8d74
+  lines: 2
+- category: contract
+  reason: "Vendor scripts write checksums back into this file, so manual edits must leave them intact"
+  preview: "# Vendored dependencies. Each entry declares its pins, artifact locatio…"
+  hash: d0e602d00ba5328b
+  lines: 3
+- category: upstream
+  reason: "The pin names the gitlab-org/gitlab commit whose ICON_TYPES list is vendored"
+  preview: "# gitlab-org/gitlab commit whose SystemNoteMetadata::ICON_TYPES is vend…"
+  hash: eaa1e50f7d145bca
+  lines: 1
+- category: contract
+  reason: "A pin edit must be followed by the vendor task that fetches the upstream schema"
+  preview: "# Iglu schema version pins. Edit a pin here, then run `mise vendor -- i…"
+  hash: c8a72a187924f8e6
+  lines: 2

@@ -1,0 +1,62 @@
+"crates/gitalisk-core/src/repository/git/commit.rs":
+- category: security
+  reason: "A revision starting with a dash would be read by git as an option, an argument-injection boundary"
+  preview: "/// Refuse a revision that git would read as an option."
+  hash: 7854ee6cf214d289
+  lines: 1
+- category: magic-value
+  reason: "The 0x1f unit separator cannot appear in commit messages, unlike a pipe"
+  preview: "// Use ASCII Unit Separator (0x1f) as delimiter - safer than pipe for c…"
+  hash: 71f39fb8a4d89bf6
+  lines: 1
+"crates/gitalisk-core/src/repository/git/current_branch.rs":
+- category: upstream
+  reason: "The git default branch name varies by version and config, so the test accepts main or master"
+  preview: "// Git now defaults to 'main' in newer versions, but some systems still…"
+  hash: 7c432ab3876fdc90
+  lines: 1
+- category: upstream
+  reason: "Modern git creates an initial branch before any commit, so the call succeeds"
+  preview: "// Modern git creates an initial branch even without commits"
+  hash: d8af72cc8a66c4a8
+  lines: 2
+"crates/gitalisk-core/src/repository/git/mod.rs":
+- category: upstream
+  reason: "Git emits raw bytes, so unix paths keep non-UTF-8 names intact"
+  preview: "/// Git emits raw bytes; on unix keep non-UTF-8 names intact."
+  hash: 7832514cf184d9ea
+  lines: 1
+"crates/gitalisk-core/src/repository/git/remote.rs":
+- category: magic-value
+  reason: "Git remote get-url exits with 2 when the remote does not exist"
+  preview: "/// `git remote get-url` exits with 2 when the remote does not exist."
+  hash: fff1b05cbd811a41
+  lines: 1
+"crates/gitalisk-core/src/repository/git/worktree.rs":
+- category: upstream
+  reason: "Git returns a relative .git for repos and an absolute path for worktrees on each platform"
+  preview: "// Regular repos: git returns \".git\" (relative) on all platforms."
+  hash: d6e19695b03d6508
+  lines: 4
+"crates/gitalisk-core/src/repository/gitalisk_repository.rs":
+- category: invariant
+  reason: "Pathspecs are matched as literal paths; callers that pass globs silently match nothing"
+  preview: "/// Literal paths, not globs."
+  hash: ceb819db22f36907
+  lines: 1
+- category: upstream
+  reason: "Git detects renames only after staging, so an unstaged move shows as a delete plus an untracked file"
+  preview: "// An unstaged move: a deletion followed by an untracked file with"
+  hash: b8655f8a59de2b4d
+  lines: 2
+- category: upstream
+  reason: "The ignore crate applies git rules only inside a repo unless require_git is off; editors expect them everywhere"
+  preview: "// Whether a git repository is required to apply git-related ignore"
+  hash: f334a3ff19d51248
+  lines: 9
+"crates/gitalisk-core/src/workspace_folder/gitalisk_workspace.rs":
+- category: invariant
+  reason: "The git filters stay off so the walk discovers nested repositories; enabling them hides repos silently"
+  preview: "// note we explicit set the above filters to false to allow for discove…"
+  hash: 15fb4b6ff9aa6d4a
+  lines: 3

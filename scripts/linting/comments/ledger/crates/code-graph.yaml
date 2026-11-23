@@ -1,0 +1,969 @@
+"crates/code-graph/src/utils.rs":
+- category: magic-value
+  reason: "128 KiB of stack must remain before recursion to prevent overflow on deep ASTs"
+  preview: "/// Minimum stack space (128 KiB) that must remain before recursing into"
+  hash: 3b2fc61c73630a8a
+  lines: 2
+- category: upstream
+  reason: "Oxc has no recursion limit and aborts past depth 4000-8000; code cannot show that library limit"
+  preview: "/// oxc has no recursion limit and aborts the process past depth 4000-8…"
+  hash: d1fa0cf674dd3c4c
+  lines: 3
+- category: invariant
+  reason: "The climb must stay byte-for-byte equal to a repeated rfind truncate, including adjacent separators"
+  preview: "/// Scope-climb prefixes of a fully-qualified name, stripping the trail…"
+  hash: 99af24a3ff7b1be2
+  lines: 12
+"crates/code-graph/src/v2/config/filter.rs":
+- category: invariant
+  reason: "Resolver inputs must never enter the denylist or they are dropped; nothing in the code enforces it"
+  preview: "//! The single filtering policy for code indexing, shared by every file…"
+  hash: fff6059efb2a349b
+  lines: 6
+- category: magic-value
+  reason: "8000 bytes matches git's binary sniff window so deep NULs do not mark text as binary"
+  preview: "/// git's binary heuristic looks at the first 8 KiB; matching it keeps …"
+  hash: 1e8a0edc2515bd16
+  lines: 2
+- category: magic-value
+  reason: "The LFS spec caps a pointer at 1024 bytes, which sets this constant"
+  preview: "/// The LFS spec caps a pointer at 1024 bytes, including extension line…"
+  hash: 39275b5588fd82c4
+  lines: 1
+- category: invariant
+  reason: "UTF-8 is validated once here so every parser may assume valid str"
+  preview: "// Parsers all need `&str`; validate once here so they can assume UTF-8."
+  hash: c2968330a392440a
+  lines: 1
+- category: invariant
+  reason: "Splitting on carriage return too stops classic-Mac files from hiding as one line"
+  preview: "/// Detect machine-generated bundles by line shape: a single line over"
+  hash: 518e859803b7ef63
+  lines: 3
+- category: contract
+  reason: "File-name exclusions live here and directory exclusions in the shared list; resolver inputs must stay out"
+  preview: "/// The single denylist of files recorded as a bare node but never load…"
+  hash: 51c5663510c540c4
+  lines: 5
+- category: invariant
+  reason: "A BOM is the only thing that marks NUL-bearing UTF-16/32 buffers as text, not binary"
+  preview: "/// BOMs that keep a NUL-bearing buffer as text: UTF-16/32 text is full…"
+  hash: 8cd1d0510a98ac3c
+  lines: 2
+- category: upstream
+  reason: "Mirrors git buffer_is_binary and adds a BOM rescue git lacks"
+  preview: "/// Binary when a NUL byte appears in `prefix`, like git's `buffer_is_b…"
+  hash: 17d64194cc5a70ec
+  lines: 2
+- category: invariant
+  reason: "Identical content at different paths is a distinct entity, so content is never deduped"
+  preview: "// Byte-identical files at different paths are distinct graph entities"
+  hash: dad46ce03260f9c0
+  lines: 2
+"crates/code-graph/src/v2/config/lang.rs":
+- category: upstream
+  reason: "The C++ tree-sitter grammar is a superset of C, so C headers coexist with C++ files"
+  preview: "/// C and C++ share an include-based resolution graph. The C++"
+  hash: 4d4e8cf00c0d18df
+  lines: 3
+- category: known-gap
+  reason: ".svelte and .astro are left out on purpose until a fixture suite covers them"
+  preview: "// `.svelte` and `.astro` are intentionally absent: OXC's"
+  hash: 3e7f8cc689193194
+  lines: 4
+"crates/code-graph/src/v2/dsl/engine.rs":
+- category: invariant
+  reason: "Rules that extract aliases stay named imports even when the language marks the node wildcard"
+  preview: "// Check for wildcard: either a wildcard child node (e.g. `asterisk`"
+  hash: 8d73fc477e286f6d
+  lines: 5
+- category: invariant
+  reason: "The top-level scope prefix is fixed for the whole walk, so computing it once is safe"
+  preview: "// `scope_stack[..top_level_depth]` is invariant for the whole walk, so"
+  hash: f0fffd0899f9dffd
+  lines: 2
+- category: invariant
+  reason: "A second write splits the block so refs queued before it keep the earlier value"
+  preview: "// If this variable already has a value in the current"
+  hash: bafb3c6898ef1386
+  lines: 3
+- category: invariant
+  reason: "The loop header stays unsealed because the back edge arrives after the body"
+  preview: "// Header block (NOT sealed yet — back edge comes after body)"
+  hash: d9d6e47221b73300
+  lines: 1
+"crates/code-graph/src/v2/dsl/extractors.rs":
+- category: contract
+  reason: "Receiver_type stores the bare type name because lookup_by_receiver_type matches bare_type"
+  preview: "// receiver_type uses bare apply (no import resolution) so it"
+  hash: f50e866dd18e56f0
+  lines: 3
+"crates/code-graph/src/v2/dsl/ssa.rs":
+- category: magic-value
+  reason: "Past this depth reads degrade to Opaque to avoid an uncatchable SIGSEGV stack overflow"
+  preview: "/// Past this reaching-def recursion depth a read degrades to `Opaque` …"
+  hash: 050614c4a77ce1ad
+  lines: 2
+- category: invariant
+  reason: "The predecessor chain can recurse thousands deep, so the cap must degrade a file instead of overflowing the stack."
+  preview: "// Recurses up the predecessor graph — thousands deep in a wide"
+  hash: c6de60821fd470f4
+  lines: 3
+- category: invariant
+  reason: "Marker must differ from Opaque so dead-end values are not taken as cycles"
+  preview: "// Place a marker sentinel so recursive lookups that reach this"
+  hash: 2c18c91fcd91c54d
+  lines: 3
+- category: invariant
+  reason: "Add_phi_operands already returns the collapsed replacement, so the caller must not re-simplify"
+  preview: "// Different values or cycle detected: fall back to phi creation."
+  hash: 4377c883784c0378
+  lines: 5
+- category: invariant
+  reason: "Seal_block may ignore the return because the replacement already propagated through phi users"
+  preview: "/// Populate a phi's operands by reading its variable at every"
+  hash: 8c3ff9ab22c1e33d
+  lines: 10
+- category: invariant
+  reason: "Must run after seal_remaining(), and trivial phi removal cannot catch phi cycles; call order is not visible in code"
+  preview: "/// Remove redundant phi SCCs (Algorithm 5, Section 3.2 of Braun et al.…"
+  hash: 7927f62668afb121
+  lines: 9
+- category: upstream
+  reason: "Petgraph tarjan_scc returns SCCs in reverse topological order, and the loop relies on that library ordering"
+  preview: "// tarjan_scc returns SCCs in reverse topological order."
+  hash: f15e7f64f83c1e2c
+  lines: 1
+- category: magic-value
+  reason: "512 KiB is below the 2 MiB worker stack, so the test proves on-demand growth"
+  preview: "// 512 KiB is below the 2 MiB production worker stack: this chain overf…"
+  hash: 94e504191acd5d20
+  lines: 2
+"crates/code-graph/src/v2/dsl/types.rs":
+- category: invariant
+  reason: "Custom parsers must honor the CPU budget and handle hostile input because walk phases have no budget"
+  preview: "/// `Custom` replaces tree-sitter parsing wholesale. It receives the pa…"
+  hash: 1a1e230405e4d479
+  lines: 3
+"crates/code-graph/src/v2/error.rs":
+- category: contract
+  reason: "The metric label is wire-stable because dashboards and alerts read it; the type cannot show that"
+  preview: "/// Per-file benign skip. `as_metric_label` returns the wire-stable lab…"
+  hash: 85fcd521fe1e333e
+  lines: 1
+- category: contract
+  reason: "Gl_file.reason is enum-bounded only because Display is the sole producer; consumers of the column rely on it"
+  preview: "/// Why a file did not index cleanly: a benign skip, a genuine fault, or"
+  hash: ce08aeb772d98f29
+  lines: 8
+"crates/code-graph/src/v2/langs/custom/js/analyze/analyzer.rs":
+- category: upstream
+  reason: "OXC SymbolFlags marks arrow and function expressions as Variable, so the code promotes them to Function"
+  preview: "// Promote arrow functions and function expressions to Function."
+  hash: 1c4520a84f7f0a06
+  lines: 3
+- category: upstream
+  reason: "The OXC class table drops abstract methods, and TS1243 forbids static abstract, so the raw walk is needed."
+  preview: "// One raw AST walk covers every method. OXC's class table applies the …"
+  hash: 1d45efbe6d65021b
+  lines: 4
+- category: contract
+  reason: "The parser relies on CodeFilter in the file stream to remove minified bundles; another file owns that guard"
+  preview: "// Minified and long-line bundles are filtered upstream by `CodeFilter`"
+  hash: 9a9f185edd6773d8
+  lines: 2
+- category: upstream
+  reason: "Oxc 0.137 turned the semantic nodes default off and the analyzer needs random access to nodes"
+  preview: "// oxc 0.137 flipped the default to off; the analyzer relies on"
+  hash: f3ca5cb8b98e2be7
+  lines: 2
+- category: invariant
+  reason: "Downstream SSA assumes valid semantic state, so files with diagnostics are skipped to avoid wrong definitions silently"
+  preview: "// A file that failed semantic analysis has an inconsistent"
+  hash: c29fe200930d5fc3
+  lines: 4
+- category: invariant
+  reason: "The recursive walk overflows the 2 MiB worker stack with an uncatchable SIGSEGV, so the stack grows"
+  preview: "// Grow the stack on demand: the recursive CallExtractor walk overflows…"
+  hash: 2f5ba6eac677c531
+  lines: 1
+- category: upstream
+  reason: "OXC module_record can omit anonymous export default objects, so the binding is synthesized for Vue"
+  preview: "// OXC's module_record may not include `export default { ... }` for ano…"
+  hash: b1fee3d7af78842b
+  lines: 2
+"crates/code-graph/src/v2/langs/custom/js/analyze/dataflow.rs":
+- category: invariant
+  reason: "The first def per byte range must win; HashMap collect keeps the last and misattributes enclosure silently"
+  preview: "// First def at a given byte range wins. `HashMap::collect`"
+  hash: 69f016700b16f99d
+  lines: 5
+- category: security
+  reason: "Member-expression depth is attacker-controlled and can exhaust the thread stack, so the stack grows"
+  preview: "// Member-expression nesting is attacker-controlled (`a.b.c...` deep"
+  hash: 4f89656899f00b4d
+  lines: 2
+"crates/code-graph/src/v2/langs/custom/js/analyze/patterns.rs":
+- category: security
+  reason: "Hostile source can nest destructuring patterns deeply enough to overflow the stack"
+  preview: "// Hostile source can nest object/array patterns arbitrarily deep"
+  hash: 5983e1eebeb4808d
+  lines: 2
+"crates/code-graph/src/v2/langs/custom/js/constants.rs":
+- category: magic-value
+  reason: "Svelte and Astro are excluded because they have no fixture coverage, though OXC can parse them"
+  preview: "/// Single-File Component extensions the pipeline actually supports."
+  hash: 89b618bf934433f7
+  lines: 3
+- category: magic-value
+  reason: "The extension order matches tsc and ts-node priority; the list alone cannot show that source"
+  preview: "/// Extensions the specifier resolver and evaluator probe when resolvin…"
+  hash: bc0b26bfd72908d5
+  lines: 3
+- category: magic-value
+  reason: "This order matches the Bun loader priority, an external tool rule"
+  preview: "/// Same set as `RESOLVER_EXTENSIONS`, ordered to match Bun's loader pr…"
+  hash: baf50f7aebf73382
+  lines: 1
+- category: magic-value
+  reason: "Webpack configs prefer plain .js first because they are almost always JS"
+  preview: "/// Extensions the webpack-config evaluator probes when resolving a bare"
+  hash: a0f0dd50b4ef36d2
+  lines: 4
+- category: magic-value
+  reason: "The list matches the extensions webpack itself loads"
+  preview: "/// Extensions the webpack-config probe accepts. Kept narrow (plain JS"
+  hash: 03a03e8a198a71b5
+  lines: 2
+"crates/code-graph/src/v2/langs/custom/js/extract.rs":
+- category: upstream
+  reason: "Malformed input can trip OXC invariant panics, so catch_unwind limits the damage to one file"
+  preview: "// `catch_unwind` isolates per-file panics: a malformed input that trips"
+  hash: 5c63fda1e4fa5b40
+  lines: 2
+- category: security
+  reason: "Defends in depth against path escape and committed symlinks to system paths from a malicious repository"
+  preview: "/// Reject relative paths that could escape the repo clone."
+  hash: 6b1426c65fd23397
+  lines: 6
+- category: security
+  reason: "Callers pass absolute paths under the root, so the containment check strips the root and refuses anything else"
+  preview: "// Callers sometimes hand us absolute paths that already live under"
+  hash: 678c21c7e2899d69
+  lines: 4
+- category: security
+  reason: "Caps attacker-crafted star re-export counts that would amplify resolver cost on every import"
+  preview: "/// Per-file ceiling on star-reexport specifiers. Star re-export chains"
+  hash: 4ad8220f5a18bb29
+  lines: 4
+- category: security
+  reason: "Callers that bypass the walker cap rely on this constant to stay bounded"
+  preview: "/// Per-file ceiling for the JS pipeline. The walker also applies a cap,"
+  hash: 08281e6f1f3b4e3f
+  lines: 3
+- category: security
+  reason: "OXC panic payloads can carry hostile repo bytes into logs, so the text is filtered and capped"
+  preview: "/// Panic payloads from OXC can embed source snippets (byte ranges of"
+  hash: 6940b4a6b17aae77
+  lines: 7
+- category: invariant
+  reason: "Multi-block SFCs must go through combine_scripts first, or colliding bindings drop silently"
+  preview: "// One analyzer call per file. SFCs with multiple `<script>` blocks"
+  hash: 90fddd6e8bd0b6a2
+  lines: 4
+- category: security
+  reason: "Identifiers are attacker-controlled; the 1 KiB cap stops huge names from pinning memory for the pipeline life"
+  preview: "/// JS identifiers are attacker-controlled and carry into the graph as"
+  hash: 43f95f5c476cc374
+  lines: 5
+- category: invariant
+  reason: "No catch-all arm, so a new JsDefKind fails to compile instead of mapping to a wrong DefKind"
+  preview: "// Arms are explicit (no catch-all) so adding a new `JsDefKind`"
+  hash: a454ff8e8c557e55
+  lines: 3
+"crates/code-graph/src/v2/langs/custom/js/frameworks/mod.rs":
+- category: invariant
+  reason: "Block scopes flatten into one module on purpose; Vue runtime scoping is not modeled"
+  preview: "/// Fold every `<script>` block in an SFC into one analyzer input."
+  hash: 133229be9719cfec
+  lines: 8
+- category: invariant
+  reason: "The semicolon stops ASI-defeating tokens from merging statements across blocks and corrupting ranges silently"
+  preview: "// `;\\n` instead of `\\n` so ASI-defeating tokens at the end"
+  hash: 7ef56c81958ecea6
+  lines: 5
+"crates/code-graph/src/v2/langs/custom/js/frameworks/vue.rs":
+- category: security
+  reason: "A hostile file can collide a real class with the Vue virtual class FQN, so it is namespaced"
+  preview: "// If a real class with this FQN already exists in the file"
+  hash: fd8de7b9ba56e597
+  lines: 6
+"crates/code-graph/src/v2/langs/custom/js/resolve/evaluator.rs":
+- category: upstream
+  reason: "Serde_json parses with no recursion limit, so deep nested input needs stack growth before descent"
+  preview: "// `serde_json` parses without a recursion limit, so a 256 KB file of"
+  hash: c6053f2fa99f6bc5
+  lines: 2
+- category: security
+  reason: "All path-containment logic lives in the utils fs SSOT; this wrapper must not add its own"
+  preview: "/// Thin wrapper around `orbit_utils::fs::contained_canonical_path` so …"
+  hash: 9f60e776769f0741
+  lines: 3
+"crates/code-graph/src/v2/langs/custom/js/resolve/specifier.rs":
+- category: security
+  reason: "Oxc_resolver Restriction::Path is stricter than containment, so a custom check bounds paths to the clone"
+  preview: "// Bound every resolution to the repo clone. `Restriction::Path`"
+  hash: d1d1822c3ea525cf
+  lines: 4
+"crates/code-graph/src/v2/langs/custom/js/resolve/webpack.rs":
+- category: security
+  reason: "A hostile webpack config cannot point an alias outside the repo"
+  preview: "// Dropped silently unless it resolves inside the repo, so a"
+  hash: 33eead4e5cfa4421
+  lines: 3
+- category: security
+  reason: "Node built-ins, URLs, and platform-specific escapes are refused as alias targets"
+  preview: "// Anything else — `node:child_process`, URLs, paths that"
+  hash: 15b1b1bcd6cc753f
+  lines: 3
+- category: security
+  reason: "The specifier filter rejects node built-ins and filesystem escapes smuggled through package names"
+  preview: "/// ASCII-only, no path separators, no protocol prefix: matches `lodash…"
+  hash: 8f679abcc1e89eea
+  lines: 3
+"crates/code-graph/src/v2/langs/custom/js/workspace.rs":
+- category: security
+  reason: "Canonicalization failure fails closed so a prefix match cannot flip the containment check"
+  preview: "// Canonicalize once so downstream path containment checks"
+  hash: e34bbdc956d6db91
+  lines: 7
+- category: security
+  reason: "Auto discovery walks past root_dir and could honor an ambient server tsconfig, so discovery is pinned"
+  preview: "/// Resolver configuration for the tsconfig/jsconfig the repo exposes."
+  hash: bedad058f11326fa
+  lines: 7
+- category: security
+  reason: "Path::is_file follows symlinks, so a committed symlink could flip bun detection"
+  preview: "/// `Path::is_file` follows symlinks. Use `symlink_metadata` so a"
+  hash: 81cd9fad12dd7d1f
+  lines: 3
+- category: security
+  reason: "Bounds the read so a hostile package.json cannot exhaust indexer memory"
+  preview: "/// Read a manifest-sized file or skip it. Guards against a hostile"
+  hash: 05b646392bd150b4
+  lines: 2
+"crates/code-graph/src/v2/langs/custom/rust/ast.rs":
+- category: contract
+  reason: "The linker resolves super_types only against in-graph FQNs, so external traits produce no edge"
+  preview: "// Index local definitions by FQN. Multiple definitions can share an"
+  hash: 4c60ee456c13f572
+  lines: 6
+- category: contract
+  reason: "HIR gives canonical FQNs the linker matches; external supertraits drop in the linker"
+  preview: "// Capture supertrait declarations (`trait Foo: Bar + Baz`) as pending"
+  hash: b54bb17b7e992ce6
+  lines: 8
+- category: contract
+  reason: "Only direct supertraits are emitted because the linker rebuilds ancestry, matching other languages' super_types"
+  preview: "// Direct supertraits only — transitive ancestry is reconstructed"
+  hash: 3b2ed9389103f80c
+  lines: 4
+- category: contract
+  reason: "The HIR trait FQN must use the same path scheme as local trait definitions or the linker misses them"
+  preview: "/// Build the canonical FQN string for a HIR `Trait` using the same mod…"
+  hash: c0ce10fc1c6b08a7
+  lines: 4
+"crates/code-graph/src/v2/langs/custom/rust/manifest.rs":
+- category: magic-value
+  reason: "4 MiB bounds Cargo.toml reads because real manifests are far smaller"
+  preview: "/// Upper bound on a Cargo.toml file we will read off disk. Real manife…"
+  hash: 1dec9d139e6dc39e
+  lines: 2
+- category: security
+  reason: "Multi-megabyte manifests are likely adversarial, so the size check runs before the unbounded read"
+  preview: "// Cargo manifests are human-authored config. Anything multi-megabyte is"
+  hash: 30ce39582370bbc6
+  lines: 3
+- category: upstream
+  reason: "Cargo workspace.exclude entries are directory prefixes, not globs; the prefix match follows Cargo"
+  preview: "// Cargo's `workspace.exclude` is a list of directory prefixes, not glo…"
+  hash: f418987996eafb5d
+  lines: 2
+- category: magic-value
+  reason: "Cfg is pinned to linux/x86_64 to match the server indexer and keep runs reproducible"
+  preview: "// Pins cfg atoms to linux/x86_64 to match the server indexing environm…"
+  hash: 7c0fa8d5e70c16ad
+  lines: 2
+- category: invariant
+  reason: "Optional deps count only when reachable from default, a conservative rule that keeps disabled crates out"
+  preview: "// An optional dependency is considered activated only when it is named…"
+  hash: 7a49a2815355a1a3
+  lines: 4
+"crates/code-graph/src/v2/langs/custom/rust/mod.rs":
+- category: upstream
+  reason: "Ra_ap APIs expect triomphe::Arc, not std::sync::Arc, so it is re-exported"
+  preview: "// triomphe::Arc is re-exported for submodules (workspace.rs) that"
+  hash: 56de59f3d8b7c412
+  lines: 2
+- category: magic-value
+  reason: "256 jobs balances stall frequency against memory; the constant alone cannot show the trade-off."
+  preview: "// Sweeping sooner stalls Rust lanes measurably more often for a little…"
+  hash: a222a0b151973d3d
+  lines: 1
+- category: invariant
+  reason: "A second waiting writer on the interner lock stalls every arriving Rust job, so the swap guards it"
+  preview: "// A second waiting writer would stall every arriving Rust job and swee…"
+  hash: 0c2cf12ba3ca012e
+  lines: 1
+- category: invariant
+  reason: "Edge resolution is sequential, so it needs its own wall-clock budget apart from the per-file sentinel"
+  preview: "// Edge resolution is sequential over all parsed files, so it"
+  hash: e1c2a07553866aac
+  lines: 3
+- category: upstream
+  reason: "Rust-analyzer loading can panic, so catch_unwind keeps the failure to one root"
+  preview: "// A rust-analyzer load panic must cost one root, not the whole pass."
+  hash: 0cca69055275097d
+  lines: 1
+- category: upstream
+  reason: "Ra_ap_hir 0.0.328 lacks the body-source-map lookup, so closures and fn pointers get no definition"
+  preview: "// Closures, raw fn pointers, and `impl Fn*` receivers do not map to a"
+  hash: 1f9bfb6936ad2ea0
+  lines: 5
+"crates/code-graph/src/v2/langs/custom/rust/sysroot.rs":
+- category: contract
+  reason: "The version and the checked-in sysroot assets must be bumped in lockstep"
+  preview: "/// Pinned for reproducible indexing across machines/releases. Std APIs…"
+  hash: 4401e61f48af63c3
+  lines: 3
+"crates/code-graph/src/v2/langs/custom/rust/workspace.rs":
+- category: invariant
+  reason: "The candidate filter and VFS seed must agree, or a root claims files its database never loaded"
+  preview: "/// The candidate filter and the VFS seed must agree, or a root can cla…"
+  hash: 6c2de7c88ea93bea
+  lines: 2
+- category: invariant
+  reason: "Callers must pass a canonicalized root because macOS /var symlinks otherwise break the prefix match"
+  preview: "/// Returns `file_path` made relative to `root_path`."
+  hash: fe3da98562e1749e
+  lines: 7
+- category: upstream
+  reason: "Rust-analyzer load_workspace spawns a VFS loader and inotify watcher, which this loader bypasses"
+  preview: "/// Load a rust-analyzer `ProjectWorkspace` into a fresh `RootDatabase`…"
+  hash: d1825edb749ba417
+  lines: 5
+- category: security
+  reason: "The loader must never start a proc-macro server, a containment rule for untrusted repos"
+  preview: "// Invariant: this function never starts a proc-macro server."
+  hash: 25f7748354992a2d
+  lines: 1
+- category: security
+  reason: "The test guards the RUSTSEC-2023-0089 mitigation so a proc-macro server cannot return silently"
+  preview: "/// Guards the atomic-polyfill advisory mitigation (RUSTSEC-2023-0089).…"
+  hash: 21cf7ccfcac65dd6
+  lines: 3
+"crates/code-graph/src/v2/langs/generic/c_family.rs":
+- category: upstream
+  reason: "These tree-sitter declarator kinds have no declarator field, so the code reads the first named child"
+  preview: "/// `reference_declarator`, `parenthesized_declarator`, and"
+  hash: 9954deb5cc35248f
+  lines: 3
+- category: upstream
+  reason: "The tree-sitter grammar puts comment and ms_call_modifier before the inner declarator"
+  preview: "/// These named children can precede the inner declarator, so the fallb…"
+  hash: a32d46d9c17edade
+  lines: 2
+- category: upstream
+  reason: "Tree-sitter ends an unnamed C parameter in an abstract declarator that names nothing."
+  preview: "/// An unnamed parameter such as `void f(int *)` ends in an abstract de…"
+  hash: ad269e569d4c7958
+  lines: 2
+- category: upstream
+  reason: "Tree-sitter qualified_identifier is right-recursive, so specialization arguments must be dropped at any depth"
+  preview: "/// Keep class qualifiers because they identify out-of-line members in …"
+  hash: d4505273d30daaf3
+  lines: 4
+- category: invariant
+  reason: "Taking the last token before the parameter list keeps template parameters and drops trailing comments"
+  preview: "/// Use the last token before the operator's parameter list. This prese…"
+  hash: 321fef9cd55411c2
+  lines: 2
+- category: upstream
+  reason: "The tree-sitter abstract_reference_declarator has no declarator field, so the first named child is used."
+  preview: "/// `abstract_reference_declarator` has no `declarator` field, so use i…"
+  hash: e2a738a2c32f86c6
+  lines: 2
+- category: upstream
+  reason: "The tree-sitter grammar gives a nested declarator its own parameter list, which explains the extra expected entry"
+  preview: "// A nested declarator carries its own parameter list, so an abstract"
+  hash: 010b2a18be96b30c
+  lines: 2
+"crates/code-graph/src/v2/langs/generic/cpp.rs":
+- category: invariant
+  reason: "This rule must precede the direct-call rule, or qualified calls extract the full Ns::func name"
+  preview: "// Must precede the direct-call rule: both match call_expression,"
+  hash: 4f086a1132be6b95
+  lines: 3
+"crates/code-graph/src/v2/langs/generic/csharp.rs":
+- category: upstream
+  reason: "This and base are anonymous nodes in the C# tree-sitter grammar, so the empty lists are on purpose"
+  preview: "// 'this' is anonymous in C# tree-sitter"
+  hash: f3496ef473df10f2
+  lines: 2
+"crates/code-graph/src/v2/langs/generic/dockerfile.rs":
+- category: contract
+  reason: "The stage index counts comments and directives to match the incremental engine id scheme"
+  preview: "// The index counts comments and parser directives, as in the increment…"
+  hash: 1fd84ece78b28f37
+  lines: 1
+"crates/code-graph/src/v2/langs/generic/elixir.rs":
+- category: upstream
+  reason: "Tree-sitter-elixir parses every keyword construct as a call with a target field, so rules dispatch on text"
+  preview: "/// Tree-sitter-elixir parses every keyword construct (`defmodule`,"
+  hash: 2371ea90a8f38624
+  lines: 5
+- category: upstream
+  reason: "Tree-sitter-elixir parses attributes as unary_operator; the outermost check stops nested operators masking them"
+  preview: "/// Attributes (`@doc`, `@spec`) parse as `unary_operator` with an"
+  hash: bb91f84df4aff292
+  lines: 4
+- category: known-gap
+  reason: "Defmacro, defguard, and defdelegate heads are suppressed but emit no definitions yet"
+  preview: "// The head is the first named child of `arguments`: an"
+  hash: df094527fc8c1f76
+  lines: 7
+- category: upstream
+  reason: "The grammar parses field access and zero-arity calls the same, so only alias receivers count"
+  preview: "// Remote call (`Baz.hello(name)`). Without parentheses,"
+  hash: a72dc6d9ecf4dee0
+  lines: 4
+- category: known-gap
+  reason: "Only and except options are not modeled, so restricted imports over-approximate to the whole module"
+  preview: "// Wildcard keyed on the full module path: the wildcard"
+  hash: d9a9665c883d0f81
+  lines: 4
+- category: upstream
+  reason: "The grammar includes the trailing colon and whitespace in keyword tokens"
+  preview: "/// Find the pair in a `keywords` node whose key matches. Keyword"
+  hash: f67fd6a8d21bbc7a
+  lines: 2
+"crates/code-graph/src/v2/langs/generic/go.rs":
+- category: invariant
+  reason: "Rules evaluate in reverse order, so the unconditional fallback must come first"
+  preview: "// Unconditional fallback first — reverse iteration means conditional"
+  hash: d57c771a44aeed51
+  lines: 2
+"crates/code-graph/src/v2/langs/generic/hcl.rs":
+- category: invariant
+  reason: "GlobalName only admits defs with fqn != name, so Variable and Module defs must be namespaced"
+  preview: "// Variable/Module blocks are `.no_scope()`, so the scope rule pushed a"
+  hash: 2c64f4f546fcccbf
+  lines: 9
+- category: known-gap
+  reason: "Dotted HCL refs use the unbounded by_fqn path and over-resolve across directories"
+  preview: "// Rewrite strategy is split by how the engine resolves the result:"
+  hash: 8589deba0fb21a3d
+  lines: 8
+- category: invariant
+  reason: "ScopeFqnWalk would fan var refs out to every module directory, so only SameFile and GlobalName run"
+  preview: "// No ScopeFqnWalk: HCL has no lexical-scope-relative name resolution."
+  hash: b9e5a12589770402
+  lines: 8
+- category: invariant
+  reason: "Output and Provider defs stay flat because GlobalName admission would add cross-file false positives"
+  preview: "// var.x / module.x refs stay bare in hcl_rewrite_ref; namespacing the …"
+  hash: f847a13c86a60f2c
+  lines: 5
+"crates/code-graph/src/v2/langs/generic/java.rs":
+- category: known-gap
+  reason: "The permits clause emits no Extends edge; the child-side clause and bare references cover it"
+  preview: "// JEP 409 sealed types: the `permits` clause is not extracted into"
+  hash: 9e798b39336a1f76
+  lines: 7
+"crates/code-graph/src/v2/langs/generic/kotlin.rs":
+- category: invariant
+  reason: "Rules evaluate in reverse order, so the unconditional fallback must come first"
+  preview: "// Unconditional fallback first — reverse iteration means"
+  hash: a92c0466894a81f2
+  lines: 2
+"crates/code-graph/src/v2/langs/generic/lua.rs":
+- category: invariant
+  reason: "Rules evaluate last-to-first, so index 0 must stay the unconditional fallback"
+  preview: "// Evaluated last-to-first: [2] checked before [1] before [0]."
+  hash: b0989b73538c229b
+  lines: 2
+"crates/code-graph/src/v2/langs/generic/php.rs":
+- category: contract
+  reason: "Graph FQNs omit the leading backslash of PHP absolute names; other resolver code relies on that form"
+  preview: "// Graph FQNs omit the leading `\\` of an absolute name."
+  hash: 5e37dec4d340682a
+  lines: 1
+"crates/code-graph/src/v2/langs/generic/python.rs":
+- category: invariant
+  reason: "Over-deep relative imports stay relative and must never be source-rooted; code cannot show why"
+  preview: "// Over-deep or bare-dot relative imports (e.g. `from ...x import Y` ab…"
+  hash: 3412f9936f8dfc46
+  lines: 3
+- category: invariant
+  reason: "Python imports a regular package by its own name, so no path at or under it can be a sys.path root."
+  preview: "// A regular package is imported through its own name, so neither it"
+  hash: 1f2a1d2546efb611
+  lines: 2
+- category: invariant
+  reason: "The scope name must be captured before the source-root prefix is added; order matters silently"
+  preview: "// The local binding keeps the originally-written first segment, so"
+  hash: 1d6243a42afa520b
+  lines: 2
+- category: invariant
+  reason: "An __init__.py scope already equals its package, so the first dot drops nothing; explains the subtraction"
+  preview: "// An `__init__.py` *is* its package: its module scope already equals"
+  hash: 554249c3cf31e058
+  lines: 3
+- category: upstream
+  reason: "The parser labels the unaliased name AliasedImport with alias None, a quirk the test guards"
+  preview: "// `import a.b, c.d as e` labels the unaliased `a.b` name AliasedImport…"
+  hash: 6b397fa6f1dc5550
+  lines: 2
+- category: invariant
+  reason: "Pkg/json.py is only importable as pkg.json, so bare import json stays external; the test data cannot say why"
+  preview: "// pkg/json.py is only importable as pkg.json, so bare `import json`"
+  hash: 68e1341ea1091ba3
+  lines: 2
+"crates/code-graph/src/v2/langs/generic/ruby.rs":
+- category: upstream
+  reason: "Tree-sitter Ruby tags uppercase LHS as constant and Foo::Bar as scope_resolution; code cannot show grammar quirks"
+  preview: "// Constant assignments: `MAX = 2`, `Foo::Bar = obj`. Tree-sitter"
+  hash: d3663cf1f8e0643d
+  lines: 6
+- category: invariant
+  reason: "Scope dispatch tries the last-declared rule first, so Lambda must follow Constant"
+  preview: "// `NAME = <callable>`: a lambda or Proc bound to a constant or"
+  hash: df30baba148a5b05
+  lines: 9
+- category: upstream
+  reason: "Tree-sitter tags every uppercase identifier as constant, so definitional and call positions are excluded"
+  preview: "// Bare constant reference: `MAX_REFS` standalone in an expression."
+  hash: ef38794de82eddc6
+  lines: 9
+- category: invariant
+  reason: "FQNs are root-relative, so a kept :: prefix never resolves and mislinks calls"
+  preview: "// FQNs are stored root-relative, so a kept cbase prefix (`::Foo::Bar`)"
+  hash: a4d04b75c17186b1
+  lines: 2
+"crates/code-graph/src/v2/langs/generic/swift.rs":
+- category: invariant
+  reason: "Class_declaration rules evaluate in reverse order, so the index-0 fallback catches actors"
+  preview: "// Rules for class_declaration are evaluated in reverse insertion order…"
+  hash: 81e14109c645382f
+  lines: 2
+- category: known-gap
+  reason: "Extensions push no scope because methods inside would get the wrong FQN without a reattach hook"
+  preview: "// Extensions index the name but do not push a scope — methods inside w…"
+  hash: df56ae2305fe31e3
+  lines: 2
+"crates/code-graph/src/v2/langs/generic/yaml/document_types/argo_cd.yaml":
+- category: contract
+  reason: "Defines what path, name, and alias mean for ArgoCD imports, which queries read"
+  preview: "# ArgoCD Application manifests: the application name is a definition"
+  hash: ebf44a95798ec18c
+  lines: 4
+"crates/code-graph/src/v2/langs/generic/yaml/document_types/gitlab_ci.yaml":
+- category: contract
+  reason: "Defines what path, name, and alias mean for GitLab CI imports, which queries read"
+  preview: "# GitLab CI configuration, including `.gitlab-ci-*.yml` fragments and"
+  hash: b6a0b7f58a95c324
+  lines: 9
+"crates/code-graph/src/v2/langs/generic/yaml/document_types/helm_chart.yaml":
+- category: contract
+  reason: "Defines what path, name, and alias mean for Helm chart imports, which queries read"
+  preview: "# Helm Chart.yaml: the chart name is a definition and declared chart"
+  hash: e60e71b8eb222a22
+  lines: 3
+"crates/code-graph/src/v2/langs/generic/zig.rs":
+- category: magic-value
+  reason: "The list holds only standard builtin types; arbitrary-width integers like u7 are excluded on purpose"
+  preview: "// Only standard builtin types - arbitrary-width types (i.e. `u7`) are …"
+  hash: 6d173ed106d225db
+  lines: 1
+"crates/code-graph/src/v2/linker/graph.rs":
+- category: invariant
+  reason: "Sealing stops pool deduping, so this must be called once, after resolution"
+  preview: "/// Drop what only the resolver read, before the converter holds the gr…"
+  hash: cd330ee288059dcc
+  lines: 2
+- category: invariant
+  reason: "Only valid after the definition and import batches and tag cache exist"
+  preview: "/// Drop what the edge build no longer reads. Only valid once the defin…"
+  hash: 0f8fa8e3dca596b4
+  lines: 2
+- category: invariant
+  reason: "Must run after all files are added; par_iter order makes same-name resolution flaky"
+  preview: "/// Build extends edges and ancestor chains. Must be called after all"
+  hash: df434ad3a0511371
+  lines: 8
+- category: invariant
+  reason: "Index order must be sorted by FQN so lookups do not depend on parallel insertion order"
+  preview: "// Stabilize index order so lookups are deterministic regardless"
+  hash: 143c508946cbbfac
+  lines: 3
+- category: invariant
+  reason: "Node kind is part of the key because one property index maps to different tag names per kind"
+  preview: "// The node kind is part of the key because the same property index"
+  hash: fb95330698ee70a3
+  lines: 2
+- category: magic-value
+  reason: "These inputs were chosen because their unmasked FxHash sets the high bit; the literals cannot say so"
+  preview: "// Inputs hand-picked because their unmasked FxHash output has"
+  hash: e15616de5c64a084
+  lines: 2
+"crates/code-graph/src/v2/linker/imports.rs":
+- category: invariant
+  reason: "Bind only on a unique definition; ambiguous wildcard matches must fall through to ImportedSymbol"
+  preview: "// Bind only on a unique definition. No match (not re-exported here) and"
+  hash: 8fe03dd27bae07ec
+  lines: 3
+"crates/code-graph/src/v2/linker/resolver.rs":
+- category: invariant
+  reason: "Import edges are kept apart so they do not affect the failed_chains check"
+  preview: "/// Edges from definitions to external imported symbols. Stored"
+  hash: 58aee8fa77c04429
+  lines: 2
+- category: invariant
+  reason: "From_parts has no sentinel guard, so the caller must arm the flag or the guard fails silently"
+  preview: "/// `from_parts` has no sentinel guard, so its caller must arm the flag…"
+  hash: c49d11639e8f1e27
+  lines: 1
+- category: invariant
+  reason: "A member call on another receiver cannot be recursion, but this/self and bare calls can; the match cannot explain why."
+  preview: "// A member call on a non-self receiver cannot resolve to"
+  hash: 70797eae73dc6149
+  lines: 4
+- category: invariant
+  reason: "The key separator is collision-free only because U+0001 never appears in an FQN"
+  preview: "// `\\u{1}` never appears in an FQN, so one combined key is collision-fr…"
+  hash: 67aac1d97dc0ed56
+  lines: 2
+- category: invariant
+  reason: "The ancestor walk must not exit early so diamond and multiple inheritance surface all candidates"
+  preview: "// Walk ancestors for receiver type lookup (struct embedding,"
+  hash: 28fac6655160ac72
+  lines: 4
+- category: invariant
+  reason: "By_name strategies miss qualified names because Definition.name is the leaf, so by_fqn runs first"
+  preview: "// Qualified-name fast path. For refs whose name contains the"
+  hash: 7e97d56049889661
+  lines: 7
+- category: invariant
+  reason: "GlobalName stays out of import_strategies to avoid O(candidates) scans on every bare identifier"
+  preview: "// GlobalName: last-resort lookup for chain bases only."
+  hash: 3c47e72af711a3ee
+  lines: 3
+"crates/code-graph/src/v2/linker/state.rs":
+- category: invariant
+  reason: "In ssa_names checks a hash collision only costs extra work, never wrong edges"
+  preview: "/// Hashes a string into a `u64` index key (FxHash, for speed). Also pu…"
+  hash: 7c217e018466e968
+  lines: 3
+- category: magic-value
+  reason: "About 4 KB per file covers scope names, cache keys, and FQNs for typical files"
+  preview: "/// Allocate with a capacity hint. Rule of thumb: ~4KB per file covers"
+  hash: 3fc58e9e054f1755
+  lines: 2
+"crates/code-graph/src/v2/pipeline.rs":
+- category: magic-value
+  reason: "The limit is a parse-cost guard for generated Go, not the Arrow overflow fix; code cannot say which"
+  preview: "// This is a parse-cost guard for generated Go blobs, not the cumulativ…"
+  hash: f94f897f182385e5
+  lines: 3
+- category: magic-value
+  reason: "1 MiB caps YAML parse cost and keeps machine-generated files out"
+  preview: "// 1 MiB as a parse cost guard to keep machine generated files out"
+  hash: 16829bc833b76395
+  lines: 1
+- category: invariant
+  reason: "The breadcrumb names the in-flight file before an uncatchable OOM or overflow crash"
+  preview: "/// Log files >= this size before processing so an uncatchable OOM/over…"
+  hash: 61e3688a4211647b
+  lines: 1
+- category: upstream
+  reason: "Arrow 58.3.0 panic messages are matched by substring; re-validate after Arrow upgrades"
+  preview: "/// Returns `true` when `message` matches Arrow's offset-overflow panic…"
+  hash: 8bfc4aa78a50180e
+  lines: 7
+- category: upstream
+  reason: "Arrow reports only batch-level offset overflow, so the whole batch is marked on purpose"
+  preview: "// Arrow reports only the batch-level offset overflow, not the row/file…"
+  hash: 947977ca31c80332
+  lines: 4
+- category: contract
+  reason: "Names the metric that dashboards read for skipped files"
+  preview: "/// Per-file benign skips. Surface under"
+  hash: d135678e8f8f5afb
+  lines: 2
+- category: contract
+  reason: "Names the fault metric and the errored outcome label that dashboards read"
+  preview: "/// Per-file failures. Surface under"
+  hash: dee46974eda446fb
+  lines: 3
+- category: invariant
+  reason: "The native tree-sitter stack overflow is an uncatchable SIGSEGV, so headroom must be kept"
+  preview: "/// Headroom for the native tree-sitter parse, whose stack overflow is …"
+  hash: 8a19d022a33c869d
+  lines: 1
+- category: contract
+  reason: "JS and TS report resolve_ms as 0 because cross-file resolution is a bulk phase; consumers must know this"
+  preview: "/// Per-file timing captured during pipeline execution."
+  hash: 29e96baae8f231b7
+  lines: 6
+- category: contract
+  reason: "Fatal entries route to the code_errors_total stage metric that dashboards read"
+  preview: "/// Task-level errors. Fatal entries route to `code_errors_total{stage}…"
+  hash: e2d1f0c171e16450
+  lines: 1
+- category: contract
+  reason: "A typed panic payload must keep its stage so the dashboard does not collapse it into internal"
+  preview: "// If the panic payload is already a typed CodeGraphError"
+  hash: e87810168ce4dc65
+  lines: 4
+- category: invariant
+  reason: "This arm fires only for task-level failures, and unprocessed files drop from counts silently"
+  preview: "// After the typed-outcome refactor the"
+  hash: a5a5179068d182cc
+  lines: 11
+- category: invariant
+  reason: "The structural graph must build after parsing so each File node gets its final reason in one write"
+  preview: "// Build the structural file/directory graph after parsing so each File"
+  hash: c1aca6a8ff660257
+  lines: 3
+- category: invariant
+  reason: "The primary context must be picked deterministically, not by HashMap iteration order"
+  preview: "// Pick the primary context deterministically: sort by Language"
+  hash: a0e3250265d6c363
+  lines: 2
+- category: invariant
+  reason: "The graph holds one FQN separator; mixed separators silently corrupt FQNs, and the assert cannot say why"
+  preview: "// All family members must share the same FQN separator -- the"
+  hash: 6079e7ab0962ee80
+  lines: 3
+- category: invariant
+  reason: "One outcome per file is held across the barrier, so the large variant is boxed; unboxing silently grows memory"
+  preview: "/// Boxed: `ParsedFile` dwarfs the other variants, and one"
+  hash: e77b0c4f25018050
+  lines: 2
+- category: invariant
+  reason: "In-place dedupe leaves slop on every file result held until merge, which explains the shrink call"
+  preview: "// `dedupe_edge_triples` retains in place and every file's result"
+  hash: 7d5a845221ef7a30
+  lines: 2
+- category: upstream
+  reason: "Arrow 58.3.0 checks i32 overflow before allocating, which makes this test memory-safe"
+  preview: "// Memory-safe as of Arrow 58.3.0: `new_repeated` calls"
+  hash: f81882be42ace685
+  lines: 3
+- category: upstream
+  reason: "Tracing defaults are thread-local, so worker threads log to the global subscriber; code cannot show this"
+  preview: "// Worker threads log to the global subscriber, not to a thread-local d…"
+  hash: dca962b022ed1325
+  lines: 1
+"crates/code-graph/src/v2/registry.rs":
+- category: upstream
+  reason: "Macro_rules cannot parse commas in generic types, so pipeline types sit in brackets"
+  preview: "/// Pipeline types wrapped in `[]` to avoid comma ambiguity in generics."
+  hash: ab851f571da9d515
+  lines: 1
+- category: invariant
+  reason: "Macro arms match first-wins, so the tag arm must precede the ident arm; reordering breaks silently"
+  preview: "// Tag entry (before ident arm — first-match-wins)."
+  hash: cddb866d5cefe9a2
+  lines: 1
+- category: contract
+  reason: "The YAML test harness calls dispatch_by_tag from another crate; the code here cannot show that caller"
+  preview: "// dispatch_by_tag is called by the YAML test harness."
+  hash: 91aad6660137a72a
+  lines: 1
+"crates/code-graph/src/v2/types/edge.rs":
+- category: contract
+  reason: "These labels must stay compatible with v1 edge labels that other readers expect"
+  preview: "/// V1-compatible labels for structural (non-def-to-def) edges."
+  hash: 868f9540d165670c
+  lines: 1
+"crates/code-graph/src/v2/types/node.rs":
+- category: invariant
+  reason: "The enum type bounds what gl_file.reason can hold; a string field would allow unbounded values"
+  preview: "/// Why the file did not index cleanly (skip/fault), or `None`. Strictl…"
+  hash: 7d18fada884577d4
+  lines: 2
+"crates/code-graph/treesitter-visit/src/extract.rs":
+- category: tool-read
+  reason: "Rustdoc compiles and runs the doc example as a doctest"
+  preview: "//! Composable node extraction pipelines for tree-sitter ASTs."
+  hash: 612f199196e5fbce
+  lines: 21
+"crates/code-graph/treesitter-visit/src/node.rs":
+- category: tool-read
+  reason: "Rustdoc compiles the doc example as a doctest"
+  preview: "/// Find the first node along `axis` whose kind satisfies `criterion`."
+  hash: 9b63b9cdd811505f
+  lines: 12
+"crates/code-graph/treesitter-visit/src/predicate.rs":
+- category: tool-read
+  reason: "Rustdoc compiles and runs the doc example as a doctest"
+  preview: "//! Composable boolean predicates over tree-sitter nodes."
+  hash: 8b6a58f4205e68b4
+  lines: 13
+- category: upstream
+  reason: "Tree-sitter grammars put definitional fields first among named children; the predicate relies on that"
+  preview: "/// True when this node has any named previous sibling. Useful for"
+  hash: a5ffa6918c00ae25
+  lines: 7
+"crates/code-graph/treesitter-visit/src/tree_sitter/mod.rs":
+- category: upstream
+  reason: "Tree_sitter Node::kind revalidates UTF-8 on each call, so the cache indexes names by id"
+  preview: "// Node-kind names by `kind_id`. `tree_sitter::Node::kind()` reruns"
+  hash: 61860ac79b419829
+  lines: 3
+- category: magic-value
+  reason: "100K iterations at one offset marks a stalled parse; the number alone cannot say why"
+  preview: "/// Default stall limit for the progress callback. 100K iterations at t…"
+  hash: addfa227dafd5660
+  lines: 2
+- category: invariant
+  reason: "The parse must abort below this stack level before native recursion overflows it"
+  preview: "/// Abort the parse when the worker stack drops below this, before a de…"
+  hash: 30373b4235255d32
+  lines: 1
+- category: invariant
+  reason: "Thread CPU time is valid only when created and checked on the same thread; the type cannot enforce that."
+  preview: "/// Per-thread CPU-time budget (create and check on the same thread); i…"
+  hash: 021201e29526edd3
+  lines: 1
+- category: upstream
+  reason: "The progress callback is the only hook into the uninterruptible tree-sitter C parse"
+  preview: "/// Cooperative limits enforced from the parser's progress callback, th…"
+  hash: 4804cfcd25b19975
+  lines: 1
+- category: invariant
+  reason: "A native parse stack overflow is an uncatchable SIGSEGV, so the parser must bail before the red zone"
+  preview: "// Bail before the native parse overflows the stack; that fault is an u…"
+  hash: c195b170d754ef05
+  lines: 1
+- category: upstream
+  reason: "Tree-sitter returns an error here only when the progress callback breaks, never for syntax"
+  preview: "// The only error here is the progress callback breaking (budget or sta…"
+  hash: 421c618bbdce70a1
+  lines: 1
+- category: invariant
+  reason: "Src is valid UTF-8 and node offsets fall on char boundaries, which makes the direct slice sound"
+  preview: "// `src` is valid UTF-8 and node offsets land on char boundaries, so"
+  hash: f57eb8e09fc46c95
+  lines: 2
+- category: upstream
+  reason: "Tree-sitter ERROR and MISSING kind ids fall outside the name table, so they take the slow path"
+  preview: "// Out-of-range ids (e.g. ERROR/MISSING) fall back to the slow path."
+  hash: d77ccf57451febed
+  lines: 1
+- category: magic-value
+  reason: "Fetch_add returns the prior value, so max_stall 3 fires on the fifth visit; the test numbers depend on it"
+  preview: "// fetch_add returns the previous value, so with max_stall=3 the >= che…"
+  hash: bd5c51ebc1555937
+  lines: 2

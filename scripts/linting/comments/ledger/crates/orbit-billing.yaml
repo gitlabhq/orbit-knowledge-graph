@@ -1,0 +1,105 @@
+"crates/orbit-billing/src/cc_token_source.rs":
+- category: upstream
+  reason: "Labkit SourceError has no header-encoding variant, so the closest variant is chosen; no code can show why"
+  preview: "// No SourceError variant means \"header encoding failed\"; TokenCache"
+  hash: b3d79ff71a298d85
+  lines: 3
+"crates/orbit-billing/src/enforcement.rs":
+- category: compliance
+  reason: "Billing enforcement is a build-time cfg, so deployed config cannot turn it off; the audit relies on this"
+  preview: "//! Startup validation for builds compiled with `ORBIT_BILLING_ENFORCED…"
+  hash: 632005c9536fa1af
+  lines: 3
+"crates/orbit-billing/src/inputs.rs":
+- category: contract
+  reason: "BillingInputs is the whole auth-to-billing boundary and billing_adapter is the single conversion point in another crate"
+  preview: "//! Input shape for `BillingObserver`."
+  hash: b0dc8b73d4a70dbe
+  lines: 6
+"crates/orbit-billing/src/metrics.rs":
+- category: upstream
+  reason: "DeliveryFailure is non_exhaustive, so an unknown reason label covers variants added upstream"
+  preview: "// Fallback for any DeliveryFailure variant added upstream (the enum is"
+  hash: fa1e9d9613afd193
+  lines: 2
+- category: upstream
+  reason: "OTel exposes a series only after first observation, so series register at 0 for rate alerts"
+  preview: "/// Register every series at 0 at startup so `rate(...) == 0` alerts co…"
+  hash: 73deb730386df04c
+  lines: 3
+"crates/orbit-billing/src/observer.rs":
+- category: contract
+  reason: "Rails mints license_checksum only for online cloud licenses, so absence on SM means offline or legacy"
+  preview: "// Rails mints `license_checksum` only for online cloud licenses, so its"
+  hash: a04e25fa9075f1bd
+  lines: 2
+"crates/orbit-billing/src/quota/cache.rs":
+- category: magic-value
+  reason: "The 10% jitter staggers fleet-wide expiry when CustomersDot hands out the same max-age"
+  preview: "// ±10% jitter staggers expiry across instances that all populate their…"
+  hash: d068d7ea80dc62df
+  lines: 3
+- category: upstream
+  reason: "Dropping the OTel gauge handle deregisters the callback, so the field must stay alive"
+  preview: "// Kept alive for the lifetime of the cache so the OTel SDK keeps invok…"
+  hash: ec9e4b7c8bb2a3e0
+  lines: 2
+- category: invariant
+  reason: "A failed CDot check denies the request and is never cached, so the next request retries"
+  preview: "/// Returns the gate decision and whether it was served from cache."
+  hash: 7857c758ba562159
+  lines: 6
+- category: upstream
+  reason: "Moka try_get_with masks hit versus miss, so a separate get labels the metric"
+  preview: "// Fast path: cache hit. Done as a separate `get` so we can label the"
+  hash: 802d2a4a3cc3f645
+  lines: 2
+- category: invariant
+  reason: "A Deny carries a TTL and must be cached so denied requests do not re-hit CDot"
+  preview: "// A Deny outcome carries a TTL just like Allow and must be cached so"
+  hash: 0c134ff52b996ca4
+  lines: 2
+"crates/orbit-billing/src/quota/client.rs":
+- category: invariant
+  reason: "Without the header CDot can only answer 401, so an unusable claim fails closed before sending"
+  preview: "// Without the header CDot can only answer 401, so an unusable claim fa…"
+  hash: d4ef49ea1c36eb28
+  lines: 2
+- category: magic-value
+  reason: "Port 1 is reserved and unroutable, so the TCP connect fails before any HTTP exchange"
+  preview: "// Port 1 is reserved and unroutable; the TCP connect fails before any …"
+  hash: 94cfe99bb5827aaf
+  lines: 1
+"crates/orbit-billing/src/quota/key.rs":
+- category: security
+  reason: "Key fields are logged, so license_checksum stays out of CacheKey; correlation_id would defeat the cache"
+  preview: "// `license_checksum` stays out of `CacheKey`: key fields are logged, a…"
+  hash: 2048fa94f3b846c2
+  lines: 3
+- category: contract
+  reason: "CustomersDot expects the realm claim exactly as Rails signed it, never the billing-event REALM_SM value"
+  preview: "// The quota check sends the realm claim exactly as Rails signed it (`s…"
+  hash: 1defe74d6d85b39d
+  lines: 3
+"crates/orbit-billing/src/quota/metrics.rs":
+- category: upstream
+  reason: "OTel exposes a series only after first observation, and seeding histograms skews _count and _sum"
+  preview: "/// Pre-seed every labelled counter series at 0 so Prometheus never see…"
+  hash: c7cace8bcea8462e
+  lines: 8
+- category: invariant
+  reason: "Fail_open, fail_closed, and skipped are never cached, so only the miss series exists for them."
+  preview: "// fail_open, fail_closed, and skipped are only ever observed on cache=…"
+  hash: 44efd6a6f9ac8ecc
+  lines: 1
+"crates/orbit-billing/src/quota/mod.rs":
+- category: invariant
+  reason: "Self-managed operators control egress to CustomersDot, so only GitLab.com may fail open"
+  preview: "// Self-managed operators control egress to CustomersDot, so only GitLa…"
+  hash: 266eeb0e284c6954
+  lines: 1
+- category: contract
+  reason: "CustomersDot cannot resolve SaaS requests without a governing namespace until Rails rejects them, so they skip check and billing"
+  preview: "// Temporary until Rails rejects SaaS requests without a governing name…"
+  hash: c54652911782e639
+  lines: 2

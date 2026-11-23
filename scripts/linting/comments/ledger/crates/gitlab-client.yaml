@@ -1,0 +1,57 @@
+"crates/gitlab-client/src/cc_token.rs":
+- category: magic-value
+  reason: "The 30-minute lead lets a token survive a brief Rails outage near expiry without dropped events."
+  preview: "/// How long before `exp` to refresh, so a brief Rails outage near expi…"
+  hash: f48044a2194e031e
+  lines: 2
+- category: magic-value
+  reason: "The interval bounds an outage to at most one Rails call per pod per interval"
+  preview: "/// Minimum gap between Rails calls after a failure, so an outage draws…"
+  hash: b2a052580acf6e4e
+  lines: 2
+- category: magic-value
+  reason: "The 15 s cap matches labkit's OIDC token source and why waiting is acceptable without a token"
+  preview: "/// Caps the fetch while the cached token is still valid, so it can cov…"
+  hash: f0dfda6540a1fc8e
+  lines: 4
+- category: invariant
+  reason: "A stale token is served so the collector 401 surfaces the failure instead of a silent local drop."
+  preview: "/// Serves the cached token even past its `exp` on a failed refresh, so"
+  hash: 55c5f142b2d22779
+  lines: 2
+- category: invariant
+  reason: "Without a real suspension point the burst never exercises single-flight dedup"
+  preview: "// Without a real suspension point, a concurrent burst resolves the"
+  hash: 463e0e54d7f86023
+  lines: 3
+"crates/gitlab-client/src/client.rs":
+- category: contract
+  reason: "Rails validates the JWT issuer against this value"
+  preview: "/// Rails expects this value when validating incoming tokens."
+  hash: 68077e5a78224b47
+  lines: 1
+- category: contract
+  reason: "Rails validates the JWT audience against this value"
+  preview: "/// Rails expects this value when validating incoming tokens."
+  hash: 68077e5a78224b47
+  lines: 1
+- category: contract
+  reason: "Rails validates that the JWT subject starts with an expected prefix"
+  preview: "/// Rails validates that the subject starts with an expected prefix (e.…"
+  hash: cfac66b437cb38d9
+  lines: 1
+- category: contract
+  reason: "The GitLab side reads the raw JWT in this header with no Bearer prefix"
+  preview: "/// The raw JWT token is sent directly as this header value (no `Bearer…"
+  hash: fb7d24198c73e992
+  lines: 1
+- category: upstream
+  reason: "Reqwest with rustls-no-provider needs a CryptoProvider installed first; install_default Err is benign"
+  preview: "// reqwest is compiled with `rustls-no-provider`, so a CryptoProvider"
+  hash: 68e4a337607d7dcb
+  lines: 4
+- category: upstream
+  reason: "Reqwest resolve treats port 0 as use the port from the request URL"
+  preview: "// Port 0 tells reqwest to use the port from the request URL."
+  hash: c6fcef8a0385a021
+  lines: 1

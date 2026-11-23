@@ -1,0 +1,304 @@
+"crates/orbit-server/build.rs":
+- category: upstream
+  reason: "Libduckdb-sys 2.0 adds no rpath, so debug server builds set one; release compiles DuckDB in"
+  preview: "/// libduckdb-sys 2.0 adds no rpath for a downloaded libduckdb, so a de…"
+  hash: e48eaa2a2bcff8a8
+  lines: 2
+- category: contract
+  reason: "The build script path must stay in sync with OntologyArchive::path in another crate"
+  preview: "// Keep in sync with `OntologyArchive::path`."
+  hash: 7504f46e6cd6c514
+  lines: 1
+"crates/orbit-server/src/active_schema.rs":
+- category: invariant
+  reason: "Before the first dispatcher writes the key, ClickHouse is the only source of the schema version"
+  preview: "/// The key is a cache of `gkg_schema_version`; before the first dispat…"
+  hash: ca5a5ae1e749fd64
+  lines: 2
+"crates/orbit-server/src/analytics/context.rs":
+- category: contract
+  reason: "The 255 and 64 character bounds come from the analytics schema; code cannot show their source"
+  preview: "/// Bounds are 255 chars for instance/host fields; exceeding that surfa…"
+  hash: 8fd017bf641ccfc9
+  lines: 3
+"crates/orbit-server/src/analytics/observer.rs":
+- category: magic-value
+  reason: "RFC 6761 reserves .test, so no real GitLab instance uses that suffix."
+  preview: "// RFC 6761 reserves .test for testing, so no real GitLab instance live…"
+  hash: 1588a5e38bda78d4
+  lines: 1
+"crates/orbit-server/src/auth/claims.rs":
+- category: contract
+  reason: "The JWT claim carries raw Gitlab::Access integers per path so the security pass compares roles directly"
+  preview: "/// One traversal path the user holds in their scope, paired with the e…"
+  hash: 4cd2b1e05e6134b1
+  lines: 9
+- category: security
+  reason: "Rails derives per-path role sets that the compiler security pass uses to filter entities"
+  preview: "/// Traversal paths the user can query, each paired with the exact"
+  hash: e93843dbea3c33f2
+  lines: 6
+- category: contract
+  reason: "Rails sets this claim from gitlab_com_group_member? and always sends false off GitLab.com."
+  preview: "/// Whether the user is a GitLab team member. Set by Rails via"
+  hash: 26ce145421bb72d5
+  lines: 3
+- category: contract
+  reason: "The value comes from Rails User#user_type; the field name cannot show the source or values"
+  preview: "/// Rails `User#user_type`, such as `human`, `project_bot`, or `service…"
+  hash: 4afeb35e491c0ff9
+  lines: 1
+- category: contract
+  reason: "Rails omits this claim for browser session requests; no code here can show that"
+  preview: "/// Credential the caller used, such as `personal_access_token` or"
+  hash: 5ae7345a7d3f8c56
+  lines: 2
+- category: security
+  reason: "The license hash authenticates quota checks, so it must never be serialized or logged"
+  preview: "/// SHA-256 of the instance's online cloud license, sent by Rails on se…"
+  hash: 7d71f5aeb71f9aab
+  lines: 4
+- category: contract
+  reason: "The values match the Iglu orbit_query enum, and unknown values map to Rest"
+  preview: "/// Source type of the request, matching the Iglu `orbit_query` enum."
+  hash: e1db30375862f0dc
+  lines: 2
+"crates/orbit-server/src/auth/context.rs":
+- category: invariant
+  reason: "Admins read the whole organization, so a missing root namespace is expected, not an error"
+  preview: "/// Admins read the whole organization, so they have no single root nam…"
+  hash: f0c9f6b5d026b283
+  lines: 1
+"crates/orbit-server/src/auth/validator.rs":
+- category: security
+  reason: "RSA algorithms stay banned until jsonwebtoken uses rsa 0.10+, which fixes RUSTSEC-2023-0071"
+  preview: "// SECURITY: Only HS256 (HMAC-SHA256) is supported. Do NOT add RSA algo…"
+  hash: 0a6739661bf2be35
+  lines: 3
+- category: contract
+  reason: "Rails signs and validates with the same issuer and audience; both services must match"
+  preview: "// Both sides use the same issuer/audience: Rails signs and validates"
+  hash: 09e8942da343e0a4
+  lines: 2
+- category: contract
+  reason: "Rails base64-decodes the secret file before signing JWTs, so the validator must decode to match"
+  preview: "// Rails base64-decodes the secret file before signing JWTs"
+  hash: ea6d4ed05479b8d8
+  lines: 2
+"crates/orbit-server/src/billing_adapter.rs":
+- category: compliance
+  reason: "Names this file as part of the SOX billing surface from the billing ADR"
+  preview: "//! The single claims-conversion seam between orbit-server and orbit-bi…"
+  hash: 445f70caff169f14
+  lines: 9
+"crates/orbit-server/src/clickhouse_setup.rs":
+- category: invariant
+  reason: "The setup connects to the default database because the graph database does not exist yet"
+  preview: "// The graph database does not exist until the contract creates it."
+  hash: daebd79aaaaab5e2
+  lines: 1
+- category: upstream
+  reason: "ClickHouse users reach replicas only via replicated user storage, so the contract has no ON CLUSTER"
+  preview: "// The contract has no ON CLUSTER: users reach every replica only throu…"
+  hash: 080548de368c0547
+  lines: 2
+"crates/orbit-server/src/content/gitaly/file_content.rs":
+- category: invariant
+  reason: "Commit_sha is preferred because it is immutable and a branch can advance during a request"
+  preview: "/// `revision` is the git ref used in `<revision>:<path>` for `list_blo…"
+  hash: a6ce2d736aed381f
+  lines: 2
+- category: upstream
+  reason: "Gitaly lists a shared blob once per request, so missed files must go in the next batch."
+  preview: "/// Gitaly lists a shared blob once per request, so the files a batch m…"
+  hash: 172eb3c57ce05d84
+  lines: 1
+- category: invariant
+  reason: "Commit_sha is preferred because it is immutable and a branch can advance"
+  preview: "// Prefer commit_sha (immutable) over branch (can advance)."
+  hash: d234bff8155bb96f
+  lines: 1
+- category: magic-value
+  reason: "Byte 1 lands inside the two-byte character, which the test literal cannot show"
+  preview: "// 'é' is 2 bytes (0xC3 0xA9). Slicing at byte 1 lands mid-character."
+  hash: 96d16c6dbdbf20e5
+  lines: 1
+- category: known-gap
+  reason: "Resolve_batch has no unit test here because it needs a live GitlabClient"
+  preview: "// resolve_batch is covered in the integration-tests crate (needs a liv…"
+  hash: 0df3949270fdb1ca
+  lines: 1
+"crates/orbit-server/src/expanded_logs.rs":
+- category: contract
+  reason: "Rails sends this token only when its gkg_verbose_logs feature flag is on"
+  preview: "/// Rails sends this token when its `gkg_verbose_logs` feature flag is …"
+  hash: e6ddb6a58a4c5c1c
+  lines: 1
+- category: security
+  reason: "Rust-analyzer logs names from customer repositories, so its configured directives are dropped"
+  preview: "/// rust-analyzer writes names from the parsed repository into its mess…"
+  hash: 5a9277d664a13d50
+  lines: 2
+- category: security
+  reason: "The default panic hook prints text that can hold parsed source code to stderr"
+  preview: "/// The default hook prints the panic text, which can hold parsed sourc…"
+  hash: 6d7f0de92193dcb5
+  lines: 1
+- category: security
+  reason: "A customer path inside an internal span must not be expanded into logs"
+  preview: "/// A customer path inside an internal span must not be expanded."
+  hash: 9fed48c6b9773edc
+  lines: 1
+"crates/orbit-server/src/fips.rs":
+- category: compliance
+  reason: "States the FIPS 140-3 posture; a mislinked binary must refuse to start"
+  preview: "//! FIPS 140-3 posture of the server binary. Every TLS and JWT primitiv…"
+  hash: 8924a0a560bf2e8d
+  lines: 3
+- category: compliance
+  reason: "Moving to another AWS-LC generation is a compliance event, not a routine bump"
+  preview: "/// AWS-LC FIPS module generation the build is declared against. The CM…"
+  hash: 9acdd495daea743d
+  lines: 4
+- category: invariant
+  reason: "Must run before any TLS client or JWT use so every rustls consumer gets the FIPS provider"
+  preview: "/// Installs the FIPS-restricted rustls provider as the process default…"
+  hash: 1b86776098103e88
+  lines: 3
+"crates/orbit-server/src/grpc/legacy.rs":
+- category: contract
+  reason: "Published clients still call the old gRPC path with byte-identical messages"
+  preview: "//! Serves the pre-rename wire surface. Published clients built from th…"
+  hash: 05bedccccd3a8479
+  lines: 6
+"crates/orbit-server/src/grpc/server.rs":
+- category: upstream
+  reason: "Tonic ignores the builder's TCP settings for a pre-bound listener"
+  preview: "// Tonic ignores the builder's TCP settings for a pre-bound listener."
+  hash: da9bd9e9ebad00db
+  lines: 1
+"crates/orbit-server/src/grpc/service/tests/billing.rs":
+- category: contract
+  reason: "Claims never serializes license_checksum, so the test signs the payload as Rails does."
+  preview: "// `Claims` never serializes `license_checksum`, so sign the payload as…"
+  hash: f28c2d82be9b38b2
+  lines: 1
+"crates/orbit-server/src/grpc/service/tests/quota.rs":
+- category: contract
+  reason: "Claims never serializes the checksum, so the test sets it in raw JSON the way Rails signs it"
+  preview: "// `Claims` never serializes the checksum, so it is set in the raw JSON…"
+  hash: 7fe6d44f6347be3c
+  lines: 1
+"crates/orbit-server/src/indexing_status/checkpoints.rs":
+- category: magic-value
+  reason: "The wait covers two sweeps because the hourly sweep retries a dead run"
+  preview: "// The hourly sweep retries a dead run, so wait for two sweeps."
+  hash: 7f52026a247cbd0e
+  lines: 1
+- category: invariant
+  reason: "FINAL is avoided so a completed row still counts until merge after a late page write"
+  preview: "// Not `FINAL`: until a merge, a completed row still counts after an ov…"
+  hash: 5a73f0e744c52648
+  lines: 1
+"crates/orbit-server/src/indexing_status/domains.rs":
+- category: invariant
+  reason: "Foreign-key edges belong to the node domain; only node-less plans feed endpoint domains"
+  preview: "// A node plan's foreign-key edges belong to the node's domain. Only pl…"
+  hash: dc64ffa5fd77a142
+  lines: 2
+"crates/orbit-server/src/indexing_status/mod.rs":
+- category: invariant
+  reason: "The code total is final only after the Project plan settles the project list"
+  preview: "// The Project plan writes the project list, so the code total is final…"
+  hash: 6c1a2e2d92e718dc
+  lines: 1
+"crates/orbit-server/src/main.rs":
+- category: invariant
+  reason: "Versions are parsed at boot so malformed files fail fast instead of per request"
+  preview: "// Force-parse schema/format versions at boot so malformed version files"
+  hash: 74379c355aa9e31f
+  lines: 2
+"crates/orbit-server/src/pipeline/correlation.rs":
+- category: contract
+  reason: "The query_id and comment formats are what retention parses to attribute queries."
+  preview: "//! Tags each ClickHouse query with the request correlation ID. Sub-que…"
+  hash: 4a9518c090aca399
+  lines: 6
+"crates/orbit-server/src/pipeline/helpers.rs":
+- category: security
+  reason: "Non-validation errors may leak table names, SQL, or infrastructure details, so they are replaced"
+  preview: "/// Sanitize error messages before sending to clients."
+  hash: c4046da89b1267d8
+  lines: 11
+- category: security
+  reason: "Errors expose no table names, SQL, or infrastructure to the client"
+  preview: "/// No internal details (table names, SQL, infrastructure) are exposed …"
+  hash: c3a0800f0bd06f69
+  lines: 2
+- category: upstream
+  reason: "Tracing-core caches callsite interest from a thread without a subscriber, so the test adds a dispatcher"
+  preview: "// A second dispatcher stops tracing-core from caching callsite interest"
+  hash: 5edb40e6ad81da7f
+  lines: 2
+"crates/orbit-server/src/pipeline/metrics.rs":
+- category: contract
+  reason: "Compile rejections go on a different metric, so dashboards never double count them"
+  preview: "/// Closed-enum mapping for `gkg.query.pipeline.failed{failure_reason}`."
+  hash: c78633a7167e0b0c
+  lines: 3
+"crates/orbit-server/src/pipeline/service.rs":
+- category: invariant
+  reason: "The timeout must live inside run_query so the observer records timed-out queries"
+  preview: "// The timeout lives inside run_query so the observer is still alive"
+  hash: 372ddddaecb139dc
+  lines: 4
+"crates/orbit-server/src/pipeline/stages/execution.rs":
+- category: upstream
+  reason: "ClickHouse reports these stats in the X-ClickHouse-Summary HTTP header"
+  preview: "/// Stats come from the `X-ClickHouse-Summary` HTTP header."
+  hash: 396a5a5092313830
+  lines: 1
+"crates/orbit-server/src/skills/mod.rs":
+- category: invariant
+  reason: "The skill version is not a content hash; concurrent bumps or a skip can reuse it"
+  preview: "//! Skills stay outside the agent command registry because they are pas…"
+  hash: 85a08e6481341bba
+  lines: 2
+"crates/orbit-server/src/tools/registry.rs":
+- category: contract
+  reason: "The field is named input_schema so callers do not confuse it with invoke_command parameters"
+  preview: "/// Catalog entry shape shared by the TOON `list_commands` response and…"
+  hash: bcccf9f82cad54c7
+  lines: 3
+- category: magic-value
+  reason: "The token budget guards the inlined description; the comment says how to respond when it trips"
+  preview: "// Tripping this budget usually means the ontology gained edges. Either"
+  hash: 916225d82c34e7cd
+  lines: 3
+"crates/orbit-server/src/tools/service.rs":
+- category: upstream
+  reason: "Jsonschema Validator does not implement Debug, so the public type needs a manual impl."
+  preview: "// `jsonschema::Validator` is not `Debug`, so derive it manually to keep"
+  hash: 2261f31ef9622601
+  lines: 2
+- category: contract
+  reason: "The value must match config/QUERY_DSL_VERSION; no type ties the two"
+  preview: "/// Semver string for the query DSL grammar. Matches `config/QUERY_DSL_…"
+  hash: 7a3c78421c5d544b
+  lines: 1
+- category: contract
+  reason: "The value must match config/RAW_OUTPUT_FORMAT_VERSION and the format_version on every response"
+  preview: "/// Semver string for the response format. Matches `config/RAW_OUTPUT_F…"
+  hash: 8f57cc835e8d0d19
+  lines: 2
+"crates/orbit-server/src/user_agent.rs":
+- category: contract
+  reason: "Rails forwards the header as x-client-user-agent and the CLI adds the tags parsed here"
+  preview: "//! Rails forwards the caller's User-Agent header as `x-client-user-age…"
+  hash: 20b4d205f8018469
+  lines: 2
+- category: security
+  reason: "The header is free text, so only plain names and versions reach analytics"
+  preview: "/// The header is free text, so only plain names and versions reach ana…"
+  hash: ef5665846f77b758
+  lines: 1

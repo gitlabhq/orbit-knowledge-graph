@@ -1,0 +1,247 @@
+"crates/orbit-log-fields/src/lib.rs":
+- category: security
+  reason: "Safe fields must never hold customer data and the allowlist also passes dependency events"
+  preview: "//! Log and span field names for Orbit."
+  hash: 2bf6bf370b78a30b
+  lines: 21
+- category: security
+  reason: "Safe fields are written on every log line and kept in exported traces; the trust boundary is not in code"
+  preview: "/// Fields that are written on every log line and kept in exported trac…"
+  hash: 5be82739364537c6
+  lines: 1
+- category: contract
+  reason: "The expanded logs predicate in another component reads this field; renaming it breaks that silently"
+  preview: "/// The expanded logs predicate reads it."
+  hash: 740019137f8db1ba
+  lines: 1
+- category: security
+  reason: "Billing namespace comes from the JWT claim, not the read namespace, and expanded logs ignore it"
+  preview: "/// Billing namespace from the JWT `root_namespace_id` claim, not the n…"
+  hash: 545caf1c0aa21570
+  lines: 2
+- category: contract
+  reason: "The expanded logs predicate in another component reads this field; renaming it breaks that silently"
+  preview: "/// Numeric IDs, `<org_id>/<root_namespace_id>/.../`. The expanded logs…"
+  hash: 8452be7322108661
+  lines: 1
+- category: contract
+  reason: "The expanded logs predicate does not read this field; that boundary is not in code"
+  preview: "/// Comma separated; the expanded logs predicate does not read it."
+  hash: 20686ba52cda5321
+  lines: 1
+- category: security
+  reason: "The value is Orbit-generated or Orbit-defined, which is why the field is log-safe"
+  preview: "/// Comma separated. Orbit generates the IDs."
+  hash: c37714283d2fb9bc
+  lines: 1
+- category: security
+  reason: "The value is Orbit-generated or Orbit-defined, which is why the field is log-safe"
+  preview: "/// Orbit generates it (`migration-v<N>`)."
+  hash: 294a64cecf10885c
+  lines: 1
+- category: security
+  reason: "The value is Orbit-generated or Orbit-defined, which is why the field is log-safe"
+  preview: "/// Orbit builds it as `<stream>.<stream_seq>.<consumer_seq>`."
+  hash: 281261cb52247d53
+  lines: 1
+- category: security
+  reason: "The value is Orbit-generated or Orbit-defined, which is why the field is log-safe"
+  preview: "/// Orbit generates it for one redaction exchange."
+  hash: 5848855d46ce4e67
+  lines: 1
+- category: contract
+  reason: "The expanded logs predicate in another component reads this field; renaming it breaks that silently"
+  preview: "/// Whether a trusted caller asked for expanded logs. The expanded logs…"
+  hash: 40ba8995ebc77095
+  lines: 1
+- category: security
+  reason: "The field holds only normalized realm values, which is why it is log-safe"
+  preview: "/// Only the values Orbit normalizes to (`SaaS` or `SM`)."
+  hash: 7a12a5046fd669d9
+  lines: 1
+- category: security
+  reason: "The field must never hold the checksum, a secret-handling rule"
+  preview: "/// Never the checksum."
+  hash: f6c308e68d32313f
+  lines: 1
+- category: security
+  reason: "Only Orbit-defined names may go in this safe field, never customer text"
+  preview: "/// Only names that Orbit defines, such as scheduled or named queries."
+  hash: d6e69e52df0faace
+  lines: 1
+- category: security
+  reason: "The value is Orbit-generated or Orbit-defined, which is why the field is log-safe"
+  preview: "/// Sanitized Orbit build version of versioned NATS streams and subject…"
+  hash: 341cc03ebe872a68
+  lines: 1
+- category: security
+  reason: "The value is Orbit-generated or Orbit-defined, which is why the field is log-safe"
+  preview: "/// From the infrastructure config."
+  hash: a30df9903fd6e0a0
+  lines: 1
+- category: security
+  reason: "The value is Orbit-generated or Orbit-defined, which is why the field is log-safe"
+  preview: "/// Subject pattern that Orbit defines."
+  hash: b55ffa432371366f
+  lines: 1
+- category: security
+  reason: "The value is Orbit-generated or Orbit-defined, which is why the field is log-safe"
+  preview: "/// Subject patterns that Orbit defines, comma separated."
+  hash: f49b884159ea253f
+  lines: 1
+- category: security
+  reason: "The value is Orbit-generated or Orbit-defined, which is why the field is log-safe"
+  preview: "/// Bucket name that Orbit defines."
+  hash: 7b1899f3d17f53bb
+  lines: 1
+- category: contract
+  reason: "Log readers rely on this value format or unit; the field name cannot carry it"
+  preview: "/// Starts at 1."
+  hash: 8e4d512d8fb11347
+  lines: 1
+- category: contract
+  reason: "Log readers rely on this value format or unit; the field name cannot carry it"
+  preview: "/// Starts at 1."
+  hash: 8e4d512d8fb11347
+  lines: 1
+- category: contract
+  reason: "Log readers rely on this value format or unit; the field name cannot carry it"
+  preview: "/// Zero-based."
+  hash: 331cb3ccb8856795
+  lines: 1
+- category: contract
+  reason: "Says whether the value counts returned or scanned data, which dashboards read and the name cannot show"
+  preview: "/// Rows that a ClickHouse query read and returned."
+  hash: 06e6cf51b1651235
+  lines: 1
+- category: contract
+  reason: "Says whether the value counts returned or scanned data, which dashboards read and the name cannot show"
+  preview: "/// Rows that ClickHouse scanned to answer a query."
+  hash: 3a5e39be13aec77b
+  lines: 1
+- category: contract
+  reason: "Log readers rely on this value format or unit; the field name cannot carry it"
+  preview: "/// From 0 to 1."
+  hash: 00c30926d2f07758
+  lines: 1
+- category: contract
+  reason: "Log readers rely on this value format or unit; the field name cannot carry it"
+  preview: "/// Unix time in seconds."
+  hash: 2baee144b745abbf
+  lines: 1
+- category: contract
+  reason: "Log readers rely on this value format or unit; the field name cannot carry it"
+  preview: "/// Unix time in seconds."
+  hash: 2baee144b745abbf
+  lines: 1
+- category: security
+  reason: "Says why the value is safe to log, since Orbit formats it and it holds no customer data"
+  preview: "/// Timestamp that Orbit formats."
+  hash: 565c508ff9252aa1
+  lines: 1
+- category: contract
+  reason: "Says whether the value counts returned or scanned data, which dashboards read and the name cannot show"
+  preview: "/// Bytes that a ClickHouse query read and returned."
+  hash: 6bb675455dc5c095
+  lines: 1
+- category: contract
+  reason: "Says whether the value counts returned or scanned data, which dashboards read and the name cannot show"
+  preview: "/// Bytes that ClickHouse scanned to answer a query."
+  hash: 203b0465a8147983
+  lines: 1
+- category: contract
+  reason: "Log readers rely on this value format or unit; the field name cannot carry it"
+  preview: "/// Address that the server listens on, `host:port`."
+  hash: e61cdc15a6452026
+  lines: 1
+- category: contract
+  reason: "Log readers rely on this value format or unit; the field name cannot carry it"
+  preview: "/// Comma separated."
+  hash: d93a41b80b43017f
+  lines: 1
+- category: contract
+  reason: "Log readers rely on this value format or unit; the field name cannot carry it"
+  preview: "/// Comma separated `group=limit` pairs from the config."
+  hash: 1a08f5372fafb672
+  lines: 1
+- category: security
+  reason: "Says why this safe field holds no customer data, which code cannot show"
+  preview: "/// Orbit detects it from the file."
+  hash: 768431c962babd3e
+  lines: 1
+- category: security
+  reason: "The safe value must come from an Orbit closed set so no customer data is logged"
+  preview: "/// From a closed set that Orbit defines."
+  hash: 82671496ddab91c3
+  lines: 1
+- category: security
+  reason: "Says why this safe field holds no customer data, which code cannot show"
+  preview: "/// From a closed set that Orbit defines."
+  hash: 82671496ddab91c3
+  lines: 1
+- category: security
+  reason: "The field holds a fixed error kind, never the error text, which can carry customer data"
+  preview: "/// Fixed error kind. Never the error text."
+  hash: 5eb607bfbbee5be2
+  lines: 1
+- category: security
+  reason: "Says the value is a code location, so it can never hold customer data"
+  preview: "/// `file:line:column` in Orbit or dependency code."
+  hash: d6e3f8eaf5abd552
+  lines: 1
+- category: security
+  reason: "Says the value is client-controlled or free text, which is why the field is expanded only"
+  preview: "/// Realm from a token, before Orbit validates it."
+  hash: c2624d1a92709d4c
+  lines: 1
+- category: security
+  reason: "Says the value is client-controlled or free text, which is why the field is expanded only"
+  preview: "/// Free text that CustomersDot returns."
+  hash: f374f265fd1efb3e
+  lines: 1
+- category: security
+  reason: "Says the value is client-controlled or free text, which is why the field is expanded only"
+  preview: "/// Name that a client sends for a skill, a command or a tool."
+  hash: 275577abbf424241
+  lines: 1
+- category: security
+  reason: "Says the value is client-controlled or free text, which is why the field is expanded only"
+  preview: "/// Rails copies it from a client header."
+  hash: b6e971448808b036
+  lines: 1
+- category: security
+  reason: "Says the value is client-controlled or free text, which is why the field is expanded only"
+  preview: "/// A client sends it back."
+  hash: 7a54d3b0c46c4b92
+  lines: 1
+- category: security
+  reason: "Says the value is client-controlled or free text, which is why the field is expanded only"
+  preview: "/// From the client user agent."
+  hash: 9c1105d951c3f773
+  lines: 1
+- category: security
+  reason: "The URL value excludes query string and fragment, which can carry secrets; code cannot show the logging rule"
+  preview: "/// Without query string or fragment."
+  hash: 7868545181bbee52
+  lines: 1
+- category: security
+  reason: "Says the value is client-controlled or free text, which is why the field is expanded only"
+  preview: "/// Can hold an encoded branch name."
+  hash: ef74eccff220bc54
+  lines: 1
+- category: security
+  reason: "Callers must pair free error text with a fixed error kind; no type can enforce the pairing"
+  preview: "/// Log a fixed [`ERROR_TYPE`](super::safe::ERROR_TYPE) next to it."
+  hash: 90a033a610c91bbb
+  lines: 1
+"crates/orbit-log-fields/src/macros.rs":
+- category: tool-read
+  reason: "Rustdoc compiles these compile_fail doctests to prove customer text cannot reach a safe field"
+  preview: "/// ```compile_fail"
+  hash: 89c3dfcd2c6ca481
+  lines: 19
+- category: upstream
+  reason: "Tracing level macros parse fields after target: as a block, so the macros route through event!"
+  preview: "/// `tracing::info!` and the other level macros read `{ NAME } = value`…"
+  hash: d1a94d6ed894faa3
+  lines: 2

@@ -1,0 +1,424 @@
+"crates/integration-tests/tests/billing_boundary.rs":
+- category: compliance
+  reason: "A passing run is SOX control evidence for the billing crate dependency surface"
+  preview: "//! SOX boundary check: only permitted crates may depend on `orbit-bill…"
+  hash: c486ae8da9def407
+  lines: 5
+"crates/integration-tests/tests/indexer/clickhouse.rs":
+- category: upstream
+  reason: "Only the ClickHouse byte cap avoids the Arrow String 2 GB overflow; the test also needs about 3 GB memory"
+  preview: "/// The byte cap the datalake pins on retry (`preferred_block_size_byte…"
+  hash: 46ee9225784698da
+  lines: 3
+- category: upstream
+  reason: "ClickHouse index_granularity_bytes=0 makes the sort coalesce the page into one block"
+  preview: "// index_granularity_bytes=0 makes the sort coalesce the page into one …"
+  hash: 413205438a6bebca
+  lines: 1
+- category: magic-value
+  reason: "2148 rows of 1MB exceed the 2GB Arrow String offset cap, which the test needs."
+  preview: "// 2148 * 1MB exceeds the Arrow String 2GB offset cap."
+  hash: 59aed70f1d7e34df
+  lines: 1
+- category: magic-value
+  reason: "Block size 0 reproduces the failing profile; the 1 MB default would mask the bug"
+  preview: "// preferred_block_size_bytes=0 reproduces the incident profile; the de…"
+  hash: 01cfc1e29f122035
+  lines: 2
+- category: magic-value
+  reason: "Small blocks place many Arrow message headers across chunk boundaries; the setting alone cannot say why"
+  preview: "// Small blocks put many Arrow message headers across chunk boundaries."
+  hash: 94254749c6f29053
+  lines: 1
+- category: upstream
+  reason: "ClickHouse 26.6 to 26.10 prefer a projection without the skip index when the base part has more marks"
+  preview: "// Large rows clustered in the sort key give the merged base part more …"
+  hash: 9afa8d913c045e21
+  lines: 2
+"crates/integration-tests/tests/indexer/code/budget_exhaustion.rs":
+- category: invariant
+  reason: "Only a written checkpoint stops the sweep from re-dispatching an overrun repository every tick."
+  preview: "//! An overrun leaves no checkpoint, so the sweep re-dispatches the rep…"
+  hash: b440b6816855dd07
+  lines: 2
+- category: magic-value
+  reason: "The slow archive takes 3s to start, so a 1s budget overruns on any host"
+  preview: "// The slow archive takes 3s to start; a 1s budget overruns on any host."
+  hash: e15d230055278250
+  lines: 1
+"crates/integration-tests/tests/indexer/code/code_indexing_task.rs":
+- category: invariant
+  reason: "The first timeout is transient and gets one NATS redelivery; the retry policy is not visible in the test code"
+  preview: "// First timeout: transient, so NATS redelivers for one retry."
+  hash: c69c5fc9d0f10023
+  lines: 1
+- category: invariant
+  reason: "A second timeout means the job is stuck and must dead-letter; the test code cannot state the policy"
+  preview: "// Second timeout: structurally stuck, so it dead-letters."
+  hash: 31ee648aeef05209
+  lines: 1
+- category: magic-value
+  reason: "The 1s budget against a 3s fetch forces a mid-run drop; the numbers alone do not show it."
+  preview: "// 1s budget vs a 3s fetch: the job is dropped mid-run, so cleanup runs…"
+  hash: 73cc7a21bf01bd1c
+  lines: 1
+"crates/integration-tests/tests/indexer/code/helpers.rs":
+- category: magic-value
+  reason: "0 maps to unlimited because tests without extraction caps rely on that default"
+  preview: "// 0 keeps the unlimited default that tests without extraction caps rel…"
+  hash: 9873ea9d7c7da9a4
+  lines: 1
+- category: magic-value
+  reason: "The lease is long so the heartbeat keeps the lock while a test holds inserts"
+  preview: "/// A long lock lease, so a test can hold the job's inserts without the…"
+  hash: de0c9015eeb0ec5e
+  lines: 1
+- category: contract
+  reason: "The archive prefix must match Gitaly's <slug>-<ref>/ for whatever SHA the indexer asks"
+  preview: "/// Raw file entries (path, content). The archive is built on-the-fly"
+  hash: 4fc17037948d0d1e
+  lines: 3
+- category: upstream
+  reason: "Gitaly streams a zero-byte 200 archive for projects without repository content."
+  preview: "/// How many more times the archive endpoint returns 200 OK with a zero…"
+  hash: 7da1c537f10edf11
+  lines: 3
+"crates/integration-tests/tests/indexer/common/dispatch.rs":
+- category: invariant
+  reason: "Dispatchers publish to one fixed versioned stream, so scenarios must run serially on the shared NATS container"
+  preview: "/// Dispatchers publish to a fixed versioned stream, so the shared NATS…"
+  hash: 4ebff345e1d5a59e
+  lines: 3
+"crates/integration-tests/tests/indexer/namespace_deletion.rs":
+- category: invariant
+  reason: "A background merge would collapse rows with tombstones and change the counts the test asserts"
+  preview: "// A merge would collapse a row with its tombstone and change the store…"
+  hash: 2615901ac734d17b
+  lines: 1
+"crates/integration-tests/tests/indexer/namespace_freshness.rs":
+- category: magic-value
+  reason: "The served version must differ from the binary version to prove the task reads what users query"
+  preview: "// A served version that differs from this binary's proves the task rea…"
+  hash: 3c694cb0b8f41513
+  lines: 1
+"crates/integration-tests/tests/indexer/nats.rs":
+- category: upstream
+  reason: "NATS error 10058 on stream config change during rolling deploys; keep the link"
+  preview: "// Guards against error 10058 during rolling deploys when stream config…"
+  hash: 453297001b711137
+  lines: 2
+- category: magic-value
+  reason: "The 3 s in-progress send must land before the 5 s ack_wait, which resets the deadline to about 8 s"
+  preview: "// Send in-progress after 3s (before the 5s ack_wait expires)."
+  hash: 1fe01f8dfe1f4645
+  lines: 2
+- category: magic-value
+  reason: "The second 3 s wait passes the first 5 s deadline but stays inside the reset 8 s window"
+  preview: "// Wait another 3s — now at ~6s total, past the original 5s deadline"
+  hash: e64da2327382ba8f
+  lines: 2
+- category: magic-value
+  reason: "The 1 s check ends at about 7 s, before the reset 8 s deadline"
+  preview: "// Check for 1s — ends at ~7s, still before the 8s reset deadline."
+  hash: 5a46f276b75645bc
+  lines: 1
+- category: magic-value
+  reason: "A zero threshold makes fresh idle fixtures eligible at once, because created > now can never hold"
+  preview: "// Zero threshold makes the just-created idle fixtures immediately elig…"
+  hash: 9556fd54c4b825af
+  lines: 2
+- category: upstream
+  reason: "NATS stays silent after max_deliver on an unacked message, which then holds its stream slot forever"
+  preview: "/// A message that's never ack'd/nack'd/term'd across every `max_delive…"
+  hash: ef08fe2320a9e46b
+  lines: 3
+- category: upstream
+  reason: "A NATS workqueue keeps the per-subject slot for the stuck message, so re-dispatch to that subject is rejected"
+  preview: "// The workqueue's per-subject slot is still held by the stuck message,…"
+  hash: b08663d41d50b037
+  lines: 2
+- category: invariant
+  reason: "The reconciler subscribes with no replay, so it must listen before exhaustion fires or it misses the advisory"
+  preview: "// The reconciler subscribes with no replay, so it must already be list…"
+  hash: 4cf216edcb8f97f6
+  lines: 3
+"crates/integration-tests/tests/indexer/nats_tls.rs":
+- category: invariant
+  reason: "Server_sans must hold every host the client dials, including docker in CI, or the TLS handshake fails"
+  preview: "/// Generates a test PKI. `server_sans` must include all hostnames/IPs …"
+  hash: d904f3d7495aa537
+  lines: 2
+- category: contract
+  reason: "NATS verify_and_map maps the certificate CN to a NATS user, so the CN value is part of the auth contract"
+  preview: "// CN is used for NATS user mapping via verify_and_map."
+  hash: d8755b52bd197764
+  lines: 1
+"crates/integration-tests/tests/indexer/scenarios/dispatch/detect_project_and_merge_request.yaml":
+- category: invariant
+  reason: "A checkpoint below replicated_at plus a now() cursor selects the incremental path; the rows alone cannot show that"
+  preview: "# A changes checkpoint below the rows' replicated_at + a now() sweep cu…"
+  hash: dbf49577e973cb2f
+  lines: 1
+"crates/integration-tests/tests/indexer/scenarios/sdlc/agents/tombstone_without_live_version_is_a_no_op.yaml":
+- category: known-gap
+  reason: "Pins the limit that a tombstone alone cannot identify the edge after ClickHouse merges parts"
+  preview: "# Pins the known limit: once ClickHouse has merged the source parts onl…"
+  hash: a8c0a9b7c5d751af
+  lines: 3
+"crates/integration-tests/tests/indexer/scenarios/sdlc/ci/processes_job_in_pipeline_and_runs_on.yaml":
+- category: invariant
+  reason: "Runners are global-scope, so the global handler must run before the namespace handler links jobs"
+  preview: "# Runners are global-scope entities, so the global handler must run bef…"
+  hash: 9690af2e7c385f6e
+  lines: 2
+"crates/integration-tests/tests/indexer/scenarios/sdlc/groups/reparented_group_indexes_once_at_current_path.yaml":
+- category: contract
+  reason: "The namespaces pseudo-table writes version DEFAULT now(), so the dated stale row is always older"
+  preview: "# The `namespaces` pseudo-table writes its traversal-path row with vers…"
+  hash: ee3fe6ef50fcbe84
+  lines: 2
+"crates/integration-tests/tests/indexer/scenarios/sdlc/groups/route_rename_updates_full_path.yaml":
+- category: invariant
+  reason: "The checkpoint row makes the second run incremental, so only the renamed route is re-read"
+  preview: "# The checkpoint row makes the second run incremental, so only the rena…"
+  hash: 91465c06689e8351
+  lines: 2
+"crates/integration-tests/tests/indexer/scenarios/sdlc/member_removal/full_row_tombstone_removes_edge.yaml":
+- category: known-gap
+  reason: "Contrast case for the pk-only tombstone gap; pins the shape the fix must generalize to"
+  preview: "# The contrast case for pk_only_tombstone_removes_edge: when the tombst…"
+  hash: 1f32b027171fe637
+  lines: 3
+"crates/integration-tests/tests/indexer/scenarios/sdlc/merge_requests/metric_columns_read_from_siphon_not_stale_denorm.yaml":
+- category: invariant
+  reason: "Metric columns must come from siphon_merge_request_metrics, not stale denormalized merge_requests columns"
+  preview: "# The metrics row replicated after the MR row without a parent re-emit;"
+  hash: 52df2750753001e5
+  lines: 3
+"crates/integration-tests/tests/indexer/scenarios/sdlc/merge_requests/processes_merged_at_commit_coalesce_fallback.yaml":
+- category: contract
+  reason: "Every COALESCE leg must decode both bytea SHA forms or the Arrow UTF-8 decode breaks"
+  preview: "# KG #924: every COALESCE leg must decode bytea SHAs in both `\\x`-text …"
+  hash: 7ccd4103b111fc8b
+  lines: 1
+- category: invariant
+  reason: "A squash MR must point at the landed squash commit, not the pre-squash head in auto-merge notes"
+  preview: "# Squash MR must point at the landed squash commit, not the pre-squash …"
+  hash: 9e7c01ee090919ee
+  lines: 2
+- category: contract
+  reason: "Siphon now replicates squash SHAs as raw bytes, so the fixture seeds them with unhex(); the row cannot show the storage form"
+  preview: "# Post-siphon!475 squash: raw binary bytes (no \\x prefix). The { sql: .…"
+  hash: 5b9b21f7f4bf3575
+  lines: 3
+- category: invariant
+  reason: "A SHA alone is not enough; closed MRs must never emit merged-at edges"
+  preview: "# A SHA alone is insufficient; closed MRs must not emit merged-at edges."
+  hash: 3a812580a79fbe0a
+  lines: 1
+"crates/integration-tests/tests/indexer/scenarios/sdlc/notes/processes_notes_with_edges.yaml":
+- category: contract
+  reason: "Siphon replicates normalized Rails noteable_type values; Issue and Epic collapse to WorkItem and Commit has no node"
+  preview: "# Raw Rails noteable_type values as Siphon replicates them (post"
+  hash: 175eeec3f4dd835d
+  lines: 4
+"crates/integration-tests/tests/indexer/scenarios/sdlc/packages/has_vulnerability_pages_past_unmatched_occurrences.yaml":
+- category: magic-value
+  reason: "The ids are ordered so the first driver page matches nothing and an unmatched row sits between matches"
+  preview: "# Ordered by (traversal_path, id): the first driver page (1001) matches…"
+  hash: b4faafc96494e883
+  lines: 2
+"crates/integration-tests/tests/indexer/scenarios/sdlc/packages/processes_container_repositories.yaml":
+- category: contract
+  reason: "NULL status is the active state and coerces to the empty storage default; 0 maps to delete_scheduled"
+  preview: "# status NULL is the active state and coerces to the '' storage default"
+  hash: f79b9a321ca110dd
+  lines: 2
+"crates/integration-tests/tests/indexer/scenarios/sdlc/packages/processes_package_has_vulnerability.yaml":
+- category: invariant
+  reason: "Component_versions is organization-scoped, so its rows sit at the org root, not the project path"
+  preview: "# component_versions is organization-scoped, so it sits at the org root…"
+  hash: b46f7377f94c2a7d
+  lines: 1
+"crates/integration-tests/tests/indexer/scenarios/sdlc/projects/project_route_update_changes_full_path.yaml":
+- category: invariant
+  reason: "The checkpoint row makes the second run incremental instead of a full re-pull"
+  preview: "# A project moved into a subgroup gets a new route on the second"
+  hash: 9a4b8d18e7e8d774
+  lines: 3
+"crates/integration-tests/tests/indexer/scenarios/sdlc/projects/transferred_project_does_not_duplicate_edges.yaml":
+- category: invariant
+  reason: "The projects pseudo-table writes version now() and would outrank the dated move row"
+  preview: "# Seeds siphon_projects and the route table directly rather than via the"
+  hash: 1ced1d4bc86afa2d
+  lines: 3
+- category: upstream
+  reason: "Rails keeps the pre-move route row readable until a merge collapses it, so the extract sees both paths."
+  preview: "# Rails rewrites the route row and touches the project. The pre-move ro…"
+  hash: 8c920510143a2f28
+  lines: 3
+"crates/integration-tests/tests/indexer/scenarios/sdlc/projects/transferred_project_indexes_once_at_current_path.yaml":
+- category: contract
+  reason: "The projects pseudo-table writes version DEFAULT now(), so the dated stale row is always older"
+  preview: "# The `projects` pseudo-table writes its traversal-path row with version"
+  hash: a7ade4baad5baeea
+  lines: 2
+"crates/integration-tests/tests/indexer/scenarios/sdlc/security/processes_vulnerability_finding_edge.yaml":
+- category: invariant
+  reason: "Finding_id points at a vulnerability occurrence, so HAS_FINDING must target VulnerabilityOccurrence, never Finding"
+  preview: "# finding_id points at a vulnerability occurrence, so HAS_FINDING must"
+  hash: 56e6f15d6ce9a7e7
+  lines: 2
+"crates/integration-tests/tests/indexer/scenarios/sdlc/stale_edges/skips_namespace_with_writes_in_flight.yaml":
+- category: invariant
+  reason: "Comparing versions while pages drain would retire edges that are about to be written"
+  preview: "# A set `cursor_values` means the pipeline has pages still draining, so…"
+  hash: b8cbb6e87c7c0c04
+  lines: 3
+"crates/integration-tests/tests/indexer/scenarios/sdlc/system_notes/checkpoint_advances_after_draining_paged_window.yaml":
+- category: magic-value
+  reason: "Datalake_batch_size=1 makes three notes span four pages, and replicated_at equals created_at so the window selects them"
+  preview: "# With datalake_batch_size=1 (the test default) the handler pages one n…"
+  hash: d7b0725a6edf804b
+  lines: 6
+"crates/integration-tests/tests/indexer/scenarios/sdlc/system_notes/cross_project_mentions_points_from_mentioner_to_mentioned.yaml":
+- category: contract
+  reason: "Rails writes the mention note on the mentioned entity, which fixes the edge direction and partition."
+  preview: "# Cross-project MENTIONS direction + partition guard. Project A (id=200,"
+  hash: 773dd0d119c8283b
+  lines: 10
+"crates/integration-tests/tests/indexer/scenarios/sdlc/system_notes/cross_project_mentions_uses_reconciled_route_not_stale_zero.yaml":
+- category: invariant
+  reason: "The siphon_routes sort key keeps stale and reconciled rows apart under FINAL, so only argMax resolves them"
+  preview: "# siphon_routes is a ReplacingMergeTree whose sort key includes"
+  hash: bfe42dcccdd1b14c
+  lines: 9
+"crates/integration-tests/tests/indexer/scenarios/sdlc/system_notes/cross_top_level_reference_is_not_resolved.yaml":
+- category: invariant
+  reason: "The resolver bounds each datalake scan to the top-level namespace (ADR 013), so cross-top-level edges must not materialize"
+  preview: "# v1 limitation guard (ADR 013): the resolver bounds every datalake sca…"
+  hash: d1f4f307882fdbfa
+  lines: 5
+"crates/integration-tests/tests/indexer/scenarios/sdlc/system_notes/edge_write_carries_all_gl_edge_columns.yaml":
+- category: upstream
+  reason: "Strict ClickHouse rejects an Arrow INSERT with missing columns, which stalls the checkpoint"
+  preview: "# Regression: the system-note edge writer once omitted the denormalized"
+  hash: 6561837944ce12f1
+  lines: 5
+"crates/integration-tests/tests/indexer/scenarios/sdlc/work_items/reopened_state_events_produce_reopened_edges.yaml":
+- category: contract
+  reason: "Reopen is a resource_state_events state 5 row, never a system-note action; the seed proves the filter"
+  preview: "# Reopen is a resource_state_events row (state = 5), never a system-note"
+  hash: fce96581a24e36a5
+  lines: 8
+"crates/integration-tests/tests/indexer/schema/migration.rs":
+- category: invariant
+  reason: "As at indexer startup, the version table must exist before the migration runs"
+  preview: "// Mirror indexer startup: version table must exist before migration ru…"
+  hash: 80952d43753cc880
+  lines: 1
+- category: magic-value
+  reason: "Migration polls every 5 s for 60 iterations, so the test pauses time to skip the wait"
+  preview: "// Migration polls every 5s × 60 iterations. Use paused time to skip th…"
+  hash: 37228888d9280ba0
+  lines: 1
+- category: upstream
+  reason: "Non_replicated_deduplication_window makes single-node ClickHouse dedup like Cloud SharedMergeTree"
+  preview: "// non_replicated_deduplication_window makes a single-node table dedup …"
+  hash: 34ddbb77eb6dd9ce
+  lines: 1
+"crates/integration-tests/tests/indexer/schema/migration_backfill.rs":
+- category: invariant
+  reason: "Re-dispatching every project relies on NATS dedup, which wedges once a message hits max_deliver"
+  preview: "/// Coverage-driven backfill: a project is due when it is not indexed, …"
+  hash: 6c3010741804a5d6
+  lines: 4
+- category: magic-value
+  reason: "Created_at has second precision, so the +1s offset prevents a tie with the embedded row."
+  preview: "// created_at is second-precision; +1s prevents a same-second tie with …"
+  hash: 8838f4c15f4a4a6a
+  lines: 1
+"crates/integration-tests/tests/indexer/sdlc/first_pass.rs":
+- category: invariant
+  reason: "Incremental checkpoints are unawaited async inserts, so reads must wait for the queue flush"
+  preview: "// Incremental runs save checkpoints as unawaited async inserts; read o…"
+  hash: 4112ab12d56b9f23
+  lines: 1
+"crates/integration-tests/tests/indexer/sdlc/keyset_paging.rs":
+- category: invariant
+  reason: "Id order and (started_at, id) order disagree on purpose so mis-ordering skips id 0"
+  preview: "// Id order and (started_at, id) order disagree, so a mis-ordered query…"
+  hash: 009e20ca1d81ae7f
+  lines: 1
+- category: magic-value
+  reason: "The cursor literal has the shape saved while AgentSession paged by traversal_path and id"
+  preview: "// Saved while AgentSession paged by [traversal_path, id]."
+  hash: a7f23e7efb2ae200
+  lines: 1
+"crates/integration-tests/tests/indexer/sdlc/partitioning.rs":
+- category: magic-value
+  reason: "Derives the bucket cuts and per-partition state from ids 1 to 12 with count 4; the numbers alone are opaque"
+  preview: "/// A partitioned retry with mixed pre-existing partition state. Bucket…"
+  hash: 1fbdb8ce5fd0ca28
+  lines: 6
+"crates/integration-tests/tests/server/analytics.rs":
+- category: contract
+  reason: "Must match the envelope versions the pinned labkit-events rev emits; revisit on every bump"
+  preview: "// Must match the envelope schema versions the pinned labkit-events rev…"
+  hash: f98d8d2e6bd616a3
+  lines: 2
+"crates/integration-tests/tests/server/concurrent_queries.rs":
+- category: upstream
+  reason: "ClickHouse rejects parallel queries with the same query_id (Code 216)"
+  preview: "//! Parallel requests that share one correlation ID must each get their…"
+  hash: d534ef836bb362a0
+  lines: 3
+"crates/integration-tests/tests/server/corpus_smoke.rs":
+- category: contract
+  reason: "Only the Authorization stage is replaced because the Rails gRPC handshake has no in-memory form; expect: error entries must fail"
+  preview: "//! Corpus smoke test."
+  hash: ad8ebdcb2849907e
+  lines: 17
+- category: known-gap
+  reason: "Skip reason; raw_sql_ab.yaml is a raw-SQL suite, not DSL, so the smoke test cannot compile it"
+  preview: "// raw_sql_ab.yaml is a raw-SQL A/B suite, not DSL — not compilable her…"
+  hash: 6a35dd449bcbb439
+  lines: 1
+- category: security
+  reason: "Admin claims grant Owner over the org root, so access-gated entities are visible and real SQL runs, not WHERE false"
+  preview: "// Admin claims -> Owner over org root, so access-gated entities are vi…"
+  hash: 332447f6dc894d3e
+  lines: 2
+"crates/integration-tests/tests/server/data_correctness/scenarios/edge_cases/long_text_wide_page.yaml":
+- category: invariant
+  reason: "The ClickHouse filter matches the full value but the response is truncated, so the assertion checks the truncated value"
+  preview: "# The wide-page limit triggers text truncation. The ClickHouse filter"
+  hash: 01c4be7c0e31aedb
+  lines: 3
+"crates/integration-tests/tests/server/http_tls.rs":
+- category: invariant
+  reason: "Both certificate files are read eagerly, so the temporary directory can be dropped here"
+  preview: "// Both files are read eagerly, so the directory can go now."
+  hash: 5425a5dc59115362
+  lines: 1
+- category: invariant
+  reason: "The bound socket goes straight to the server, so no other process can take the port in between"
+  preview: "/// Binds loopback on an ephemeral port and hands the socket straight t…"
+  hash: d634570e9ef60cfd
+  lines: 2
+- category: security
+  reason: "The webserver to health-check hop is the only place a client verifies a server certificate, so SAN errors surface here"
+  preview: "/// The webserver to health-check hop is the only place a gkg client ve…"
+  hash: 3710d1e055653495
+  lines: 2
+- category: security
+  reason: "The default client trusts only public roots, and check_or_unavailable degrades, which is how a SAN mismatch presents"
+  preview: "// The default client has only the public roots, so it cannot verify a"
+  hash: f5029f9f9aa743ea
+  lines: 3
+"crates/integration-tests/tests/server/querying_pipeline/gitaly/file_content.rs":
+- category: upstream
+  reason: "Gitaly lists a blob shared by several paths only once, and the mock must copy that."
+  preview: "/// Like Gitaly, lists a blob shared by several paths only once."
+  hash: aa320aeac499a495
+  lines: 1

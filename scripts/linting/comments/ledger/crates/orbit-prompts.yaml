@@ -1,0 +1,6 @@
+"crates/orbit-prompts/src/marker.rs":
+- category: invariant
+  reason: "Missing marker pairs must not fail composition across release versions, or older prompts break"
+  preview: "/// Missing marker pairs must not fail composition across release versi…"
+  hash: c6426e5a5b98b4c8
+  lines: 1

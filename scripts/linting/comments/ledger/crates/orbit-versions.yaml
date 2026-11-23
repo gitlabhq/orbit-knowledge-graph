@@ -1,0 +1,6 @@
+"crates/orbit-versions/src/lib.rs":
+- category: invariant
+  reason: "The crate stays dependency-light so build scripts can use it; the schema enforces format rules"
+  preview: "//! Pinned versions from `config/versions.yaml`, embedded at compile ti…"
+  hash: 79cb8812673bfedf
+  lines: 7

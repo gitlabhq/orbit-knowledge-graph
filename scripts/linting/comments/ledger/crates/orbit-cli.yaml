@@ -1,0 +1,359 @@
+"crates/orbit-cli/build.rs":
+- category: contract
+  reason: "The release script strips the leading v, so the version glab compares in --update is bare semver"
+  preview: "// Publish strips the leading `v` (scripts/release/upload-local-cli-rel…"
+  hash: 3de4d50f572c6a60
+  lines: 3
+- category: upstream
+  reason: "Libduckdb-sys 2.0 adds no rpath, so debug builds set one and release builds must not"
+  preview: "/// libduckdb-sys 2.0 no longer adds an rpath for a downloaded libduckd…"
+  hash: daff8a1f12f8ecb4
+  lines: 5
+"crates/orbit-cli/src/commands/context.rs":
+- category: magic-value
+  reason: "200 lines keeps one long file from crowding out other targets of the same call"
+  preview: "/// A file read without a range stops here, saying how to read the rest…"
+  hash: 0bfee2f2ebabfe1a
+  lines: 2
+"crates/orbit-cli/src/commands/grep/mod.rs":
+- category: contract
+  reason: "Exits 1 without a message to match rg, which agents and scripts rely on"
+  preview: "/// A search that found nothing; exits 1 without a message, as rg does."
+  hash: 3b1c6afddb449bcf
+  lines: 1
+"crates/orbit-cli/src/commands/grep/rank.rs":
+- category: magic-value
+  reason: "Doc comments and attributes put a definition name a few lines below its first line, hence 10"
+  preview: "/// Doc comments and attributes put a definition's name a few lines bel…"
+  hash: eddecfdddb2952b3
+  lines: 1
+"crates/orbit-cli/src/commands/hook_guard.rs":
+- category: invariant
+  reason: "The PreToolUse guard fails open and must never block a tool call; read stays accepted for old installs"
+  preview: "//! Hidden `orbit hook-guard` — the Claude Code PreToolUse guard instal…"
+  hash: 45db528d6c684702
+  lines: 4
+- category: invariant
+  reason: "Orbit only reads GitLab, so glab writes must never get the nudge; the rule is a product boundary"
+  preview: "/// Orbit only reads GitLab, so only glab reads get the nudge; writes s…"
+  hash: e71a4b0fbacab904
+  lines: 1
+"crates/orbit-cli/src/commands/index/incremental/detached.rs":
+- category: invariant
+  reason: "Only the child knows when it holds the locks; a reader started after return must wait, not read the old graph"
+  preview: "/// Returns once the child holds the first repository's locks, or at on…"
+  hash: 4c213e7992dcb059
+  lines: 3
+"crates/orbit-cli/src/commands/index/incremental/input.rs":
+- category: upstream
+  reason: "Sparse checkout, skip-worktree, and assume-unchanged keep paths whose parent is not a real directory"
+  preview: "/// The per-path load fails on a parent that is no longer a real direct…"
+  hash: 712adabc333c6ce1
+  lines: 2
+"crates/orbit-cli/src/commands/index/incremental/mod.rs":
+- category: invariant
+  reason: "Snapshots go in place only after rows land, so a failed write leaves files stale and retried"
+  preview: "// Snapshots go in place only after the rows land, so a failed write ke…"
+  hash: e851423426fd29bd
+  lines: 1
+"crates/orbit-cli/src/commands/index/incremental/state.rs":
+- category: invariant
+  reason: "Freshness compares file mtime with the snapshot read time, so this time must be set exactly"
+  preview: "/// Freshness compares a file's mtime with the time its family last rea…"
+  hash: e6fe545bbf956cf9
+  lines: 1
+- category: invariant
+  reason: "The rename must keep the read time that freshness compares against; a copy would break it silently"
+  preview: "/// Puts each pending snapshot in place. The rename keeps the read time…"
+  hash: ff5508ad2f9fc5f4
+  lines: 1
+"crates/orbit-cli/src/commands/reset.rs":
+- category: invariant
+  reason: "Lock order; shallow paths first so index state and manifest lock before revisions"
+  preview: "/// Shallow paths first, so index state and the manifest lock before th…"
+  hash: 24c710de068c6b1e
+  lines: 1
+"crates/orbit-cli/src/commands/setup.rs":
+- category: invariant
+  reason: "A rerun keeps the full kind, so it needs the instance tree again, not the embedded one"
+  preview: "// A rerun keeps `full`, so it needs the instance's tree again, not the…"
+  hash: 47e336150ef575b3
+  lines: 1
+"crates/orbit-cli/src/commands/setup/components.rs":
+- category: security
+  reason: "The copy must not follow a link at the destination and must not leave a partial file"
+  preview: "/// Copies `source` to `destination` only if nothing exists there, with…"
+  hash: 9156c4d88a8c6739
+  lines: 2
+"crates/orbit-cli/src/commands/setup/components/hooks.rs":
+- category: invariant
+  reason: "A config is read only when it names a retired value, so user-owned configs stay untouched"
+  preview: "/// Removes what an earlier release installed. A config file is read on…"
+  hash: a0792fe136b7d341
+  lines: 2
+- category: invariant
+  reason: "Feature files are removed together or not at all, since a kept file without its siblings stops working"
+  preview: "/// Removes feature files together or not at all: an edited file kept w…"
+  hash: 23854687ddb91a81
+  lines: 2
+"crates/orbit-cli/src/commands/setup/components/skill.rs":
+- category: contract
+  reason: "The ownership record sits beside the skill directory so the directory stays what agents and glab skills expect"
+  preview: "/// Ownership record next to the skill directory, so the directory itse…"
+  hash: b91fc0e0c267a355
+  lines: 2
+- category: contract
+  reason: "Glab skills update rewrites only the wrapper version, so a version-only diff still counts as ours"
+  preview: "/// Whether `path` still holds what setup wrote, as opposed to a direct…"
+  hash: 90b77ce6fb900d7f
+  lines: 3
+- category: upstream
+  reason: "Glab skills update rewrites the version line, so the match must ignore it"
+  preview: "/// Matches a lone wrapper `SKILL.md` ignoring its `version:` line, whi…"
+  hash: 574ab84ef0fa220b
+  lines: 1
+- category: contract
+  reason: "Hooks share this file and back it up before they write it; the skill component relies on that"
+  preview: "// Hooks share this file and back it up before they write it."
+  hash: 3f2086a216d4c2c0
+  lines: 1
+- category: invariant
+  reason: "Either distribution may have written the rules, so uninstall must remove both launcher forms"
+  preview: "// Either distribution may have written the rules, whichever one runs t…"
+  hash: 84358f8abc51a3f5
+  lines: 1
+- category: upstream
+  reason: "Glab skills update swaps the wrapper back unless the other launcher's wrapper stays."
+  preview: "// Keeping the other launcher's wrapper stops `glab skills update` from…"
+  hash: 717e58edbc9560d8
+  lines: 1
+- category: invariant
+  reason: "An unused changed directory stays unrecorded so a later setup backs it up before writing"
+  preview: "// Leave the changed directory unrecorded once nobody uses it, so a lat…"
+  hash: 497fff9e8466ec37
+  lines: 1
+- category: invariant
+  reason: "An unmarked directory loses only files that match this release, so user edits are never deleted"
+  preview: "/// An unmarked directory loses only files that still match this releas…"
+  hash: 08c10297a767376c
+  lines: 1
+- category: invariant
+  reason: "A differing manifest must stop being a skill, or the agent lists orbit-cli next to orbit"
+  preview: "/// A differing manifest must stop being a skill, or the agent lists `o…"
+  hash: 7935d36ec061f93c
+  lines: 2
+- category: invariant
+  reason: "Never overwrite an earlier backup, because it may hold the user's own edit"
+  preview: "// Never overwrite an earlier backup; it may hold the user's own edit."
+  hash: a996442d53d222dc
+  lines: 1
+"crates/orbit-cli/src/database/locks.rs":
+- category: magic-value
+  reason: "75 is sysexits.h EX_TEMPFAIL, the code callers check for a wait timeout"
+  preview: "/// sysexits.h EX_TEMPFAIL."
+  hash: 1ac4bead291848ff
+  lines: 1
+- category: contract
+  reason: "For a writer, the lock file mtime is the index start time that other readers report"
+  preview: "/// For a writer holder, the lock file's mtime is the index's start tim…"
+  hash: 1970dc053c0b4b6b
+  lines: 1
+"crates/orbit-cli/src/database/writer.rs":
+- category: invariant
+  reason: "Directories are left alone because one can share a path with a file it replaced"
+  preview: "/// Deletes the rows of `paths`: their files, the entities in them, and"
+  hash: e710726baaeee13c
+  lines: 3
+"crates/orbit-cli/src/list.rs":
+- category: upstream
+  reason: "DuckDB renders enums and timestamps as dictionary indexes or epoch millis, and ORDER BY must qualify the column"
+  preview: "// Cast the enum and timestamp to text so JSON/CSV don't render them as…"
+  hash: a649a6f42c3ffa84
+  lines: 3
+- category: contract
+  reason: "The seed mirrors set_status, where only indexed rows get a timestamp; keep in sync"
+  preview: "// Mirrors `set_status`: only `indexed` rows get a timestamp, so"
+  hash: 67971c721a230356
+  lines: 2
+- category: upstream
+  reason: "DuckDB returns zero batches, not a 0-row batch, for an empty result, so no CSV header prints"
+  preview: "// DuckDB returns zero batches (not a 0-row batch) for an empty"
+  hash: ea531cacc80260e4
+  lines: 2
+"crates/orbit-cli/src/main.rs":
+- category: magic-value
+  reason: "The timeout only bounds fast commands; raising it only lengthens exit against a dead collector"
+  preview: "/// Only bounds commands too fast to hide a round trip behind their own…"
+  hash: 007cf94ecc92f6c5
+  lines: 2
+- category: magic-value
+  reason: "A detached send-event child has no caller waiting, so it gets a longer flush timeout"
+  preview: "/// A detached `send-event` child has no caller waiting, so it can give…"
+  hash: 62372618683bc4ee
+  lines: 1
+- category: contract
+  reason: "Glab owns update but forwards --help here, so the help lists it under glab"
+  preview: "/// glab owns `update` but forwards `--help` here, so list it under gla…"
+  hash: 325445cb3b43c003
+  lines: 1
+- category: contract
+  reason: "Setup adds the hidden --gitlab flag when Orbit reaches GitLab; the hook command relies on it"
+  preview: "/// Also point glab calls at Orbit's GitLab search and context; setup a…"
+  hash: 4d3073ae0104fec7
+  lines: 1
+- category: upstream
+  reason: "Exit skips the tokio runtime wait on blocking DNS lookups past the flush timeout"
+  preview: "// Skips the runtime's wait on blocking DNS lookups past the flush time…"
+  hash: bf67ed5810eeba58
+  lines: 1
+- category: upstream
+  reason: "Labkit-events ships no TLS provider, so one is installed before the HTTPS tracker builds"
+  preview: "// labkit-events ships no TLS provider; the tracker below builds an HTT…"
+  hash: 1d1929975e955a1c
+  lines: 1
+"crates/orbit-cli/src/remote/client.rs":
+- category: invariant
+  reason: "Remembering failed hosts stops each request from waiting out its own connect timeout on a dropping host"
+  preview: "/// Base URLs whose last connection attempt in this process failed, wit…"
+  hash: eec5bb20eb83cb3c
+  lines: 3
+- category: invariant
+  reason: "A connect timeout means dropped packets, so a retry pays the timeout again; fail fast."
+  preview: "// A connect timeout means the host drops packets: retrying"
+  hash: 823293b119b0c60c
+  lines: 2
+- category: upstream
+  reason: "Linux drops new SYNs once the accept queue is full, which the test uses to mimic a dropping host"
+  preview: "// Linux drops new SYNs once the accept queue is full, like a host that…"
+  hash: d11b3247f9e31932
+  lines: 1
+"crates/orbit-cli/src/remote/context.rs":
+- category: contract
+  reason: "The API has no graph expansion for pipelines, branches, or commits, so the CLI must not ask for one"
+  preview: "/// Pipelines, branches, and commits (`path@ref`) have no graph expansi…"
+  hash: ff6c0c4992112b9d
+  lines: 1
+"crates/orbit-cli/src/remote/grep.rs":
+- category: contract
+  reason: "The API maps a node kind to its search scope, so requests send kinds as-is"
+  preview: "/// Node kinds that GitLab grep searches. The API maps a kind to its sc…"
+  hash: 22bb9a4d667f9e81
+  lines: 1
+- category: upstream
+  reason: "GitLab rejects a search with no term this long as an abusive tiny search"
+  preview: "/// GitLab rejects a search with no term this long as an abusive tiny s…"
+  hash: a530a88e445196a6
+  lines: 1
+- category: contract
+  reason: "The API answers 404 for missing, unreadable, or Orbit-off targets; the CLI maps that answer"
+  preview: "/// The API answers 404 for a target it cannot find, cannot read, or wh…"
+  hash: 6cba435ece5ecb49
+  lines: 1
+"crates/orbit-cli/src/remote/retry.rs":
+- category: invariant
+  reason: "QUERY never retries 503 because the server may have run and billed the query"
+  preview: "/// Only 429, connect failures other than timeouts, and (when opted in)…"
+  hash: e75721896ffe676a
+  lines: 3
+"crates/orbit-cli/src/remote/sdlc.rs":
+- category: contract
+  reason: "The context endpoint returns the merge request for a branch that has one"
+  preview: "/// Reads a branch from the context endpoint. A branch with a merge req…"
+  hash: 87abede6401df39c
+  lines: 2
+"crates/orbit-cli/src/skill.rs":
+- category: magic-value
+  reason: "The install directory name is fixed because only content depends on instance reachability"
+  preview: "/// Fixed because the content, not the name, depends on whether the ins…"
+  hash: fda0bed1832dcde4
+  lines: 1
+- category: contract
+  reason: "Installed trees are addressed by directory, so the manifest name must match it"
+  preview: "/// Installed trees are addressed by directory, so the manifest name mu…"
+  hash: deea7cf3b13ead08
+  lines: 1
+- category: security
+  reason: "The cache is skipped so a validated copy cannot hide a rejected token."
+  preview: "/// The cache is skipped so a rejected token is not hidden behind a val…"
+  hash: 72479707b0dd3e39
+  lines: 1
+- category: invariant
+  reason: "The skill is documentation, so auth failures, rate limits, and outages must degrade to a local copy"
+  preview: "/// The skill is documentation, so auth failures, rate limits and outag…"
+  hash: b77321a72f5f4e9a
+  lines: 1
+- category: invariant
+  reason: "Never unlink the lock inode, or another writer could lock its replacement"
+  preview: "// Never unlink the inode: another writer could lock its replacement."
+  hash: 5104f8e341a94208
+  lines: 2
+"crates/orbit-cli/src/telemetry.rs":
+- category: contract
+  reason: "The invocation id is shared with the request trace id and inherited by the detached child"
+  preview: "/// Shared with the request trace id; a detached `send-event` child inh…"
+  hash: 562300e4681ef70b
+  lines: 1
+- category: contract
+  reason: "Glab sets GITLAB_ORBIT_DISTRIBUTION=glab on the binary it runs; code here only reads it"
+  preview: "/// glab sets `GITLAB_ORBIT_DISTRIBUTION=glab` on the binary it runs fo…"
+  hash: fd81642060a28557
+  lines: 1
+"crates/orbit-cli/src/tui.rs":
+- category: upstream
+  reason: "Cliclack wraps card bodies to terminal width minus 6, without a hanging indent"
+  preview: "/// cliclack wraps card bodies to the terminal width minus this, withou…"
+  hash: 058224205ad48225
+  lines: 1
+- category: upstream
+  reason: "The terminal echoes Ctrl-C as ^C, which shifts cliclack's in-place progress redraw"
+  preview: "/// The terminal echoes Ctrl-C as `^C`, which shifts the progress bars …"
+  hash: 530bbd7c0754a932
+  lines: 1
+"crates/orbit-cli/src/workspace.rs":
+- category: invariant
+  reason: "Index state comes first so reset waits for running indexes before it locks the manifest"
+  preview: "/// Index state comes first so a reset waits for running indexes before…"
+  hash: 034dee7bcb6e2638
+  lines: 2
+- category: invariant
+  reason: "Climbing after filtered-out repos would index an enclosing repository the user did not choose"
+  preview: "// Climbing after repos were found but filtered out would index an"
+  hash: 2992a2ea4344807d
+  lines: 2
+- category: invariant
+  reason: "Paths are stored relative to the work-tree root, not parent_repo_path, so subdirectory runs must resolve here"
+  preview: "/// Resolve the working-tree root of the repo containing `path`."
+  hash: 1d832293ef4825ea
+  lines: 9
+- category: invariant
+  reason: "Non-UTF-8 names are left out because the graph cannot hold them"
+  preview: "/// Names that are not UTF-8 are left out, since the graph cannot hold …"
+  hash: c9ec873cf9e7ac5e
+  lines: 1
+- category: upstream
+  reason: "Root ignores permissions in CI containers, so the test blocks create_dir_all with a file"
+  preview: "// A file where the parent directory must go makes create_dir_all fail"
+  hash: f469527d74455d52
+  lines: 2
+"crates/orbit-cli/tests/no_index.rs":
+- category: contract
+  reason: "The nightly search guard parses these outputs, so its fixtures must change with them"
+  preview: "/// The nightly search guard (packages/agent-plugins-nightly/search-gua…"
+  hash: 4c8462a4db5ce18a
+  lines: 2
+"crates/orbit-cli/tests/skills_remote.rs":
+- category: security
+  reason: "A PATH without glab keeps tests from reaching the developer's real glab login through the credential helper"
+  preview: "/// A `PATH` with no `glab` on it, so no test reaches the developer's r…"
+  hash: 7d82390a69dad66c
+  lines: 2
+- category: invariant
+  reason: "A file blocks the cache path even as root, where chmod would not; the test relies on this"
+  preview: "// Use a file instead of chmod so this fails even when run as root."
+  hash: 46bd595dfbfa20e6
+  lines: 1
+- category: invariant
+  reason: "No reply is queued, so any request fails the mock server deadline; the test relies on this"
+  preview: "// No reply is queued: any request would fail the mock server's accept …"
+  hash: 714a50a30ccf8e4b
+  lines: 1

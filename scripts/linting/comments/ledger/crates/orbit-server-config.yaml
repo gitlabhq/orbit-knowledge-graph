@@ -1,0 +1,56 @@
+"crates/orbit-server-config/src/app.rs":
+- category: invariant
+  reason: "An empty YAML file parses to null and would wipe every lower config layer"
+  preview: "// An empty or comment-only file parses to null, which would replace ev…"
+  hash: b47f0b499b200610
+  lines: 1
+"crates/orbit-server-config/src/engine.rs":
+- category: upstream
+  reason: "Croner 3.0.1 keeps the sub-second fraction, which causes drift and double fires; truncation fixes it."
+  preview: "// croner 3.0.1 preserves the sub-second fraction of `now` in the"
+  hash: cb4ef89534cf8805
+  lines: 5
+- category: upstream
+  reason: "Croner returns the sub-second offset without truncation; the test values show the expected delays"
+  preview: "// 2026-01-15 10:05:00.700 UTC — 700ms into a matching second."
+  hash: a863e4bb32fa0475
+  lines: 3
+- category: magic-value
+  reason: "The 59 to 60 second range proves the snap to a whole second; the bounds alone do not show why."
+  preview: "// Must be < 60s (snapped to :06:00.000 → 59.3s), not ~60.0s or ~60.7s."
+  hash: 91d9da4ff8a6070f
+  lines: 1
+"crates/orbit-server-config/src/grpc.rs":
+- category: upstream
+  reason: "Tonic 0.14.5 panics without a grace value when the connection-age timer fires (hyperium/tonic#2522)"
+  preview: "// Must stay paired with max_connection_age_secs: without a grace value,"
+  hash: 01ecf711763f8a74
+  lines: 3
+- category: upstream
+  reason: "Tonic bug hyperium/tonic#2522 panics with zero grace and non-zero max age"
+  preview: "// Regression guard for hyperium/tonic#2522: a zero grace with a non-ze…"
+  hash: 19e3949abda8eed9
+  lines: 2
+"crates/orbit-server-config/src/query.rs":
+- category: invariant
+  reason: "Compiler_derived is set after merge and must never come from YAML overrides"
+  preview: "// compiler_derived is never merged from YAML overrides — it's"
+  hash: 2ae37979e843098a
+  lines: 2
+"crates/orbit-server-config/src/secrets.rs":
+- category: upstream
+  reason: "Kubernetes stages atomic secret updates behind a ..data symlink, which the watcher must follow"
+  preview: "// Kubernetes stages atomic updates behind a `..data` symlink."
+  hash: 7b2bcd03a0b9917e
+  lines: 1
+"crates/orbit-server-config/src/tls.rs":
+- category: invariant
+  reason: "Per-half fallback would silently pair one group's certificate with another group's key"
+  preview: "// A group carries an identity as a pair or not at all; falling back"
+  hash: 0f137dc68194f64e
+  lines: 2
+- category: security
+  reason: "A typo in a group or key name would leave the listener plaintext while the config looks right"
+  preview: "// Both halves matter: a typo in the group name and a typo in a key"
+  hash: 1972c70579d32f6c
+  lines: 3

@@ -1,0 +1,27 @@
+"crates/orbit-analytics/build.rs":
+- category: upstream
+  reason: "Typify names the root struct from the schema title, so a title is injected to keep names stable"
+  preview: "/// `(schema_name, generated_root_type_name)` — the second element is t…"
+  hash: 3db76bf34688d9f3
+  lines: 4
+- category: upstream
+  reason: "Typify does not understand Iglu top-level keys, so they are stripped and a title is injected"
+  preview: "// Strip Iglu-specific top-level keys typify doesn't understand, and"
+  hash: 57dfe13e8bb3825e
+  lines: 2
+- category: invariant
+  reason: "Injected defaults must run before promote_defaults_on_required to get the same treatment; order is not visible from code"
+  preview: "/// Inject property defaults that GKG needs for `derive(Default)` but t…"
+  hash: 1897bb54b018e7e0
+  lines: 4
+- category: upstream
+  reason: "Typify emits serde(default) only for non-required fields, so required fields with defaults are demoted"
+  preview: "/// Remove required properties that carry a `default` so typify generat…"
+  hash: 44773c6eccb4ee37
+  lines: 2
+"crates/orbit-analytics/src/gitlab_instance.rs":
+- category: invariant
+  reason: "With no instance yet, product usage data must read as off; the consent default is not visible in code"
+  preview: "// The default watch has no instance yet, so product usage data reads a…"
+  hash: 20d36bc0c51a9758
+  lines: 1

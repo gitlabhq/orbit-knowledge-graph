@@ -1,0 +1,257 @@
+"crates/ontology/build.rs":
+- category: upstream
+  reason: "Rust-embed release builds track content but not file adds or removes, so a rerun line is needed"
+  preview: "// The embedded ontology is a `rust-embed` folder. Release builds expan…"
+  hash: 5788449587729c81
+  lines: 3
+"crates/ontology/src/constants.rs":
+- category: contract
+  reason: "The reserved edge columns must match the EdgeEntity schema in another file"
+  preview: "/// Must match EdgeEntity schema."
+  hash: 410e156db8893423
+  lines: 1
+- category: invariant
+  reason: "The check must run at startup and in a test so CI catches constants that drift from the ontology YAML"
+  preview: "/// Panics if compile-time constants diverge from the embedded ontology…"
+  hash: ec008bc74ead2cb9
+  lines: 3
+"crates/ontology/src/denormalized.rs":
+- category: security
+  reason: "Each scoped table keeps its own traversal_path column because the security pass filters every one of them"
+  preview: "/// One `traversal_path` column per scoped table, each filtered by the …"
+  hash: 2395e48fc3b82fb1
+  lines: 1
+- category: invariant
+  reason: "The anchor's ids lead the sort key so in-namespace seeks land on it; the order is not arbitrary"
+  preview: "/// `traversal_path`, then ids with the anchor's first so in-namespace …"
+  hash: f86e08b0ceb408b7
+  lines: 1
+"crates/ontology/src/entities.rs":
+- category: upstream
+  reason: "ClickHouse defaults PRIMARY KEY to ORDER BY when absent, so the field is optional"
+  preview: "/// When set, emit `PRIMARY KEY (...)` in the DDL. When absent, ClickHo…"
+  hash: dc63bc6dc2527081
+  lines: 2
+- category: upstream
+  reason: "Lightweight projections need ClickHouse 26.1 or later"
+  preview: "/// Lightweight projection: stores only the key columns + `_part_offset…"
+  hash: 9113a86065a2eed8
+  lines: 3
+- category: contract
+  reason: "Discriminants must match Gitlab::Access in Rails so YAML, JWT claims, and compiler comparisons agree"
+  preview: "/// GitLab access levels. Discriminants match `Gitlab::Access` in Rails…"
+  hash: f0ec1feec99a064e
+  lines: 5
+- category: contract
+  reason: "The value must be a key of the Rails Authz::RedactionService::RESOURCE_CLASSES map"
+  preview: "/// Rails resource type (e.g., \"projects\", \"merge_requests\", \"groups\", …"
+  hash: ea888bae3d4fc74f
+  lines: 2
+- category: security
+  reason: "Required_role sets the minimum role for rows to pass the security pass, for example read_vulnerability."
+  preview: "/// Minimum GitLab role required on a traversal path for rows of this"
+  hash: 11fd8477ec5e4455
+  lines: 5
+- category: invariant
+  reason: "ORDER BY columns are the ReplacingMergeTree dedup key, so changing them changes which rows collapse"
+  preview: "/// ClickHouse ORDER BY columns; used as the deduplication key for Repl…"
+  hash: c91352b1d2dac8c7
+  lines: 1
+- category: invariant
+  reason: "A tombstone must carry immutable columns, or a pre-pick filter resurrects an older live row"
+  preview: "/// Column-backed fields marked `mutable: false` outside the sort key. …"
+  hash: 3b56c100a0ce105b
+  lines: 2
+- category: invariant
+  reason: "Prune_to scopes confine the scan without propagating, so the other endpoint may be a global hub"
+  preview: "/// How a resolved `traversal_path` prefix relates to an edge variant's…"
+  hash: c2c3d4cff38f7aec
+  lines: 5
+- category: invariant
+  reason: "A same_namespace source can live in another namespace on prod, for example the parent Group of CONTAINS"
+  preview: "/// A `same_namespace` source can live in another namespace on prod"
+  hash: d49d959247bd1707
+  lines: 2
+- category: contract
+  reason: "Tag values are stored as key:value tokens that the query compiler reads"
+  preview: "/// Values are stored as `\"key:value\"` tokens in the array."
+  hash: 2818e9539edc34dd
+  lines: 1
+- category: security
+  reason: "LIKE operators are disabled on sensitive columns to prevent probing of their values"
+  preview: "/// Whether LIKE-based filter operators (contains, starts_with, ends_wi…"
+  hash: 279e9228d8ac200f
+  lines: 3
+- category: invariant
+  reason: "Postgres bytea may hold non-UTF8 bytes, so hex-encoding stops one row from poisoning the Arrow batch"
+  preview: "/// Source column is a Postgres `bytea` that may hold non-UTF8 bytes. E…"
+  hash: 9f1b5e0ee96d0667
+  lines: 2
+"crates/ontology/src/etl.rs":
+- category: contract
+  reason: "The indexer, not the ontology, generates extract SQL; another crate owns that, which this type cannot show"
+  preview: "/// Declarative extract: what to read. The ClickHouse SQL is generated …"
+  hash: b2ddef80113867f1
+  lines: 3
+- category: contract
+  reason: "The indexer substitutes and validates markers in authored SQL; the split of duty lives in another crate"
+  preview: "/// Raw content of a co-located `.sql` file (escape hatch). Markers are"
+  hash: d108e0df95a6790d
+  lines: 2
+"crates/ontology/src/introspection.rs":
+- category: contract
+  reason: "The MCP get_graph_schema tool and the CLI schema command both consume this module; code here cannot show its consumers"
+  preview: "//! Consumed by both the `orbit-server` MCP `get_graph_schema` tool (fu…"
+  hash: b56b0127dba2d835
+  lines: 3
+"crates/ontology/src/lib.rs":
+- category: invariant
+  reason: "An empty prefix must leave names unchanged for v0 compatibility; the code shows the branch, not the reason"
+  preview: "/// Returns a clone with all physical table names prefixed for the given"
+  hash: ede7f2f02da4f7d7
+  lines: 9
+- category: contract
+  reason: "The compiler may pass base or version-prefixed table names, so the prefix is stripped"
+  preview: "/// Minimum access level required to include rows of the node backing"
+  hash: 0fe493265fb01bc7
+  lines: 10
+- category: security
+  reason: "A coarse pre-filter that fails closed; callers that need per-variant accuracy must not rely on it, or scope filters leak"
+  preview: "/// Returns `true` when **at least one** variant of `relationship_kind`…"
+  hash: f27488cb379362ab
+  lines: 7
+- category: invariant
+  reason: "Sort_key, not primary_key, is the ClickHouse dedup key that path predicates prune on; the code cannot say why"
+  preview: "/// True when a `startsWith(traversal_path, P)` predicate prunes granul…"
+  hash: 2467207985e0f6ac
+  lines: 6
+- category: security
+  reason: "Only the exact triple check is safe for mixed-variant edges like CONTAINS; using the coarse check would widen scope"
+  preview: "/// Whether the specific `(relationship_kind, source_kind, target_kind)`"
+  hash: e8247395a1550f82
+  lines: 4
+- category: security
+  reason: "The walk never widens scope past the seed and tainted aliases never receive a proof"
+  preview: "/// Propagate scope proofs across scope-preserving edges with a two-pas…"
+  hash: 6eb7aec35481398c
+  lines: 9
+- category: security
+  reason: "Global hubs carry no traversal_path, so they are excluded from traversal-path security filters by design"
+  preview: "/// Physical tables of `global` nodes — non-namespaced hubs (User, Runn…"
+  hash: 42fd30758d360514
+  lines: 3
+- category: invariant
+  reason: "Unique columns get no stats because selectivity is always 1/row_count; the skip reason is not in the code"
+  preview: "// skip: selectivity is always 1/row_count"
+  hash: ebdf029f83823594
+  lines: 1
+- category: contract
+  reason: "The compiler and indexer both derive edge projections from this function; the rules prevent stale copies."
+  preview: "/// Whether this relationship's edge materializes `column` on its"
+  hash: 8ef1d0a1e79f73c6
+  lines: 15
+- category: invariant
+  reason: "The any guard is sound only while FK edges declare fk_column on all variants"
+  preview: "// An FK edge is indexed from the node holding the key, so only that si…"
+  hash: 3c1cec08d1138cfe
+  lines: 7
+- category: invariant
+  reason: "The sql/ directory holds refreshable-view templates, not pipelines, so the walk must skip it; the name alone cannot say why"
+  preview: "// `sql/` holds refreshable-view select templates, not extract pipeline…"
+  hash: 8d9f75c6637044c3
+  lines: 1
+- category: invariant
+  reason: "Code-graph edges must share one edge table so traversals can JOIN them; a reroute breaks queries silently"
+  preview: "// They must all route to the same edge table so traversals can JOIN"
+  hash: c8b6802600180680
+  lines: 2
+- category: invariant
+  reason: "Projecting HAS_DIFF onto the empty source side silently drops merged-MR diff rows; the guard pins that rule"
+  preview: "// HAS_DIFF's foreign key (merge_request_id) lives on the diff, so only…"
+  hash: 74abd176eab5859a
+  lines: 5
+- category: invariant
+  reason: "Another entity's pipeline writes these edges with empty tags, so no denorm is declared"
+  preview: "// Another entity's pipeline writes these edges with empty tags (#1249)."
+  hash: 40efb94b013fcade
+  lines: 1
+- category: security
+  reason: "User is global, so the edge is the anchor and an edge table has no redaction floor; the test pins this"
+  preview: "// User is global, so the edge is the anchor; an edge table has no reda…"
+  hash: 8cadd82663dcde7f
+  lines: 1
+- category: security
+  reason: "Pins admin_only on User columns GitLab hides from non-admins, so a dropped flag fails CI"
+  preview: "// Pin the real ontology so any future edit that drops admin_only on a"
+  hash: e1eff417fc7e0f0a
+  lines: 4
+- category: invariant
+  reason: "Traversal_path must stay in the column list for hydration traversal-path narrowing; the assertion alone does not say why"
+  preview: "// traversal_path is included for hydration traversal-path narrowing."
+  hash: 3289f1db8199eee7
+  lines: 1
+- category: invariant
+  reason: "A missing prune_to_target falls through the restrict catch-all arm and scopes the edge differently"
+  preview: "// REOPENED is a global User source into a namespaced issuable target,"
+  hash: e7a8f39a8b3bf081
+  lines: 5
+"crates/ontology/src/loading/mod.rs":
+- category: contract
+  reason: "Enum coercion must gate on EnumType::Int to match the node projection and query normalizer in other files"
+  preview: "// A string-typed enum column already holds the value, so the integer o…"
+  hash: 2f5505d2ab01b4ce
+  lines: 3
+- category: invariant
+  reason: "Declaring a denorm on an edge whose ETL leaves tags empty makes the compiler push a bad tag"
+  preview: "// Declare the denorm only on edges whose ETL materializes"
+  hash: 6a08ddf10b95161c
+  lines: 3
+- category: invariant
+  reason: "Cross-namespace hops are valid because each table keeps its own path in the row; the test data cannot show why"
+  preview: "// Cross-namespace hops are fine: each table keeps its own path in the …"
+  hash: 8e663ec170da511c
+  lines: 1
+"crates/ontology/src/loading/node.rs":
+- category: security
+  reason: "A traversal_path on a global hub would let elision drop a scope filter; the check guards that"
+  preview: "// A global hub must be non-namespaced; a traversal_path would let elis…"
+  hash: d24d6a4d1d4a6830
+  lines: 1
+- category: invariant
+  reason: "Derived-entity rows have nothing to project from, so they must carry authored SQL; the error alone does not say why"
+  preview: "// Derived-entity rows are neither node properties nor edge endpoints, …"
+  hash: 843fb4b01e07d8c0
+  lines: 2
+"crates/ontology/src/loading/schema.rs":
+- category: upstream
+  reason: "Serde externally-tagged enums need a YAML !tag, so the strategy is modeled as optional blocks"
+  preview: "/// One optional block per strategy; exactly one must be set (enforced …"
+  hash: a73a6d65bb10614d
+  lines: 3
+"crates/ontology/src/migrations/fingerprint.rs":
+- category: invariant
+  reason: "Partition_count is a runtime knob that must stay version-neutral; the code cannot say why it is stripped"
+  preview: "/// Strip runtime-only pipeline knobs (`extract.partition_count`) so ch…"
+  hash: 17df3496c4e76e21
+  lines: 1
+"crates/ontology/src/migrations/scope.rs":
+- category: invariant
+  reason: "An empty Sdlc set means the whole SDLC domain, not nothing; the type cannot express that meaning"
+  preview: "/// What a migration invalidates and must re-index. Empty `Sdlc` set = …"
+  hash: 2d28a11802b83483
+  lines: 1
+- category: invariant
+  reason: "Fail-safe rule; any unmapped diff widens to Full so a missed re-index cannot happen silently"
+  preview: "/// The minimal [`MigrationScope`] a fingerprint diff justifies, or `No…"
+  hash: d3585a70ed5cefd2
+  lines: 2
+- category: invariant
+  reason: "HAS_NOTE has no pipelines block but routes to the SDLC edge table, so it must derive sdlc, not code"
+  preview: "// HAS_NOTE is FK-derived: no edge `pipelines:` block, but routed to th…"
+  hash: e60a32ef4ec76efd
+  lines: 2
+- category: invariant
+  reason: "Code edges route to gl_code_edge, so a change must derive code scope, never an sdlc entity"
+  preview: "// calls/defines/extends/imports/on_branch route to gl_code_edge, so an…"
+  hash: 9c997115192af7a9
+  lines: 2

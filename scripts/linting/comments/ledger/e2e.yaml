@@ -1,0 +1,341 @@
+"e2e/charts/clickhouse/values.yaml":
+- category: magic-value
+  reason: "Explains what replica counts 1 and 3 mean for engines, Keeper, and the setup job"
+  preview: "# 1 = a single node with plain engines. 3 = three replicas that each ru…"
+  hash: 840360b3d71a2f48
+  lines: 3
+"e2e/config/siphon-layout.yaml":
+- category: contract
+  reason: "Identifiers must match application_identifier in values/siphon.yaml.gotmpl"
+  preview: "# Siphon deployment layout for e2e."
+  hash: d4e11195253487d1
+  lines: 8
+- category: upstream
+  reason: "Required since siphon 0.0.99-beta and must match the producer stream_name"
+  preview: "# Required since siphon 0.0.99-beta; must match the producer's queueing…"
+  hash: b82ad6e988315cee
+  lines: 1
+- category: invariant
+  reason: "Without the reconciler, rows inserted before their JOIN dependencies stay missing from the view"
+  preview: "# Reconciler runs scheduled refresh jobs that backfill derived ClickHou…"
+  hash: 1c1ddc122f0570bd
+  lines: 4
+- category: magic-value
+  reason: "Inline is chosen for e2e because a separate refresh consumer adds noise without benefit"
+  preview: "# `inline` keeps refresh packages on the same NATS consumer as CDC even…"
+  hash: 83ad4e49eb55b079
+  lines: 3
+"e2e/config/versions.yaml":
+- category: upstream
+  reason: "CNG images default to the moving :master tag, so digests must be pinned with the chart"
+  preview: "# Devel (nightly) chart from gitlab-devel/gitlab. The chart version,"
+  hash: daada5c286ad1e16
+  lines: 6
+- category: contract
+  reason: "The ref must match the pinned CNG images so the Siphon schema view agrees."
+  preview: "# Git ref of `gitlab-org/gitlab` used to fetch SSOT siphon table defini…"
+  hash: 10d3ddd75e07cc74
+  lines: 4
+- category: contract
+  reason: "The Rails-workhorse orbit-query payload changes on master, so an unpinned workhorse silently 502s"
+  preview: "# Per-component digest pins. Consumed by values/gitlab.yaml.gotmpl which"
+  hash: 7619246359f9d769
+  lines: 6
+- category: magic-value
+  reason: "This chart line ships PG 17, the version GitLab 19.0 requires"
+  preview: "# bitnami/postgresql chart line that ships PG 17 (the version GitLab 19…"
+  hash: c94f77ffda135186
+  lines: 2
+- category: upstream
+  reason: "Bitnami's main registry became paid in August 2025, so the legacy mirror supplies the tags."
+  preview: "# Bitnami's main registry switched to paid in Aug 2025; the legacy free"
+  hash: ccb4b1fe479e327e
+  lines: 2
+"e2e/scripts/bootstrap-instance.sh":
+- category: contract
+  reason: "Lists the chart env, secret name, and idempotency the script relies on from other systems"
+  preview: "# Bootstrap the e2e GitLab instance: activate the license and mint a ro…"
+  hash: f154c26b70b3bf80
+  lines: 19
+- category: invariant
+  reason: "Gate on the migrations Job because toolbox runs before migrations finish and rails-runner crashes"
+  preview: "# Gate on the migrations Job, not the toolbox pod: toolbox goes Running"
+  hash: 7814cbd4e1fe0ba6
+  lines: 2
+- category: security
+  reason: "The activation code goes via ARGV so it never shows in the process list; stdout carries only the PAT"
+  preview: "# Status messages go to stderr; only the PAT lands on stdout so the bash"
+  hash: 539d5b3fe2f2001a
+  lines: 5
+- category: invariant
+  reason: "Kubernetes secrets are namespace-scoped, so the PAT must live in the runner namespace"
+  preview: "# Robot runner runs in NS_GKG; secrets are namespace-scoped so the PAT …"
+  hash: c3f0db5ebb84e526
+  lines: 2
+"e2e/scripts/build-orbit-image.sh":
+- category: contract
+  reason: "The CI job sources this file and waits on E2E_BUILD_PID; code cannot show it must be sourced"
+  preview: "# Sourced (not executed) by the e2e CI job: it exports E2E_GKG_IMAGE/E2…"
+  hash: 6d80fbb1dfc512fd
+  lines: 3
+- category: invariant
+  reason: "The e2e cluster is amd64-only, so skipping the multi-arch manifest is safe; code cannot say why"
+  preview: "# Reuse the amd64 dev image from docker-build-amd64. The e2e cluster is"
+  hash: 4e60d1a779bc00f9
+  lines: 2
+- category: invariant
+  reason: "The deploy absorbs the build and a nudger restarts pods in pull backoff; code cannot show the overlap"
+  preview: "# The stack deploy absorbs the build; the nudger below respawns gkg"
+  hash: 83e3ef78fa7239df
+  lines: 2
+- category: magic-value
+  reason: "Why debuginfo is off: image is about 5x smaller and backtraces keep names"
+  preview: "# Drop DWARF: ~5x smaller image; backtraces keep function names."
+  hash: d2390c81ea3894a8
+  lines: 1
+"e2e/scripts/bump-gitlab-pins.sh":
+- category: contract
+  reason: "Workhorse is pinned because the Rails-workhorse payload changes on master and an unpinned one 502s"
+  preview: "# Bump the pinned gitlab devel chart + gitlab-org/gitlab ref + CNG image"
+  hash: fdfa44d13a376eac
+  lines: 20
+- category: upstream
+  reason: "The devel repo publishes charts tagged by pipeline ID, so the newest created timestamp wins"
+  preview: "# The devel repo publishes a fresh chart every few hours tagged with the"
+  hash: b95f945a64693981
+  lines: 2
+"e2e/scripts/bump-orbit-pins.sh":
+- category: invariant
+  reason: "Chart pin stays manual because chart moves can change the values schema"
+  preview: "# Bump the pinned gkg image tag in e2e/config/versions.yaml to the late…"
+  hash: ba858029d1a15d54
+  lines: 3
+"e2e/scripts/bump-siphon-pins.sh":
+- category: contract
+  reason: "Sync-cdc-tables.sh regenerates CDC config at setup, so only the pin is committed"
+  preview: "# Bump the pinned siphon chart + image in e2e/config/versions.yaml to t…"
+  hash: b0ff95a09f7d176b
+  lines: 3
+- category: magic-value
+  reason: "Names the project behind numeric ID 76780115 and ties it to the helmfile repository URL"
+  preview: "# gitlab-org/analytics-section/platform-insights/siphon-helm-charts, ma…"
+  hash: 9036e76798b4de75
+  lines: 2
+- category: upstream
+  reason: "The siphon chart sets appVersion null, so the image version is tracked separately"
+  preview: "# The image is versioned independently of the chart (chart appVersion i…"
+  hash: 41c2bb9bf060f16a
+  lines: 1
+"e2e/scripts/ch-chaos.sh":
+- category: upstream
+  reason: "DDL blocks while a ClickHouse replica is down, so the first kill waits for migrations"
+  preview: "# Kill one ClickHouse replica while the stack is busy, then wait for it…"
+  hash: ce8ea4df07db50dc
+  lines: 4
+"e2e/scripts/cleanup-stale-namespaces.sh":
+- category: upstream
+  reason: "The runner can kill the 5-minute teardown and leave namespaces that exhaust the 3-node cluster."
+  preview: "# Delete e2e namespaces older than a threshold to reclaim cluster capac…"
+  hash: cd0d48c5db128825
+  lines: 8
+"e2e/scripts/dump-diagnostics.sh":
+- category: contract
+  reason: "Two callers with different available data sources; script probes each before use"
+  preview: "# Snapshot e2e cluster state into $E2E_DIR/diagnostics/. Called both fr…"
+  hash: ca45ceebe00dff9e
+  lines: 5
+- category: invariant
+  reason: "The diagnostics script must never fail its caller; set +e alone does not say why"
+  preview: "# never fail the caller"
+  hash: 18b61efa5a6e4a1f
+  lines: 1
+- category: upstream
+  reason: "Completed init containers report ready=false, so restarts select the failing one"
+  preview: "# Init containers are picked by restarts (completed ones report ready=f…"
+  hash: 2b90dd6a89152a74
+  lines: 2
+- category: upstream
+  reason: "Helm hides failed or pending releases without --all; code cannot show that"
+  preview: "# --- Helm releases ---------------------------------------------------…"
+  hash: 4c1c33ea7ec88215
+  lines: 4
+- category: upstream
+  reason: "Top nodes fails without metrics-server and node pressure delays gkg past the timeout"
+  preview: "# --- Cluster-wide events + nodes -------------------------------------…"
+  hash: ae757183837b4fc8
+  lines: 5
+- category: upstream
+  reason: "Describe pod surfaces failures that kubectl logs does not show"
+  preview: "# --- Per-namespace pods, events, workloads, logs ---------------------…"
+  hash: 00ab755d8dc7cdb0
+  lines: 6
+- category: security
+  reason: "The ClickHouse password stays in the pod env and SQL goes over stdin"
+  preview: "# Pipe SQL via stdin so we don't need to escape quotes in the query"
+  hash: f69cf38b6ec20461
+  lines: 2
+- category: upstream
+  reason: "DictGet-via-DEFAULT staleness shows as '0/' traversal paths; code cannot show this failure mode"
+  preview: "# Cache hit rate, last refresh time, errors. Critical for diagnosing"
+  hash: 27d8726bf944e078
+  lines: 3
+- category: contract
+  reason: "Graph tables carry a runtime prefix from the schema pin, so names are discovered"
+  preview: "# Graph DB tables are prefixed at runtime per the schema pin in config/…"
+  hash: f05ddbafb9571cd9
+  lines: 4
+"e2e/scripts/install-ci-tools.sh":
+- category: upstream
+  reason: "GitLab SaaS runs after_script in a fresh container, so tooling must install again"
+  preview: "# Installs the kube tooling the e2e job needs. Idempotent so it can be …"
+  hash: ec2b9e2b0c8de2d3
+  lines: 3
+"e2e/scripts/lib.sh":
+- category: contract
+  reason: "The file must be sourced, not executed, by the other e2e scripts"
+  preview: "# Shared variables and functions for e2e scripts. Source, don't execute."
+  hash: 6124f52142221e86
+  lines: 1
+"e2e/scripts/patch-ch-dicts.sh":
+- category: upstream
+  reason: "The ClickHouse CACHE layout can cache a CDC race miss as 0/, which the reconciler never repairs"
+  preview: "# Recreate the traversal-path dictionaries with LAYOUT(DIRECT). The ups…"
+  hash: cc6c83605db13af2
+  lines: 6
+- category: magic-value
+  reason: "600s because this can start before the ClickHouse pod exists"
+  preview: "# 600s: this may launch before the ClickHouse pod even exists."
+  hash: d8737c4dd711a930
+  lines: 1
+- category: upstream
+  reason: "SHOW CREATE redacts the password as [HIDDEN], making a dict that fails every lookup"
+  preview: "# Pull the default-user password from the pod env so we can rewrite the"
+  hash: 387ff43374988e44
+  lines: 6
+- category: upstream
+  reason: "DIRECT layouts reject LIFETIME and default TSV escapes newlines in the SOURCE query"
+  preview: "# SHOW CREATE round-trip preserves SOURCE/columns; DIRECT layouts reject"
+  hash: 63d8578883a65c5d
+  lines: 3
+- category: upstream
+  reason: "ClickHouse leaves system.dictionaries.type empty until first load, and bad credentials surface only on lookup."
+  preview: "# system.dictionaries.type stays empty until the dictionary first loads…"
+  hash: f2f7940d2eefdbd2
+  lines: 4
+"e2e/scripts/patch-ch-siphon-watermark.sh":
+- category: upstream
+  reason: "Siphon 0.0.100-beta handles the watermark column but does not create it"
+  preview: "# Create the _siphon_watermark column the SDLC indexer queries (gkg!172…"
+  hash: a852c2d96ca3c083
+  lines: 4
+- category: upstream
+  reason: "ADD COLUMN leaves old rows unstored so now() recomputes at read; MATERIALIZE pins the watermark"
+  preview: "# Default now64() matches what siphon expects ClickHouse to manage. The"
+  hash: fb4bc33895d306b7
+  lines: 10
+"e2e/scripts/publish-siphon-tables.sh":
+- category: upstream
+  reason: "GitLab.com throttles git-upload-pack for arbitrary SHAs, so a cached archive request is used."
+  preview: "# A path-filtered archive is one cached HTTP request. Fetching an arbit…"
+  hash: d11c0f734c517226
+  lines: 3
+- category: upstream
+  reason: "The siphon container reads files as another user, so a 077 umask breaks it"
+  preview: "# The siphon container reads the files as another user; a local umask o…"
+  hash: baaa76be1741d6d6
+  lines: 1
+"e2e/scripts/setup.sh":
+- category: upstream
+  reason: "GitLab chart 9.11.x cluster-scoped resources survive namespace deletion and block later helm installs"
+  preview: "# Clean cluster-scoped resources orphaned by previous e2e runs whose ow…"
+  hash: 96d6db0732f39ea5
+  lines: 8
+- category: upstream
+  reason: "--wait=false avoids hanging on finalizers that never reconcile"
+  preview: "# 1. Mark for deletion (--wait=false avoids hanging on finalizers)."
+  hash: 67c29b7c1a183187
+  lines: 1
+- category: upstream
+  reason: "Finalizer controllers from a torn-down namespace are gone and never reconcile"
+  preview: "# 2. Strip finalizers so the API server actually removes the object;"
+  hash: 0a91e9fa8ef87db3
+  lines: 3
+- category: upstream
+  reason: "Helm install fails while the object still exists, even with deletionTimestamp set"
+  preview: "# 3. Poll up to 30s for actual removal — helm install fails if the"
+  hash: 268801646bcd936b
+  lines: 2
+- category: contract
+  reason: "The generated files are read by values/siphon.yaml.gotmpl in another file"
+  preview: "# Regenerate siphon CDC config from gitlab-org/gitlab SSOT at the pinne…"
+  hash: 091ca7c855470ea1
+  lines: 2
+- category: invariant
+  reason: "Watermark must run after sync because it enumerates tables the siphon consumer creates"
+  preview: "# Both self-gate on their prerequisites, so they overlap the sync. Wate…"
+  hash: b53e44df32e594b1
+  lines: 2
+"e2e/scripts/sync-cdc-tables.sh":
+- category: contract
+  reason: "Generated fragments are read by values/siphon.yaml.gotmpl; e2e PG has no ci/sec shards"
+  preview: "# Regenerate siphon CDC config from the GitLab SSOT table definitions."
+  hash: 63671cce9a65f196
+  lines: 14
+- category: upstream
+  reason: "Dind and colima mount only certain host paths, so the tmp dir must live there"
+  preview: "# Tmp dir must live somewhere the docker daemon can volume-mount. Under…"
+  hash: 291609fd2a55c3bd
+  lines: 4
+- category: invariant
+  reason: "Coalescing all databases slows code backfill past its budget; only vulnerability tables are added"
+  preview: "# --- 2. Filter to database: main + selectively coalesce vulnerability …"
+  hash: 00edb5364fb231d4
+  lines: 10
+- category: contract
+  reason: "The siphon generator emits one stream split on its section headers"
+  preview: "# --- 4. Split per-section into addressable YAML files ----------------…"
+  hash: 19bca820f3f5f078
+  lines: 3
+- category: magic-value
+  reason: "Why reconcile schedules fire every few seconds in e2e, and gocron needs six fields"
+  preview: "# --- 5. Override _without_traversal_path schedules to fire every 15 se…"
+  hash: 21ce3201f58295b8
+  lines: 7
+"e2e/scripts/teardown.sh":
+- category: upstream
+  reason: "Helmfile needs every env var to parse .gotmpl even for destroy"
+  preview: "# helmfile needs all env vars to parse .gotmpl; values don't matter for…"
+  hash: 6ce2aceb9a161229
+  lines: 1
+"e2e/scripts/test.sh":
+- category: upstream
+  reason: "--from-file flattens directories and strips exec bits, so fixtures ship as a tarball"
+  preview: "# Bundle fixtures (binary tarball — preserves directory structure and e…"
+  hash: 695c373a3e37f4d1
+  lines: 3
+- category: upstream
+  reason: "Streaming kubectl logs from a subshell orphans kubectl, so the script polls"
+  preview: "# Poll job status until terminal condition or timeout. Heartbeat keeps …"
+  hash: 156a720c8691ab66
+  lines: 3
+- category: upstream
+  reason: "Kubernetes Jobs emit several True conditions, so the match is by substring"
+  preview: "# Modern Job objects emit multiple True conditions (SuccessCriteriaMet +"
+  hash: cb623bf72f549aec
+  lines: 3
+- category: upstream
+  reason: "Kubectl cp cannot exec into completed pods, so the report comes from logs"
+  preview: "# Extract JUnit report from job logs (kubectl cp can't exec into comple…"
+  hash: 7545917ca2b571ab
+  lines: 1
+- category: contract
+  reason: "The CI after_script already dumps diagnostics on failure"
+  preview: "# In CI the failure-gated after_script dumps diagnostics; don't dump tw…"
+  hash: 63b2944becf5ba58
+  lines: 1
+"e2e/values/nats.yaml":
+- category: magic-value
+  reason: "64MB matches the staging value"
+  preview: "# 64MB, matches staging"
+  hash: d72820659fd659de
+  lines: 1
