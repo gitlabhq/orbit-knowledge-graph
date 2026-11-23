@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use duckdb_client::DuckDbClient;
+use duckdb_client::{DuckDbClient, DuckDbExecutor};
 use query_data_model::DuckDbDataModel;
 use query_engine::compiler::{Frontend, generate_local_ddl};
 use query_engine::pipeline::{NoOpObserver, PipelineError, QueryPipelineContext, TypeMap};
@@ -11,7 +11,7 @@ use query_engine::shared::{PipelineOutput, run_local};
 use super::coverage::Coverage;
 use super::engine::{Engine, Planned, run_all, run_steps};
 use super::seed_preset;
-use super::stages::LocalExecutor;
+use super::stages::RecordingExecutor;
 use crate::scenario::seed::{group_by_columns, values_insert};
 use crate::scenario::{Backend, Seed};
 
@@ -38,7 +38,7 @@ struct DuckdbEnv {
 }
 
 struct DuckdbEngine<'a> {
-    database: Mutex<DuckDbClient>,
+    executor: DuckDbExecutor,
     ontology: Arc<ontology::Ontology>,
     data_model: Arc<DuckDbDataModel>,
     coverage: &'a Mutex<Coverage>,
@@ -50,7 +50,7 @@ impl Engine for DuckdbEngine<'_> {
     type Env = DuckdbEnv;
 
     async fn seed(&self, seed: &Seed, name: &str) {
-        seed_local(&self.database.lock().unwrap(), seed, name);
+        seed_local(&self.executor.client(), seed, name);
     }
 
     async fn run(&self, query: &str, frontend: Frontend) -> Result<PipelineOutput, PipelineError> {
@@ -69,8 +69,8 @@ impl Engine for DuckdbEngine<'_> {
         run_local(
             &mut ctx,
             &mut obs,
-            LocalExecutor {
-                database: &self.database,
+            RecordingExecutor {
+                inner: &self.executor,
                 coverage: self.coverage,
             },
         )
@@ -98,7 +98,7 @@ impl Engine for DuckdbEngine<'_> {
             .as_ref()
             .map(|preset| seed_preset(presets, preset));
         let engine = DuckdbEngine {
-            database: Mutex::new(database),
+            executor: DuckDbExecutor::new(database),
             data_model: query_engine::compiler::local_data_model(&ontology)
                 .unwrap_or_else(|e| panic!("{name}: local data model: {e}")),
             ontology,

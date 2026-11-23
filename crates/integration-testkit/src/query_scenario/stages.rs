@@ -1,7 +1,6 @@
 use std::sync::Mutex;
 
 use arrow::record_batch::RecordBatch;
-use duckdb_client::DuckDbClient;
 use orbit_server::pipeline::HydrationStage;
 use query_engine::compiler::ParameterizedQuery;
 use query_engine::pipeline::{
@@ -35,24 +34,19 @@ impl PipelineStage for MockAuthorizationStage<'_> {
     }
 }
 
-pub(super) struct LocalExecutor<'a> {
-    pub(super) database: &'a Mutex<DuckDbClient>,
+pub(super) struct RecordingExecutor<'a, X> {
+    pub(super) inner: &'a X,
     pub(super) coverage: &'a Mutex<Coverage>,
 }
 
-impl QueryExecutor for LocalExecutor<'_> {
+impl<X: QueryExecutor> QueryExecutor for RecordingExecutor<'_, X> {
     async fn run(
         &self,
         query: &ParameterizedQuery,
         ctx: &mut QueryPipelineContext,
-        _obs: &mut dyn PipelineObserver,
+        obs: &mut dyn PipelineObserver,
     ) -> Result<Vec<RecordBatch>, PipelineError> {
         self.coverage.lock().unwrap().record(&ctx.compiled()?.ast);
-        let sql = query.render();
-        self.database
-            .lock()
-            .unwrap()
-            .query_arrow(&sql)
-            .map_err(|error| PipelineError::Execution(format!("{error}\n{sql}")))
+        self.inner.run(query, ctx, obs).await
     }
 }

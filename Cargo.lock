@@ -2267,11 +2267,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow",
+ "compiler",
  "duckdb",
  "ontology",
  "orbit-search",
  "orbit-utils",
+ "pipeline",
  "serde_json",
+ "shared",
  "tempfile",
  "thiserror 2.0.18",
 ]
