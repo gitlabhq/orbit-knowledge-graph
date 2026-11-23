@@ -160,9 +160,9 @@ fn one_file(
                 let Stage::Mutable(tree) = &mut at else {
                     return Err(Killed::limit(phase.label, &file.path, 0, 0));
                 };
-                engine::run_tree(phase, tree, 0, None, env, Some(&graph), run)?
+                engine::run_tree(phase, tree, 0, None, env, Some(&graph), run)?.0
             }
-            false => engine::run_tree(phase, at.compact(env), 0, None, env, Some(&graph), run)?,
+            false => engine::run_tree(phase, at.compact(env), 0, None, env, Some(&graph), run)?.0,
         };
         edges.extend(found);
         if *engine::profile::ON {
@@ -244,7 +244,8 @@ fn finish(env: &Env, state: &mut State, run: &Sentinel, report: &mut Report) -> 
                 }
                 for (fi, tree) in state.trees.iter_mut().enumerate() {
                     let fi = fi as u32;
-                    let edges = engine::run_tree(phase, tree, fi, None, env, Some(&graph), run)?;
+                    let (edges, _) =
+                        engine::run_tree(phase, tree, fi, None, env, Some(&graph), run)?;
                     state.edges.extend(edges.into_iter().map(|e| e.in_file(fi)));
                 }
             }

@@ -277,7 +277,70 @@ pub struct Hooks<S: Store> {
     finish: fn(&mut Run<S>, u8),
 }
 
+/// A module that keeps what rules write to it until the engine collects it:
+/// its output from each run, merged across a phase's runs.
+pub trait Backend: Module {
+    type Output: Default + Send + 'static;
+    fn take(state: &mut Self::State) -> Self::Output;
+    fn merge(into: &mut Self::Output, from: Self::Output);
+}
+
+type Output = Box<dyn Any + Send>;
+
+/// How the engine collects a backend's output, untyped.
+#[derive(Clone, Copy)]
+struct Collect {
+    take: fn(&mut dyn Any) -> Output,
+    merge: fn(&mut Output, Output),
+}
+
+/// What a phase's runs left in each mounted backend.
+#[derive(Default)]
+pub struct Outputs(Vec<(&'static str, Collect, Output)>);
+
+impl Outputs {
+    pub(super) fn merge(&mut self, from: Outputs) {
+        for (name, collect, output) in from.0 {
+            match self.0.iter_mut().find(|(n, _, _)| *n == name) {
+                Some((_, collect, into)) => (collect.merge)(into, output),
+                None => self.0.push((name, collect, output)),
+            }
+        }
+    }
+
+    /// Backend `B`'s merged output; empty if the phase wrote none.
+    pub fn take<B: Backend>(&mut self) -> B::Output {
+        match self.0.iter().position(|(n, _, _)| *n == B::NAME) {
+            Some(at) => *self
+                .0
+                .swap_remove(at)
+                .2
+                .downcast::<B::Output>()
+                .expect("a backend's output has its type"),
+            None => B::Output::default(),
+        }
+    }
+}
+
+fn take_output<B: Backend>(state: &mut dyn Any) -> Output {
+    let state = state
+        .downcast_mut::<B::State>()
+        .expect("each slot holds its module's state");
+    Box::new(B::take(state))
+}
+
+fn merge_output<B: Backend>(into: &mut Output, from: Output) {
+    let into = into
+        .downcast_mut::<B::Output>()
+        .expect("a backend's output has its type");
+    let from = *from
+        .downcast::<B::Output>()
+        .expect("a backend's output has its type");
+    B::merge(into, from);
+}
+
 pub struct Registration {
+    collect: Option<Collect>,
     name: &'static str,
     state: fn() -> Box<dyn Any>,
     describe: fn(u8) -> Vec<Entry>,
@@ -287,8 +350,20 @@ pub struct Registration {
     pub(crate) tags: &'static [&'static str],
 }
 
+/// Mounts backend `B`: a module whose output the engine collects.
+pub const fn register_backend<B: Backend>() -> Registration {
+    Registration {
+        collect: Some(Collect {
+            take: take_output::<B>,
+            merge: merge_output::<B>,
+        }),
+        ..register::<B>()
+    }
+}
+
 pub const fn register<M: Module>() -> Registration {
     Registration {
+        collect: None,
         name: M::NAME,
         state: new_state::<M>,
         describe: describe::<M>,
@@ -763,8 +838,8 @@ impl<'t, S: Store> Run<'t, S> {
     }
 
     /// Finishes the phase's modules; the edges the run wrote, without
-    /// repeats, unless it was stopped.
-    fn end(&mut self) -> Result<Vec<Edge>, Killed> {
+    /// repeats, and its backends' outputs, unless it was stopped.
+    fn end(&mut self) -> Result<(Vec<Edge>, Outputs), Killed> {
         if let Some(killed) = self.killed.take() {
             return Err(killed);
         }
@@ -777,19 +852,15 @@ impl<'t, S: Store> Run<'t, S> {
         let mut seen = FxHashSet::default();
         self.edges
             .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.call_resolution)));
-        Ok(std::mem::take(&mut self.edges))
-    }
-
-    /// Takes module `M`'s state from the run, leaving a fresh one.
-    pub fn take_state<M: Module>(&mut self) -> M::State {
-        let slot = self
-            .registry
-            .slot_of(M::NAME)
-            .expect("every module is registered");
-        let state = self.states[usize::from(slot)]
-            .downcast_mut::<M::State>()
-            .expect("each slot holds its module's state");
-        std::mem::take(state)
+        let mut outputs = Outputs::default();
+        for &slot in self.phase_modules {
+            let module = self.registry.module(slot);
+            if let Some(collect) = module.collect {
+                let output = (collect.take)(self.states[usize::from(slot)].as_mut());
+                outputs.0.push((module.name, collect, output));
+            }
+        }
+        Ok((std::mem::take(&mut self.edges), outputs))
     }
 
     pub(crate) fn profiling(&self) -> bool {

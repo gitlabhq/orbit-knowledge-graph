@@ -35,6 +35,18 @@ pub struct Written {
     pub rows: Vec<Row>,
 }
 
+impl crate::engine::Backend for Rows {
+    type Output = Vec<Row>;
+
+    fn take(state: &mut Written) -> Vec<Row> {
+        std::mem::take(&mut state.rows)
+    }
+
+    fn merge(into: &mut Vec<Row>, from: Vec<Row>) {
+        into.extend(from);
+    }
+}
+
 impl Module for Rows {
     const NAME: &'static str = "tables";
     type State = Written;
@@ -406,17 +418,8 @@ pub fn export(
     state.trees.push(state.project_compact(env));
     let graph = crate::engine::Graph::new(&state.edges);
     let walk = state.trees.len();
-    let rows = crate::engine::run_trees(
-        phase,
-        &state.trees,
-        walk,
-        Some(project),
-        &graph,
-        env,
-        run,
-        |run| run.take_state::<Rows>().rows,
-    )
-    .map(|(_, rows)| rows.into_iter().flatten().collect());
+    let rows = crate::engine::run_trees(phase, &state.trees, walk, Some(project), &graph, env, run)
+        .map(|(_, mut outputs)| outputs.take::<Rows>());
     let written = rows.map_err(Error::from).and_then(|rows| {
         Sink {
             env,

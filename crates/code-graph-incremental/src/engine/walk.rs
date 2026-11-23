@@ -10,14 +10,17 @@ use smallvec::SmallVec;
 
 use super::pattern::{self, Cap, Pat};
 use super::program::{Pass, Phase, Scratch, Template, order};
-use super::{Compact, Cursor, Graph, Indexed, Loc, Run, Store, Tree, WHOLE, Write, machine};
+use super::{
+    Compact, Cursor, Graph, Indexed, Loc, Outputs, Run, Store, Tree, WHOLE, Write, machine,
+};
 use crate::env::Env;
 use crate::intern::Lang;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Edge, Mutable, Storage};
 
 /// Runs a phase on one tree with the rules at `rules`, or the tree's own;
-/// returns the edges it wrote. `fi` is the tree's file in `graph`.
+/// returns the edges it wrote and its backends' outputs. `fi` is the tree's
+/// file in `graph`.
 pub fn run_tree<S: Store>(
     phase: &Phase,
     tree: &mut Tree<S>,
@@ -26,7 +29,7 @@ pub fn run_tree<S: Store>(
     env: &Env,
     graph: Option<&Graph>,
     budget: &Sentinel,
-) -> Result<Vec<Edge>, Killed> {
+) -> Result<(Vec<Edge>, Outputs), Killed> {
     let file = tree_budget(phase, env, &tree.label);
     let rules = rules.unwrap_or_else(|| env.rules_index(&tree.label));
     let on = On {
@@ -38,10 +41,10 @@ pub fn run_tree<S: Store>(
         budget,
         file: &file,
     };
-    let mut edges = Vec::new();
+    let (mut edges, mut outputs) = (Vec::new(), Outputs::default());
     for pass in phase.passes(rules) {
         settle(|| {
-            if !(on.walk(pass, tree, &mut edges)? && pass.repeat) {
+            if !(on.walk(pass, tree, &mut edges, &mut outputs)? && pass.repeat) {
                 return Ok(false);
             }
             budget.check()?;
@@ -49,7 +52,7 @@ pub fn run_tree<S: Store>(
             Ok(true)
         })?;
     }
-    Ok(edges)
+    Ok((edges, outputs))
 }
 
 /// Runs a phase on a family's files, the project tree last in `trees`, with
@@ -76,7 +79,6 @@ pub fn run_family(
             &graph,
             env,
             budget,
-            |_| (),
         ) {
             Ok((edges, _)) => edges,
             Err(killed) if !killed.cancelled => {
@@ -108,11 +110,10 @@ fn settle<E>(mut round: impl FnMut() -> Result<bool, E>) -> Result<(), E> {
 }
 
 /// Runs a phase on the first `walk` trees of a family in parallel, over all
-/// its trees and the graph so far; returns the edges it wrote and what
-/// `collect` takes from each file's finished run, such as a backend's state.
-/// `project` is the project tree's file, if the family has one.
-#[allow(clippy::too_many_arguments)]
-pub fn run_trees<T: Send>(
+/// its trees and the graph so far; returns the edges it wrote and its
+/// backends' outputs. `project` is the project tree's file, if the family has
+/// one.
+pub fn run_trees(
     phase: &Phase,
     trees: &[Tree<Compact>],
     walk: usize,
@@ -120,12 +121,11 @@ pub fn run_trees<T: Send>(
     graph: &Graph,
     env: &Env,
     budget: &Sentinel,
-    collect: impl Fn(&mut Run<'_, Compact>) -> T + Sync,
-) -> Result<(Vec<Edge>, Vec<T>), Killed> {
+) -> Result<(Vec<Edge>, Outputs), Killed> {
     let scope = scope_budget(phase, env, budget);
     let files = project.unwrap_or(trees.len() as u32);
     let indexed = Indexed::new(phase, trees, files as usize, env, &scope);
-    let found: Vec<Result<(Vec<Edge>, T), Killed>> = (0..walk)
+    let found: Vec<Result<(Vec<Edge>, Outputs), Killed>> = (0..walk)
         .into_par_iter()
         .map(|fi| {
             let file = tree_budget(phase, env, &trees[fi].label);
@@ -140,17 +140,16 @@ pub fn run_trees<T: Send>(
             for pass in phase.passes(rules) {
                 fire_from(&mut run, pass, &order(&trees[fi], pass.post), 0);
             }
-            let edges = run.end()?;
-            Ok((edges, collect(&mut run)))
+            run.end()
         })
         .collect();
-    let (mut edges, mut taken) = (Vec::new(), Vec::new());
+    let (mut edges, mut outputs) = (Vec::new(), Outputs::default());
     for result in found {
-        let (e, t) = result?;
+        let (e, o) = result?;
         edges.extend(e);
-        taken.push(t);
+        outputs.merge(o);
     }
-    Ok((edges, taken))
+    Ok((edges, outputs))
 }
 
 /// What a walk over one tree reads besides the tree.
@@ -173,6 +172,7 @@ impl On<'_> {
         pass: &Pass,
         tree: &mut Tree<S>,
         edges: &mut Vec<Edge>,
+        outputs: &mut Outputs,
     ) -> Result<bool, Killed> {
         let nodes = order(tree, pass.post);
         let (mut at, mut replaced) = (0, false);
@@ -195,7 +195,9 @@ impl On<'_> {
                 run.start_modules();
                 at = fire_from(&mut run, pass, &nodes, at);
                 let writes = std::mem::take(&mut run.writes);
-                edges.extend(run.end()?);
+                let (written, out) = run.end()?;
+                edges.extend(written);
+                outputs.merge(out);
                 writes
             };
             replaced |= commit(tree, pass, &self.env.lang, writes);
