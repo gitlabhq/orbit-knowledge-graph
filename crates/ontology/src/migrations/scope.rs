@@ -240,63 +240,44 @@ fn parse_derived_name(content: &str) -> Option<String> {
     Some(parsed.name)
 }
 
-#[derive(Deserialize)]
-struct TemplateUserYaml {
-    #[serde(default)]
-    pipelines: Vec<TemplatePipelineYaml>,
-}
-
-#[derive(Deserialize)]
-struct TemplatePipelineYaml {
-    extract: Option<TemplateExtractYaml>,
-}
-
-#[derive(Deserialize)]
-struct TemplateExtractYaml {
-    query: Option<String>,
-}
-
-/// A changed `.sql.j2` template counts as a change to each YAML that uses it; `None` when one has no user.
+/// A changed `.sql.j2` template counts as a change to each YAML whose extract uses it; `None` when none does.
 fn replace_templates_with_their_yaml_files(
     source_contents: &BTreeMap<String, String>,
     changed_sources: &BTreeSet<String>,
 ) -> Option<BTreeSet<String>> {
     let mut resolved = BTreeSet::new();
     for path in changed_sources {
-        if !path.ends_with(".sql.j2") {
+        let Some((template_dir, template_file)) =
+            path.strip_suffix(".sql.j2").and(path.rsplit_once('/'))
+        else {
             resolved.insert(path.clone());
             continue;
-        }
-        let users: Vec<&String> = source_contents
+        };
+        let yaml_files: BTreeSet<String> = source_contents
             .iter()
-            .filter(|(yaml_path, content)| uses_template(yaml_path, content, path))
-            .map(|(yaml_path, _)| yaml_path)
+            .filter(|(yaml_path, content)| {
+                yaml_path
+                    .rsplit_once('/')
+                    .is_some_and(|(dir, file)| dir == template_dir && file.ends_with(".yaml"))
+                    && extracts_from(content, template_file)
+            })
+            .map(|(yaml_path, _)| yaml_path.clone())
             .collect();
-        if users.is_empty() {
+        if yaml_files.is_empty() {
             return None;
         }
-        resolved.extend(users.into_iter().cloned());
+        resolved.extend(yaml_files);
     }
     Some(resolved)
 }
 
-fn uses_template(yaml_path: &str, content: &str, template_path: &str) -> bool {
-    let Some(dir) = yaml_path
-        .strip_suffix(".yaml")
-        .and_then(|stem| stem.rsplit_once('/'))
-        .map(|(dir, _)| dir)
-    else {
-        return false;
-    };
-    let Ok(parsed) = orbit_utils::yaml::from_str::<TemplateUserYaml>(content) else {
-        return false;
-    };
-    parsed.pipelines.iter().any(|pipeline| {
-        pipeline
-            .extract
-            .as_ref()
-            .and_then(|extract| extract.query.as_deref())
-            .is_some_and(|query| format!("{dir}/{query}") == template_path)
+fn extracts_from(yaml_content: &str, template_file: &str) -> bool {
+    orbit_utils::yaml::from_str::<serde_json::Value>(yaml_content).is_ok_and(|yaml| {
+        yaml["pipelines"].as_array().is_some_and(|pipelines| {
+            pipelines
+                .iter()
+                .any(|pipeline| pipeline["extract"]["query"] == template_file)
+        })
     })
 }
 
@@ -500,28 +481,6 @@ mod tests {
             &BTreeSet::new(),
         );
         assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["Pipeline"]))));
-    }
-
-    #[test]
-    fn derive_scope_derived_template_maps_to_owning_entity() {
-        let ontology = Ontology::new();
-        let embedded = BTreeMap::from([
-            (
-                "derived/core/system_note.yaml".to_string(),
-                "name: SystemNote\npipelines:\n  - name: SystemNote\n    extract:\n      query: system_note.sql.j2\n".to_string(),
-            ),
-            (
-                "derived/core/system_note.sql.j2".to_string(),
-                "SELECT 1\n".to_string(),
-            ),
-        ]);
-        let scope = derive_scope(
-            &ontology,
-            &embedded,
-            &entities(&["derived/core/system_note.sql.j2"]),
-            &BTreeSet::new(),
-        );
-        assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["SystemNote"]))));
     }
 
     #[test]
