@@ -1,8 +1,6 @@
-# MODE, SKILLS_REF, FLOW_USER, and REVIEW_USER in setup: README.md in this folder.
 # Each step writes .docs-write/route/<file>; a read_file step reads it and the
 # router branches on the exact token. A missing file ends the flow.
 # The image has no python3: steps run through .docs-write/step, which uses uv.
-# .docs-write/ must stay readable: read_file refuses git-ignored paths, so never exclude it.
 version: v1
 environment: ambient
 components:
