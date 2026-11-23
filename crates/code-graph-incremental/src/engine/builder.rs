@@ -12,7 +12,6 @@ use crate::language::SupportLang;
 use crate::sentinel::Limits;
 
 pub struct Engine {
-    pub export_config: crate::backend::tables::ExportConfig,
     /// The mounted frontends, the env's own language first.
     pub frontends: Vec<Box<dyn crate::frontend::Frontend>>,
     pub lang: Lang,
@@ -47,14 +46,13 @@ pub struct Project {
 }
 
 /// How an engine is configured: the family it serves, the modules it
-/// mounts, its budgets, the interner it compiles into, and the export's
-/// column overrides. Everything else comes from pipeline.yaml.
+/// mounts, its budgets, and the interner it compiles into. Everything else
+/// comes from pipeline.yaml.
 pub struct EngineBuilder {
     lang_id: SupportLang,
     modules: &'static [Registration],
     limits: Limits,
     lang: Option<Lang>,
-    export_config: crate::backend::tables::ExportConfig,
 }
 
 impl EngineBuilder {
@@ -77,21 +75,10 @@ impl EngineBuilder {
         self
     }
 
-    pub fn export_config(mut self, config: crate::backend::tables::ExportConfig) -> Self {
-        self.export_config = config;
-        self
-    }
-
     /// Compiles the family's rules against the mounted modules.
     pub fn build(self) -> Result<Engine, LoadError> {
         let lang = self.lang.unwrap_or_default();
-        Engine::load(
-            self.lang_id,
-            lang,
-            self.limits,
-            self.modules,
-            self.export_config,
-        )
+        Engine::load(self.lang_id, lang, self.limits, self.modules)
     }
 }
 
@@ -102,7 +89,6 @@ impl Engine {
             modules: crate::modules::ALL,
             limits: Limits::UNLIMITED,
             lang: None,
-            export_config: Default::default(),
         }
     }
 
@@ -111,7 +97,6 @@ impl Engine {
         lang: Lang,
         limits: Limits,
         modules: &'static [Registration],
-        export_config: crate::backend::tables::ExportConfig,
     ) -> Result<Self, LoadError> {
         let members = lang_id.family_members();
         let mut rules: FxHashMap<SupportLang, usize> = FxHashMap::default();
@@ -150,7 +135,6 @@ impl Engine {
         }
         Ok(Self {
             frontends,
-            export_config,
             pipeline,
             project,
             lang,

@@ -71,7 +71,7 @@ impl<'a> Exporter<'a> {
         let tables = code_graph_incremental::backend::tables::export(
             env,
             state,
-            &Tables::load(env, self.ontology)?,
+            &Tables::load(env, self.ontology, &Default::default())?,
             &envelope(self.git),
             &Scope::all(),
             &code_graph_incremental::Sentinel::disabled(),
@@ -183,7 +183,7 @@ pub(super) fn replacement(
     files: &FxHashSet<String>,
 ) -> Result<Replacement> {
     let envelope = envelope(git);
-    let tables = Tables::load(env, ontology)?;
+    let tables = Tables::load(env, ontology, &Default::default())?;
     let edge_table = ontology
         .local_edge_table_name()
         .ok_or_else(|| anyhow::anyhow!("local_db.edge_table.name must be configured"))?;

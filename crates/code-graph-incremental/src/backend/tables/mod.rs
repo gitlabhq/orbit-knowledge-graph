@@ -291,7 +291,13 @@ fn check_shape(table: &Table, shape: &RowShape) -> Result<(), LoadError> {
 }
 
 impl Tables {
-    pub fn load(env: &Engine, ontology: &Ontology) -> Result<Self, LoadError> {
+    /// The ontology's tables, with `config`'s column specs in place of the
+    /// ontology's where it gives them.
+    pub fn load(
+        env: &Engine,
+        ontology: &Ontology,
+        config: &ExportConfig,
+    ) -> Result<Self, LoadError> {
         let mut tables = Vec::new();
         for name in ontology.local_entity_names() {
             let table = ontology
@@ -332,7 +338,7 @@ impl Tables {
                 .collect(),
         });
         for table in &mut tables {
-            if let Some(schema) = env.export_config.schemas.get(&table.name) {
+            if let Some(schema) = config.schemas.get(&table.name) {
                 check_schema(&table.specs, schema)?;
                 table.specs = schema.clone();
             }
@@ -441,7 +447,7 @@ pub fn export_directories(
     envelope: &Envelope,
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
     let env = Engine::builder(crate::language::SupportLang::Markdown).build()?;
-    let tables = Tables::load(&env, ontology)?;
+    let tables = Tables::load(&env, ontology, &ExportConfig::default())?;
     let mut state = State::new(&env);
     state.trees = paths
         .iter()
@@ -650,7 +656,8 @@ mod tests {
     #[test]
     fn a_missing_envelope_value_is_a_named_error() {
         let ontology = Ontology::load_embedded().expect("embedded ontology");
-        let tables = Tables::load(&python(), &ontology).expect("export rules load");
+        let tables = Tables::load(&python(), &ontology, &ExportConfig::default())
+            .expect("export rules load");
         let envelope = Envelope::new([("project_id", Scalar::Int(1))]);
         let message = envelope.check(&tables).unwrap_err().to_string();
         assert!(message.contains("'branch'"), "{message}");
@@ -660,7 +667,8 @@ mod tests {
     #[test]
     fn export_rules_agree_with_the_ontology() {
         let ontology = Ontology::load_embedded().expect("embedded ontology");
-        let tables = Tables::load(&python(), &ontology).unwrap_or_else(|e| panic!("{e}"));
+        let tables = Tables::load(&python(), &ontology, &ExportConfig::default())
+            .unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(tables.tables.len(), ontology.local_entity_names().len() + 1);
     }
 }

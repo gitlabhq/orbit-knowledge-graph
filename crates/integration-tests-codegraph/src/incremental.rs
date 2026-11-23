@@ -195,7 +195,7 @@ fn check(
         ("commit_sha", Scalar::Str("test")),
     ]);
     let db = create_test_db().expect("in-memory DuckDB");
-    let plan = Tables::load(env, ontology).expect("export rules");
+    let plan = Tables::load(env, ontology, &Default::default()).expect("export rules");
     let tables = tables::export(
         env,
         &mut state,

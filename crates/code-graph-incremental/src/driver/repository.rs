@@ -71,9 +71,7 @@ pub fn repository<E: std::fmt::Display>(
     if families.is_empty() {
         on_worker_pool("none", 1, || {
             (options.phase_started)("none", "export", repository.usage().files);
-            let env = Engine::builder(SupportLang::Markdown)
-                .export_config(export_config.clone())
-                .build()?;
+            let env = Engine::builder(SupportLang::Markdown).build()?;
             let mut state = super::State::new(&env);
             state.trees = repository
                 .files()
@@ -85,7 +83,7 @@ pub fn repository<E: std::fmt::Display>(
                     crate::tree::Tree::unparsed(&env.lang, &file.path, file.size, &reason).into()
                 })
                 .collect();
-            let mut tables = crate::backend::tables::Tables::load(&env, ontology)?;
+            let mut tables = crate::backend::tables::Tables::load(&env, ontology, export_config)?;
             tables.batch_bytes = options.batch_bytes;
             emit(crate::backend::tables::export(
                 &env,
@@ -133,16 +131,16 @@ pub fn repository<E: std::fmt::Display>(
                     let outcome = run.check().map_err(Error::from).and_then(|()| {
                         on_worker_pool(family, family_threads, || {
                             let (report, batches) = {
-                                let env = Engine::builder(language)
-                                    .limits(limits)
-                                    .export_config(export_config.clone())
-                                    .build()?;
+                                let env = Engine::builder(language).limits(limits).build()?;
                                 phase_started(family, "index", file_count);
                                 let (mut graph, mut report) = super::index(&env, repository, run)?;
                                 report.unread_files.retain(|path| owns(family, path));
                                 run.check()?;
-                                let mut tables =
-                                    crate::backend::tables::Tables::load(&env, ontology)?;
+                                let mut tables = crate::backend::tables::Tables::load(
+                                    &env,
+                                    ontology,
+                                    export_config,
+                                )?;
                                 tables.batch_bytes = options.batch_bytes;
                                 phase_started(family, "export", file_count);
                                 let scope = crate::backend::tables::Scope {

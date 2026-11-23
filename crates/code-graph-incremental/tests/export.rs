@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use arrow::record_batch::RecordBatch;
-use code_graph_incremental::backend::tables::{self, Scope, Tables};
+use code_graph_incremental::backend::tables::{self, ExportConfig, Scope, Tables};
 use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Engine, Envelope, Error, Limits, Scalar, Sentinel, driver};
 mod common;
@@ -21,13 +21,14 @@ fn export_with(
     env: &Engine,
     repository: &orbit_utils::vfs::Vfs<()>,
     ontology: &Ontology,
+    config: &ExportConfig,
     envelope: Envelope,
 ) -> Result<Exported, Error> {
     let (mut state, _) = driver::index(env, repository, &Sentinel::disabled())?;
     let tables = tables::export(
         env,
         &mut state,
-        &Tables::load(env, ontology)?,
+        &Tables::load(env, ontology, config)?,
         &envelope,
         &Scope::all(),
         &Sentinel::disabled(),
@@ -71,12 +72,11 @@ fn envelope() -> Envelope<'static> {
 
 #[test]
 fn export_config_emits_typed_metadata_and_envelope_overrides() {
-    use code_graph_incremental::backend::tables::ExportConfig;
     use orbit_arrow::{ColumnSpec, ColumnType};
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
     let sources = common::walk(repo.path());
-    let mut env = Engine::builder(SupportLang::Python)
+    let env = Engine::builder(SupportLang::Python)
         .limits(Limits::UNLIMITED)
         .build()
         .unwrap();
@@ -109,8 +109,7 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
         ])
         .collect();
     config.schemas.insert("gl_file".into(), specs);
-    env.export_config = config;
-    let error = export_with(&env, &sources, &ontology, envelope())
+    let error = export_with(&env, &sources, &ontology, &config, envelope())
         .err()
         .unwrap();
     assert!(error.to_string().contains("version"));
@@ -125,7 +124,8 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
         if let Some(path) = traversal_path {
             values.push(("traversal_path", Scalar::Str(path)));
         }
-        let exported = export_with(&env, &sources, &ontology, Envelope::new(values)).unwrap();
+        let exported =
+            export_with(&env, &sources, &ontology, &config, Envelope::new(values)).unwrap();
         let batch = table(&exported, "gl_file");
         assert_eq!(batch.num_rows(), 1);
         let versions = batch
@@ -149,7 +149,14 @@ fn export_repo(root: &Path) -> Exported {
         .build()
         .unwrap();
     let ontology = Ontology::load_embedded().unwrap();
-    export_with(&env, &common::walk(root), &ontology, envelope()).unwrap()
+    export_with(
+        &env,
+        &common::walk(root),
+        &ontology,
+        &ExportConfig::default(),
+        envelope(),
+    )
+    .unwrap()
 }
 
 fn table<'a>(exported: &'a Exported, name: &str) -> &'a RecordBatch {
@@ -436,8 +443,14 @@ fn definition_coordinates_cover_the_same_span_as_bytes() {
             .build()
             .unwrap();
         let ontology = Ontology::load_embedded().unwrap();
-        let exported =
-            export_with(&env, &common::walk(repo.path()), &ontology, envelope()).unwrap();
+        let exported = export_with(
+            &env,
+            &common::walk(repo.path()),
+            &ontology,
+            &ExportConfig::default(),
+            envelope(),
+        )
+        .unwrap();
         let actual: Vec<_> = rows(
             table(&exported, "gl_definition"),
             &[
@@ -635,7 +648,7 @@ fn exporting_deeply_nested_definitions_grows_linearly() {
             .unwrap();
         let ontology = Ontology::load_embedded().unwrap();
         let mut state = index(&env, repo.path());
-        let tables = Tables::load(&env, &ontology).unwrap();
+        let tables = Tables::load(&env, &ontology, &ExportConfig::default()).unwrap();
         let started = Instant::now();
         tables::export(
             &env,
@@ -673,7 +686,7 @@ fn exporting_some_trees_matches_the_full_export_of_those_files() {
         .build()
         .unwrap();
     let ontology = Ontology::load_embedded().unwrap();
-    let tables = Tables::load(&env, &ontology).unwrap();
+    let tables = Tables::load(&env, &ontology, &ExportConfig::default()).unwrap();
     let mut state = index(&env, repo.path());
     let main = state
         .trees
