@@ -18,6 +18,7 @@ members = [
   "crates/query-engine/types",
   "crates/query-engine/pipeline",
   "crates/query-engine/shared",
+  "crates/query-engine/local",
   "crates/query-engine/formatters",
   "crates/query-engine/profiler",
   "crates/query-engine/compiler-pipeline-macros",

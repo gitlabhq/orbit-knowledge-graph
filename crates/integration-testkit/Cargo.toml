@@ -8,6 +8,7 @@ arrow = { workspace = true }
 async-trait = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 duckdb-client = { path = "../duckdb-client" }
+local = { path = "../query-engine/local" }
 orbit-server-config = { path = "../orbit-server-config" }
 gitalisk-core = { workspace = true }
 orbit-utils = { path = "../utils" }

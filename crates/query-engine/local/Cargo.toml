@@ -1,0 +1,15 @@
+[package]
+name = "local"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[dependencies]
+arrow = { workspace = true }
+compiler = { path = "../compiler" }
+duckdb-client = { path = "../../duckdb-client" }
+pipeline = { path = "../pipeline" }
+shared = { path = "../shared" }
+
+[lints]
+workspace = true

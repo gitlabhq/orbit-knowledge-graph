@@ -16,9 +16,6 @@ orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
 anyhow = { workspace = true }
 ontology = { path = "../ontology" }
-compiler = { path = "../query-engine/compiler" }
-pipeline = { path = "../query-engine/pipeline" }
-shared = { path = "../query-engine/shared" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 

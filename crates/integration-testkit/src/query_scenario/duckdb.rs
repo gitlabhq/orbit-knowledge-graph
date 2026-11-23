@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use duckdb_client::{DuckDbClient, DuckDbExecutor};
+use duckdb_client::DuckDbClient;
+use local::DuckDbExecutor;
 use query_data_model::DuckDbDataModel;
 use query_engine::compiler::{Frontend, generate_local_ddl};
 use query_engine::pipeline::{NoOpObserver, PipelineError, QueryPipelineContext, TypeMap};

@@ -5,7 +5,7 @@ use compiler::ParameterizedQuery;
 use pipeline::{PipelineError, PipelineObserver, QueryPipelineContext};
 use shared::QueryExecutor;
 
-use crate::DuckDbClient;
+use duckdb_client::DuckDbClient;
 
 pub struct DuckDbExecutor {
     client: Mutex<DuckDbClient>,
