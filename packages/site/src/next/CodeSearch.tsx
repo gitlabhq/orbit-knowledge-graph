@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from "re
 import { cn, Icon } from "@gitlab-org/orbit-site";
 import { CODE_MS, CROSS_SEARCHES, type FileHit, type Line, type Search, SEARCHES, STEP_MS } from "./searches";
 
-const textOf = (search: Search) => search.ask ?? (search.kind === "code" ? search.label : search.pattern);
+export const textOf = (search: Search) => search.ask ?? (search.kind === "code" ? search.label : search.pattern);
 const TYPE_MS = 22;
 const BOTTOM_ROOM_PX = 48;
 const VERBS: Record<string, [string, string]> = {
@@ -15,9 +15,9 @@ const VERBS: Record<string, [string, string]> = {
 };
 const MAX_CHAT_PX = 420;
 const SEND_PAUSE_MS = 250;
-const stepsOf = (search: Search) => (search.steps ? search.steps.length : 1);
+export const stepsOf = (search: Search) => (search.steps ? search.steps.length : 1);
 const MODE_ICONS = { text: "text-description", regex: "regular-expression", structural: "file-tree" } as const;
-const iconOf = (search: Search) => (search.kind === "cross" ? search.steps![0]!.icon : MODE_ICONS[search.mode]);
+export const iconOf = (search: Search) => (search.kind === "cross" ? search.steps![0]!.icon : MODE_ICONS[search.mode]);
 
 const GROUPS = [
   { label: "Code search", items: ["error", "flag", "unwrap"].map((id) => SEARCHES.find((item) => item.id === id)!) },
@@ -73,7 +73,7 @@ function File({ hit }: { hit: FileHit }) {
   );
 }
 
-function Thread({ search, stage }: { search: Search; stage: number }) {
+export function Thread({ search, stage }: { search: Search; stage: number }) {
   const done = stage >= stepsOf(search);
   const code = done ? "Searched code" : "Searching code…";
   return (

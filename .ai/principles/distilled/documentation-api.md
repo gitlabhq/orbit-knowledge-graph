@@ -1,6 +1,6 @@
 ---
-source_checksum: 1cb02a9b9820f086
-distilled_at_sha: f821a52e7e6c48d5eb961fe53f9049f25bb4d274
+source_checksum: 0e9ee9550239deb4
+distilled_at_sha: cf64a3d8f7ef3e3137b983ecedac825dcf82a0b3
 ---
 <!-- Auto-generated from docs.gitlab.com by gitlab-ai-principles-distiller — do not edit manually -->
 
@@ -23,7 +23,8 @@ distilled_at_sha: f821a52e7e6c48d5eb961fe53f9049f25bb4d274
 ### REST API — History and Deprecations
 
 - Add history notes to describe new or updated API calls; include feature flag information in history when the API or attribute is behind a feature flag.
-- To deprecate an attribute: add a history note, add inline deprecation text to the attribute's table row (e.g. `[Deprecated](link) in GitLab 14.7. Use \`widget_id\` instead.`), and update the REST API deprecations page for wide announcement.
+- Add history for an individual attribute at the end of that attribute's table description (for example, `[Introduced](https://work-item-link) in GitLab 14.3.`); place other history items the same way.
+- To deprecate an attribute: add a history note, add inline history text to the attribute's table row (e.g. `[Deprecated](link) in GitLab 14.7. Use \`widget_id\` instead.`), and update the REST API deprecations page for wide announcement.
 
 ### REST API — Operation Titles and Descriptions
 

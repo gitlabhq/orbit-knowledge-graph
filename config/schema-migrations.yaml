@@ -16,6 +16,21 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 126
+  scope: "*"
+  note: >-
+    BLOCKS is a new WorkItem edge from issue links with link_type 1. RELATED_TO
+    keeps only link_type 0, so a blocking link no longer reads as relates to. Edge files
+    drop the properties blocks that the loader never read. The rebuild removes the
+    blocking links already stored as RELATED_TO.
+- version: 125
+  scope: "*"
+  note: >-
+    Link-table edges copy only immutable endpoint properties into their tags. A
+    link row does not change when its endpoint does, so a copied state went stale. Nodes
+    keep only immutable enrichment_props, and link-table edges stop enriching
+    MergeRequest and WorkItem endpoints. Queries stop trusting the stale copies at once;
+    the rebuild clears them.
 - version: 124
   scope: sdlc
   entities:

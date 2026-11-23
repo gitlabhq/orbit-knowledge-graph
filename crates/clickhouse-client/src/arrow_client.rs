@@ -17,10 +17,8 @@ use orbit_observability::resilience::MetricsObserver;
 use orbit_utils::query_types::{ScalarType, SqlType};
 use serde::Serialize;
 use serde_json::Value;
-use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_util::io::SyncIoBridge;
 use tracing::Instrument;
 
 pub use clickhouse::QuerySummary;
@@ -616,34 +614,10 @@ impl ArrowQuery {
         self,
         max_block_size: Option<u64>,
     ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
-        let (cursor, first) = self.open_cursor(max_block_size).await?;
-
-        let handle = tokio::runtime::Handle::current();
-        let (tx, rx) = mpsc::channel::<Result<RecordBatch, ClickHouseError>>(2);
-
-        let span = tracing::Span::current();
-        tokio::task::spawn_blocking(move || {
-            let _entered = span.enter();
-            let body = Cursor::new(first.unwrap_or_default()).chain(cursor);
-            let bridge = SyncIoBridge::new_with_handle(body, handle);
-            let reader = match StreamReader::try_new(bridge, None) {
-                Ok(reader) => reader,
-                Err(err) => {
-                    let _ = tx.blocking_send(Err(ClickHouseError::ArrowDecode(err)));
-                    return;
-                }
-            };
-
-            for batch_result in reader {
-                let mapped: Result<RecordBatch, ClickHouseError> =
-                    batch_result.map_err(ClickHouseError::ArrowDecode);
-                if tx.blocking_send(mapped).is_err() {
-                    break;
-                }
-            }
-        });
-
-        Ok(ReceiverStream::new(rx).boxed())
+        let (batches, _summary) = self
+            .fetch_arrow_streamed_with_summary(max_block_size)
+            .await?;
+        Ok(batches)
     }
 
     pub async fn fetch_arrow_streamed_with_summary(
@@ -693,10 +667,18 @@ impl ArrowQuery {
                         return;
                     }
                 }
-                next = cursor.next().await;
+                // Take whole chunks: the cursor's AsyncRead loses bytes when the next chunk is late.
+                next = tokio::select! {
+                    biased;
+                    _ = tx.closed() => return,
+                    next = cursor.next() => next,
+                };
             }
             if let Some(summary_tx) = summary_tx.take() {
                 let _ = summary_tx.send(cursor.summary().cloned());
+            }
+            if let Err(err) = decoder.finish() {
+                let _ = tx.send(Err(ClickHouseError::ArrowDecode(err))).await;
             }
         };
         tokio::spawn(task.in_current_span());

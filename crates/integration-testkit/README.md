@@ -108,9 +108,9 @@ can intermittently miss freshly-written data.
 Read-only subtests receive a shared `&TestContext` and only query:
 
 ```rust
-async fn search_returns_correct_values(ctx: &TestContext) {
-    let resp = run_query(ctx, "...", &allow_all()).await;
-    resp.assert_node_count(5);
+async fn seeded_users_are_visible(ctx: &TestContext) {
+    let batches = ctx.query("SELECT id FROM gl_user").await;
+    assert_eq!(batches.iter().map(|batch| batch.num_rows()).sum::<usize>(), 5);
 }
 ```
 
@@ -121,7 +121,7 @@ Mutating subtests call their own seed and do additional writes. They go in the
 async fn writes_extra_data_then_queries(ctx: &TestContext) {
     seed(ctx).await;
     ctx.execute("INSERT INTO gl_note ...").await;
-    let resp = run_query(ctx, "...", &allow_all()).await;
+    let batches = ctx.query("SELECT id FROM gl_note").await;
     // ...
 }
 ```
@@ -153,16 +153,11 @@ every field they list when they cover every returned node of the entity.
 
 ### Example: single-entity traversal with filter and ordering
 
-```rust
-async fn search_filter_eq(ctx: &TestContext) {
-    let resp = run_query(ctx, r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User",
-                 "filters": {"state": "blocked"}}],
-        "order_by": "u.id",
-        "limit": 10
-    }"#, &allow_all()).await;
+Query scenarios build the view and run the assertions from YAML. Direct
+assertions take a view made with `for_query`:
 
+```rust
+fn search_filter_eq(resp: &ResponseView) {
     resp.assert_filter("User", "state", |n| {
         n.prop_str("state") == Some("blocked")
     });
@@ -173,17 +168,7 @@ async fn search_filter_eq(ctx: &TestContext) {
 ### Example: traversal with edges
 
 ```rust
-async fn traversal_edges(ctx: &TestContext) {
-    let resp = run_query(ctx, r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "g", "entity": "Group"}
-        ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-        "limit": 10
-    }"#, &allow_all()).await;
-
+fn traversal_edges(resp: &ResponseView) {
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_referential_integrity();
 }
