@@ -30,6 +30,20 @@ fixtures:
       #include "missing/gone.h"
       int orphan(void) { return gone(); }
 
+  - path: db/b.h
+    content: |
+      int stored(void);
+
+  - path: db/b.c
+    content: |
+      #include "b.h"
+      int stored(void) { return 4; }
+
+  - path: app/a.c
+    content: |
+      #include "db/b.h"
+      int fetch(void) { return stored(); }
+
 tests:
   - name: "an include directory path and a flat include reach the header definitions"
     query: |
@@ -49,3 +63,12 @@ tests:
       RETURN callee.name AS name
     assert:
       - { row_count: 0 }
+
+  - name: "a repository-root-relative include still reaches the header definition"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'fetch'
+      RETURN callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: db/b.c } }

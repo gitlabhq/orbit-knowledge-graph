@@ -57,8 +57,9 @@ pub struct ResolveConfig {
     pub parse_files: Vec<ParseFileSpec>,
     pub merge_same_named_types: bool,
     pub submodule_imports: bool,
-    /// A `./` import with no match next to the importer is retried as written
-    /// against the source roots (C and C++ include directories).
+    /// A `./` import with no match next to the importer is retried without the
+    /// `./` against the repository root and the lookup prefixes (C and C++
+    /// include directories).
     pub root_include_fallback: bool,
 }
 

@@ -97,6 +97,9 @@ pub struct ImportReq {
     pub target_fi: u32,
     pub anchor: u32,
     pub target_path: String,
+    /// The path that matched when `target_path` found nothing and the import
+    /// was retried through the lookup prefixes.
+    pub fallback_path: Option<String>,
 }
 
 impl ImportReq {
@@ -187,9 +190,14 @@ impl Resolver {
             .reqs
             .par_iter()
             .filter(|req| {
-                self.lookup != *lookup
-                    || !resolve_glob(&req.target_path, &self.file_index, &lookup.prefixes)
-                        .contains(&Loc::new(req.target_fi as usize, req.anchor))
+                if self.lookup != *lookup {
+                    return true;
+                }
+                let mut found = resolve_glob(&req.target_path, &self.file_index, &lookup.prefixes);
+                if let (true, Some(fallback)) = (found.is_empty(), &req.fallback_path) {
+                    found = resolve_glob(fallback, &self.file_index, &lookup.prefixes);
+                }
+                !found.contains(&Loc::new(req.target_fi as usize, req.anchor))
             })
             .map(|req| req.fi)
             .collect();
@@ -288,6 +296,7 @@ impl Resolver {
                     target_fi: new_tfi,
                     anchor: r.anchor,
                     target_path: r.target_path.clone(),
+                    fallback_path: r.fallback_path.clone(),
                 })
             })
             .collect();
@@ -372,7 +381,9 @@ impl Resolver {
             .iter()
             .filter(|req| dirty_fis.contains(&req.fi))
             .filter_map(|req| {
-                let sym = lang.syms.intern(&req.target_path);
+                let sym = lang
+                    .syms
+                    .intern(req.fallback_path.as_deref().unwrap_or(&req.target_path));
                 let node = trees[req.fi as usize]
                     .cursor(req.node)
                     .child(C::SourcePath)?
@@ -944,11 +955,13 @@ fn gather_imports_for(
                                 .unwrap_or_else(|| root.to_owned());
                     }
                     let mut direct = resolve_glob(&target_path, file_index, prefixes);
+                    let mut fallback_path = None;
                     if direct.is_empty()
                         && config.root_include_fallback
                         && let Some(bare) = source_str.strip_prefix("./")
                     {
                         direct = resolve_glob(bare, file_index, prefixes);
+                        fallback_path = Some(bare.to_owned());
                     }
                     direct.retain(|loc| loc.fi != fi);
                     if direct.is_empty() && stdlib {
@@ -989,6 +1002,7 @@ fn gather_imports_for(
                             target_fi: loc.fi,
                             anchor: loc.node,
                             target_path: path,
+                            fallback_path: fallback_path.clone().filter(|_| !is_sub),
                         });
                     }
                 })
