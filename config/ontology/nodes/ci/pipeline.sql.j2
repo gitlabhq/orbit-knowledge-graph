@@ -1,0 +1,43 @@
+SELECT
+  id,
+  iid,
+  sha,
+  ref,
+  status,
+  source,
+  tag,
+  duration,
+  failure_reason,
+  created_at,
+  started_at,
+  finished_at,
+  committed_at,
+  updated_at,
+  before_sha,
+  yaml_errors,
+  protected,
+  project_id,
+  user_id,
+  merge_request_id,
+  auto_canceled_by_id,
+  coalesce(metadata.name, '') AS name,
+  traversal_path,
+  partition_id,
+  {{version_column}} AS _version,
+  {{deleted_column}} AS _deleted
+FROM siphon_p_ci_pipelines
+LEFT JOIN (
+  SELECT
+    traversal_path AS metadata_traversal_path,
+    pipeline_id AS metadata_pipeline_id,
+    argMax(name, {{version_column}}) AS name,
+    argMax({{deleted_column}}, {{version_column}}) AS deleted
+  FROM siphon_ci_pipeline_metadata
+  WHERE startsWith(traversal_path, {traversal_path:String})
+  GROUP BY traversal_path, pipeline_id
+  HAVING deleted = false ) AS metadata
+  ON traversal_path = metadata.metadata_traversal_path
+  AND id = metadata.metadata_pipeline_id
+WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}
+ORDER BY traversal_path, id, partition_id
+LIMIT {{batch_size}}
