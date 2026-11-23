@@ -36,9 +36,7 @@ use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
 use crate::scenario::{self, Backend, Seed};
 use crate::visitor::{NodeExt, ResponseView};
-use crate::{
-    SeededColumnResolver, collect_subtest_results, derive_clickhouse_data_model, load_ontology,
-};
+use crate::{SeededColumnResolver, derive_clickhouse_data_model, load_ontology};
 
 pub use duckdb::run_duckdb_dir;
 pub(crate) use format::rejection_reason;
@@ -100,75 +98,32 @@ fn seed_preset(presets_dir: &Path, name: &str) -> Seed {
 }
 
 pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
-    let root = Path::new(root);
-    let presets: Arc<Path> = Arc::from(Path::new(presets));
-    let mut scenarios = engine::scenarios_for::<ClickhouseEngine>(root);
-    assert!(
-        !scenarios.is_empty(),
-        "no query scenario files found under {}",
-        root.display()
-    );
-
-    if let Ok(filter) = std::env::var("SCENARIO_FILTER") {
-        let filter = filter.trim();
-        if !filter.is_empty() {
-            scenarios.retain(|(name, _)| name.contains(filter));
-            assert!(
-                !scenarios.is_empty(),
-                "SCENARIO_FILTER='{filter}' matched no query scenarios under {}",
-                root.display()
-            );
+    engine::run_all::<ClickhouseEngine>(Path::new(root), Path::new(presets), |plans| {
+        let databases: Vec<_> = plans
+            .iter()
+            .map(|plan| Database::for_scenario(&plan.config, &plan.steps, &plan.name))
+            .collect();
+        ClickhouseEnv {
+            ctx: ctx.clone(),
+            datasets: Datasets::new(databases.iter()),
         }
-    }
-
-    scenario::assert_distinct_database_names(scenarios.iter().map(|(name, _)| name.clone()));
-
-    let concurrency: usize = std::env::var("SUBTEST_CONCURRENCY")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(8);
-    let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
-    let ctx = Arc::new(ctx.clone());
-    let scenarios: Vec<_> = scenarios
-        .into_iter()
-        .map(|(name, scenario)| {
-            let (config, steps) = scenario.into_steps(&name);
-            let database = Database::for_scenario(&config, &steps, &name);
-            (name, config, steps, database)
-        })
-        .collect();
-    let datasets = Arc::new(Datasets::new(
-        scenarios.iter().map(|(.., database)| database),
-    ));
-
-    let mut handles = Vec::new();
-    for (name, config, steps, database) in scenarios {
-        let semaphore = Arc::clone(&semaphore);
-        let ctx = Arc::clone(&ctx);
-        let presets = Arc::clone(&presets);
-        let datasets = Arc::clone(&datasets);
-        let task_name = name.clone();
-        let handle = tokio::task::spawn(async move {
-            let _permit = semaphore.acquire_owned().await.unwrap();
-            let started = std::time::Instant::now();
-            eprintln!("--- {task_name}");
-            let scenario = (config, steps, database);
-            run_scenario(&ctx, &datasets, scenario, &task_name, &presets).await;
-            eprintln!("    {task_name} {:.2?}", started.elapsed());
-        });
-        handles.push((name, handle));
-    }
-
-    collect_subtest_results(handles).await;
+    })
+    .await;
 }
 
-async fn run_scenario(
-    ctx: &TestContext,
-    datasets: &Datasets,
-    (config, steps, database): (ScenarioConfig, Vec<QueryStep>, Database),
-    name: &str,
-    presets: &Path,
-) {
+struct ClickhouseEnv {
+    ctx: TestContext,
+    datasets: Datasets,
+}
+
+async fn run_scenario(env: &ClickhouseEnv, plan: engine::Planned, presets: &Path) {
+    let engine::Planned {
+        name,
+        config,
+        steps,
+    } = plan;
+    let (ctx, datasets) = (&env.ctx, &env.datasets);
+    let database = Database::for_scenario(&config, &steps, &name);
     let outcome = AssertUnwindSafe(async {
         let ctx = match &database {
             Database::Base => ctx.clone(),
@@ -176,13 +131,13 @@ async fn run_scenario(
                 datasets
                     .acquire(
                         dataset,
-                        datasets::prepare(ctx, &config, dataset, presets, name),
+                        datasets::prepare(ctx, &config, dataset, presets, &name),
                     )
                     .await
             }
-            Database::Private(fork) => datasets::prepare(ctx, &config, fork, presets, name).await,
+            Database::Private(fork) => datasets::prepare(ctx, &config, fork, presets, &name).await,
         };
-        run_case(&ctx, &config, &steps, name, presets).await;
+        run_case(&ctx, &config, &steps, &name, presets).await;
     })
     .catch_unwind()
     .await;
@@ -244,6 +199,12 @@ struct ClickhouseEngine<'a> {
 
 impl engine::Engine for ClickhouseEngine<'_> {
     const BACKEND: Backend = Backend::ClickHouse;
+
+    type Env = ClickhouseEnv;
+
+    async fn run_scenario(env: &ClickhouseEnv, plan: engine::Planned, presets: &Path) {
+        run_scenario(env, plan, presets).await;
+    }
 
     async fn seed(&self, seed: &Seed, name: &str) {
         let columns = crate::scenario::seed::fetch_table_columns(self.ctx).await;

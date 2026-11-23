@@ -1,24 +1,107 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use query_engine::compiler::Frontend;
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::PipelineOutput;
 
-use super::format::{QueryExpect, QueryScenario, QueryStep};
+use super::format::{QueryExpect, QueryScenario, QueryStep, ScenarioConfig};
 use super::pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
 use super::{
     assert_compilation, assert_output, assert_pagination, assert_repeated_response, read_scenarios,
     repeat_count, step_label, validate_response,
 };
+use crate::collect_subtest_results;
 use crate::scenario::{self, Backend, Seed};
 
-pub(super) trait Engine {
+pub(super) struct Planned {
+    pub(super) name: String,
+    pub(super) config: ScenarioConfig,
+    pub(super) steps: Vec<QueryStep>,
+}
+
+pub(super) trait Engine: Sized {
     const BACKEND: Backend;
+
+    type Env: Send + Sync + 'static;
 
     async fn seed(&self, seed: &Seed, name: &str);
 
     async fn run(&self, query: &str, frontend: Frontend) -> Result<PipelineOutput, PipelineError>;
+
+    fn run_scenario(
+        env: &Self::Env,
+        plan: Planned,
+        presets: &Path,
+    ) -> impl Future<Output = ()> + Send;
+}
+
+pub(super) async fn run_all<E: Engine>(
+    root: &Path,
+    presets: &Path,
+    env: impl FnOnce(&[Planned]) -> E::Env,
+) -> E::Env {
+    let mut scenarios = scenarios_for::<E>(root);
+    assert!(
+        !scenarios.is_empty(),
+        "no {} query scenarios found under {}",
+        E::BACKEND,
+        root.display()
+    );
+
+    if let Ok(filter) = std::env::var("SCENARIO_FILTER") {
+        let filter = filter.trim();
+        if !filter.is_empty() {
+            scenarios.retain(|(name, _)| name.contains(filter));
+            assert!(
+                !scenarios.is_empty(),
+                "SCENARIO_FILTER='{filter}' matched no query scenarios under {}",
+                root.display()
+            );
+        }
+    }
+
+    scenario::assert_distinct_database_names(scenarios.iter().map(|(name, _)| name.clone()));
+
+    let concurrency: usize = std::env::var("SUBTEST_CONCURRENCY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8);
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
+    let plans: Vec<Planned> = scenarios
+        .into_iter()
+        .map(|(name, scenario)| {
+            let (config, steps) = scenario.into_steps(&name);
+            Planned {
+                name,
+                config,
+                steps,
+            }
+        })
+        .collect();
+    let env = Arc::new(env(&plans));
+    let presets: Arc<Path> = Arc::from(presets);
+
+    let mut handles = Vec::new();
+    for plan in plans {
+        let semaphore = Arc::clone(&semaphore);
+        let env = Arc::clone(&env);
+        let presets = Arc::clone(&presets);
+        let name = plan.name.clone();
+        let task_name = name.clone();
+        let handle = tokio::task::spawn(async move {
+            let _permit = semaphore.acquire_owned().await.unwrap();
+            let started = std::time::Instant::now();
+            eprintln!("--- {task_name}");
+            E::run_scenario(&env, plan, &presets).await;
+            eprintln!("    {task_name} {:.2?}", started.elapsed());
+        });
+        handles.push((name, handle));
+    }
+
+    collect_subtest_results(handles).await;
+    Arc::into_inner(env).expect("scenario tasks released the environment")
 }
 
 pub(super) fn scenarios_for<E: Engine>(root: &Path) -> Vec<(String, QueryScenario)> {

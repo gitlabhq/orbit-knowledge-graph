@@ -10,54 +10,32 @@ use query_engine::pipeline::{
 use query_engine::shared::{ExtractionStage, OutputStage, PipelineOutput};
 
 use super::coverage::Coverage;
-use super::engine::{Engine, run_steps, scenarios_for};
+use super::engine::{Engine, Planned, run_all, run_steps};
 use super::seed_preset;
 use super::stages::{LocalCompilationStage, LocalExecutionStage, LocalFinishStage};
 use crate::scenario::seed::{group_by_columns, values_insert};
 use crate::scenario::{Backend, Seed};
 
 pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) -> Coverage {
-    let root = Path::new(root);
-    let ontology = Arc::new(crate::load_unprefixed_ontology());
-    let base = seed_preset(Path::new(presets), seed);
-    let scenarios = scenarios_for::<DuckdbEngine>(root);
-    assert!(
-        !scenarios.is_empty(),
-        "no duckdb scenarios under {}",
-        root.display()
-    );
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let presets = Path::new(presets);
+    let env = DuckdbEnv {
+        ontology: Arc::new(crate::load_unprefixed_ontology()),
+        base: seed_preset(presets, seed),
+        coverage: Mutex::new(Coverage::default()),
+    };
+    tokio::runtime::Builder::new_current_thread()
         .build()
-        .expect("DuckDB scenario runtime");
-    let coverage = Mutex::new(Coverage::default());
-    for (name, scenario) in scenarios {
-        let ontology = scenario.config.ontology_overlay.as_deref().map_or_else(
-            || Arc::clone(&ontology),
-            |name| Arc::new(crate::load_ontology_overlay(name)),
-        );
-        let directory = tempfile::tempdir().expect("temporary DuckDB directory");
-        let database = DuckDbClient::open(&directory.path().join("scenario.duckdb"))
-            .unwrap_or_else(|e| panic!("{name}: open DuckDB: {e}"));
-        database
-            .initialize_schema(&generate_local_ddl(&ontology, ""))
-            .unwrap_or_else(|e| panic!("{name}: local DDL: {e}"));
-        let (config, steps) = scenario.into_steps(&name);
-        let preset = config
-            .seed
-            .as_ref()
-            .map(|preset| seed_preset(Path::new(presets), preset));
-        let engine = DuckdbEngine {
-            database: Mutex::new(database),
-            ontology,
-            coverage: &coverage,
-        };
-        runtime.block_on(async {
-            engine.seed(preset.as_ref().unwrap_or(&base), &name).await;
-            engine.seed(&config.extra_seed, &name).await;
-            run_steps(&engine, &steps, &name).await;
-        });
-    }
-    coverage.into_inner().unwrap()
+        .expect("DuckDB scenario runtime")
+        .block_on(run_all::<DuckdbEngine>(Path::new(root), presets, |_| env))
+        .coverage
+        .into_inner()
+        .unwrap()
+}
+
+struct DuckdbEnv {
+    ontology: Arc<ontology::Ontology>,
+    base: Seed,
+    coverage: Mutex<Coverage>,
 }
 
 struct DuckdbEngine<'a> {
@@ -68,6 +46,8 @@ struct DuckdbEngine<'a> {
 
 impl Engine for DuckdbEngine<'_> {
     const BACKEND: Backend = Backend::DuckDb;
+
+    type Env = DuckdbEnv;
 
     async fn seed(&self, seed: &Seed, name: &str) {
         seed_local(&self.database.lock().unwrap(), seed, name);
@@ -100,6 +80,38 @@ impl Engine for DuckdbEngine<'_> {
             .await?
             .finish()
             .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
+    }
+
+    async fn run_scenario(env: &DuckdbEnv, plan: Planned, presets: &Path) {
+        let Planned {
+            name,
+            config,
+            steps,
+        } = plan;
+        let ontology = config.ontology_overlay.as_deref().map_or_else(
+            || Arc::clone(&env.ontology),
+            |name| Arc::new(crate::load_ontology_overlay(name)),
+        );
+        let directory = tempfile::tempdir().expect("temporary DuckDB directory");
+        let database = DuckDbClient::open(&directory.path().join("scenario.duckdb"))
+            .unwrap_or_else(|e| panic!("{name}: open DuckDB: {e}"));
+        database
+            .initialize_schema(&generate_local_ddl(&ontology, ""))
+            .unwrap_or_else(|e| panic!("{name}: local DDL: {e}"));
+        let preset = config
+            .seed
+            .as_ref()
+            .map(|preset| seed_preset(presets, preset));
+        let engine = DuckdbEngine {
+            database: Mutex::new(database),
+            ontology,
+            coverage: &env.coverage,
+        };
+        engine
+            .seed(preset.as_ref().unwrap_or(&env.base), &name)
+            .await;
+        engine.seed(&config.extra_seed, &name).await;
+        run_steps(&engine, &steps, &name).await;
     }
 }
 
