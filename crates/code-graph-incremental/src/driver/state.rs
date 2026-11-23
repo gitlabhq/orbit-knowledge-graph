@@ -36,23 +36,23 @@ pub struct State {
 impl State {
     /// The project tree after the project phase, with each file's tags and
     /// those of the directories above it, and every tag key the phase sets.
-    fn project_tree(&self, env: &Engine) -> (Tree, Vec<(String, Vec<Tag>)>, Vec<u32>) {
+    fn project_tree(&self, engine: &Engine) -> (Tree, Vec<(String, Vec<Tag>)>, Vec<u32>) {
         let paths: Vec<_> = self
             .trees
             .iter()
             .map(|tree| tree.label.as_str())
             .chain(self.configs.iter().map(|file| file.path.as_str()))
             .collect();
-        let mut tree = env.project.build(&paths, &self.configs, &env.lang);
-        let phase = env.pipeline.phase_over("project");
+        let mut tree = engine.project.build(&paths, &self.configs, &engine.lang);
+        let phase = engine.pipeline.phase_over("project");
         let run = crate::sentinel::Sentinel::disabled();
         for rules in 0..phase.rule_sets() {
-            let _ = crate::engine::run_tree(phase, &mut tree, 0, Some(rules), env, None, &run);
+            let _ = crate::engine::run_tree(phase, &mut tree, 0, Some(rules), engine, None, &run);
         }
         let keys = (0..phase.rule_sets())
             .flat_map(|r| phase.tag_keys(r))
             .collect();
-        let tags = file_tags(&tree, &env.lang);
+        let tags = file_tags(&tree, &engine.lang);
         (tree, tags, keys)
     }
 
@@ -96,14 +96,14 @@ impl State {
     }
 
     /// The project tree after the project phase, Compact, for family phases.
-    pub(crate) fn project_compact(&self, env: &Engine) -> Tree<Compact> {
-        self.project_tree(env).0.compact_and_remap()
+    pub(crate) fn project_compact(&self, engine: &Engine) -> Tree<Compact> {
+        self.project_tree(engine).0.compact_and_remap()
     }
 
     /// Sets on each tree the tags the project phase put on its file and the
     /// directories above it.
-    pub(crate) fn project(&mut self, env: &Engine) {
-        let (_, file_tags, tag_keys) = self.project_tree(env);
+    pub(crate) fn project(&mut self, engine: &Engine) {
+        let (_, file_tags, tag_keys) = self.project_tree(engine);
         let by_path: FxHashMap<&str, usize> = self
             .trees
             .iter()
@@ -417,8 +417,8 @@ impl State {
     /// [`FILES_PER_BLOCK`] files, grouped by a hash of their path. A block is
     /// named by the hash of its content, so a save writes only the blocks
     /// whose files changed and removes the ones nothing refers to any more.
-    pub fn save(&self, env: &Engine, path: &Path) -> io::Result<()> {
-        self.write(env, path, path, None)?;
+    pub fn save(&self, engine: &Engine, path: &Path) -> io::Result<()> {
+        self.write(engine, path, path, None)?;
         remove_unreferenced_blocks(path)
     }
 
@@ -430,12 +430,12 @@ impl State {
     /// its file without being serialised.
     pub fn stage(
         &self,
-        env: &Engine,
+        engine: &Engine,
         path: &Path,
         staged: &Path,
         touched: Option<&FxHashSet<u32>>,
     ) -> io::Result<()> {
-        self.write(env, path, staged, touched)
+        self.write(engine, path, staged, touched)
     }
 
     /// Puts the index staged for `path` in place and removes the blocks the
@@ -447,7 +447,7 @@ impl State {
 
     fn write(
         &self,
-        env: &Engine,
+        engine: &Engine,
         path: &Path,
         index_path: &Path,
         touched: Option<&FxHashSet<u32>>,
@@ -478,7 +478,7 @@ impl State {
             blocks,
         };
         let shared = Shared {
-            lang: LangSnapshot::from(&env.lang),
+            lang: LangSnapshot::from(&engine.lang),
             configs: self
                 .configs
                 .iter()
@@ -598,7 +598,7 @@ impl State {
     pub fn load(path: &Path, lang_id: SupportLang) -> io::Result<(Engine, Self)> {
         let (mut input, index) = open_index(path)?;
         let shared: Shared = read_frame(&mut input, &mut rkyv::util::AlignedVec::new())?;
-        let env = Engine::family(lang_id)
+        let engine = Engine::family(lang_id)
             .lang(Lang::from(shared.lang))
             .limits(Limits::UNLIMITED)
             .build()
@@ -669,7 +669,7 @@ impl State {
             edges,
             configs: shared.configs.into_iter().map(Into::into).collect(),
         };
-        Ok((env, state))
+        Ok((engine, state))
     }
 }
 

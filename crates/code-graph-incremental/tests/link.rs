@@ -25,8 +25,8 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
     }
 }
 
-fn link_repo(env: &Engine, root: &Path) -> State {
-    driver::index(env, &common::walk(root), &Sentinel::disabled())
+fn link_repo(engine: &Engine, root: &Path) -> State {
+    driver::index(engine, &common::walk(root), &Sentinel::disabled())
         .unwrap()
         .0
 }
@@ -38,15 +38,15 @@ fn python_env(limits: Limits) -> Engine {
         .unwrap()
 }
 
-fn label(env: &Engine, node: Cursor) -> String {
+fn label(engine: &Engine, node: Cursor) -> String {
     let sym = node
-        .child_sym_of_kind(env.lang.lookup_kind("__defname"))
+        .child_sym_of_kind(engine.lang.lookup_kind("__defname"))
         .or(node.sym_opt())
         .unwrap_or(0);
-    env.lang.syms.resolve(sym).to_string()
+    engine.lang.syms.resolve(sym).to_string()
 }
 
-fn edges(env: &Engine, state: &State, kind: EdgeKind) -> Vec<(String, String)> {
+fn edges(engine: &Engine, state: &State, kind: EdgeKind) -> Vec<(String, String)> {
     let mut found: Vec<_> = state
         .edges
         .iter()
@@ -54,8 +54,8 @@ fn edges(env: &Engine, state: &State, kind: EdgeKind) -> Vec<(String, String)> {
         .map(|e| {
             let tree = &state.trees[e.from_fi()];
             (
-                label(env, tree.cursor(e.from_node)),
-                label(env, state.trees[e.to_fi()].cursor(e.to_node)),
+                label(engine, tree.cursor(e.from_node)),
+                label(engine, state.trees[e.to_fi()].cursor(e.to_node)),
             )
         })
         .collect();
@@ -71,22 +71,22 @@ fn pair(a: &str, b: &str) -> (String, String) {
 fn linking_a_file_yields_its_local_edges() {
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
-    let env = python_env(Limits::UNLIMITED);
+    let engine = python_env(Limits::UNLIMITED);
 
-    let state = link_repo(&env, repo.path());
+    let state = link_repo(&engine, repo.path());
 
     assert!(state.edges.iter().all(|e| e.from_fi() == e.to_fi()));
     assert_eq!(
-        edges(&env, &state, env.lang.edge_kind("defines").unwrap()),
+        edges(&engine, &state, engine.lang.edge_kind("defines").unwrap()),
         [pair("Greeter", "greet")]
     );
     assert_eq!(
-        edges(&env, &state, env.lang.edge_kind("calls").unwrap()),
+        edges(&engine, &state, engine.lang.edge_kind("calls").unwrap()),
         [pair("run", "Greeter"), pair("run", "greet")],
         "g = Greeter(); g.greet() resolves through the local type"
     );
     assert_eq!(
-        edges(&env, &state, env.lang.edge_kind("imports").unwrap()),
+        edges(&engine, &state, engine.lang.edge_kind("imports").unwrap()),
         [pair("greet", "helper"), pair("run", "os")],
         "each use of an imported name points at the import"
     );
@@ -103,16 +103,18 @@ fn every_file_gets_a_tree_and_unparsed_ones_carry_their_reason() {
             ("logo.png", b"\x89PNG\x00\x00"),
         ],
     );
-    let env = python_env(Limits::UNLIMITED);
+    let engine = python_env(Limits::UNLIMITED);
 
-    let state = link_repo(&env, repo.path());
+    let state = link_repo(&engine, repo.path());
 
-    let reason_key = env.lang.syms.lookup("reason");
+    let reason_key = engine.lang.syms.lookup("reason");
     let mut rows: Vec<(String, usize, Option<&str>)> = state
         .trees
         .iter()
         .map(|t| {
-            let reason = t.get_tag(0, reason_key).map(|v| env.lang.syms.resolve(v));
+            let reason = t
+                .get_tag(0, reason_key)
+                .map(|v| engine.lang.syms.resolve(v));
             (t.label.clone(), t.root().descendants().count(), reason)
         })
         .collect();
@@ -131,14 +133,14 @@ fn every_file_gets_a_tree_and_unparsed_ones_carry_their_reason() {
 fn a_killed_file_keeps_a_row_tagged_with_the_timeout() {
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
-    let env = python_env(Limits {
+    let engine = python_env(Limits {
         file_rewrite_ms: 0,
         ..Limits::UNLIMITED
     });
 
-    let state = link_repo(&env, repo.path());
+    let state = link_repo(&engine, repo.path());
 
-    let reason_key = env.lang.syms.lookup("reason");
+    let reason_key = engine.lang.syms.lookup("reason");
     let tree = &state.trees[0];
     assert_eq!(tree.label, "main.py");
     assert_eq!(tree.root().descendants().count(), 0);
@@ -149,7 +151,7 @@ fn a_killed_file_keeps_a_row_tagged_with_the_timeout() {
     );
     assert_eq!(
         tree.get_tag(0, reason_key)
-            .map(|v| env.lang.syms.resolve(v)),
+            .map(|v| engine.lang.syms.resolve(v)),
         Some("skip_timeout_walk")
     );
     assert!(state.edges.is_empty());
@@ -169,7 +171,7 @@ fn link_one(
     std::thread::Builder::new()
         .stack_size(driver::WORKER_STACK_BYTES)
         .spawn(move || {
-            let env = Engine::family(language)
+            let engine = Engine::family(language)
                 .limits(Limits {
                     file_link_ms,
                     ..Limits::UNLIMITED
@@ -179,7 +181,7 @@ fn link_one(
             let repo = tempfile::tempdir().unwrap();
             write_all(repo.path(), &[(&path, source.as_bytes())]);
             let (_, report) =
-                driver::index(&env, &common::walk(repo.path()), &Sentinel::disabled()).unwrap();
+                driver::index(&engine, &common::walk(repo.path()), &Sentinel::disabled()).unwrap();
             match report.skipped.first() {
                 None => Ok(()),
                 Some(killed) => Err(killed.to_string()),

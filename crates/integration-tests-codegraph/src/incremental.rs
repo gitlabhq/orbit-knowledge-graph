@@ -116,7 +116,7 @@ fn index_and_check(yaml: &str) {
         .collect();
     let lang_id = detect_lang(&suite, &paths);
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
-    let env = Engine::family(lang_id)
+    let engine = Engine::family(lang_id)
         .limits(suite_limits(&suite))
         .build()
         .expect("rules compile");
@@ -130,24 +130,25 @@ fn index_and_check(yaml: &str) {
         )
         .expect("load fixtures"),
     );
-    let run = || Sentinel::new("run", "", env.limits.total_ms);
-    let graph = driver::index(&env, &repository, &run()).expect("suite exceeded the total budget");
+    let run = || Sentinel::new("run", "", engine.limits.total_ms);
+    let graph =
+        driver::index(&engine, &repository, &run()).expect("suite exceeded the total budget");
     let (mut state, mut failures) = check(
-        &env,
+        &engine,
         graph,
         &ontology,
         &suite.tests,
         &suite.skipped,
         &suite.limited,
     );
-    let mut env = env;
+    let mut engine = engine;
 
     for step in &suite.steps {
         if step.snapshot {
             let snapshot = tempfile::tempdir().expect("snapshot directory");
             let snapshot = snapshot.path().join("graph.bin");
-            state.save(&env, &snapshot).expect("save snapshot");
-            (env, state) = State::load(&snapshot, lang_id).expect("load snapshot");
+            state.save(&engine, &snapshot).expect("save snapshot");
+            (engine, state) = State::load(&snapshot, lang_id).expect("load snapshot");
         }
         for removed in &step.remove {
             std::fs::remove_file(repo.path().join(removed)).ok();
@@ -167,10 +168,10 @@ fn index_and_check(yaml: &str) {
             )
             .expect("load changed fixtures"),
         );
-        let run = Sentinel::new("run", "", env.limits.total_ms);
-        let graph = driver::reindex(&env, &changes, state, &step.remove, &run)
+        let run = Sentinel::new("run", "", engine.limits.total_ms);
+        let graph = driver::reindex(&engine, &changes, state, &step.remove, &run)
             .expect("suite exceeded the total budget");
-        let (next, step_failures) = check(&env, graph, &ontology, &step.tests, &[], &[]);
+        let (next, step_failures) = check(&engine, graph, &ontology, &step.tests, &[], &[]);
         state = next;
         failures.extend(step_failures);
     }
@@ -180,7 +181,7 @@ fn index_and_check(yaml: &str) {
 /// Exports the graph into a fresh DuckDB and runs `tests` against it; the
 /// graph comes back for the next step.
 fn check(
-    env: &Engine,
+    engine: &Engine,
     (mut state, report): (State, Report),
     ontology: &Arc<Ontology>,
     tests: &[TestCase],
@@ -195,9 +196,9 @@ fn check(
         ("commit_sha", Scalar::Str("test")),
     ]);
     let db = create_test_db().expect("in-memory DuckDB");
-    let plan = Tables::load(env, ontology, &Default::default()).expect("export rules");
+    let plan = Tables::load(engine, ontology, &Default::default()).expect("export rules");
     let tables = tables::export(
-        env,
+        engine,
         &mut state,
         &plan,
         &envelope,

@@ -294,7 +294,7 @@ impl Tables {
     /// The ontology's tables, with `config`'s column specs in place of the
     /// ontology's where it gives them.
     pub fn load(
-        env: &Engine,
+        engine: &Engine,
         ontology: &Ontology,
         config: &ExportConfig,
     ) -> Result<Self, LoadError> {
@@ -343,7 +343,7 @@ impl Tables {
                 table.specs = schema.clone();
             }
         }
-        let phase = env.pipeline.phase_over("graph");
+        let phase = engine.pipeline.phase_over("graph");
         let index = |name: &str| {
             tables
                 .iter()
@@ -383,7 +383,7 @@ impl Tables {
                 }
             }
         }
-        let id_prefix: Vec<String> = match env.pipeline.setting(0, "id_prefix") {
+        let id_prefix: Vec<String> = match engine.pipeline.setting(0, "id_prefix") {
             Some(DataSpec::List(items)) => items
                 .iter()
                 .filter_map(|i| match i {
@@ -410,7 +410,7 @@ impl Tables {
 
 /// One `(table, batch)` per table, the edge table last.
 pub fn export(
-    env: &Engine,
+    engine: &Engine,
     state: &mut State,
     tables: &Tables,
     envelope: &Envelope,
@@ -419,16 +419,24 @@ pub fn export(
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
     envelope.check(tables)?;
     run.check()?;
-    let phase = env.pipeline.phase_over("graph");
+    let phase = engine.pipeline.phase_over("graph");
     let project = state.trees.len() as u32;
-    state.trees.push(state.project_compact(env));
+    state.trees.push(state.project_compact(engine));
     let graph = crate::engine::Graph::new(&state.edges);
     let walk = state.trees.len();
-    let rows = crate::engine::run_trees(phase, &state.trees, walk, Some(project), &graph, env, run)
-        .map(|(_, mut outputs)| outputs.take::<Rows>());
+    let rows = crate::engine::run_trees(
+        phase,
+        &state.trees,
+        walk,
+        Some(project),
+        &graph,
+        engine,
+        run,
+    )
+    .map(|(_, mut outputs)| outputs.take::<Rows>());
     let written = rows.map_err(Error::from).and_then(|rows| {
         Sink {
-            env,
+            engine,
             trees: &state.trees,
             phase,
             tables,
@@ -446,12 +454,12 @@ pub fn export_directories(
     ontology: &Ontology,
     envelope: &Envelope,
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
-    let env = Engine::family(crate::language::SupportLang::Markdown).build()?;
-    let tables = Tables::load(&env, ontology, &ExportConfig::default())?;
-    let mut state = State::new(&env);
+    let engine = Engine::family(crate::language::SupportLang::Markdown).build()?;
+    let tables = Tables::load(&engine, ontology, &ExportConfig::default())?;
+    let mut state = State::new(&engine);
     state.trees = paths
         .iter()
-        .map(|path| Tree::unparsed(&env.lang, path, 0, "").into())
+        .map(|path| Tree::unparsed(&engine.lang, path, 0, "").into())
         .collect();
     let none = FxHashSet::default();
     let scope = Scope {
@@ -460,7 +468,7 @@ pub fn export_directories(
         only: Some(&none),
     };
     export(
-        &env,
+        &engine,
         &mut state,
         &tables,
         envelope,
@@ -470,7 +478,7 @@ pub fn export_directories(
 }
 
 struct Sink<'a> {
-    env: &'a Engine,
+    engine: &'a Engine,
     trees: &'a [Tree<Compact>],
     phase: &'a Phase,
     tables: &'a Tables,
@@ -482,7 +490,7 @@ type Ids = FxHashMap<Loc, (i64, usize, bool)>;
 
 impl Sink<'_> {
     fn text(&self, value: Option<Val>) -> Cow<'_, str> {
-        let lang = &self.env.lang;
+        let lang = &self.engine.lang;
         Cow::Borrowed(match value {
             Some(Val::Sym(s)) => lang.syms.resolve(s),
             Some(Val::Node(l) | Val::Type(l)) => lang

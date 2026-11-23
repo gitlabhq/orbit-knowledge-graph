@@ -97,15 +97,18 @@ pub fn for_language(language: SupportLang) -> Box<dyn Frontend> {
 /// Parses a file with the first mounted frontend that accepts it, or the
 /// engine's first, under the parse budget.
 pub fn parse(
-    env: &Engine,
+    engine: &Engine,
     path: &str,
     source: &str,
     run: &Sentinel,
 ) -> Result<(Tree, Option<Killed>), Killed> {
-    let frontend = &env.frontend_for(path).unwrap_or(&env.frontends[0]).frontend;
+    let frontend = &engine
+        .frontend_for(path)
+        .unwrap_or(&engine.frontends[0])
+        .frontend;
     let budget = run
-        .child(PARSE, path, env.limits.file_parse_ms)
+        .child(PARSE, path, engine.limits.file_parse_ms)
         .on_thread_cpu();
     budget.check()?;
-    frontend.parse(source, path, &env.lang, &env.limits, &budget)
+    frontend.parse(source, path, &engine.lang, &engine.limits, &budget)
 }

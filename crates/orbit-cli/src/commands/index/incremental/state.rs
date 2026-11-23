@@ -54,12 +54,12 @@ impl Project<'_> {
                     return Err(tui::cancelled("Indexing cancelled."));
                 }
                 let read_at = std::time::SystemTime::now();
-                let mut env = Engine::family(family).build()?;
-                env.limits.total_ms = self.budget_ms;
-                let (mut state, report) = self.indexing(&env, paths)?.index(&env)?;
+                let mut engine = Engine::family(family).build()?;
+                engine.limits.total_ms = self.budget_ms;
+                let (mut state, report) = self.indexing(&engine, paths)?.index(&engine)?;
                 let snapshot = self.snapshot_path(family);
-                staged.push(stage(family, &env, &state, &snapshot, None, read_at)?);
-                outputs.push(exporter.write(family, &env, &mut state, &report, self.stats)?);
+                staged.push(stage(family, &engine, &state, &snapshot, None, read_at)?);
+                outputs.push(exporter.write(family, &engine, &mut state, &report, self.stats)?);
             }
             Ok(outputs)
         });
@@ -92,7 +92,7 @@ impl Project<'_> {
             families: &families,
             saved_files: &saved_files,
             stats: self.stats,
-            indexing: &|env, paths| self.indexing(env, paths),
+            indexing: &|engine, paths| self.indexing(engine, paths),
         };
         let work = reader.work(changes.changed, changes.removed)?;
         let mut names: Vec<&'static str> = families
@@ -201,12 +201,12 @@ impl Project<'_> {
             })
     }
 
-    fn indexing(&self, env: &Engine, paths: Vec<String>) -> Result<Indexing> {
+    fn indexing(&self, engine: &Engine, paths: Vec<String>) -> Result<Indexing> {
         let files = paths.len();
         let cancel = self.cancel.clone();
         Ok(Indexing {
             repository: input::paths(&self.git.repo_path, paths)?,
-            run: Sentinel::new("run", "", env.limits.total_ms)
+            run: Sentinel::new("run", "", engine.limits.total_ms)
                 .with_cancellation(Arc::new(move || cancel.load(Ordering::Relaxed))),
             bars: self.progress.map(|bars| bars.family(files)),
         })
@@ -312,7 +312,7 @@ fn pending_file(snapshot: &std::path::Path) -> PathBuf {
 /// it every block is written.
 fn stage(
     family: SupportLang,
-    env: &Engine,
+    engine: &Engine,
     state: &State,
     snapshot: &std::path::Path,
     touched: Option<&FxHashSet<u32>>,
@@ -320,7 +320,7 @@ fn stage(
 ) -> Result<Refreshed> {
     let pending = pending_file(snapshot);
     let staged = state
-        .stage(env, snapshot, &pending, touched)
+        .stage(engine, snapshot, &pending, touched)
         .map_err(anyhow::Error::from)
         .and_then(|()| set_read_time(&pending, read_at));
     if let Err(error) = staged {
@@ -406,14 +406,14 @@ pub(super) struct Indexing {
 }
 
 impl Indexing {
-    fn index(self, env: &Engine) -> Result<(State, Report)> {
-        let indexed = driver::index(env, &self.repository, &self.run)?;
+    fn index(self, engine: &Engine) -> Result<(State, Report)> {
+        let indexed = driver::index(engine, &self.repository, &self.run)?;
         self.bars.inspect(FamilyBars::done);
         Ok(indexed)
     }
 
-    fn reindex(self, env: &Engine, state: State, removed: &[String]) -> Result<(State, Report)> {
-        let indexed = driver::reindex(env, &self.repository, state, removed, &self.run)?;
+    fn reindex(self, engine: &Engine, state: State, removed: &[String]) -> Result<(State, Report)> {
+        let indexed = driver::reindex(engine, &self.repository, state, removed, &self.run)?;
         self.bars.inspect(FamilyBars::done);
         Ok(indexed)
     }
@@ -511,26 +511,28 @@ impl Reader<'_> {
         read_at: std::time::SystemTime,
     ) -> Result<(Refreshed, Vec<String>, bool)> {
         let snapshot = snapshot_file(self.state_dir, family);
-        let (mut env, state) = match self.families.contains(&family) {
+        let (mut engine, state) = match self.families.contains(&family) {
             true => State::load(&snapshot, family)
                 .with_context(|| format!("failed to load {}", snapshot.display()))?,
             false => {
-                let env = Engine::family(family).build()?;
-                let state = State::new(&env);
-                (env, state)
+                let engine = Engine::family(family).build()?;
+                let state = State::new(&engine);
+                (engine, state)
             }
         };
-        env.limits.total_ms = budget_ms;
+        engine.limits.total_ms = budget_ms;
         let before = state.trees.len();
         let known: FxHashSet<&str> = state.trees.iter().map(|tree| tree.label.as_str()).collect();
         let added = paths.iter().any(|path| !known.contains(path.as_str()));
         drop(known);
-        let (mut state, report) = (self.indexing)(&env, paths)?.reindex(&env, state, &removed)?;
+        let (mut state, report) =
+            (self.indexing)(&engine, paths)?.reindex(&engine, state, &removed)?;
         let labels: Vec<String> = state.trees.iter().map(|tree| tree.label.clone()).collect();
         // Every phase after the per-file ones runs on every tree, so any file's rows can change.
         let files: FxHashSet<String> = labels.iter().cloned().chain(removed).collect();
-        let replacement = output::replacement(self.git, self.ontology, &env, &mut state, &files)?;
-        let mut staged = stage(family, &env, &state, &snapshot, None, read_at)?;
+        let replacement =
+            output::replacement(self.git, self.ontology, &engine, &mut state, &files)?;
+        let mut staged = stage(family, &engine, &state, &snapshot, None, read_at)?;
         staged.replacement = Some(replacement);
         staged.output = output::family_output(family, state.trees.len(), &report, self.stats);
         Ok((staged, labels, added || state.trees.len() != before))

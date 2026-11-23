@@ -486,10 +486,10 @@ pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>
         families: &families,
         saved_files: &saved_files,
         stats: false,
-        indexing: &|env, paths| {
+        indexing: &|engine, paths| {
             Ok(state::Indexing {
                 repository: input::paths(&git.repo_path, paths)?,
-                run: code_graph_incremental::Sentinel::new("run", "", env.limits.total_ms),
+                run: code_graph_incremental::Sentinel::new("run", "", engine.limits.total_ms),
                 bars: None,
             })
         },

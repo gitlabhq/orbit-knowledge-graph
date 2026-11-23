@@ -26,16 +26,16 @@ pub fn run_tree<S: Store>(
     tree: &mut Tree<S>,
     fi: u32,
     rules: Option<usize>,
-    env: &Engine,
+    engine: &Engine,
     graph: Option<&Graph>,
     budget: &Sentinel,
 ) -> Result<(Vec<Edge>, Outputs), Killed> {
-    let file = tree_budget(phase, env, &tree.label);
-    let rules = rules.unwrap_or_else(|| env.rules_index(&tree.label));
+    let file = tree_budget(phase, engine, &tree.label);
+    let rules = rules.unwrap_or_else(|| engine.rules_index(&tree.label));
     let on = On {
         phase,
         rules,
-        env,
+        engine,
         graph,
         fi,
         budget,
@@ -63,7 +63,7 @@ pub fn run_family(
     phase: &Phase,
     trees: &[Tree<Compact>],
     base: &[Edge],
-    env: &Engine,
+    engine: &Engine,
     budget: &Sentinel,
 ) -> Result<(Vec<Edge>, Option<Killed>), Killed> {
     let project = trees.len() as u32 - 1;
@@ -77,7 +77,7 @@ pub fn run_family(
             project as usize,
             Some(project),
             &graph,
-            env,
+            engine,
             budget,
         ) {
             Ok((edges, _)) => edges,
@@ -119,18 +119,18 @@ pub fn run_trees(
     walk: usize,
     project: Option<u32>,
     graph: &Graph,
-    env: &Engine,
+    engine: &Engine,
     budget: &Sentinel,
 ) -> Result<(Vec<Edge>, Outputs), Killed> {
-    let scope = scope_budget(phase, env, budget);
+    let scope = scope_budget(phase, engine, budget);
     let files = project.unwrap_or(trees.len() as u32);
-    let indexed = Indexed::new(phase, trees, files as usize, env, &scope);
+    let indexed = Indexed::new(phase, trees, files as usize, engine, &scope);
     let found: Vec<Result<(Vec<Edge>, Outputs), Killed>> = (0..walk)
         .into_par_iter()
         .map(|fi| {
-            let file = tree_budget(phase, env, &trees[fi].label);
-            let rules = env.rules_index(&trees[fi].label);
-            let mut run = Run::new(trees, fi as u32, rules, env, phase, &scope, &file);
+            let file = tree_budget(phase, engine, &trees[fi].label);
+            let rules = engine.rules_index(&trees[fi].label);
+            let mut run = Run::new(trees, fi as u32, rules, engine, phase, &scope, &file);
             run.graph = Some(graph);
             run.graph_fi = fi as u32;
             run.indexed = Some(&indexed);
@@ -156,7 +156,7 @@ pub fn run_trees(
 struct On<'a> {
     phase: &'a Phase,
     rules: usize,
-    env: &'a Engine,
+    engine: &'a Engine,
     graph: Option<&'a Graph>,
     fi: u32,
     budget: &'a Sentinel,
@@ -179,12 +179,12 @@ impl On<'_> {
         while at < nodes.len() {
             let writes = {
                 let trees = std::slice::from_ref(&*tree);
-                let indexed = Indexed::new(self.phase, trees, 1, self.env, self.budget);
+                let indexed = Indexed::new(self.phase, trees, 1, self.engine, self.budget);
                 let mut run = Run::new(
                     trees,
                     0,
                     self.rules,
-                    self.env,
+                    self.engine,
                     self.phase,
                     self.budget,
                     self.file,
@@ -200,7 +200,7 @@ impl On<'_> {
                 outputs.merge(out);
                 writes
             };
-            replaced |= commit(tree, pass, &self.env.lang, writes);
+            replaced |= commit(tree, pass, &self.engine.lang, writes);
         }
         Ok(replaced)
     }
@@ -418,23 +418,23 @@ pub(super) fn piece<'t, S: Store>(
 
 /// The phase's per-tree budget, on thread CPU time; unbounded when the phase
 /// declares none.
-fn tree_budget(phase: &Phase, env: &Engine, label: &str) -> Sentinel {
+fn tree_budget(phase: &Phase, engine: &Engine, label: &str) -> Sentinel {
     let ms = phase
         .budget
         .tree
         .as_deref()
-        .and_then(|name| env.limits.ms(name))
+        .and_then(|name| engine.limits.ms(name))
         .unwrap_or(u64::MAX);
     Sentinel::new(phase.label, label, ms).on_thread_cpu()
 }
 
 /// A phase's per-scope budget, a child of `run`.
-pub fn scope_budget(phase: &Phase, env: &Engine, run: &Sentinel) -> Sentinel {
+pub fn scope_budget(phase: &Phase, engine: &Engine, run: &Sentinel) -> Sentinel {
     let ms = phase
         .budget
         .scope
         .as_deref()
-        .and_then(|name| env.limits.ms(name))
+        .and_then(|name| engine.limits.ms(name))
         .unwrap_or(u64::MAX);
     run.child(phase.label, "", ms)
 }

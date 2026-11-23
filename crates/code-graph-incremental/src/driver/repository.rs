@@ -71,8 +71,8 @@ pub fn repository<E: std::fmt::Display>(
     if families.is_empty() {
         on_worker_pool("none", 1, || {
             (options.phase_started)("none", "export", repository.usage().files);
-            let env = Engine::family(SupportLang::Markdown).build()?;
-            let mut state = super::State::new(&env);
+            let engine = Engine::family(SupportLang::Markdown).build()?;
+            let mut state = super::State::new(&engine);
             state.trees = repository
                 .files()
                 .map(|file| {
@@ -80,13 +80,14 @@ pub fn repository<E: std::fmt::Display>(
                         orbit_utils::vfs::Decision::List(reason) => format!("skip_{reason}"),
                         _ => String::new(),
                     };
-                    crate::tree::Tree::unparsed(&env.lang, &file.path, file.size, &reason).into()
+                    crate::tree::Tree::unparsed(&engine.lang, &file.path, file.size, &reason).into()
                 })
                 .collect();
-            let mut tables = crate::backend::tables::Tables::load(&env, ontology, export_config)?;
+            let mut tables =
+                crate::backend::tables::Tables::load(&engine, ontology, export_config)?;
             tables.batch_bytes = options.batch_bytes;
             emit(crate::backend::tables::export(
-                &env,
+                &engine,
                 &mut state,
                 &tables,
                 envelope,
@@ -131,13 +132,14 @@ pub fn repository<E: std::fmt::Display>(
                     let outcome = run.check().map_err(Error::from).and_then(|()| {
                         on_worker_pool(family, family_threads, || {
                             let (report, batches) = {
-                                let env = Engine::family(language).limits(limits).build()?;
+                                let engine = Engine::family(language).limits(limits).build()?;
                                 phase_started(family, "index", file_count);
-                                let (mut graph, mut report) = super::index(&env, repository, run)?;
+                                let (mut graph, mut report) =
+                                    super::index(&engine, repository, run)?;
                                 report.unread_files.retain(|path| owns(family, path));
                                 run.check()?;
                                 let mut tables = crate::backend::tables::Tables::load(
-                                    &env,
+                                    &engine,
                                     ontology,
                                     export_config,
                                 )?;
@@ -149,7 +151,7 @@ pub fn repository<E: std::fmt::Display>(
                                     only: None,
                                 };
                                 let batches = crate::backend::tables::export(
-                                    &env, &mut graph, &tables, envelope, &scope, run,
+                                    &engine, &mut graph, &tables, envelope, &scope, run,
                                 )?;
                                 (report, batches)
                             };

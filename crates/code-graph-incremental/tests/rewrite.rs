@@ -20,8 +20,9 @@ def run():
     g.greet(os.getcwd())
 ";
 
-fn rewrite_repo(env: &Engine, root: &Path) -> (Vec<Tree>, Vec<Killed>) {
-    let (state, report) = driver::index(env, &common::walk(root), &Sentinel::disabled()).unwrap();
+fn rewrite_repo(engine: &Engine, root: &Path) -> (Vec<Tree>, Vec<Killed>) {
+    let (state, report) =
+        driver::index(engine, &common::walk(root), &Sentinel::disabled()).unwrap();
     (state.trees, report.skipped)
 }
 
@@ -32,25 +33,25 @@ fn python_env(limits: Limits) -> Engine {
         .unwrap()
 }
 
-fn nodes<'a>(env: &Engine, tree: &'a Tree, kind: &str) -> impl Iterator<Item = Cursor<'a>> {
-    let kind = env.lang.lookup_kind(kind);
+fn nodes<'a>(engine: &Engine, tree: &'a Tree, kind: &str) -> impl Iterator<Item = Cursor<'a>> {
+    let kind = engine.lang.lookup_kind(kind);
     tree.root().descendants().filter(move |c| c.is(kind))
 }
 
-fn name_of(env: &Engine, node: Cursor) -> String {
+fn name_of(engine: &Engine, node: Cursor) -> String {
     let sym = node
-        .child_sym_of_kind(env.lang.lookup_kind("__name"))
+        .child_sym_of_kind(engine.lang.lookup_kind("__name"))
         .unwrap_or(0);
-    env.lang.syms.resolve(sym).to_string()
+    engine.lang.syms.resolve(sym).to_string()
 }
 
 #[test]
 fn a_python_file_rewrites_into_only_canonical_nodes() {
     let repo = tempfile::tempdir().unwrap();
     std::fs::write(repo.path().join("main.py"), MAIN).unwrap();
-    let env = python_env(Limits::UNLIMITED);
+    let engine = python_env(Limits::UNLIMITED);
 
-    let (items, skipped) = rewrite_repo(&env, repo.path());
+    let (items, skipped) = rewrite_repo(&engine, repo.path());
 
     assert!(skipped.is_empty());
     let tree = &items[0];
@@ -62,8 +63,8 @@ fn a_python_file_rewrites_into_only_canonical_nodes() {
     let foreign: Vec<_> = tree
         .root()
         .descendants()
-        .filter(|c| !env.lang.in_vocabulary(c.kind()))
-        .map(|c| env.lang.kinds.resolve(c.kind() as u32).to_string())
+        .filter(|c| !engine.lang.in_vocabulary(c.kind()))
+        .map(|c| engine.lang.kinds.resolve(c.kind() as u32).to_string())
         .collect();
     assert!(foreign.is_empty(), "language nodes survived: {foreign:?}");
 }
@@ -72,23 +73,23 @@ fn a_python_file_rewrites_into_only_canonical_nodes() {
 fn definitions_carry_their_type_and_name() {
     let repo = tempfile::tempdir().unwrap();
     std::fs::write(repo.path().join("main.py"), MAIN).unwrap();
-    let env = python_env(Limits::UNLIMITED);
+    let engine = python_env(Limits::UNLIMITED);
 
-    let (items, _) = rewrite_repo(&env, repo.path());
+    let (items, _) = rewrite_repo(&engine, repo.path());
 
     let tree = &items[0];
     let def_types = ["__class", "__method", "__function"];
-    let mut defs: Vec<(String, &str)> = nodes(&env, tree, "__def")
+    let mut defs: Vec<(String, &str)> = nodes(&engine, tree, "__def")
         .map(|d| {
             let name = d
-                .children_of(env.lang.lookup_kind("__defname"))
+                .children_of(engine.lang.lookup_kind("__defname"))
                 .next()
                 .and_then(|n| n.sym_opt())
-                .map(|s| env.lang.syms.resolve(s).to_string())
+                .map(|s| engine.lang.syms.resolve(s).to_string())
                 .unwrap_or_default();
             let def_type = def_types
                 .into_iter()
-                .find(|t| d.has(env.lang.lookup_kind(t)))
+                .find(|t| d.has(engine.lang.lookup_kind(t)))
                 .unwrap_or("");
             (name, def_type)
         })
@@ -108,18 +109,18 @@ fn definitions_carry_their_type_and_name() {
 fn imports_and_calls_become_canonical_nodes() {
     let repo = tempfile::tempdir().unwrap();
     std::fs::write(repo.path().join("main.py"), MAIN).unwrap();
-    let env = python_env(Limits::UNLIMITED);
+    let engine = python_env(Limits::UNLIMITED);
 
-    let (items, _) = rewrite_repo(&env, repo.path());
+    let (items, _) = rewrite_repo(&engine, repo.path());
 
     let tree = &items[0];
-    let mut imports: Vec<String> = nodes(&env, tree, "__import")
-        .map(|i| name_of(&env, i))
+    let mut imports: Vec<String> = nodes(&engine, tree, "__import")
+        .map(|i| name_of(&engine, i))
         .collect();
     imports.sort();
     assert_eq!(imports, ["helper", "os"]);
     assert!(
-        nodes(&env, tree, "__call").count() >= 3,
+        nodes(&engine, tree, "__call").count() >= 3,
         "Greeter(), g.greet(), os.getcwd()"
     );
 }
@@ -128,12 +129,12 @@ fn imports_and_calls_become_canonical_nodes() {
 fn a_file_over_the_rewrite_budget_is_skipped_and_reported() {
     let repo = tempfile::tempdir().unwrap();
     std::fs::write(repo.path().join("main.py"), MAIN).unwrap();
-    let env = python_env(Limits {
+    let engine = python_env(Limits {
         file_rewrite_ms: 0,
         ..Limits::UNLIMITED
     });
 
-    let (items, skipped) = rewrite_repo(&env, repo.path());
+    let (items, skipped) = rewrite_repo(&engine, repo.path());
 
     assert_eq!(items[0].root().descendants().count(), 0);
     assert_eq!(skipped.len(), 1);

@@ -54,31 +54,31 @@ pub fn candidates(
 
 /// Indexes the family's files of `repository` into a fresh graph.
 pub fn index(
-    env: &Engine,
+    engine: &Engine,
     repository: &orbit_utils::vfs::Vfs<()>,
     run: &Sentinel,
 ) -> Result<(State, Report), Error> {
     let mut report = Report::default();
-    let (files, configs) = sources(env, repository, &mut report);
-    let mut state = State::new(env);
+    let (files, configs) = sources(engine, repository, &mut report);
+    let mut state = State::new(engine);
     state.configs = configs;
-    insert(env, &mut state, &files, run, &mut report)?;
-    unparsed(env, repository, &mut state, &report);
-    finish(env, &mut state, run, &mut report)?;
+    insert(engine, &mut state, &files, run, &mut report)?;
+    unparsed(engine, repository, &mut state, &report);
+    finish(engine, &mut state, run, &mut report)?;
     Ok((state, report))
 }
 
 /// Re-indexes the changed files of `repository` into `state`, dropping the
 /// files in `removed`.
 pub fn reindex(
-    env: &Engine,
+    engine: &Engine,
     repository: &orbit_utils::vfs::Vfs<()>,
     mut state: State,
     removed: &[String],
     run: &Sentinel,
 ) -> Result<(State, Report), Error> {
     let mut report = Report::default();
-    let (files, configs) = sources(env, repository, &mut report);
+    let (files, configs) = sources(engine, repository, &mut report);
     let gone: std::collections::HashSet<&str> = removed
         .iter()
         .map(String::as_str)
@@ -87,14 +87,14 @@ pub fn reindex(
         .collect();
     state.retain(|label| !gone.contains(label));
     state.configs.extend(configs);
-    insert(env, &mut state, &files, run, &mut report)?;
-    finish(env, &mut state, run, &mut report)?;
+    insert(engine, &mut state, &files, run, &mut report)?;
+    finish(engine, &mut state, run, &mut report)?;
     Ok((state, report))
 }
 
 /// The phases before the first that needs more than its own tree, and the rest.
-fn split(env: &Engine) -> (&[Phase], &[Phase]) {
-    let phases = env.pipeline.phases.as_slice();
+fn split(engine: &Engine) -> (&[Phase], &[Phase]) {
+    let phases = engine.pipeline.phases.as_slice();
     let at = phases
         .iter()
         .position(|p| p.scope != "tree")
@@ -103,16 +103,16 @@ fn split(env: &Engine) -> (&[Phase], &[Phase]) {
 }
 
 fn insert(
-    env: &Engine,
+    engine: &Engine,
     state: &mut State,
     files: &[SourceFile],
     run: &Sentinel,
     report: &mut Report,
 ) -> Result<(), Error> {
-    let (own, _) = split(env);
+    let (own, _) = split(engine);
     let done: Vec<_> = files
         .par_iter()
-        .map(|file| (file, Instant::now(), one_file(env, file, own, run)))
+        .map(|file| (file, Instant::now(), one_file(engine, file, own, run)))
         .map(|(file, started, result)| (file, started.elapsed(), result))
         .collect();
     run.check()?;
@@ -141,13 +141,13 @@ fn insert(
 /// Parses one file and runs the phases that read only that file. The tree
 /// becomes Compact at the first phase that runs on Compact trees.
 fn one_file(
-    env: &Engine,
+    engine: &Engine,
     file: &SourceFile,
     phases: &[Phase],
     run: &Sentinel,
 ) -> Result<(Tree<Compact>, Vec<Edge>, Option<Killed>), Killed> {
     let started = std::time::Instant::now();
-    let (tree, cut) = crate::frontend::parse(env, &file.path, &file.content, run)?;
+    let (tree, cut) = crate::frontend::parse(engine, &file.path, &file.content, run)?;
     if *engine::profile::ON {
         engine::profile::phase("parse", started);
     }
@@ -161,16 +161,27 @@ fn one_file(
                 let Stage::Mutable(tree) = &mut at else {
                     return Err(Killed::limit(phase.label, &file.path, 0, 0));
                 };
-                engine::run_tree(phase, tree, 0, None, env, Some(&graph), run)?.0
+                engine::run_tree(phase, tree, 0, None, engine, Some(&graph), run)?.0
             }
-            false => engine::run_tree(phase, at.compact(env), 0, None, env, Some(&graph), run)?.0,
+            false => {
+                engine::run_tree(
+                    phase,
+                    at.compact(engine),
+                    0,
+                    None,
+                    engine,
+                    Some(&graph),
+                    run,
+                )?
+                .0
+            }
         };
         edges.extend(found);
         if *engine::profile::ON {
             engine::profile::phase(&phase.name, started);
         }
     }
-    Ok((at.into_compact(env), edges, cut))
+    Ok((at.into_compact(engine), edges, cut))
 }
 
 /// A file's tree before and after it turns Compact.
@@ -181,12 +192,12 @@ enum Stage {
 }
 
 impl Stage {
-    fn compact(&mut self, env: &Engine) -> &mut Tree<Compact> {
+    fn compact(&mut self, engine: &Engine) -> &mut Tree<Compact> {
         if let Stage::Mutable(_) = self {
             let Stage::Mutable(tree) = std::mem::replace(self, Stage::Moving) else {
                 unreachable!()
             };
-            *self = Stage::Compact(canonical(env, tree));
+            *self = Stage::Compact(canonical(engine, tree));
         }
         match self {
             Stage::Compact(tree) => tree,
@@ -194,8 +205,8 @@ impl Stage {
         }
     }
 
-    fn into_compact(mut self, env: &Engine) -> Tree<Compact> {
-        self.compact(env);
+    fn into_compact(mut self, engine: &Engine) -> Tree<Compact> {
+        self.compact(engine);
         match self {
             Stage::Compact(tree) => tree,
             _ => unreachable!("compact leaves a Compact tree"),
@@ -205,12 +216,12 @@ impl Stage {
 
 /// Keeps only canonical nodes with their text frozen into symbols, and drops
 /// the source.
-fn canonical(env: &Engine, mut tree: Tree<Mutable>) -> Tree<Compact> {
+fn canonical(engine: &Engine, mut tree: Tree<Mutable>) -> Tree<Compact> {
     let root = tree.root;
-    tree.node_mut(root).kind = env.lang.tree_kinds().source_file;
-    tree.prune(&env.lang);
+    tree.node_mut(root).kind = engine.lang.tree_kinds().source_file;
+    tree.prune(&engine.lang);
     for id in tree.preorder() {
-        let sym = tree.sym_of(id, &env.lang);
+        let sym = tree.sym_of(id, &engine.lang);
         tree.node_mut(id).sym = sym;
     }
     tree.source = std::sync::Arc::from("");
@@ -220,21 +231,21 @@ fn canonical(env: &Engine, mut tree: Tree<Mutable>) -> Tree<Compact> {
 /// Runs the phases after the per-file ones: project phases on the project
 /// tree, then tree phases over every tree with the whole graph.
 fn finish(
-    env: &Engine,
+    engine: &Engine,
     state: &mut State,
     run: &Sentinel,
     report: &mut Report,
 ) -> Result<(), Error> {
-    let (_, rest) = split(env);
+    let (_, rest) = split(engine);
     for phase in rest {
         run.check()?;
         let started = std::time::Instant::now();
         match phase.scope.as_str() {
-            "project" => state.project(env),
+            "project" => state.project(engine),
             "graph" => {}
             "family" => {
-                state.trees.push(state.project_compact(env));
-                let ran = engine::run_family(phase, &state.trees, &state.edges, env, run);
+                state.trees.push(state.project_compact(engine));
+                let ran = engine::run_family(phase, &state.trees, &state.edges, engine, run);
                 state.trees.pop();
                 let (found, stopped) = ran?;
                 report.skipped.extend(stopped);
@@ -251,7 +262,7 @@ fn finish(
                 for (fi, tree) in state.trees.iter_mut().enumerate() {
                     let fi = fi as u32;
                     let (edges, _) =
-                        engine::run_tree(phase, tree, fi, None, env, Some(&graph), run)?;
+                        engine::run_tree(phase, tree, fi, None, engine, Some(&graph), run)?;
                     state.edges.extend(edges.into_iter().map(|e| e.in_file(fi)));
                 }
             }
@@ -265,7 +276,7 @@ fn finish(
 
 /// The family's source files and manifests, read; unreadable ones are reported.
 fn sources(
-    env: &Engine,
+    engine: &Engine,
     repository: &orbit_utils::vfs::Vfs<()>,
     report: &mut Report,
 ) -> (Vec<SourceFile>, Vec<SourceFile>) {
@@ -276,8 +287,8 @@ fn sources(
             .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
     };
     let mut files = Vec::new();
-    for file in candidates(repository, env.limits.max_files) {
-        if !env.reads(&file.path) {
+    for file in candidates(repository, engine.limits.max_files) {
+        if !engine.reads(&file.path) {
             continue;
         }
         match read(&file.path) {
@@ -288,11 +299,11 @@ fn sources(
             None => report.unread_files.push(file.path.to_string()),
         }
     }
-    let cap = env.limits.max_manifest_bytes;
+    let cap = engine.limits.max_manifest_bytes;
     let mut bytes = 0u64;
     let mut configs = Vec::new();
     for file in repository.files().filter(|file| file.keeps()) {
-        if !env.project.reads(&file.path) {
+        if !engine.project.reads(&file.path) {
             continue;
         }
         bytes = bytes.saturating_add(file.size);
@@ -318,7 +329,7 @@ fn sources(
 
 /// A `File` row for every repository file that has no tree, with the reason.
 fn unparsed(
-    env: &Engine,
+    engine: &Engine,
     repository: &orbit_utils::vfs::Vfs<()>,
     state: &mut State,
     report: &Report,
@@ -341,7 +352,7 @@ fn unparsed(
                 Some(&"parse") => "skip_timeout_parse".into(),
                 Some(&"stack") => "skip_stack_limit".into(),
                 Some(&"edges") => "skip_too_many_edges".into(),
-                Some(label) => env
+                Some(label) => engine
                     .pipeline
                     .skip_reason(label)
                     .unwrap_or("skip_timeout_sentinel")
@@ -352,6 +363,6 @@ fn unparsed(
         };
         state
             .trees
-            .push(Tree::unparsed(&env.lang, path, file.size, &reason).into());
+            .push(Tree::unparsed(&engine.lang, path, file.size, &reason).into());
     }
 }

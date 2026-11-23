@@ -63,15 +63,15 @@ impl<'a> Exporter<'a> {
     pub(super) fn write(
         &mut self,
         family: SupportLang,
-        env: &Engine,
+        engine: &Engine,
         state: &mut State,
         report: &Report,
         stats: bool,
     ) -> Result<FamilyOutput> {
         let tables = code_graph_incremental::backend::tables::export(
-            env,
+            engine,
             state,
-            &Tables::load(env, self.ontology, &Default::default())?,
+            &Tables::load(engine, self.ontology, &Default::default())?,
             &envelope(self.git),
             &Scope::all(),
             &code_graph_incremental::Sentinel::disabled(),
@@ -178,12 +178,12 @@ pub(super) struct Replacement {
 pub(super) fn replacement(
     git: &GitInfo,
     ontology: &ontology::Ontology,
-    env: &Engine,
+    engine: &Engine,
     state: &mut State,
     files: &FxHashSet<String>,
 ) -> Result<Replacement> {
     let envelope = envelope(git);
-    let tables = Tables::load(env, ontology, &Default::default())?;
+    let tables = Tables::load(engine, ontology, &Default::default())?;
     let edge_table = ontology
         .local_edge_table_name()
         .ok_or_else(|| anyhow::anyhow!("local_db.edge_table.name must be configured"))?;
@@ -205,7 +205,7 @@ pub(super) fn replacement(
         only: Some(&only),
     };
     for (table, batch) in code_graph_incremental::backend::tables::export(
-        env,
+        engine,
         state,
         &tables,
         &envelope,

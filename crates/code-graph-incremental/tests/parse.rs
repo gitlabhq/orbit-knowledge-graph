@@ -14,21 +14,21 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
     }
 }
 
-fn parse_repo(env: &Engine, root: &Path) -> Vec<Tree> {
+fn parse_repo(engine: &Engine, root: &Path) -> Vec<Tree> {
     let repository = common::walk(root);
     driver::candidates(&repository, 0)
-        .filter(|file| env.reads(&file.path))
+        .filter(|file| engine.reads(&file.path))
         .map(|file| {
             let source = String::from_utf8(repository.read(&file.path).unwrap().to_vec()).unwrap();
-            frontend::parse(env, &file.path, &source, &Sentinel::disabled())
+            frontend::parse(engine, &file.path, &source, &Sentinel::disabled())
                 .unwrap()
                 .0
         })
         .collect()
 }
 
-fn error_nodes(tree: &Tree, env: &Engine) -> usize {
-    let error = env.lang.kinds.lookup("ERROR") as u16;
+fn error_nodes(tree: &Tree, engine: &Engine) -> usize {
+    let error = engine.lang.kinds.lookup("ERROR") as u16;
     tree.root()
         .descendants()
         .filter(|c| c.kind() == error)
@@ -61,11 +61,11 @@ fn unread_sources_and_manifests_remain_in_the_graph_and_report() {
     for path in ["main.ts", "package.json"] {
         std::fs::remove_file(root.path().join(path)).unwrap();
     }
-    let env = Engine::family(SupportLang::TypeScript)
+    let engine = Engine::family(SupportLang::TypeScript)
         .limits(Limits::UNLIMITED)
         .build()
         .unwrap();
-    let (state, report) = driver::index(&env, &repository, &Sentinel::disabled()).unwrap();
+    let (state, report) = driver::index(&engine, &repository, &Sentinel::disabled()).unwrap();
     assert_eq!(report.unread_files, ["main.ts", "package.json"]);
     assert!(
         state.configs.is_empty(),
@@ -73,8 +73,8 @@ fn unread_sources_and_manifests_remain_in_the_graph_and_report() {
     );
     assert_eq!(state.trees.len(), 2);
     for tree in state.trees {
-        let reason = tree.root().tag(env.lang.syms.lookup("reason")).unwrap();
-        assert_eq!(env.lang.syms.resolve(reason), "fault_file_read");
+        let reason = tree.root().tag(engine.lang.syms.lookup("reason")).unwrap();
+        assert_eq!(engine.lang.syms.resolve(reason), "fault_file_read");
     }
 }
 
@@ -90,12 +90,12 @@ fn every_configured_language_parses_when_classified_for_parsing() {
             _ => b"x",
         };
         write_all(repo.path(), &[(&path, source)]);
-        let env = Engine::family(lang)
+        let engine = Engine::family(lang)
             .limits(Limits::UNLIMITED)
             .build()
             .unwrap();
 
-        let parsed = parse_repo(&env, repo.path());
+        let parsed = parse_repo(&engine, repo.path());
 
         let labels: Vec<_> = parsed.iter().map(|tree| tree.label.as_str()).collect();
         match lang.has_rules() {
@@ -116,18 +116,18 @@ fn tsx_inside_the_typescript_pipeline_gets_the_tsx_grammar() {
         repo.path(),
         &[("app.tsx", jsx), ("util.ts", b"export const n = 1;\n")],
     );
-    let env = Engine::family(SupportLang::TypeScript)
+    let engine = Engine::family(SupportLang::TypeScript)
         .limits(Limits::UNLIMITED)
         .build()
         .unwrap();
 
-    let parsed = parse_repo(&env, repo.path());
+    let parsed = parse_repo(&engine, repo.path());
 
     let mut labels: Vec<_> = parsed.iter().map(|tree| tree.label.clone()).collect();
     labels.sort();
     assert_eq!(labels, ["app.tsx", "util.ts"]);
     for tree in &parsed {
-        assert_eq!(error_nodes(tree, &env), 0, "{}", tree.label);
+        assert_eq!(error_nodes(tree, &engine), 0, "{}", tree.label);
     }
 }
 
@@ -144,12 +144,12 @@ fn only_this_familys_files_are_parsed() {
             ("data.json", b"{}"),
         ],
     );
-    let env = Engine::family(SupportLang::Python)
+    let engine = Engine::family(SupportLang::Python)
         .limits(Limits::UNLIMITED)
         .build()
         .unwrap();
 
-    let parsed = parse_repo(&env, repo.path());
+    let parsed = parse_repo(&engine, repo.path());
 
     let labels: Vec<_> = parsed.iter().map(|tree| tree.label.as_str()).collect();
     assert_eq!(labels, ["src/main.py"]);
@@ -197,7 +197,7 @@ fn a_family_parses_each_member_with_its_own_grammar() {
             ("main.py", b"x = 1\n"),
         ],
     );
-    let env = Engine::family(SupportLang::Kotlin)
+    let engine = Engine::family(SupportLang::Kotlin)
         .limits(Limits::UNLIMITED)
         .build()
         .unwrap();
@@ -207,16 +207,16 @@ fn a_family_parses_each_member_with_its_own_grammar() {
         ("B.scala", true),
         ("main.py", false),
     ] {
-        assert_eq!(env.reads(path), read, "{path}");
+        assert_eq!(engine.reads(path), read, "{path}");
     }
 
-    let parsed = parse_repo(&env, repo.path());
+    let parsed = parse_repo(&engine, repo.path());
 
     let mut labels: Vec<_> = parsed.iter().map(|tree| tree.label.clone()).collect();
     labels.sort();
     assert_eq!(labels, ["Service.kt", "User.java"]);
     for tree in &parsed {
-        assert_eq!(error_nodes(tree, &env), 0, "{}", tree.label);
+        assert_eq!(error_nodes(tree, &engine), 0, "{}", tree.label);
     }
 }
 
