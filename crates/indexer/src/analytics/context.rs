@@ -44,14 +44,11 @@ pub(crate) fn build_common(
                 .parse::<orbit_common::OrbitCommonEnvironment>()
                 .map_err(validation("environment"))?,
         ),
-        correlation_id: None,
         instance_id: parse_opt(&instance.instance_id, "instance_id")?,
         unique_instance_id: parse_opt(&instance.unique_instance_id, "unique_instance_id")?,
         host_name: parse_opt(&instance.host_name, "host_name")?,
-        organization_id: None,
         root_namespace_ids: root_namespace_id.map(|id| vec![id]),
-        coding_agent: None,
-        schema_version: None,
+        ..orbit_common::OrbitCommon::default()
     }))
 }
 
