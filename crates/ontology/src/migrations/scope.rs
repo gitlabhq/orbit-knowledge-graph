@@ -240,7 +240,6 @@ fn parse_derived_name(content: &str) -> Option<String> {
     Some(parsed.name)
 }
 
-/// A changed `.sql.j2` template counts as a change to each YAML whose extract uses it; `None` when none does.
 fn replace_templates_with_their_yaml_files(
     source_contents: &BTreeMap<String, String>,
     changed_sources: &BTreeSet<String>,
