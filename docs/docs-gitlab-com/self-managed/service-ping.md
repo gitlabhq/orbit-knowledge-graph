@@ -27,7 +27,7 @@ GitLab Orbit still sends its usage events to DIP, and ClickHouse stores them, un
 Prerequisites:
 
 - GitLab Orbit 1.3.0 or later, with Helm chart 7.1.0 or later.
-- GitLab 19.6 or later.
+- GitLab 19.6 or later. <!-- TODO: name the first GitLab version with gitlab-org/gitlab!273677 (19.7, or the 19.6 patch release if it is backported). Before it, the exporter sends no Orbit metrics unless Enable Registration Features is on. -->
   The exporter reads the Service Ping settings through an API that earlier versions do not have.
 - The NATS server and the ClickHouse server that GitLab Orbit uses.
 - A ClickHouse account that can create databases and users, for the DIP migrations.
@@ -296,6 +296,7 @@ To remove Service Ping for GitLab Orbit:
 
 The `snowplow` and `serviceping` databases, the `serviceping_exporter` user, and the `serviceping_reader` role stay in ClickHouse.
 If you no longer need them, drop them with your ClickHouse client.
+The `RAW_EVENTS_*` and `ENRICHED_EVENTS_*` streams that DIP created also stay on the NATS server. If you no longer need them, delete them with the NATS CLI.
 
 ## Troubleshooting
 
