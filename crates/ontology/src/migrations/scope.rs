@@ -98,10 +98,18 @@ pub fn derive_scope(
         return None;
     }
 
+    let changed_sources: BTreeSet<String> = changed_sources
+        .iter()
+        .map(|path| match path.strip_suffix(".sql.j2") {
+            Some(stem) => format!("{stem}.yaml"),
+            None => path.clone(),
+        })
+        .collect();
+
     let mut sdlc_entities: BTreeSet<String> = BTreeSet::new();
     let mut code_changed = false;
 
-    for path in changed_sources {
+    for path in &changed_sources {
         if path == ONTOLOGY_SCHEMA_FILE || path == "reference.yaml" {
             return Some(MigrationScope::Full);
         }
@@ -418,6 +426,41 @@ mod tests {
     }
 
     #[test]
+    fn derive_scope_node_template_maps_to_owning_node() {
+        let ontology = Ontology::new();
+        let embedded = BTreeMap::from([
+            (
+                "nodes/ci/pipeline.yaml".to_string(),
+                "node_type: Pipeline\npipelines:\n  - name: Pipeline\n    extract:\n      query: pipeline.sql.j2\n".to_string(),
+            ),
+            ("nodes/ci/pipeline.sql.j2".to_string(), "SELECT 1\n".to_string()),
+        ]);
+        let scope = derive_scope(
+            &ontology,
+            &embedded,
+            &entities(&["nodes/ci/pipeline.sql.j2"]),
+            &BTreeSet::new(),
+        );
+        assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["Pipeline"]))));
+    }
+
+    #[test]
+    fn derive_scope_template_without_a_yaml_is_full() {
+        let ontology = Ontology::new();
+        let embedded = BTreeMap::from([(
+            "nodes/ci/orphan.sql.j2".to_string(),
+            "SELECT 1\n".to_string(),
+        )]);
+        let scope = derive_scope(
+            &ontology,
+            &embedded,
+            &entities(&["nodes/ci/orphan.sql.j2"]),
+            &BTreeSet::new(),
+        );
+        assert_eq!(scope, Some(MigrationScope::Full));
+    }
+
+    #[test]
     fn derive_scope_mixed_code_and_sdlc_is_full() {
         let ontology = Ontology::new();
         let embedded = BTreeMap::from([
@@ -483,6 +526,29 @@ mod tests {
             &BTreeSet::new(),
         );
         assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["HAS_NOTE"]))));
+    }
+
+    #[test]
+    fn derive_scope_edge_template_maps_to_relationship_kind() {
+        let ontology = Ontology::new().with_edges(["CREATED_MR"]);
+        let embedded = BTreeMap::from([
+            (
+                "edges/created_mr.yaml".to_string(),
+                "pipelines:\n  - name: CREATED_MR\n    extract:\n      query: created_mr.sql.j2\n"
+                    .to_string(),
+            ),
+            (
+                "edges/created_mr.sql.j2".to_string(),
+                "SELECT 1\n".to_string(),
+            ),
+        ]);
+        let scope = derive_scope(
+            &ontology,
+            &embedded,
+            &entities(&["edges/created_mr.sql.j2"]),
+            &BTreeSet::new(),
+        );
+        assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["CREATED_MR"]))));
     }
 
     // calls/defines/extends/imports/on_branch route to gl_code_edge, so an edge
