@@ -1,6 +1,7 @@
 #[macro_use]
 mod roles;
 pub mod backend;
+pub mod config;
 pub mod constants;
 pub mod driver;
 pub mod edge;

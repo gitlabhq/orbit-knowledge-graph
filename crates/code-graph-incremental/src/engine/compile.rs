@@ -66,15 +66,15 @@ enum Does {
 }
 
 impl Pipeline {
-    /// `languages` holds each language's rule file, by its index in the env.
+    /// Compiles `sources` against the mounted `modules`; a tree's rules are
+    /// its language's entry in `sources.langs`.
     pub fn load(
         lang: &Lang,
-        languages: &[Option<&'static str>],
+        sources: &super::lang::Sources,
         modules: &'static [Registration],
     ) -> Result<Self, LoadError> {
         let registry = Registry::new(modules);
-        let spec: PipelineSpec =
-            orbit_utils::yaml::from_str(include_str!("../../config/pipeline.yaml"))?;
+        let spec: PipelineSpec = orbit_utils::yaml::from_str(sources.pipeline)?;
         for edge in &spec.edges {
             lang.edges.intern(edge);
         }
@@ -84,7 +84,7 @@ impl Pipeline {
         }
         let tree = bind_roles(&spec, lang, "tree", crate::tree::TreeKinds::NAMES, &[])?;
         let _ = lang.tree.set(crate::tree::TreeKinds::bound(&tree.kinds));
-        let files = super::lang::load(languages)?;
+        let files = super::lang::load(sources)?;
         let names: HashMap<String, u16> = files
             .shared
             .data

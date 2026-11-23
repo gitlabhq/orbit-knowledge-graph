@@ -8,8 +8,6 @@ use serde_json::{Map, Value};
 
 use crate::error::LoadError;
 
-include!(concat!(env!("OUT_DIR"), "/rule_files.rs"));
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum DataSpec {
     Bool(bool),
@@ -84,20 +82,36 @@ pub struct IdSpec {
     pub parts: Vec<String>,
 }
 
+/// The YAML a pipeline compiles from: pipeline.yaml, the rule files every
+/// language shares, the libraries rule files import by name, and each
+/// language's own rule file, if it has one.
+#[derive(Clone, Copy)]
+pub struct Sources<'a> {
+    pub pipeline: &'a str,
+    pub rules: &'a [(&'a str, &'a str)],
+    pub libs: &'a [(&'a str, &'a str)],
+    pub langs: &'a [Option<&'a str>],
+}
+
 #[derive(Debug)]
 pub struct RuleFiles {
     pub shared: LangFile,
     pub langs: Vec<Option<LangFile>>,
 }
 
-pub fn load(langs: &[Option<&'static str>]) -> Result<RuleFiles, LoadError> {
-    let mut loader = Loader::default();
+pub fn load(sources: &Sources) -> Result<RuleFiles, LoadError> {
+    let mut loader = Loader {
+        libs: sources.libs,
+        loaded: HashMap::new(),
+        loading: Vec::new(),
+    };
     let mut shared = LangFile::default();
-    for (name, yaml) in RULES {
+    for (name, yaml) in sources.rules {
         let file = loader.file(&format!("config/rules/{name}.yaml"), yaml)?;
         merge(&mut shared, file)?;
     }
-    let langs = langs
+    let langs = sources
+        .langs
         .iter()
         .enumerate()
         .map(|(at, yaml)| {
@@ -136,12 +150,13 @@ struct Scope {
 }
 
 #[derive(Default)]
-struct Loader {
-    libs: HashMap<String, Scope>,
+struct Loader<'a> {
+    libs: &'a [(&'a str, &'a str)],
+    loaded: HashMap<String, Scope>,
     loading: Vec<String>,
 }
 
-impl Loader {
+impl Loader<'_> {
     fn top(name: &str, yaml: &str) -> Result<Map<String, Value>, LoadError> {
         match orbit_utils::yaml::from_str::<Value>(yaml)
             .map_err(|e| err(format!("{name}: yaml: {e}")))?
@@ -153,13 +168,14 @@ impl Loader {
     }
 
     fn lib(&mut self, name: &str) -> Result<Scope, LoadError> {
-        if let Some(scope) = self.libs.get(name) {
+        if let Some(scope) = self.loaded.get(name) {
             return Ok(scope.clone());
         }
         if self.loading.iter().any(|n| n == name) {
             return Err(err(format!("library {name} imports itself")));
         }
-        let yaml = LIBS
+        let yaml = self
+            .libs
             .iter()
             .find(|(n, _)| *n == name)
             .map(|(_, y)| *y)
@@ -173,7 +189,7 @@ impl Loader {
             )));
         }
         self.loading.pop();
-        self.libs.insert(name.to_owned(), scope.clone());
+        self.loaded.insert(name.to_owned(), scope.clone());
         Ok(scope)
     }
 

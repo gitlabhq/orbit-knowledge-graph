@@ -128,7 +128,16 @@ impl Env {
             };
             rules.insert(member, index);
         }
-        let pipeline = crate::engine::Pipeline::load(&lang, &sources, modules)?;
+        let pipeline = crate::engine::Pipeline::load(
+            &lang,
+            &crate::engine::lang::Sources {
+                pipeline: crate::config::PIPELINE,
+                rules: crate::config::RULES,
+                libs: crate::config::LIBS,
+                langs: &sources,
+            },
+            modules,
+        )?;
         let project = project(&pipeline, &lang, sources.len())?;
         Ok(Self {
             export_config,

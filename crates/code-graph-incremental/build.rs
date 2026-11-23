@@ -13,7 +13,7 @@ fn main() {
             })
             .collect();
         names.sort();
-        code += &format!("const {table}: &[(&str, &str)] = &[\n");
+        code += &format!("pub const {table}: &[(&str, &str)] = &[\n");
         for name in names {
             code += &format!(
                 "    ({name:?}, include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{dir}/{name}.yaml\"))),\n"
