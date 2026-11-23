@@ -637,9 +637,13 @@ description = "Fix the layout of the YAML test suites"
 run = "uv run --quiet scripts/linting/yaml_lint_test.py"
 description = "Run the YAML layout linter's unit tests"
 
+[tasks."lint:comments"]
+run = "uv run --quiet scripts/linting/comments/check.py"
+description = "Block code comments that scripts/linting/comments/ledger.toml does not allow"
+
 [tasks."lint:comments:test"]
-run = "uv run --quiet scripts/linting/comment_check_test.py"
-description = "Run the comment check's unit tests"
+run = "ast-grep test -c scripts/linting/comments/sgconfig.yml --skip-snapshot-tests"
+description = "Run the comment rule tests"
 
 [tasks."lint:docs"]
 depends = ["lint:markdown", "lint:rumdl", "lint:vale", "lint:links"]

@@ -1,0 +1,46 @@
+[[entry]]
+glob = "crates/orbit-server-config/**"
+rules = ["comments-rust-doc"]
+reason = "schemars writes these doc comments into config/schemas/config.schema.json"
+
+[[entry]]
+glob = "crates/gitaly-protos/src/proto/*.rs"
+reason = "prost-build generates this file"
+
+[[entry]]
+glob = "crates/orbit-server/src/proto/orbit.*.rs"
+reason = "prost-build generates this file"
+
+[[entry]]
+glob = "crates/orbit-server-config/src/proto/orbit.*.rs"
+reason = "prost-build generates this file"
+
+[[entry]]
+glob = "packages/agent-plugins/types/*.d.ts"
+reason = "Claude Code generates these type declarations"
+
+[[entry]]
+glob = "fixtures/**"
+reason = "parser and query test inputs, and their comments are test data"
+
+[[entry]]
+glob = "crates/integration-tests-codegraph/fixtures/**"
+reason = "parser and query test inputs, and their comments are test data"
+
+[[entry]]
+glob = "scripts/dev/tests/fixtures/**"
+reason = "parser and query test inputs, and their comments are test data"
+
+[[entry]]
+glob = "scripts/vendored/**"
+reason = "vendored files are copies of upstream sources"
+
+[[entry]]
+glob = "config/setup/agents/*/index.js"
+text = "/*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */"
+reason = "bun build writes this license header into the bundle, and CI diffs the build output"
+
+[[entry]]
+glob = "packages/agent-plugins/core/lib.js"
+text = "/*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */"
+reason = "bun build writes this license header into the bundle, and CI diffs the build output"
