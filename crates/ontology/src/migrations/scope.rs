@@ -99,7 +99,7 @@ pub fn derive_scope(
     }
 
     let Some(changed_sources) =
-        replace_templates_with_their_users(source_contents, changed_sources)
+        replace_templates_with_their_yaml_files(source_contents, changed_sources)
     else {
         return Some(MigrationScope::Full);
     };
@@ -257,7 +257,7 @@ struct TemplateExtractYaml {
 }
 
 /// A changed `.sql.j2` template counts as a change to each YAML that uses it; `None` when one has no user.
-fn replace_templates_with_their_users(
+fn replace_templates_with_their_yaml_files(
     source_contents: &BTreeMap<String, String>,
     changed_sources: &BTreeSet<String>,
 ) -> Option<BTreeSet<String>> {
