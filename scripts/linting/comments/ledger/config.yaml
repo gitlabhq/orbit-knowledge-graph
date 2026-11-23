@@ -54,17 +54,6 @@
   preview: "# Duo creates its config dir on first run, so the binary glab installs …"
   hash: d211b563a999907f
   lines: 1
-"config/setup/agents/opencode_ui/tui.tsx":
-- category: invariant
-  reason: "Plugin reload keeps memory storage but drops timers, so old lines would never clear."
-  preview: "// Memory storage outlives a plugin reload but these timers do not, so …"
-  hash: 7ca587d26b96a178
-  lines: 2
-- category: upstream
-  reason: "An interrupted call may never send its end event, so stale lines would stay without the session-stop cleanup."
-  preview: "// An interrupted call may never send its end. When a session stops, it…"
-  hash: a27c09fb54f40387
-  lines: 1
 "config/setup/opencode_plugin.js":
 - category: upstream
   reason: "OpenCode 2 calls setup() and OpenCode 1 calls server(), so the file must import nothing from OpenCode."
