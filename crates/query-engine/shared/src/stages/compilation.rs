@@ -38,14 +38,17 @@ impl<M: CompileTarget + Send + Sync + 'static> PipelineStage for CompilationStag
             Some(query) => CompileSource::Parsed(Box::new(query.clone())),
             None => CompileSource::Raw(&ctx.query_json),
         };
-        let compiled = M::compile(
-            source,
-            ctx.frontend,
-            data_model,
-            ctx.security_context.as_ref(),
-        )
-        .map_err(PipelineError::from)
-        .inspect_err(|e| obs.record_error(e))?;
+        let security = if M::REQUIRES_SECURITY {
+            Some(
+                ctx.security_context()
+                    .inspect_err(|e| obs.record_error(e))?,
+            )
+        } else {
+            ctx.security_context.as_ref()
+        };
+        let compiled = M::compile(source, ctx.frontend, data_model, security)
+            .map_err(PipelineError::from)
+            .inspect_err(|e| obs.record_error(e))?;
 
         let query_type: &str = compiled.query_type.into();
         obs.set_query_type(query_type);
@@ -103,5 +106,19 @@ mod tests {
             .unwrap_err();
 
         assert!(error.to_string().contains("query data model missing"));
+    }
+
+    #[tokio::test]
+    async fn a_remote_stage_without_a_security_context_reports_a_security_error() {
+        let mut ctx = context(QUERY);
+        let clickhouse = compiler::data_model::clickhouse(Arc::clone(&ctx.ontology)).unwrap();
+        ctx.server_extensions.insert(clickhouse);
+
+        let error = CompilationStage::<ClickHouseDataModel>::new()
+            .execute(&mut ctx, &mut NoOpObserver)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, PipelineError::Security(_)), "{error}");
     }
 }

@@ -134,6 +134,8 @@ impl CompileSource<'_> {
 }
 
 pub trait CompileTarget: Sized {
+    const REQUIRES_SECURITY: bool;
+
     fn compile_observed(
         source: CompileSource,
         fe: Frontend,
@@ -460,6 +462,8 @@ mod tests {
 
         let error = compile_model(query, Frontend::JsonDsl, &clickhouse, None).unwrap_err();
         assert!(error.to_string().contains("security context is required"));
+        assert!(matches!(error, QueryError::Security(_)));
+        assert!(matches!(error, QueryError::Security(_)));
         let local = compile_model(query, Frontend::JsonDsl, &duckdb, None).unwrap();
         assert_eq!(local.base.dialect, SqlDialect::DuckDb);
         let remote = compile_model(

@@ -526,7 +526,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
                     quote! {
                         #ctx_name::new(
                             security
-                                .ok_or_else(|| crate::error::QueryError::PipelineInvariant(
+                                .ok_or_else(|| crate::error::QueryError::Security(
                                     "security context is required".into(),
                                 ))?
                                 .clone(),
@@ -545,8 +545,13 @@ pub fn generate(input: TokenStream) -> TokenStream {
                 }
             })
             .collect();
+        let requires_security = targets.iter().any(|(candidate, _, _, secured)| {
+            *secured && quote!(#candidate).to_string() == quote!(#model).to_string()
+        });
         out.extend(quote! {
             impl crate::CompileTarget for #model {
+                const REQUIRES_SECURITY: bool = #requires_security;
+
                 fn compile_observed(
                     source: crate::CompileSource,
                     fe: crate::Frontend,
