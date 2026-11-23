@@ -436,7 +436,7 @@ mod tests {
     }
 
     #[test]
-    fn build_query_fits_oversized_token_type_to_the_schema_limit() {
+    fn build_query_cuts_oversized_token_type_to_the_schema_limit() {
         let mut claims = claims_with_paths(vec![]);
         claims.token_type = Some("x".repeat(65));
         let data = query_data(&claims, "query_graph");
@@ -452,7 +452,7 @@ mod tests {
     }
 
     #[test]
-    fn build_query_fits_oversized_coding_agent_to_the_schema_limit() {
+    fn build_query_cuts_oversized_coding_agent_to_the_schema_limit() {
         let claims = claims_with_paths(vec![]);
         let query = build_query(
             &claims,
@@ -484,7 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn build_common_fits_oversized_instance_id_to_the_schema_limit() {
+    fn build_common_cuts_oversized_instance_id_to_the_schema_limit() {
         let mut claims = claims_with_paths(vec![]);
         claims.instance_id = Some("x".repeat(256));
         let common = build_common(
