@@ -1,7 +1,3 @@
-//! Filesystem security utilities (safe directory creation, symlink
-//! validation, path-traversal prevention). Security-critical: review
-//! carefully before modification.
-
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -19,33 +15,16 @@ pub enum RemovedSymlinkReason {
     Dangling,
 }
 
-/// Canonicalize `path` and return it only if the real target lives
-/// inside `root`. The path-traversal guard every subsystem that turns
-/// a user-supplied specifier into a filesystem read should route
-/// through.
-///
-/// Returns `None` when:
-/// - `path` does not exist
-/// - `path` is a dangling symlink
-/// - the canonical target resolves outside `root` (direct symlink
-///   escape, `../..` climb, Windows UNC redirect, etc.)
-///
-/// `root` is expected to already be canonical. Caller's responsibility
-/// to canonicalize it once at setup time.
 pub fn contained_canonical_path(root: &Path, path: &Path) -> Option<PathBuf> {
     let canonical = std::fs::canonicalize(path).ok()?;
     canonical.starts_with(root).then_some(canonical)
 }
 
-/// `true` when `path` has only normal components — safe to join under a root,
-/// with no `..`/`.`/root/prefix that could climb out.
 pub fn is_safe_relative_path(path: &Path) -> bool {
     path.components()
         .all(|c| matches!(c, std::path::Component::Normal(_)))
 }
 
-/// Resolve `dest` to its canonical form within `root`, creating parents if
-/// needed. `PermissionDenied` if the real target escapes `root`.
 pub fn resolve_dest_within(root: &Path, dest: &Path) -> io::Result<PathBuf> {
     if dest.exists() {
         contained_canonical_path(root, dest).ok_or_else(|| {
@@ -59,13 +38,6 @@ pub fn resolve_dest_within(root: &Path, dest: &Path) -> io::Result<PathBuf> {
     }
 }
 
-/// Create parent directories for `path`, validating that no existing
-/// path component resolves outside `root` via symlinks.
-///
-/// Returns the canonicalized destination path (parent joined with filename).
-///
-/// Without this check, `create_dir_all` follows symlinks planted by earlier
-/// operations, creating directories outside the intended root.
 pub fn safe_create_dir_all(path: &Path, root: &Path) -> io::Result<PathBuf> {
     let parent = match path.parent() {
         Some(p) => p,
@@ -87,10 +59,6 @@ pub fn safe_create_dir_all(path: &Path, root: &Path) -> io::Result<PathBuf> {
         .join(path.file_name().unwrap_or_default()))
 }
 
-/// Walk up from `path` to find the deepest ancestor that exists on disk.
-///
-/// Used to validate a path before `create_dir_all` so that we can detect
-/// symlinks in existing components before creating new directories.
 pub fn longest_existing_ancestor(path: &Path) -> &Path {
     let mut current = path;
     while !current.exists() {
@@ -102,14 +70,6 @@ pub fn longest_existing_ancestor(path: &Path) -> &Path {
     current
 }
 
-/// Walk a directory tree and remove any symlink that resolves outside
-/// `root`. Dangling symlinks are also removed. Removed symlinks are
-/// returned for callers that need to observe skipped archive entries.
-///
-/// The scan never short-circuits: every entry is visited and every bad
-/// symlink is deleted even if earlier entries failed. This prevents a
-/// malicious archive from planting multiple escaping symlinks where only
-/// the first gets cleaned up.
 pub fn validate_symlinks(root: &Path) -> io::Result<Vec<RemovedSymlink>> {
     let mut first_err: Option<io::Error> = None;
     let mut removed_symlinks = Vec::new();
@@ -117,13 +77,10 @@ pub fn validate_symlinks(root: &Path) -> io::Result<Vec<RemovedSymlink>> {
     while let Some(dir) = stack.pop() {
         let entries = match std::fs::read_dir(&dir) {
             Ok(e) => e,
-            // Cleanup elsewhere can race us and remove it after listing.
             Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
             Err(e) => return Err(e),
         };
         for entry in entries {
-            // OS-level iteration errors are recorded but don't stop the scan,
-            // so remaining symlinks are still checked and cleaned up.
             let entry = match entry {
                 Ok(e) => e,
                 Err(e) => {

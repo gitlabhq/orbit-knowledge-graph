@@ -7,7 +7,6 @@ use orbit_server_config::ExpandedLogsConfig;
 use orbit_utils::traversal_path::TraversalPath;
 use tracing_subscriber::EnvFilter;
 
-/// Rails sends this token when its `gkg_verbose_logs` feature flag is on.
 pub static VERBOSE_LOGS: LazyLock<VerboseLogsConfig> = LazyLock::new(|| {
     VerboseLogsConfig::default()
         .with_feature_flags_header("x-gitlab-enabled-feature-flags")
@@ -16,8 +15,6 @@ pub static VERBOSE_LOGS: LazyLock<VerboseLogsConfig> = LazyLock::new(|| {
 
 const MESSAGE_LEAKING_TARGET: &str = "ra_ap";
 
-/// rust-analyzer writes names from the parsed repository into its messages. EnvFilter
-/// prefers the most specific directive, so configured `ra_ap*` directives are dropped.
 pub fn log_directive(configured: Option<&str>) -> String {
     let base = configured
         .filter(|directive| !directive.is_empty())
@@ -37,7 +34,6 @@ fn valid_rust_log() -> Option<String> {
         .filter(|directive| EnvFilter::try_new(directive).is_ok())
 }
 
-/// The variant of a typed error inside an `anyhow` error, else `fatal`: many webserver errors carry no kind.
 pub fn anyhow_error_type(error: &anyhow::Error) -> &'static str {
     if let Some(error) = error.downcast_ref::<indexer::config::IndexerError>() {
         return error.into();
@@ -54,7 +50,6 @@ pub fn anyhow_error_type(error: &anyhow::Error) -> &'static str {
     "fatal"
 }
 
-/// The default hook prints the panic text, which can hold parsed source code, to stderr.
 pub fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         let location = info.location().map(ToString::to_string);
@@ -84,7 +79,6 @@ fn is_requested(facts: &SpanFacts<'_>) -> bool {
     facts.get_bool(safe::EXPANDED_LOGS_REQUESTED) == Some(true)
 }
 
-/// A customer path inside an internal span must not be expanded.
 fn is_internal_tenant(facts: &SpanFacts<'_>, internal: &HashSet<u64>) -> bool {
     let by_id = facts.get_u64(safe::GL_ROOT_NAMESPACE_ID);
     let by_path = facts.get_str(safe::TRAVERSAL_PATH);

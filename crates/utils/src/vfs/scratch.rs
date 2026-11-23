@@ -1,8 +1,3 @@
-//! Where bytes live when they are not in memory: one anonymous append-only
-//! file, opened on the first spill, positional writes from any thread,
-//! positional reads, gone when the store is. Each blob is one independent
-//! LZ4 block when compression reduces its size, so reads stay random-access.
-
 use std::io;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -88,8 +83,6 @@ fn read_exact_at(file: &std::fs::File, bytes: &mut [u8], offset: u64) -> io::Res
     std::os::unix::fs::FileExt::read_exact_at(file, bytes, offset)
 }
 
-// Windows seek_read/seek_write take an explicit offset but may transfer
-// fewer bytes than asked, so loop like the unix `*_exact_at` helpers.
 #[cfg(windows)]
 fn write_all_at(file: &std::fs::File, mut bytes: &[u8], mut offset: u64) -> io::Result<()> {
     use std::os::windows::fs::FileExt;

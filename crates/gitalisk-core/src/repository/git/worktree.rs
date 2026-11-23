@@ -1,15 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Returns `true` if the repository at `repo_path` is a git worktree
-/// (`.git` is a file pointing to the main repo) rather than a regular
-/// repository (`.git` is a directory).
 pub fn is_worktree(repo_path: &Path) -> bool {
     repo_path.join(".git").is_file()
 }
 
-/// The root of the working tree that contains `path`: this checkout's own
-/// root, which for a worktree differs from `parent_repo_path`.
 pub fn toplevel(path: &Path) -> Result<PathBuf, std::io::Error> {
     let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
@@ -28,7 +23,6 @@ pub fn toplevel(path: &Path) -> Result<PathBuf, std::io::Error> {
     dunce::canonicalize(top)
 }
 
-/// Whether the repository's ignore rules exclude `path`.
 pub fn is_ignored(repo_path: &Path, path: &Path) -> bool {
     Command::new("git")
         .args(["check-ignore", "--quiet"])
@@ -39,7 +33,6 @@ pub fn is_ignored(repo_path: &Path, path: &Path) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-/// The origin repository root for a checkout; for a worktree, the main repo.
 pub fn parent_repo_path(repo_path: &Path) -> Result<PathBuf, std::io::Error> {
     let output = Command::new("git")
         .args(["rev-parse", "--git-common-dir"])
@@ -58,17 +51,12 @@ pub fn parent_repo_path(repo_path: &Path) -> Result<PathBuf, std::io::Error> {
         .trim()
         .to_string();
 
-    // Regular repos: git returns ".git" (relative) on all platforms.
-    // Worktrees: git returns an absolute path (Unix: "/home/user/repo/.git",
-    // Windows: "C:/Users/user/repo/.git"). Path::is_absolute() handles
-    // both formats. dunce::canonicalize at the end normalizes the result.
     let git_dir = if Path::new(&common_dir).is_absolute() {
         PathBuf::from(&common_dir)
     } else {
         repo_path.join(&common_dir)
     };
 
-    // The repo root is the parent of the .git directory.
     let root = git_dir
         .parent()
         .ok_or_else(|| std::io::Error::other("git common dir has no parent"))?;
@@ -125,8 +113,6 @@ mod tests {
         wt_path
     }
 
-    // ── is_worktree ─────────────────────────────────────────────
-
     #[test]
     fn regular_repo_is_not_worktree() {
         let repo = repo_with_commit();
@@ -145,8 +131,6 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         assert!(!is_worktree(tmp.path()));
     }
-
-    // ── parent_repo_path ──────────────────────────────────────────
 
     #[test]
     fn regular_repo_returns_itself() {
@@ -176,7 +160,6 @@ mod tests {
         assert_eq!(parent_repo_path(&wt2).unwrap(), main);
         assert_eq!(parent_repo_path(&wt3).unwrap(), main);
 
-        // And the main repo also returns itself.
         assert_eq!(parent_repo_path(&repo.path).unwrap(), main);
     }
 
@@ -185,8 +168,6 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         assert!(parent_repo_path(tmp.path()).is_err());
     }
-
-    // ── consistency with branch/commit ──────────────────────────
 
     #[test]
     fn worktree_has_different_branch_than_main() {
@@ -212,10 +193,8 @@ mod tests {
         let main_sha = crate::repository::git::commit::get_current_commit_hash(&repo.path).unwrap();
         let wt_sha = crate::repository::git::commit::get_current_commit_hash(&wt).unwrap();
 
-        // Worktree starts at the same commit as main.
         assert_eq!(main_sha, wt_sha);
 
-        // After a commit in the worktree, they diverge.
         std::fs::write(wt.join("new.txt"), "worktree file").unwrap();
         let add_out = Command::new("git")
             .args(["add", "."])
@@ -233,7 +212,6 @@ mod tests {
         let wt_sha_after = crate::repository::git::commit::get_current_commit_hash(&wt).unwrap();
         assert_ne!(main_sha, wt_sha_after);
 
-        // But parent_repo_path still resolves to the same root.
         assert_eq!(
             parent_repo_path(&wt).unwrap(),
             dunce::canonicalize(&repo.path).unwrap()

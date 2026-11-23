@@ -34,16 +34,12 @@ fn is_clickhouse_error_transient(error: &clickhouse::error::Error) -> bool {
     }
 }
 
-// ClickHouse error code 241 (MEMORY_LIMIT_EXCEEDED). Repeated OOMs signal
-// server-level memory pressure worth backing off from.
 fn is_memory_limit_exceeded(message: &str) -> bool {
     message.contains("MEMORY_LIMIT_EXCEEDED")
 }
 
 const SERVER_OVERLOAD_CODES: [&str; 2] = ["TOO_MANY_PARTS", "TOO_MANY_SIMULTANEOUS_QUERIES"];
 
-// Only the server-wide memory tracker adds `current RSS` to MEMORY_LIMIT_EXCEEDED.
-// A query or user limit ("Query memory limit exceeded") is the caller's problem.
 fn is_server_memory_limit(message: &str) -> bool {
     is_memory_limit_exceeded(message) && message.contains("current RSS")
 }

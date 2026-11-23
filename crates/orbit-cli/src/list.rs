@@ -5,9 +5,6 @@ use anyhow::Result;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-// Cast the enum and timestamp to text so JSON/CSV don't render them as a
-// dictionary index or epoch-millis integer. The ORDER BY qualifies the
-// table column so it sorts the TIMESTAMP, not the CAST alias.
 const MANIFEST_QUERY: &str = "SELECT \
        repo_path, \
        branch, \
@@ -41,8 +38,6 @@ mod tests {
     use crate::database::manifest;
     use crate::workspace::project_id_from_path;
 
-    // Mirrors `set_status`: only `indexed` rows get a timestamp, so
-    // non-indexed rows exercise the NULL `last_indexed_at` path.
     fn seed(db_path: &Path, rows: &[(&str, &str, &str, &str)]) {
         let client = duckdb_client::DuckDbClient::open(db_path).unwrap();
         client.initialize_schema(manifest::MANIFEST_DDL).unwrap();
@@ -102,8 +97,6 @@ mod tests {
         let db = tmp.path().join("manifest.duckdb");
         seed(&db, &[]);
         assert_empty_state_output(&db);
-        // DuckDB returns zero batches (not a 0-row batch) for an empty
-        // result, so there is no schema to print a CSV header from.
         assert!(render(Format::Csv, &db).is_empty());
     }
 
@@ -167,7 +160,6 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0]["repo_path"], "/tmp/repo-a");
         assert_eq!(rows[0]["status"], "indexed");
-        // The pending row has no timestamp and must sort last (NULLS LAST).
         assert_eq!(rows[1]["repo_path"], "/tmp/repo-b");
         assert!(rows[1].get("last_indexed_at").is_none_or(|t| t.is_null()));
     }

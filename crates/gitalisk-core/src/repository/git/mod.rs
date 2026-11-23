@@ -5,7 +5,6 @@ pub mod worktree;
 
 use std::path::PathBuf;
 
-/// Git emits raw bytes; on unix keep non-UTF-8 names intact.
 pub(crate) fn path_from_bytes(bytes: &[u8]) -> PathBuf {
     #[cfg(unix)]
     {

@@ -1,10 +1,3 @@
-//! Integration test: migration-triggered code backfill.
-//!
-//! When a schema migration is in progress (`gkg_schema_version` has a
-//! `migrating` row), the shared `CodeBackfill` active sweep must dispatch
-//! code indexing tasks for **all** enabled namespaces, not only for
-//! newly-enabled ones arriving via CDC events.
-
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -270,7 +263,6 @@ impl TestContext {
             .await
             .unwrap();
 
-        // Siphon stream consumed by the CDC path of the backfill dispatcher.
         jetstream
             .create_stream(async_nats::jetstream::stream::Config {
                 name: "siphon_stream_main_db".into(),
@@ -395,10 +387,6 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
     );
 }
 
-/// Coverage-driven backfill: a project is due when it is not indexed, is not a
-/// gap, and had no attempt within the retry wait. Without this, each tick
-/// re-dispatches the entire project list and relies on NATS per-subject dedup,
-/// which wedges as soon as any message hits max_deliver.
 #[tokio::test]
 async fn backfill_dispatches_only_projects_that_are_due() {
     let context = TestContext::new().await;
@@ -615,7 +603,6 @@ async fn migration_completion_checker_guards_against_two_migrating_versions() {
     context
         .given_migration(*SCHEMA_VERSION + 1, *SCHEMA_VERSION)
         .await;
-    // created_at is second-precision; +1s prevents a same-second tie with the embedded row.
     context
         .clickhouse
         .execute(&format!(

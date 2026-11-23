@@ -1,7 +1,3 @@
-//! OS-specific file access refuses host symlinks, including parent components.
-//! The kernel enforces this in one open: openat2 on Linux, O_NOFOLLOW_ANY on macOS.
-//! Windows opens and pins parents without write/delete sharing, rejecting all reparse points.
-
 use std::fs::File;
 use std::io;
 use std::path::Path;

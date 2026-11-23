@@ -10,7 +10,6 @@ pub(super) struct Term {
     pub(super) raw: String,
     regex: Option<(regex::Regex, regex::Regex)>,
     pub(super) assign: Option<regex::Regex>,
-    /// `-F`: the raw text exactly, so `_`, `-`, and spaces are not optional.
     fixed: bool,
 }
 

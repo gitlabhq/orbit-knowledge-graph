@@ -9,17 +9,10 @@ use crate::workspace::git_toplevel;
 
 pub(super) enum IndexOutcome {
     OutsideRepository,
-    /// `index_path` is what the user should pass to `orbit workspace index`.
-    NotIndexed {
-        index_path: String,
-    },
-    Indexed {
-        suggested_grep: Option<String>,
-    },
+    NotIndexed { index_path: String },
+    Indexed { suggested_grep: Option<String> },
 }
 
-/// A project setup is about its project root; a global setup is about the
-/// folder the command runs in.
 pub(super) fn repository_root(target: &Target) -> Option<PathBuf> {
     let folder = match target {
         Target::Project(root) => root.clone(),

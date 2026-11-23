@@ -1,6 +1,3 @@
-//! Directory walk as a [`FileStreamHooks`] source. Files are already on disk, so
-//! nothing is written — the walk only classifies.
-
 use std::io::Read;
 use std::path::Path;
 
@@ -9,9 +6,6 @@ use ignore::WalkBuilder;
 use super::inventory::FileInventory;
 use super::stream::{Decision, FileInventoryEntry, FileStreamHooks, StreamError, step};
 
-/// Walk `root` (honoring `.gitignore`, including dotfiles so resolver inputs
-/// survive), running every file through `hooks`. Returns the inventory of
-/// recorded files with their [`Decision`]. Paths are relative to `root`.
 pub fn walk_dir<H: FileStreamHooks>(
     root: &Path,
     hooks: &mut H,
@@ -19,9 +13,6 @@ pub fn walk_dir<H: FileStreamHooks>(
     let mut inventory = Vec::new();
     let mut content = Vec::new();
 
-    // git's listing semantics (matching the prior gitalisk listing): .gitignore
-    // + .git/info/exclude + dotfiles, but not ripgrep .ignore or global/ancestor
-    // ignores, and never `.git` itself (hidden(false) would enumerate it).
     let walker = WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
@@ -53,8 +44,6 @@ pub fn walk_dir<H: FileStreamHooks>(
             label: Default::default(),
         };
 
-        // A symlink has no content to sniff and is never a parse candidate; the
-        // hooks settle it, same as the tar source.
         let (decision, label) = if is_symlink {
             hooks.on_non_regular(&meta)
         } else {

@@ -1,6 +1,3 @@
-//! Host file access without following symlinks in any path component.
-//! Callers select trusted paths. Reads verify size but are not immutable snapshots.
-
 mod syscalls;
 
 use std::io::{self, Read};
@@ -93,8 +90,6 @@ fn inspect_in(
     })
 }
 
-// Looks up the leaf by path, not relative to `parent`. `File::read` re-validates
-// every component, so a swapped ancestor can at most misreport metadata.
 #[cfg(windows)]
 fn inspect_in(
     path: &Path,

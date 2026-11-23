@@ -1,7 +1,3 @@
-# Raw Rails noteable_type values as Siphon replicates them (post
-# Note#noteable_type= normalization): Issue and Epic collapse to WorkItem;
-# Commit has no ontology node, so its HAS_NOTE edge drops while the note
-# row itself still indexes.
 description: Notes index with AUTHORED and HAS_NOTE edges across noteable types
 scope: { namespace: 100 }
 

@@ -45,7 +45,7 @@ pub async fn run_server(
         .map_err(|e| Error::Config(format!("Failed to bind to {}: {}", bind_address, e)))?;
 
     info!(
-        // ast-grep-ignore: log-safe-field-is-plain -- a socket address from the Orbit config
+        // ast-grep-ignore: log-safe-field-is-plain
         safe(TCP_ADDRESS) = bind_address.to_string(),
         safe(TLS_ENABLED) = tls.is_some(),
         "Health check server listening"

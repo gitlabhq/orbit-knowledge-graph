@@ -1,8 +1,6 @@
 use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter, ObservableGauge, UpDownCounter};
 use serde::Serialize;
 
-/// The typed `build_*` methods panic if the spec's declared `kind` doesn't
-/// match the requested instrument type.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct MetricSpec {
     pub otel_name: &'static str,
@@ -44,8 +42,6 @@ pub enum Stability {
 }
 
 impl MetricSpec {
-    /// Histograms must go through [`histogram_f64`](Self::histogram_f64) or
-    /// [`histogram_u64`](Self::histogram_u64) because they require a bucket set.
     const fn instrument(
         otel_name: &'static str,
         description: &'static str,
@@ -174,9 +170,6 @@ impl MetricSpec {
         }
     }
 
-    /// Must match the name `opentelemetry-prometheus` produces: dots to
-    /// underscores, a UCUM unit suffix if the unit maps to one, then `_total`
-    /// for counters.
     pub fn prom_name(&self) -> String {
         let mut name = self.otel_name.replace('.', "_");
         if let Some(unit) = self.unit

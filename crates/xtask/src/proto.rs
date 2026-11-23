@@ -7,31 +7,18 @@ const PACKAGE: &str = "orbit-server-config";
 const SCHEMA: &str = "proto/orbit/config/v1/config.proto";
 const CRATE: &str = "prost-protovalidate-types";
 
-/// Regenerates the prost types and descriptor set for the server
-/// configuration schema into `crates/orbit-server-config/src/proto`.
-///
-/// The descriptor set is what carries the `buf.validate` rules to the loader,
-/// so a stale one stops enforcing them without any error. CI regenerates and
-/// fails on a diff.
-///
-/// This binary links `orbit-server-config`, so the committed output has to be
-/// present before it can be rebuilt.
 pub fn run() -> Result<()> {
     let crate_dir = repo_root().join("crates").join(PACKAGE);
     let out_dir = crate_dir.join("src/proto");
     std::fs::create_dir_all(&out_dir)
         .with_context(|| format!("failed to create {}", out_dir.display()))?;
 
-    // `validate.proto` comes from the crate the loader validates with, so the
-    // rules compiled into the descriptor are the ones the runtime understands.
     let protovalidate = protovalidate_proto_dir()?;
 
     prost_build::Config::new()
         .out_dir(&out_dir)
         .file_descriptor_set_path(out_dir.join("config_descriptor.bin"))
         .enable_type_names()
-        // Keeps prost-build from emitting Rust for the imported package; only
-        // the descriptor needs it, and the loader brings its own types.
         .extern_path(".buf.validate", "::prost_protovalidate_types")
         .compile_protos(
             &[&crate_dir.join(SCHEMA)],
@@ -70,9 +57,6 @@ fn protovalidate_proto_dir() -> Result<PathBuf> {
         .filter(|package| package["name"] == CRATE)
         .collect();
 
-    // Two versions in the graph means the generated rules and the validating
-    // ones could come from different schemas, which fails by quietly skipping
-    // a rule rather than by erroring.
     let [package] = found.as_slice() else {
         bail!(
             "expected exactly one {CRATE} in the dependency graph, found {}",

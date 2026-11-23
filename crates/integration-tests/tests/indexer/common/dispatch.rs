@@ -23,9 +23,6 @@ use orbit_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, Nat
 use siphon_proto::replication_event::{Column, Operation};
 use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
 
-/// Dispatchers publish to a fixed versioned stream, so the shared NATS container
-/// can't host concurrent scenarios: `serial` runs them one at a time and each run
-/// recreates the stream for a clean slate.
 pub struct DispatchScenarioHandlers {
     nats_url: String,
     serial: tokio::sync::Mutex<()>,

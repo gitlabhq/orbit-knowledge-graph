@@ -1,6 +1,3 @@
-//! NATS-level reconciliation metrics — housekeeping that acts on JetStream's
-//! own advisories rather than on indexed domain data.
-
 use crate::MetricSpec;
 
 pub mod labels {

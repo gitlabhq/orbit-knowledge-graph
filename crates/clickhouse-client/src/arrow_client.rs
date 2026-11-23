@@ -26,7 +26,6 @@ pub use clickhouse::QuerySummary;
 use crate::error::ClickHouseError;
 use crate::extract::FromArrowColumn;
 
-/// ClickHouse rejects an async insert that also carries `insert_quorum`.
 const ASYNC_INSERT_SETTING_KEYS: [&str; 2] = ["async_insert", "wait_for_async_insert"];
 
 const REPLICATION_TRANSIENTS: [&str; 11] = [
@@ -173,9 +172,6 @@ impl ArrowClickHouseClient {
         self
     }
 
-    /// Mark the client as read-only so ClickHouse cancels its queries when the
-    /// caller drops them. Never use it on a client that inserts or runs DDL.
-    /// Mode 2 rather than 1 because every query sends settings, which mode 1 forbids.
     pub fn read_only(mut self) -> Self {
         self.client = self.client.with_setting("readonly", "2");
         self
@@ -201,7 +197,6 @@ impl ArrowClickHouseClient {
         self.quorum_writes
     }
 
-    /// The connection points at a self-managed cluster with more than one replica.
     pub fn is_replicated(&self) -> bool {
         self.replicated
     }
@@ -214,8 +209,6 @@ impl ArrowClickHouseClient {
         }
     }
 
-    /// Use this for `INSERT` queries so they inherit async-insert and
-    /// other write-specific settings. Use `query()` for read operations.
     pub fn insert_query(&self, sql: &str) -> ArrowQuery {
         self.query(sql).with_settings(
             self.insert_settings
@@ -224,7 +217,6 @@ impl ArrowClickHouseClient {
         )
     }
 
-    /// Sorted so the emitted `SETTINGS` clause is deterministic.
     fn insert_settings_clause(&self, overrides: &[(&str, &str)]) -> String {
         let mut merged: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
         for (k, v) in &self.insert_settings {
@@ -394,8 +386,6 @@ impl ArrowClickHouseClient {
         &self.client
     }
 
-    /// Bind a named parameter to a query.
-    ///
     pub fn bind_param(
         query: ArrowQuery,
         key: &str,
@@ -454,9 +444,6 @@ impl ArrowClickHouseClient {
     }
 }
 
-/// ClickHouse's HTTP parameter parser for DateTime64 and Date rejects the ISO 8601
-/// trailing `Z` ("only 19 of 20 bytes was parsed"). Columns already pin UTC, so
-/// dropping it keeps the value.
 fn parameter_text(text: &str, temporal: bool) -> &str {
     if temporal {
         text.strip_suffix('Z').unwrap_or(text)
@@ -465,12 +452,6 @@ fn parameter_text(text: &str, temporal: bool) -> &str {
     }
 }
 
-/// Log a warning when array binding silently drops elements that don't
-/// match the expected scalar type (e.g. a string in an Int64 array).
-///
-/// In practice this should never fire: the query engine's `check_filter_types`
-/// validates values against the ontology column type, and the lowerer builds
-/// homogeneous arrays. This is purely defensive for `bind_param`'s public API.
 fn warn_on_dropped_elements(key: &str, scalar: &str, input: usize, bound: usize) {
     if bound != input {
         warn!(
@@ -499,7 +480,6 @@ pub struct ArrowQuery {
 
 type FirstChunk = (clickhouse::query::BytesCursor, Option<Bytes>);
 
-/// A quorum conflict arrives with the first chunk, before any rows, so only that read retries.
 async fn open_cursor(query: Query) -> Result<FirstChunk, ClickHouseError> {
     let mut cursor = query
         .fetch_bytes("ArrowStream")
@@ -537,7 +517,6 @@ impl ArrowQuery {
             .fold(self, |query, (name, value)| query.with_setting(name, value))
     }
 
-    /// For statements that are not idempotent, such as `ATTACH PARTITION ... FROM`.
     pub fn without_quorum_retry(mut self) -> Self {
         self.retry_quorum_conflicts = false;
         self
@@ -667,7 +646,6 @@ impl ArrowQuery {
                         return;
                     }
                 }
-                // Take whole chunks: the cursor's AsyncRead loses bytes when the next chunk is late.
                 next = tokio::select! {
                     biased;
                     _ = tx.closed() => return,

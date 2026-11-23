@@ -42,7 +42,6 @@ impl ClickHouseWriter {
         }
     }
 
-    /// Faster and more reliable than HTTP streaming for large files.
     pub fn load_parquet_file(&self, table_name: &str, parquet_path: &Path) -> Result<()> {
         let path_str = parquet_path.to_str().context("Invalid path encoding")?;
 

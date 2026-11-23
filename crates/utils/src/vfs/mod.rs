@@ -1,24 +1,3 @@
-//! A repository as a read-only filesystem, loaded once from a source.
-//!
-//! ```text
-//! Source ──put──▶ Loading<T> ──finish──▶ Vfs<T>
-//!                   │                      read / read_dir / stat
-//!                   ▼                      files / subtree / usage
-//!            Pass::metadata (&File)
-//!            Pass::content (&File)       →  Decision<T>: Keep(T) | List(why)
-//! ```
-//!
-//! Decisions are policy and belong to a [`Pass`]; where bytes live, when they
-//! are read and what a path resolves to is mechanism and belongs to the store.
-//! Virtual paths resolve lexically under `/`. Sources own transport and host-path validation.
-//! On-demand readers can return live content. Repeated reads can perform I/O again.
-//!
-//! Cancellation is cooperative between files, not an interrupt for blocked source I/O.
-//! Memory limits cover stored content, not node metadata, decompression or caller buffers.
-//! Every valid offered path is cataloged; duplicate paths use the last offered entry.
-//! Reader failures remain attached to content and are returned by `read`, without a policy change.
-//! Source failures, storage failures, cancellation, and global caps abort loading.
-
 mod limits;
 mod loading;
 mod policy;
@@ -67,7 +46,6 @@ pub enum SourceError {
 
 #[derive(Default)]
 pub struct Options {
-    /// Defaults to the system temporary directory; use a disk-backed volume to offload RAM.
     pub scratch_dir: Option<PathBuf>,
     pub compress_spill: bool,
     pub cancelled: Option<Box<dyn Fn() -> bool + Send + Sync>>,

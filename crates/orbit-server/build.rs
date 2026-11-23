@@ -6,8 +6,6 @@ fn main() {
     regenerate_protos();
 }
 
-/// libduckdb-sys 2.0 adds no rpath for a downloaded libduckdb, so a debug `gkg-server` run
-/// outside Cargo finds the library only through this one. Release builds compile DuckDB in.
 fn link_downloaded_duckdb() {
     println!("cargo:rerun-if-env-changed=DUCKDB_DOWNLOAD_LIB");
     let downloads = std::env::var("DUCKDB_DOWNLOAD_LIB")
@@ -23,12 +21,9 @@ fn link_downloaded_duckdb() {
     }
 }
 
-/// Points `ONTOLOGY_ARCHIVE_PATH` at the bundled archive for the current
-/// schema version.
 fn export_current_ontology_archive_path() {
     let directory = std::path::Path::new(env!("ORBIT_CONFIG_DIR")).join("ontology-archives");
     println!("cargo:rerun-if-changed={}", directory.display());
-    // Keep in sync with `OntologyArchive::path`.
     let current_path = directory.join(format!("v{}.tar.gz", orbit_versions::VERSIONS.schema));
     let resolved = current_path.canonicalize().unwrap_or_else(|_| {
         panic!(

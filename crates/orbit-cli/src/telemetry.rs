@@ -32,7 +32,6 @@ pub fn is_safe_identifier(value: &str) -> bool {
     SAFE_IDENTIFIER_RE.is_match(value)
 }
 
-/// Shared with the request trace id; a detached `send-event` child inherits its parent's.
 pub(crate) fn invocation_id() -> String {
     static ID: OnceLock<String> = OnceLock::new();
     ID.get_or_init(|| {
@@ -59,8 +58,6 @@ impl TelemetryConfig {
     }
 }
 
-/// Hands one command event to a detached `orbit send-event` child, so a command returns
-/// without waiting on the collector. Does nothing when telemetry is off.
 pub fn spawn_detached_event(command: &str, exit_code: i32, duration: Duration) {
     if !resolve_from_env().enabled {
         return;
@@ -245,7 +242,6 @@ pub fn detect_coding_agent(get_env: impl Fn(&str) -> Option<String>) -> Option<S
     }
 }
 
-/// glab sets `GITLAB_ORBIT_DISTRIBUTION=glab` on the binary it runs for `glab orbit`.
 pub fn detect_distribution(get_env: impl Fn(&str) -> Option<String>) -> Option<&'static str> {
     (get_env(DISTRIBUTION_ENV).as_deref() == Some(GLAB_DISTRIBUTION)).then_some(GLAB_DISTRIBUTION)
 }

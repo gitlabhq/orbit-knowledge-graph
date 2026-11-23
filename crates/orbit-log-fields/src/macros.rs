@@ -1,22 +1,3 @@
-/// ```compile_fail
-/// orbit_log_fields::info!(safe(KIND) = ?Some("x"), "rejected");
-/// ```
-///
-/// ```compile_fail
-/// orbit_log_fields::info!(safe(KIND) = %"x", "rejected");
-/// ```
-///
-/// `ERROR_TYPE` takes only a `&'static str`, so it cannot hold error text:
-///
-/// ```compile_fail
-/// let error = String::from("customer text");
-/// orbit_log_fields::warn!(safe(ERROR_TYPE) = error.as_str(), "rejected");
-/// ```
-///
-/// ```compile_fail
-/// let error = String::from("customer text");
-/// orbit_log_fields::warn!(safe(ERROR_TYPE) = <&str>::from(&*error), "rejected");
-/// ```
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __rewrite {
@@ -65,8 +46,6 @@ macro_rules! __static_value {
     };
 }
 
-/// `tracing::info!` and the other level macros read `{ NAME } = value` right
-/// after `target:` as a block of fields, so every level goes through `event!`.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __event {

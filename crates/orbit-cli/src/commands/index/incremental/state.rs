@@ -31,8 +31,6 @@ pub(super) struct Project<'a> {
 }
 
 impl Project<'_> {
-    /// Indexes every file and rewrites the whole graph. The snapshots go in
-    /// place once the rows are written.
     pub(super) fn index_all(&self) -> Result<Vec<FamilyOutput>> {
         let repository = input::directory(&self.git.repo_path)?;
         let families = input::split(&repository, None);
@@ -73,8 +71,6 @@ impl Project<'_> {
         self.finish(written, &staged, &names, owner)
     }
 
-    /// Reads the files changed since the last run and replaces only their
-    /// rows, the same way a refresh does.
     pub(super) fn index_changed(&self) -> Result<Vec<FamilyOutput>> {
         let saved = self.load_state()?;
         let owner = saved.owner.as_deref().and_then(SupportLang::from_family);
@@ -134,8 +130,6 @@ impl Project<'_> {
         self.finish(written.map(|()| outputs), &refresh.families, &names, owner)
     }
 
-    /// Puts the staged snapshots in place once the rows are written, and
-    /// drops them when they are not.
     fn finish<T>(
         &self,
         written: Result<T>,
@@ -259,7 +253,6 @@ fn snapshot_file(state_dir: &std::path::Path, family: SupportLang) -> PathBuf {
     state_dir.join(format!("graph.{}.bin", family.family()))
 }
 
-/// Freshness compares a file's mtime with the time its family last read it.
 fn set_read_time(snapshot: &std::path::Path, read_at: std::time::SystemTime) -> Result<()> {
     std::fs::File::options()
         .write(true)
@@ -294,7 +287,6 @@ pub(super) fn changed_since_snapshot(
         .collect()
 }
 
-/// A family's new rows, and its snapshot written beside the live one until the rows are applied.
 pub(super) struct Refreshed {
     pub family: SupportLang,
     pub replacement: Option<Replacement>,
@@ -303,8 +295,6 @@ pub(super) struct Refreshed {
     snapshot: PathBuf,
 }
 
-/// What a refresh writes: each family's rows, and the directories again
-/// when files came or went.
 pub(super) struct Refresh {
     pub families: Vec<Refreshed>,
     pub directories: Option<Vec<(String, RecordBatch)>>,
@@ -316,9 +306,6 @@ fn pending_file(snapshot: &std::path::Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// Writes the snapshot of `state` beside the live one at `snapshot`.
-/// `touched` names the files that changed since that one was read; without
-/// it every block is written.
 fn stage(
     env: &Env,
     state: &State,
@@ -344,7 +331,6 @@ fn stage(
     })
 }
 
-/// Puts each pending snapshot in place. The rename keeps the read time that freshness compares against.
 pub(super) fn commit_snapshots(refreshed: &[Refreshed]) -> Result<()> {
     for family in refreshed {
         State::commit_staged(&family.pending, &family.snapshot)
@@ -353,16 +339,12 @@ pub(super) fn commit_snapshots(refreshed: &[Refreshed]) -> Result<()> {
     Ok(())
 }
 
-/// Drops the pending snapshots, so the edited files still count as changed after a failed write.
 pub(super) fn discard_snapshots(refreshed: &[Refreshed]) {
     for family in refreshed {
         let _ = std::fs::remove_file(&family.pending);
     }
 }
 
-/// The working-tree files a refresh must read and remove: edited since
-/// their family read them, or not in any snapshot yet, as after a
-/// `git mv`; and gone, though a snapshot still holds them.
 pub(super) fn refresh_changes(
     repo: &std::path::Path,
     state_dir: &std::path::Path,
@@ -393,7 +375,6 @@ pub(super) fn refresh_changes(
     (changed, removed)
 }
 
-/// Each family's files, as its saved snapshot lists them.
 pub(super) type SavedFiles = BTreeMap<&'static str, Vec<String>>;
 
 pub(super) fn saved_files(state_dir: &std::path::Path, families: &[SupportLang]) -> SavedFiles {
@@ -408,7 +389,6 @@ pub(super) fn saved_files(state_dir: &std::path::Path, families: &[SupportLang])
 
 type ContextFor<'a> = dyn for<'e> Fn(&'e Env, Vec<String>) -> Result<Context<'e>> + 'a;
 
-/// How `orbit index` and a refresh read changed files into the saved graph.
 pub(super) struct Reader<'a> {
     pub git: &'a GitInfo,
     pub ontology: &'a ontology::Ontology,
@@ -423,7 +403,6 @@ pub(super) struct Reader<'a> {
 type FamilyWork = (SupportLang, Vec<String>, Vec<String>);
 
 impl Reader<'_> {
-    /// The files each family reads again and drops.
     pub(super) fn work(
         &self,
         changed: Vec<String>,
@@ -446,9 +425,6 @@ impl Reader<'_> {
         Ok(work)
     }
 
-    /// Reads each family's files, builds their new rows, and stages each
-    /// snapshot beside the live one. Nothing is in place until the rows are
-    /// written and [`commit_snapshots`] runs.
     pub(super) fn read(
         &self,
         work: BTreeMap<&'static str, FamilyWork>,
@@ -486,9 +462,6 @@ impl Reader<'_> {
         })
     }
 
-    /// Reads `paths` into one family and drops `removed`. A family the
-    /// snapshots do not have yet is indexed whole. Returns the family's files
-    /// now, and whether the set of them changed.
     fn read_family(
         &self,
         family: SupportLang,
@@ -531,8 +504,6 @@ impl Reader<'_> {
         Ok((staged, labels, added || state.trees.len() != before))
     }
 
-    /// The directory rows of every family's files: those just read, and the
-    /// saved file lists of the rest.
     fn directories(
         &self,
         read: BTreeMap<&'static str, Vec<String>>,
