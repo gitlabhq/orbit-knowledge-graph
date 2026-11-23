@@ -131,8 +131,6 @@ impl Dictionary {
     }
 }
 
-/// ClickHouse runs dictionary loads and view refreshes without the client's session settings,
-/// so their SQL repeats the session's `compatibility`.
 pub fn compatibility_clause(compatibility: Option<&str>) -> String {
     match compatibility {
         Some(version) => format!(" SETTINGS compatibility = {}", quote_sql_literal(version)),
@@ -168,8 +166,6 @@ impl GraphSchema {
         Self::from_ontology_replicated(ontology, false)
     }
 
-    /// `replicated` renders every MergeTree engine as its `Replicated*` variant for a
-    /// self-managed cluster; a `Replicated` database replicates DDL only.
     pub fn from_ontology_replicated(
         ontology: &Ontology,
         replicated: bool,

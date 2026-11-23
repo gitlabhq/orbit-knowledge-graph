@@ -60,8 +60,6 @@ fn named_queries_render_and_compile() {
     }
 }
 
-/// Fails on ontology/DDL drift from the fingerprint snapshot, a malformed
-/// ledger or a stale current archive.
 #[test]
 fn migration_ledger_matches_fingerprint_snapshot() {
     orbit_migrations::snapshot_check::verify_committed_snapshot(

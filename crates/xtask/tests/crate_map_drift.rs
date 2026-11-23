@@ -1,5 +1,3 @@
-//! Tests the drift parsers `include!`d from the same file `build.rs` uses.
-
 include!("../build_support/crate_map_drift.rs");
 
 #[test]

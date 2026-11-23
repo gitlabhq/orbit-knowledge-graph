@@ -20,16 +20,12 @@ use orbit_server_config::GitlabClientConfiguration;
 
 pub type ByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, GitlabClientError>> + Send>>;
 
-/// Rails expects this value when validating incoming tokens.
 pub const JWT_ISSUER: &str = "gitlab";
 
-/// Rails expects this value when validating incoming tokens.
 pub const JWT_AUDIENCE: &str = "gitlab-knowledge-graph";
 
-/// Rails validates that the subject starts with an expected prefix (e.g. "gkg-").
 pub const JWT_SUBJECT: &str = "gkg-indexer:code";
 
-/// The raw JWT token is sent directly as this header value (no `Bearer` prefix).
 const AUTH_HEADER: &str = "Gitlab-Orbit-Api-Request";
 
 const JWT_EXPIRY_SECONDS: i64 = 300;
@@ -98,10 +94,6 @@ impl GitlabClient {
     fn build_http_client(
         config: &GitlabClientConfiguration,
     ) -> Result<reqwest::Client, GitlabClientError> {
-        // reqwest is compiled with `rustls-no-provider`, so a CryptoProvider
-        // must be installed before building any client. The `install_default`
-        // call is idempotent — the Err case just means another caller already
-        // installed a provider.
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let mut builder = reqwest::Client::builder();
@@ -131,7 +123,6 @@ impl GitlabClient {
                 expanded(REMOTE_ADDR) = %addr,
                 "overriding DNS for base_url host"
             );
-            // Port 0 tells reqwest to use the port from the request URL.
             builder = builder.resolve(domain, SocketAddr::new(addr.ip(), 0));
         }
 

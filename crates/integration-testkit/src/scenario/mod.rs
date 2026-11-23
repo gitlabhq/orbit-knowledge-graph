@@ -1,7 +1,3 @@
-//! Each scenario file seeds datalake rows, runs one or more indexer
-//! handlers, and asserts on the resulting graph nodes and edges. See
-//! `config/schemas/indexer_scenario.schema.json` for the format.
-
 mod expect;
 mod format;
 pub(crate) mod seed;
@@ -24,16 +20,12 @@ pub use format::{
 };
 pub use seed::DEFAULT_REPLICATED_AT;
 
-/// A request a dispatch handler published, drained back for `expect.dispatched`.
-/// `kind` is the logical request type, free of the versioned NATS subject.
 #[derive(Debug, Clone)]
 pub struct DispatchedMessage {
     pub kind: String,
     pub payload: serde_json::Value,
 }
 
-/// Per-step inputs a handler may consume, folded into one argument so the trait
-/// stays stable as scenarios grow new inputs.
 #[derive(Clone, Copy)]
 pub struct HandlerInput<'a> {
     pub scope: Option<Scope>,
@@ -41,10 +33,6 @@ pub struct HandlerInput<'a> {
     pub cdc: &'a [CdcEvent],
 }
 
-/// Maps a scenario `run:` handler name to an actual indexer handler
-/// invocation. Implemented by test crates because handler construction
-/// depends on the `indexer` crate, which this crate must not depend on.
-/// Returns the requests a dispatch handler published; empty for graph handlers.
 #[async_trait]
 pub trait ScenarioHandlers: Send + Sync {
     async fn run(
@@ -55,13 +43,6 @@ pub trait ScenarioHandlers: Send + Sync {
     ) -> Vec<DispatchedMessage>;
 }
 
-/// Discover and run every scenario under `root` as a concurrent subtest
-/// with its own forked database. Pass an absolute path, e.g.
-/// `concat!(env!("CARGO_MANIFEST_DIR"), "/tests/indexer/scenarios/sdlc")`.
-///
-/// Set `SCENARIO_FILTER` to a substring to run only matching scenarios
-/// (matched against the `<dir>/<relative path>` name, so it selects by
-/// folder, e.g. `ci/`, or by name, e.g. `processes_jobs`).
 pub async fn run_dir(ctx: &TestContext, root: &str, handlers: Arc<dyn ScenarioHandlers>) {
     let root = Path::new(root);
     let mut files = Vec::new();
@@ -194,9 +175,6 @@ pub(crate) fn scenario_name(root: &Path, file: &Path) -> String {
     format!("{prefix}/{}", relative.display())
 }
 
-// database_name collapses every non-alphanumeric character to '_', so two scenario
-// paths differing only in such characters would fork the same database and silently
-// interfere. Catch the collision loudly before any task spawns.
 pub(crate) fn assert_distinct_database_names(names: impl IntoIterator<Item = String>) {
     let mut seen: HashMap<String, String> = HashMap::new();
     for name in names {

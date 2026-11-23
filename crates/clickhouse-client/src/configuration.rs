@@ -4,7 +4,6 @@ use orbit_server_config::ClickHouseConfiguration;
 
 use crate::arrow_client::ArrowClickHouseClient;
 
-/// Serialized inserts make `select_sequential_consistency` work; `async_insert` (on by default since 26.x) is rejected with a quorum.
 const QUORUM_SESSION_SETTINGS: [(&str, &str); 4] = [
     ("insert_quorum", "auto"),
     ("insert_quorum_parallel", "0"),
@@ -258,9 +257,6 @@ mod tests {
         assert!(config.url.contains("8123"));
     }
 
-    // Without the rustls-tls-* features on the `clickhouse` crate, any HTTPS
-    // URL is rejected immediately with "scheme is not http". This test guards
-    // against accidental removal of those features (e.g. by Renovate Bot).
     #[tokio::test]
     async fn test_https_url_does_not_fail_with_missing_tls() {
         let config = ClickHouseConfiguration {

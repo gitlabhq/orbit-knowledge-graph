@@ -1,21 +1,3 @@
-//! Corpus smoke test.
-//!
-//! Runs every GQL query in `fixtures/queries/corpus/` through the **same pipeline
-//! stages the webserver runs** (`QueryPipelineService::run_query`): Security ->
-//! Compilation -> ClickHouseExecutor -> Extraction ->
-//! Authorization -> Redaction -> Hydration -> Output, against a real ClickHouse
-//! seeded with the data-correctness fixture.
-//!
-//! The only substitution is the Authorization stage: the real one performs the
-//! GitLab-Rails authorization handshake over the gRPC stream, which has no
-//! in-memory equivalent, so it is replaced by an authorize-everything stage
-//! (the same thing every other server integration test mocks). Every other
-//! stage is the production stage, in the production order.
-//!
-//! This asserts the queries run end to end (compiled SQL + hydration plan are
-//! valid against the current schema), not result correctness. `expect: error`
-//! entries are deliberate invalid controls and must fail.
-
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
@@ -70,10 +52,6 @@ struct SmokeCase {
     frontend: Frontend,
 }
 
-/// Stand-in for the real `AuthorizationStage`, which authorizes resources via
-/// the GitLab-Rails handshake over the gRPC stream. Authorizes everything so
-/// the rest of the pipeline (redaction, hydration) runs on whatever rows the
-/// query returned.
 struct AuthorizeAllStage;
 
 impl PipelineStage for AuthorizeAllStage {
@@ -144,8 +122,6 @@ impl<S: PipelineStage> PipelineStage for Traced<'_, S> {
     }
 }
 
-/// Resolves any content lookup to a mock value so hydration of gitaly-backed
-/// virtual columns doesn't need a real Gitaly.
 struct MockColumnResolver;
 
 #[async_trait::async_trait]
@@ -185,7 +161,6 @@ fn load_corpus() -> Vec<SmokeCase> {
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| {
             p.extension().is_some_and(|x| x == "yaml")
-                // raw_sql_ab.yaml is a raw-SQL A/B suite, not DSL — not compilable here.
                 && p.file_name().is_some_and(|n| n != "raw_sql_ab.yaml")
         })
         .collect();
@@ -504,8 +479,6 @@ async fn corpus_smoke() {
 
     let ontology = load_ontology();
     let data_model = derive_clickhouse_data_model(&ontology);
-    // Admin claims -> Owner over org root, so access-gated entities are visible
-    // and the real SQL runs (not `WHERE false`).
     let claims = Claims::dummy();
 
     let corpus = load_corpus();

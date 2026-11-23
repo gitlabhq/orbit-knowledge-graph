@@ -1,13 +1,3 @@
-//! Entity-ETL coverage lives in the YAML scenarios under
-//! `tests/indexer/scenarios/sdlc/`, executed by `scenario_indexing`. The Rust
-//! subtests below cover the partitioning mechanics the scenario format does not
-//! model: per-run partition count and filtered checkpoint assertions (live vs
-//! tombstoned rows by key prefix).
-//!
-//! Each `#[tokio::test]` starts a single ClickHouse container and runs all
-//! subtests in parallel, forking an isolated database per subtest to avoid
-//! cross-test contamination while eliminating per-test container startup overhead.
-
 mod first_pass;
 mod keyset_paging;
 mod partitioning;

@@ -15,10 +15,8 @@ use crate::status_query::{
 };
 
 const MAX_SDLC_ATTEMPTS: i64 = 5;
-// The hourly sweep retries a dead run, so wait for two sweeps.
 const STALE_AFTER: TimeDelta = TimeDelta::hours(2);
 
-// Not `FINAL`: until a merge, a completed row still counts after an overlapping run's late page write.
 const PLAN_CHECKPOINTS_SQL: &str = "\
 SELECT root, plan, \
        maxIf(indexed_at, NOT _deleted AND _version >= tombstoned_at) AS last_completed_at, \
@@ -49,7 +47,6 @@ pub struct PlanCheckpoints {
 }
 
 impl PlanCheckpoints {
-    /// A run that completed with nothing indexed because the source table does not exist.
     pub fn is_source_unavailable(&self, plan: &str) -> bool {
         self.by_plan.get(plan).is_some_and(|checkpoint| {
             checkpoint.indexed_at.is_some() && checkpoint.watermark == DateTime::<Utc>::UNIX_EPOCH

@@ -1,10 +1,3 @@
-# ADR 013 happy path. The cross-project mentioner (1/100/400/) is a sibling
-# under the SAME top-level namespace as the mentioned noteable (1/100/200/);
-# v1 bounds resolution to the source top-level namespace, so it still
-# resolves. The MENTIONS edge points from mentioner → mentioned and lands
-# in the mentioned entity's (noteable's) namespace partition. Note rows
-# carry _siphon_replicated_at == created_at so the watermark window selects
-# them.
 description: System notes materialize MENTIONS edges, and nothing else
 scope: { namespace: 100 }
 

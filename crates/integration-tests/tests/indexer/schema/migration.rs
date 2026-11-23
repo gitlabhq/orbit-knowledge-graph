@@ -39,7 +39,6 @@ async fn setup() -> (TestContext, ontology::Ontology, MigrationMetrics) {
     let ontology = ontology::Ontology::load_embedded().unwrap();
     let metrics = MigrationMetrics::new();
 
-    // Mirror indexer startup: version table must exist before migration runs.
     ensure_version_table(&ctx.create_client()).await.unwrap();
 
     (ctx, ontology, metrics)
@@ -336,7 +335,6 @@ async fn held_lock_causes_timeout() {
     mock.set_lock("schema_migration");
     let lock_svc: Arc<dyn LockService> = Arc::new(mock);
 
-    // Migration polls every 5s × 60 iterations. Use paused time to skip the wait.
     tokio::time::pause();
 
     let result = migration::run_if_needed(
@@ -719,7 +717,6 @@ async fn repeated_status_write_survives_insert_block_dedup() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
 
-    // non_replicated_deduplication_window makes a single-node table dedup like Cloud's SharedMergeTree.
     ctx.execute(
         "CREATE TABLE gkg_schema_version \
          (version UInt32, \

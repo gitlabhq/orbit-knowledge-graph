@@ -294,7 +294,6 @@ fn write_file(repo: &std::path::Path, path: &str, text: &str) {
     std::fs::write(path, text).unwrap();
 }
 
-/// Every row of every graph table, in a stable order.
 fn graph_tables(data: &std::path::Path) -> Vec<Value> {
     [
         "gl_directory",
@@ -733,7 +732,6 @@ fn sequential_read_consistency() {
 fn unindexable_repo_records_error_in_manifest() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = tempfile::TempDir::new().unwrap();
-    // A commitless repo is discovered (.git exists) but git_info fails on HEAD.
     git(repo.path(), &["init"]);
 
     let ok = orbit_cmd()
@@ -1265,8 +1263,6 @@ fn workspace_sql_indexes_the_current_repository_on_first_use() {
     assert_eq!(counts, json!([{"n": 2}]));
 }
 
-/// `orbit` with no credentials and no glab on PATH, so skills commands never
-/// reach a real login or instance.
 fn hermetic_skills_cmd(cache: &std::path::Path) -> std::process::Command {
     let mut cmd = orbit_cmd();
     for key in [

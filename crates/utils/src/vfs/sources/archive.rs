@@ -1,7 +1,3 @@
-//! Gitaly tar.gz input is processed sequentially. Rejected bodies are streamed past, not retained.
-//! Entry paths are validated before stripping the archive root. Hard links name archive entries;
-//! symlink targets stay virtual. Malformed streams fail rather than returning partial contents.
-
 use std::io::Read;
 use std::sync::Arc;
 
@@ -239,7 +235,6 @@ mod tests {
         }
     }
 
-    // crates/utils/src/archive.rs::tests::extracts_and_strips_archive_root
     #[test]
     fn extracts_and_strips_archive_root() {
         let data = build_archive(&[
@@ -329,7 +324,6 @@ mod tests {
         }
     }
 
-    // crates/utils/src/archive.rs::tests::skips_pax_global_and_per_file_headers
     #[test]
     fn skips_pax_global_and_per_file_headers() {
         for valid_override in [false, true] {
@@ -399,7 +393,6 @@ mod tests {
         assert_eq!(&*vfs.read("other").unwrap(), b"other");
     }
 
-    // crates/utils/src/archive.rs::tests::skips_entry_outside_archive_root_and_keeps_the_rest
     #[test]
     fn skips_entry_outside_archive_root_and_keeps_the_rest() {
         let data = build_archive(&[
@@ -413,7 +406,6 @@ mod tests {
         assert_eq!(&*vfs.read("file3.rs").unwrap(), b"c");
     }
 
-    // crates/utils/src/archive.rs::tests::skips_entry_whose_name_is_too_long_and_keeps_the_rest — virtual names remain readable.
     #[test]
     fn retains_long_filename_and_keeps_the_rest() {
         let name = format!("{}.rs", "z".repeat(500));
@@ -427,7 +419,6 @@ mod tests {
         assert_eq!(&*vfs.read(&name).unwrap(), b"unwritable");
     }
 
-    // crates/utils/src/archive.rs::tests::skips_entry_whose_directory_name_is_too_long_and_keeps_the_rest — virtual directories have no host limit.
     #[test]
     fn retains_long_directory_and_keeps_the_rest() {
         let directory = "z".repeat(500);
@@ -443,7 +434,6 @@ mod tests {
         assert_eq!(vfs.read_dir(&directory).unwrap(), ["f.rs"]);
     }
 
-    // crates/utils/src/archive.rs::tests::rejects_path_traversal
     #[test]
     fn rejects_path_traversal() {
         for path in [
@@ -467,7 +457,6 @@ mod tests {
         }
     }
 
-    // crates/utils/src/archive.rs::tests::skips_symlink_escaping_target_directory
     #[test]
     fn escaping_symlinks_cannot_read_host_files() {
         let outside = tempfile::tempdir().unwrap();
@@ -486,7 +475,6 @@ mod tests {
         assert_eq!(std::fs::read(secret).unwrap(), b"host content");
     }
 
-    // crates/utils/src/archive.rs::tests::removes_skipped_symlinks_from_inventory — VFS catalogs unresolved links without making them readable.
     #[test]
     fn catalogs_unresolved_symlinks_without_readable_content() {
         let data = build_archive(&[
@@ -504,7 +492,6 @@ mod tests {
         assert_eq!(&*vfs.read("legit.txt").unwrap(), b"hello");
     }
 
-    // crates/utils/src/archive.rs::tests::allows_valid_internal_symlink
     #[test]
     fn allows_valid_internal_symlink() {
         let data = build_archive(&[
@@ -519,7 +506,6 @@ mod tests {
         );
     }
 
-    // crates/utils/src/archive.rs::tests::empty_and_truncated_bodies_are_classified_empty
     #[test]
     fn empty_and_truncated_bodies_are_classified_empty() {
         let full = build_archive(&[Entry::File("project-main/src/main.rs", b"fn main() {}")]);
@@ -528,7 +514,6 @@ mod tests {
         }
     }
 
-    // crates/utils/src/archive.rs::tests::list_only_files_are_recorded_but_not_written
     #[test]
     fn list_only_files_are_recorded_but_not_stored() {
         let data = build_archive(&[
@@ -566,7 +551,6 @@ mod tests {
         assert_eq!(vfs.usage().spilled, 0);
     }
 
-    // crates/utils/src/archive.rs::tests::text_file_larger_than_sniff_window_is_written_in_full
     #[test]
     fn text_file_larger_than_sniff_window_is_stored_in_full() {
         let body: Vec<u8> = (0..12_000).map(|i| ((i % 254) + 1) as u8).collect();
@@ -576,7 +560,6 @@ mod tests {
         assert_eq!(vfs.stat("big.txt").unwrap().len, body.len() as u64);
     }
 
-    // crates/utils/src/archive.rs::tests::oversize_entry_is_filtered_when_the_size_comes_from_a_pax_record
     #[test]
     fn oversize_entry_is_filtered_when_the_size_comes_from_a_pax_record() {
         let mut builder = tar::Builder::new(Vec::new());

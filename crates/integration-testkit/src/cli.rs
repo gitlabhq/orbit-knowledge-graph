@@ -20,7 +20,6 @@ pub fn orbit_cmd() -> Command {
     let mut cmd = Command::new(&bin);
     cmd.env("DYLD_LIBRARY_PATH", &lib);
     cmd.env("LD_LIBRARY_PATH", &lib);
-    // Keep a scratch folder from resolving to a checkout that encloses TMPDIR.
     cmd.env("GIT_CEILING_DIRECTORIES", std::env::temp_dir());
     cmd.current_dir(std::env::temp_dir());
     cmd
@@ -83,9 +82,6 @@ pub fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-/// Use this when the repo must be at a controlled location (e.g.
-/// nested inside another repo). For standalone repos, prefer
-/// [`create_test_repo`] which uses gitalisk's `LocalGitRepository`.
 pub fn init_repo_at(path: &Path, files: &[(&str, &str)]) {
     std::fs::create_dir_all(path).unwrap();
     for (name, content) in files {

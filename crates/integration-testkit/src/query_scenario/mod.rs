@@ -1,7 +1,3 @@
-//! YAML-driven query pipeline scenarios. Parallels `scenario/` for indexer
-//! tests but exercises the full query path: compile, execute, redact,
-//! hydrate, paginate, format, assert.
-
 mod datasets;
 mod duckdb;
 mod format;
@@ -52,9 +48,6 @@ pub(crate) use response::shown_private_detail;
 use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage};
 use orbit_server::redaction::QueryResult;
 
-/// Parse all YAML scenario files under `root` without executing them.
-/// Catches syntax errors and serde mismatches in `cargo nextest --lib`
-/// before the integration stage spins up Docker.
 pub fn validate_parse(root: &str) {
     let root = Path::new(root);
     let mut files = Vec::new();
@@ -78,7 +71,6 @@ fn read_scenarios(root: &Path, file: &Path) -> Vec<(String, QueryScenario)> {
         .collect()
 }
 
-/// Load a named seed preset from `presets/seed.yaml` and apply it.
 pub async fn load_yaml_seed(ctx: &TestContext, presets_dir: &str, name: &str) {
     let seed = seed_preset(Path::new(presets_dir), name);
     let columns = crate::scenario::seed::fetch_table_columns(ctx).await;
@@ -804,8 +796,6 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             expect.path_edges.len(),
             pids.len()
         );
-        // Sort both actual paths and expected paths by destination ID
-        // so the zip is deterministic regardless of path_ids() ordering.
         let mut actual_paths: Vec<_> = pids
             .iter()
             .map(|&pid| {

@@ -144,7 +144,6 @@ impl AnalyticsObserver {
     }
 }
 
-// RFC 6761 reserves .test for testing, so no real GitLab instance lives there.
 fn is_test_host(host: &str) -> bool {
     host.to_ascii_lowercase().ends_with(".test")
 }
@@ -302,7 +301,6 @@ mod tests {
         let data = &events[0].contexts()[1].data;
         assert_eq!(data["ch_read_rows"], 800);
         assert_eq!(data["ch_read_bytes"], 16000);
-        // Peak memory -- max, not sum.
         assert_eq!(data["ch_memory_usage"], 4_000_000);
     }
 

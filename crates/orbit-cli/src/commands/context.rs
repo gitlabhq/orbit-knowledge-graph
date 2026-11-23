@@ -317,7 +317,6 @@ enum Qualified {
     Code(crate::remote::code::Code, String),
 }
 
-/// Turns shorthand into context tokens. `!42`, `#7`, and `@ref` are relative to the `origin` project.
 fn qualify(target: &str) -> Option<Qualified> {
     let (name, value) = target.split_once(':')?;
     if value.is_empty() || value.starts_with(':') {
@@ -635,7 +634,6 @@ fn render_local(
     Ok((out, git, shown))
 }
 
-/// Warns that the graph describes the indexed commit when a shown file has changed since.
 fn edited_note(git: &workspace::GitInfo, edited: std::collections::BTreeSet<String>) -> String {
     match edited.is_empty() {
         true => String::new(),
@@ -647,8 +645,6 @@ fn edited_note(git: &workspace::GitInfo, edited: std::collections::BTreeSet<Stri
     }
 }
 
-/// A file read without a range stops here, saying how to read the rest, so a long file
-/// does not crowd out the other targets of the same call.
 const WHOLE_FILE_LINES: usize = 200;
 
 #[derive(Default)]
@@ -784,9 +780,6 @@ fn missing_note(missing: &[anyhow::Error]) -> String {
 
 const NAMED_MAX: usize = 5;
 
-/// Definitions whose FQN ends with `target`, so a bare name or `Class.method` finds
-/// `pkg.Class.method` and `Class::method` alike. With `file`, only definitions in that file,
-/// so `path:Name` reads `Name` where the path says it is.
 fn named(
     client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,

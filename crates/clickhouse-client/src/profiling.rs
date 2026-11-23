@@ -69,8 +69,6 @@ impl ArrowClickHouseClient {
         self.fetch_text(&format!("EXPLAIN PIPELINE {sql}")).await
     }
 
-    /// Flushes the query log first to ensure the entry is available.
-    /// `log_comment_match` must be a unique substring (e.g. a profiling UUID).
     pub async fn fetch_query_log(
         &self,
         log_comment_match: &str,
@@ -321,8 +319,6 @@ fn validate_query_id(query_id: &str) -> Result<(), ClickHouseError> {
     Ok(())
 }
 
-/// `clusterAllReplicas` wraps columns in `Nullable`, which ClickHouse
-/// serializes as strings in JSONEachRow format, so a value may be a number or a string.
 fn json_u64(v: &serde_json::Value) -> u64 {
     v.as_u64()
         .or_else(|| v.as_str().and_then(|s| s.parse().ok()))

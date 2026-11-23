@@ -22,8 +22,6 @@ pub(crate) fn current_branch(dir: &Path) -> Result<String, RemoteError> {
         .ok_or_else(|| no_branch("detached HEAD".to_string()))
 }
 
-/// Reads a branch from the context endpoint. A branch with a merge request returns the merge
-/// request, so the caller reads it in full, as for any merge request.
 pub(crate) async fn read_branch(
     client: &OrbitClient,
     project: &str,

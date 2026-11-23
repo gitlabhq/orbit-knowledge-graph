@@ -1,6 +1,3 @@
-# Seeds siphon_projects and the route table directly rather than via the
-# `projects:` pseudo-table, which writes version DEFAULT now() and would
-# outrank any dated row the move step seeds.
 description: Transferring a project to another subgroup does not duplicate its edges under the old path
 scope: { namespace: 100 }
 
@@ -22,9 +19,6 @@ steps:
           rows:
             - { source_id: 100, target_id: 1000, traversal_path: "1/100/1000/" }
 
-  # Rails rewrites the route row and touches the project. The pre-move route row
-  # stays readable until a merge collapses it, so the extract sees both paths and
-  # must not re-emit the project — or its edges — under the old one.
   - seed:
       checkpoint:
         - { key: ns.100.Project, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }

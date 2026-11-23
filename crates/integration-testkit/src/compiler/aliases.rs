@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 
-/// (alias, pipeline, phase, state field path): `alias` under `physical.<pipeline>` means `<phase>.<path>`.
 #[rustfmt::skip]
 const ALIASES: &[(&str, &str, &str, &str)] = &[
     ("logical",      "clickhouse",           "normalize",       "input"),

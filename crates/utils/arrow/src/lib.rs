@@ -24,14 +24,10 @@ pub enum ColumnValue {
     Null,
 }
 
-/// Types that can be extracted from a [`ColumnValue`], with fallback
-/// parsing from the string representation. Useful because ClickHouse
-/// hydration (`toJSONString(map(...))`) stringifies all values.
 pub trait FromColumnValue: Sized {
     fn from_column_value(v: &ColumnValue) -> Option<Self>;
 }
 
-/// Tries the native accessor first, then falls back to parsing from the string variant.
 macro_rules! impl_coerce {
     ($ty:ty, native: $accessor:ident) => {
         impl FromColumnValue for $ty {
@@ -79,15 +75,6 @@ impl ColumnValue {
             .map(|d| Self::datetime(Some(d)))
     }
 
-    /// Extract as the requested type, parsing from string if needed.
-    ///
-    /// ```
-    /// # use orbit_arrow::ColumnValue;
-    /// assert_eq!(ColumnValue::Int64(42).coerce::<i64>(), Some(42));
-    /// assert_eq!(ColumnValue::String("42".into()).coerce::<i64>(), Some(42));
-    /// assert_eq!(ColumnValue::String("hello".into()).coerce::<i64>(), None);
-    /// assert_eq!(ColumnValue::String("hello".into()).coerce::<String>(), Some("hello".into()));
-    /// ```
     pub fn coerce<T: FromColumnValue>(&self) -> Option<T> {
         T::from_column_value(self)
     }
@@ -128,8 +115,6 @@ impl ArrowUtils {
         map
     }
 
-    /// Look up a column by name and return its primitive value at the given row,
-    /// or `None` if the column is missing, cannot be downcast, or is null.
     pub fn get_column<T: ArrowPrimitiveType>(
         batch: &RecordBatch,
         col_name: &str,
@@ -146,8 +131,6 @@ impl ArrowUtils {
         Some(arr.value(row))
     }
 
-    /// Look up a column by name and return its `String` value at the given row,
-    /// or `None` if the column is missing, not a `StringArray`, or null.
     pub fn get_column_string(batch: &RecordBatch, col_name: &str, row: usize) -> Option<String> {
         let idx = batch.schema().index_of(col_name).ok()?;
         let arr = batch.column(idx).as_any().downcast_ref::<StringArray>()?;
@@ -157,9 +140,6 @@ impl ArrowUtils {
         Some(arr.value(row).to_string())
     }
 
-    /// Look up a `List<String>` column by name and collect its non-null elements
-    /// at the given row. Returns an empty vec if the column is missing, not a
-    /// `ListArray`, null at this row, or contains a non-`StringArray` inner type.
     pub fn get_string_list(batch: &RecordBatch, col_name: &str, row: usize) -> Vec<String> {
         let Some(idx) = batch.schema().index_of(col_name).ok() else {
             return Vec::new();
@@ -180,10 +160,6 @@ impl ArrowUtils {
             .collect()
     }
 
-    /// Look up a `List<Struct<Int64, String>>` column by name and collect its
-    /// non-null `(i64, String)` pairs at the given row. Returns an empty vec if the
-    /// column is missing, the list is null, or the inner struct doesn't have the
-    /// expected layout (at least two columns: `Int64Array` then `StringArray`).
     pub fn get_i64_string_pairs(
         batch: &RecordBatch,
         col_name: &str,
@@ -217,21 +193,14 @@ impl ArrowUtils {
             .collect()
     }
 
-    /// Returns `None` if the index is out of range or the column cannot be downcast to `A`.
     pub fn get_column_by_index<A: 'static>(batch: &RecordBatch, col: usize) -> Option<&A> {
         batch.column(col).as_any().downcast_ref::<A>()
     }
 
-    /// Returns `None` if the column is missing or cannot be downcast to `A`.
     pub fn get_column_by_name<'a, A: 'static>(batch: &'a RecordBatch, name: &str) -> Option<&'a A> {
         batch.column_by_name(name)?.as_any().downcast_ref::<A>()
     }
 
-    /// Convert a single Arrow array cell to its string representation.
-    ///
-    /// Covers all integer widths (Int8–Int64, UInt8–UInt64), Utf8,
-    /// LargeUtf8, Float64, Boolean, and all timestamp precisions.
-    /// Returns `None` for null cells or unsupported types.
     pub fn array_value_to_string(array: &dyn Array, row: usize) -> Option<String> {
         match Self::extract_value(array, row) {
             ColumnValue::Int64(v) => Some(v.to_string()),
@@ -302,16 +271,11 @@ impl ArrowUtils {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnType {
     Str,
-    /// Dictionary-encoded string for low-cardinality columns (edge_kind, language).
     DictStr,
     Int,
     Bool,
-    /// Microsecond-precision UTC timestamp.
     TimestampMicros,
-    /// `Array(String)` — variable-length list of strings.
     StrList,
-    /// `Array(String)` carried on the wire as dictionary keys. Use it when the
-    /// same handful of values repeat across rows; the column type is unchanged.
     DictStrList,
 }
 
@@ -425,7 +389,6 @@ impl Col {
     }
 }
 
-/// Returns `Err` if you call the wrong push variant for the column type.
 pub struct ColRef<'a> {
     name: &'a str,
     col: &'a mut Col,
@@ -554,32 +517,6 @@ impl ColRef<'_> {
     }
 }
 
-/// Schema-driven Arrow RecordBatch builder.
-///
-/// All columns are declared via `&[ColumnSpec]`. The builder manages typed
-/// column builders and produces a RecordBatch. No opinions about which
-/// columns exist or their order -- the caller controls the full schema.
-///
-/// ```
-/// use orbit_arrow::{BatchBuilder, ColumnSpec, ColumnType};
-///
-/// # struct Node { id: i64, path: String, name: String }
-/// # fn example(nodes: Vec<Node>) -> Result<(), Box<dyn std::error::Error>> {
-/// let specs = vec![
-///     ColumnSpec { name: "id".into(), col_type: ColumnType::Int, nullable: false },
-///     ColumnSpec { name: "path".into(), col_type: ColumnType::Str, nullable: false },
-///     ColumnSpec { name: "name".into(), col_type: ColumnType::Str, nullable: false },
-/// ];
-/// let batch = BatchBuilder::new(&specs, nodes.len())?
-///     .build(&nodes, |n, b| {
-///         b.col("id")?.push_int(n.id)?;
-///         b.col("path")?.push_str(&n.path)?;
-///         b.col("name")?.push_str(&n.name)?;
-///         Ok(())
-///     })?;
-/// # Ok(())
-/// # }
-/// ```
 #[derive(Debug)]
 pub struct BatchBuilder {
     specs: Vec<ColumnSpec>,
@@ -588,8 +525,6 @@ pub struct BatchBuilder {
     index: FxHashMap<String, usize>,
 }
 
-/// Distinct values a `LowCardinality` column is expected to hold before its
-/// dictionary has to grow.
 const DICT_VALUES_HINT: usize = 64;
 
 pub const BATCH_BYTES: usize = i32::MAX as usize / 2;
@@ -610,8 +545,6 @@ impl BatchBuilder {
                 ColumnType::Str => {
                     Col::Str(StringBuilder::with_capacity(cap, cap * 8), spec.nullable)
                 }
-                // The keys buffer is one i32 per row, so it needs the row
-                // capacity; left at zero it doubles and keeps the slop.
                 ColumnType::DictStr => Col::DictStr(
                     arrow::array::StringDictionaryBuilder::<arrow::datatypes::Int32Type>::with_capacity(
                         cap,
@@ -669,7 +602,6 @@ impl BatchBuilder {
         })
     }
 
-    /// Every call to `fill` must push exactly one value to each column.
     pub fn build<T>(
         mut self,
         items: &[T],
@@ -689,8 +621,6 @@ impl BatchBuilder {
         std::mem::replace(self, empty).finish().map(Some)
     }
 
-    /// Finalize into a `RecordBatch`. Use with `col(...)` when rows come from
-    /// more than one source and `build` (single slice) does not fit.
     pub fn finish(self) -> BatchResult<RecordBatch> {
         if let Some(expected) = self.cols.first().map(Col::len) {
             for (i, col) in self.cols.iter().enumerate().skip(1) {
@@ -717,34 +647,13 @@ impl BatchBuilder {
     }
 }
 
-/// Types that can serialize a slice of themselves into an Arrow
-/// [`RecordBatch`] via [`BatchBuilder`].
-///
-/// The `Ctx` type parameter carries pipeline-level values (e.g.
-/// project ID, branch) that aren't part of the domain struct.
-/// Defaults to `()` for types that don't need external context.
-///
-/// ```text
-/// let specs = ontology.local_entity_specs("File");
-/// let batch = FileNode::to_record_batch(&nodes, &specs, &ctx)?;
-/// ```
-/// Trait for row envelope columns that surround entity-specific data.
-/// Each consumer (DuckDB, ClickHouse) implements this with their own
-/// header columns (id, project_id, branch, traversal_path, _version, etc).
-///
-/// Row types call `ctx.write_header(b, id)` to emit the envelope,
-/// then write their own entity columns.
 pub trait RowEnvelope {
     fn write_header(&self, b: &mut BatchBuilder, id: i64) -> BatchResult<()>;
 
-    /// Column specs for the envelope (prepended to entity specs).
     fn header_specs(&self) -> Vec<ColumnSpec>;
 }
 
 pub trait AsRecordBatch<Ctx = ()>: Sized {
-    /// Write one row into `builder`. Must push exactly one value to
-    /// every column declared in the specs that were used to create the
-    /// builder. Returns `Err` if a referenced column is missing.
     fn write_row(&self, builder: &mut BatchBuilder, ctx: &Ctx) -> BatchResult<()>;
 
     fn to_record_batch(
@@ -776,11 +685,6 @@ pub fn batch_slice_bytes(batch: &RecordBatch) -> u64 {
         .sum()
 }
 
-/// Column type fixup for a RecordBatch before ClickHouse insertion.
-/// - Dictionary-encodes `Utf8` columns named in `dict_columns` to
-///   `Dictionary<Int32, Utf8>` for smaller IPC payloads.
-/// - Zeroes the null slots of temporal columns, since ClickHouse range-checks them
-///   before it applies the column default.
 pub fn prepare_batch(batch: &RecordBatch, dict_columns: &HashSet<String>) -> RecordBatch {
     let dict_type = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
     let (fields, columns): (Vec<Field>, Vec<ArrayRef>) = batch
@@ -1435,7 +1339,6 @@ mod tests {
             .unwrap()
             .build(&items, |item, b| {
                 b.col("id")?.push_int(*item)?;
-                // deliberately skip "name" on second row
                 if *item == 1 {
                     b.col("name")?.push_str("alice")?;
                 }

@@ -1,6 +1,3 @@
-//! The trait-specific forwarding `impl` for `MultiObserver<T>` lives in the
-//! consuming crate so this module stays trait-agnostic and dependency-free.
-
 pub struct MultiObserver<T: ?Sized> {
     observers: Vec<Box<T>>,
 }

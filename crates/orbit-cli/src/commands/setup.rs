@@ -1,10 +1,3 @@
-//! `orbit setup` and `orbit uninstall`. `spec` declares each agent from `config/setup/agents/`,
-//! `detect` finds the installed ones, `plan` lists the files a selection touches, and
-//! `components` installs or removes one `Component` at a time into a `Report`. `index_repo`
-//! indexes the current repository afterwards. `summary` turns all of it into text and `tui`
-//! draws it. Any pre-existing file gets a one-time `.orbit-backup` sibling before its first
-//! modification.
-
 mod components;
 pub(crate) mod detect;
 mod index_repo;
@@ -234,8 +227,6 @@ pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> 
     Ok(finish(&selection, Outcome::Applied))
 }
 
-/// Agents left without Orbit instructions because the component that loads them was skipped or
-/// could not be installed.
 fn missing_instructions(selection: &Selection, target: &Target) -> Vec<String> {
     selection
         .agents
@@ -269,7 +260,6 @@ fn ask_which_agents(
 const INSTALL_AGENT_PLUGINS: &str = "install";
 const SKIP_AGENT_PLUGINS: &str = "skip";
 
-/// Asks whether to install the agent plugins, starting on the recommended install.
 fn ask_install_agent_plugins(ui_agents: &[&str]) -> Result<bool> {
     let choices = [
         tui::Choice {
@@ -410,8 +400,6 @@ pub(crate) enum SkillKind {
     Full,
 }
 
-/// What `--skill` asked for, and the instance's full tree when one may be needed. Which kind
-/// each skills directory gets is decided at install time from the agents that share it.
 #[derive(Clone, Default)]
 pub(crate) struct SkillRequest {
     pub(crate) kind: Option<SkillKind>,
@@ -426,7 +414,6 @@ fn needs_instance_skill(request: &SkillRequest, selected: &[spec::Agent], target
     let needs_full = selected
         .iter()
         .any(|agent| agent.skills.as_ref().is_some_and(|dirs| dirs.requires_full));
-    // A rerun keeps `full`, so it needs the instance's tree again, not the embedded one.
     needs_full || components::records_full_skill(selected, target)
 }
 
@@ -1516,7 +1503,6 @@ mod tests {
         );
     }
 
-    /// A file as an earlier `orbit setup` wrote it: checksum stamp, then the body.
     fn stamped(body: &str) -> String {
         format!(
             "// orbit setup checksum: {}\n{body}",

@@ -1,5 +1,3 @@
-//! DuckDB dialect end-to-end tests.
-
 use crate::compiler_legacy::setup::test_ontology;
 use compiler::{Frontend, compile_local};
 

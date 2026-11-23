@@ -1,6 +1,3 @@
-//! Helpers for the `<org_id>/<namespace_id>/` traversal path format used
-//! throughout the indexer, NATS topic routing, and query profiler.
-
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
@@ -53,22 +50,14 @@ pub fn lowest_common_prefix(paths: &[TraversalPath]) -> TraversalPath {
     TraversalPath(out)
 }
 
-/// Regex (RE2) matching the top-level `<org_id>/<namespace_id>/` prefix of a
-/// traversal path. Anchor with `$` to match a path that is exactly top-level.
 pub const TOP_LEVEL_PREFIX_REGEX: &str = "^[0-9]+/[0-9]+/";
 
-/// Result of [`split_top_level`].
 pub struct TopLevelSplit {
-    /// Distinct IDs of top-level namespaces.
     pub ids: Vec<i64>,
-    /// Traversal paths of the top-level namespaces.
     pub paths: Vec<TraversalPath>,
-    /// `(id, path)` rows dropped for not being top-level.
     pub skipped: Vec<(i64, TraversalPath)>,
 }
 
-/// Partitions enabled `(id, path)` rows into top-level namespaces and the rows
-/// dropped for not being top-level.
 pub fn split_top_level(ids: Vec<i64>, paths: Vec<TraversalPath>) -> TopLevelSplit {
     let mut kept_ids = HashSet::new();
     let mut kept_paths = Vec::new();
@@ -145,11 +134,6 @@ impl TraversalPath {
         self.0.starts_with(&other.0) || other.0.starts_with(&self.0)
     }
 
-    /// A traversal path is valid when it matches `<org_id>/<namespace_id>/`
-    /// where both segments are unsigned integers.
-    ///
-    /// An empty or malformed path would cause `startsWith(traversal_path, '')`
-    /// to match every row in the table.
     pub fn is_valid(&self) -> bool {
         let Some(inner) = self.0.strip_suffix('/') else {
             return false;
@@ -181,15 +165,10 @@ impl TraversalPath {
         Ok(())
     }
 
-    /// A path is top-level when it is exactly `<org_id>/<namespace_id>/` (two
-    /// segments). Subgroups (three or more segments) are never indexed.
     pub fn is_top_level(&self) -> bool {
         self.segment_count() == 2
     }
 
-    /// Extract the organization ID (first segment) from a traversal path.
-    ///
-    /// Returns `None` when the path is empty or the first segment isn't numeric.
     pub fn organization_id(&self) -> Option<i64> {
         self.0
             .trim_start_matches('/')
@@ -198,23 +177,10 @@ impl TraversalPath {
             .and_then(|s| s.parse().ok())
     }
 
-    /// Extract the top-level namespace ID (second segment) from a traversal path.
-    ///
-    /// `"42/100/" → Some(100)`, `"42/100/1000/" → Some(100)`.
-    /// Returns `None` when the path has fewer than two segments or the second
-    /// segment isn't numeric.
     pub fn top_level_namespace_id(&self) -> Option<i64> {
         self.segments().nth(1).and_then(|s| s.parse().ok())
     }
 
-    /// The top-level-namespace prefix of a traversal path: the first two
-    /// segments with a trailing slash (`<org_id>/<top_level_ns_id>/`).
-    ///
-    /// `"42/100/" → Some("42/100/")`, `"42/100/1000/" → Some("42/100/")`.
-    /// Returns `None` when the path has fewer than two numeric segments, so a
-    /// malformed path can never produce `startsWith(traversal_path, "")` (which
-    /// would match every row). Used to bound the system-notes resolver scans to a
-    /// single top-level namespace partition.
     pub fn root_prefix(&self) -> Option<Self> {
         let mut segments = self.segments();
         let org = segments.next()?;
@@ -225,10 +191,6 @@ impl TraversalPath {
         Some(Self(format!("{org}/{top_level}/")))
     }
 
-    /// Extract the leaf namespace ID (last segment) from a traversal path.
-    ///
-    /// `"1/22/" → Some(22)`, `"1/22/33/" → Some(33)`. Returns `None` when the
-    /// path is empty or the last segment isn't numeric.
     pub fn leaf_id(&self) -> Option<i64> {
         self.0
             .trim_end_matches('/')
@@ -237,9 +199,6 @@ impl TraversalPath {
             .and_then(|s| s.parse().ok())
     }
 
-    /// Convert slash-separated segments to dot-separated, stripping empties.
-    ///
-    /// `"42/9970/" → "42.9970"`, `"42/9970/12345/" → "42.9970.12345"`.
     pub fn to_dotted(&self) -> String {
         self.segments().collect::<Vec<_>>().join(".")
     }

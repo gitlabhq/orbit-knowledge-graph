@@ -5,11 +5,6 @@ pub fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
-/// Wraps a string in quotes, escaping backslash, quote, newline, carriage return,
-/// and tab.
-///
-/// All other C0 control bytes and DEL (`0x7f`) are silently dropped. This policy is not
-/// lossless or JSON-compatible and must not be used when control-character fidelity matters.
 pub fn quote_escaped(value: &str) -> String {
     let mut output = String::with_capacity(value.len() + 2);
     output.push('"');
@@ -45,7 +40,6 @@ fn next_escape_byte(bytes: &[u8]) -> Option<usize> {
     control.or(quoted)
 }
 
-/// Returns the character count only when it exceeds `limit`.
 #[inline]
 pub fn char_count_if_exceeds(value: &str, limit: usize) -> Option<usize> {
     if value.len() <= limit {
@@ -55,7 +49,6 @@ pub fn char_count_if_exceeds(value: &str, limit: usize) -> Option<usize> {
     (count > limit).then_some(count)
 }
 
-/// Borrows values within `limit`; otherwise returns a prefix fitting `limit - suffix` plus `suffix`.
 pub fn truncate_chars<'a>(value: &'a str, limit: usize, suffix: &str) -> Cow<'a, str> {
     if char_count_if_exceeds(value, limit).is_none() {
         return Cow::Borrowed(value);
@@ -69,16 +62,10 @@ pub fn truncate_chars<'a>(value: &'a str, limit: usize, suffix: &str) -> Cow<'a,
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StrId(u32);
 
-/// Interning string pool. Identical strings return the same `StrId`,
-/// enabling O(1) equality checks via integer comparison.
 pub struct StringPool {
     buf: String,
     index: Vec<(u32, u32)>,
-    /// Maps (hash64, byte_len) → list of StrIds with that hash+len.
-    /// On lookup, each candidate is verified by full string comparison.
     intern_map: FxHashMap<(u64, u32), Vec<StrId>>,
-    /// Set by [`StringPool::seal`]. Interning after that point silently appends
-    /// duplicates, so for a sealed pool it is a bug rather than a slow path.
     sealed: bool,
 }
 
@@ -107,7 +94,6 @@ impl StringPool {
         }
     }
 
-    /// Intern a string. Returns the same `StrId` for identical content.
     pub fn alloc(&mut self, s: &str) -> StrId {
         debug_assert!(
             !self.sealed,
@@ -131,8 +117,6 @@ impl StringPool {
         id
     }
 
-    /// Look up a string's `StrId` without allocating. Returns `None` if the
-    /// string has never been interned.
     pub fn find(&self, s: &str) -> Option<StrId> {
         let key = (fxhash_str(s), s.len() as u32);
         let candidates = self.intern_map.get(&key)?;
@@ -153,16 +137,12 @@ impl StringPool {
         self.index.is_empty()
     }
 
-    /// Free the dedup index for a write-once pool. After this a repeat `alloc`
-    /// appends a second copy and `find` no longer sees the older ones.
     pub fn shrink_to_arena(&mut self) {
         self.intern_map = FxHashMap::default();
         self.buf.shrink_to_fit();
         self.index.shrink_to_fit();
     }
 
-    /// [`shrink_to_arena`](Self::shrink_to_arena) plus a debug assertion on later
-    /// `alloc`. Use it when the pool outlives the shrink, where a dup is a bug.
     pub fn seal(&mut self) {
         self.sealed = true;
         self.shrink_to_arena();
@@ -185,8 +165,6 @@ impl fmt::Debug for StringPool {
     }
 }
 
-/// Allocated once, reused via `clear()`; avoids per-call `format!()` heap
-/// allocations in hot paths.
 pub struct ScratchBuf(String);
 
 impl Default for ScratchBuf {

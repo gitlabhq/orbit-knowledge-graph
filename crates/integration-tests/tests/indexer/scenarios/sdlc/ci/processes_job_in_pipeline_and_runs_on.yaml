@@ -1,5 +1,3 @@
-# Runners are global-scope entities, so the global handler must run before
-# the namespace handler links jobs to them.
 description: Jobs link to pipelines and runners across global + namespace runs
 scope: { namespace: 100 }
 

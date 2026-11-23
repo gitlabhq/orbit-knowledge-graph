@@ -1,12 +1,3 @@
-# Simulator configuration - slim (quick smoke test)
-#
-# ~50 nodes, ~200 edges. Runs in seconds.
-#
-# Workflow:
-#   1. Generate data:  cargo synth generate -c crates/xtask/simulator-slim.yaml
-#   2. Load to CH:     cargo synth load -c crates/xtask/simulator-slim.yaml
-#   3. Evaluate:       cargo synth evaluate -c crates/xtask/simulator-slim.yaml
-
 clickhouse:
   url: http://localhost:8123
   database: default
@@ -21,10 +12,8 @@ clickhouse:
     engine: MergeTree
     index_granularity: 8192
 
-    # Use per-node sort_key from ontology YAML (matches graph.sql).
     use_ontology_sort_keys: true
 
-    # Edge table schema matches graph.sql exactly.
     edge_primary_key: [traversal_path, relationship_kind]
     edge_order_by: [traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind]
 
@@ -69,7 +58,7 @@ generation:
 
   relationships:
     CONTAINS:
-      "Group -> Group":               # 2 levels x 2 per parent = 14 total groups
+      "Group -> Group":
         count: 2
         max_depth: 2
       "Group -> Project": 2

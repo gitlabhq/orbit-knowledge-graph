@@ -1,13 +1,7 @@
-//! One filtering and limit surface for every file source. A repository's files
-//! arrive two ways — a Gitaly tar ([`crate::archive`]) and a directory walk
-//! ([`super::walk`]) — and both run every entry through one [`FileStreamHooks`]
-//! policy via [`step`]; the sources carry no filtering of their own.
-
 use std::path::{Component, Path};
 
 use rustc_hash::FxHashMap;
 
-/// Why a file was not loaded. Snake_case for metric labels.
 #[derive(
     Debug,
     Clone,
@@ -33,7 +27,6 @@ pub enum SkipReason {
     ExcludedDirectory,
 }
 
-/// Broad content class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ContentClass {
     #[default]
@@ -46,38 +39,24 @@ pub enum ContentClass {
     NonRegular,
 }
 
-/// Classification metadata carried on the entry.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FileLabel {
     pub skip: Option<SkipReason>,
     pub content: ContentClass,
-    /// Fine-grained content type from an external classifier (e.g.
-    /// Magika). The coarse `content` field drives routing decisions;
-    /// `detail` carries specificity for consumers that need it.
     pub detail: Option<String>,
     pub extension: Option<String>,
 }
 
-/// Per-file outcome of the hook pipeline. The two loaded states split the
-/// materialize axis from the parse axis: both `Parse` and `Load` make the bytes
-/// available (on disk for the tar source); only `Parse` is sent to a parser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, strum::Display, strum::AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum Decision {
-    /// Load the bytes and parse them. The only parse candidate downstream.
     #[default]
     Parse,
-    /// Load the bytes but don't parse — resolver inputs (manifests, etc.) and
-    /// content duplicates: available to resolvers, never sent to a parser.
     Load,
-    /// Record the file as a node without loading its bytes.
     ListOnly,
     Drop,
 }
 
-/// A file discovered in a repository, recorded whether or not its bytes were
-/// loaded. `decision` drives parse selection, so both sources agree without
-/// re-checking disk state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileInventoryEntry {
     pub path: String,
@@ -86,8 +65,6 @@ pub struct FileInventoryEntry {
     pub label: FileLabel,
 }
 
-/// Normalize each path, drop duplicates (first wins), and sort. Sources call
-/// this so every consumer receives one canonical inventory.
 pub fn canonicalize_inventory(entries: Vec<FileInventoryEntry>) -> Vec<FileInventoryEntry> {
     let mut by_path: FxHashMap<String, (u64, Decision, FileLabel)> = FxHashMap::default();
     for entry in entries {
@@ -111,8 +88,6 @@ pub fn canonicalize_inventory(entries: Vec<FileInventoryEntry>) -> Vec<FileInven
     entries
 }
 
-/// Normalize a `/`-joined relative path: drop `.` segments, reject anything that
-/// climbs out (`..`, root, prefix). `None` if nothing remains.
 fn normalize_relative_path(path: &str) -> Option<String> {
     let mut parts = Vec::new();
     for component in Path::new(path).components() {
@@ -133,50 +108,31 @@ pub struct CapExceeded {
     pub cap: u64,
 }
 
-/// Fatal, whole-stream failure: a cap tripped or the source could not be read,
-/// so the run is abandoned rather than indexing a partial/oversized repository.
 #[derive(Debug, thiserror::Error)]
 pub enum StreamError {
     #[error(transparent)]
     Cap(#[from] CapExceeded),
     #[error("source error: {0}")]
     Io(#[from] std::io::Error),
-    /// The source produced no entries (empty or truncated archive); callers
-    /// treat it as an empty repository, not a retryable failure.
     #[error("source contained no entries (empty or truncated stream)")]
     Empty,
 }
 
-/// Filtering policy for a file stream. Each method defaults to a pass-through.
-/// Returns `(Decision, FileLabel)` so the source stamps both on the entry.
 pub trait FileStreamHooks {
-    /// Charge aggregate counters; called for every entry (so excluded blobs
-    /// still count toward a total-bytes cap). `Err` aborts the stream.
     fn admit(&mut self, _file: &FileInventoryEntry) -> Result<(), CapExceeded> {
         Ok(())
     }
-    /// Settle from path + size alone, before any bytes are read. `Some` is
-    /// final; `None` reads the content. On a first pass over raw files,
-    /// `Parse` should only come from `on_content` (it needs bytes). On a
-    /// refinement pass (`FileInventory::refine`) the entry already carries a
-    /// prior label, so returning `Parse` from `on_header` is valid.
     fn on_header(&mut self, _file: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
         None
     }
-    /// Decide with the file's full (size-capped) content; only reached when
-    /// `on_header` returned `None`.
     fn on_content(&mut self, _file: &FileInventoryEntry, _content: &[u8]) -> (Decision, FileLabel) {
         (Decision::Parse, FileLabel::default())
     }
-    /// Settle a non-regular entry (symlink, etc.) — no content to sniff, never a
-    /// parse candidate. Routed here (instead of decided in the source) so the
-    /// filter stays the single decision point. Defaults to a bare node.
     fn on_non_regular(&mut self, _file: &FileInventoryEntry) -> (Decision, FileLabel) {
         (Decision::ListOnly, FileLabel::default())
     }
 }
 
-/// `content` is caller-owned to reuse across entries.
 pub fn step<H: FileStreamHooks>(
     hooks: &mut H,
     file: &FileInventoryEntry,
@@ -192,8 +148,6 @@ pub fn step<H: FileStreamHooks>(
     Ok(hooks.on_content(file, content))
 }
 
-/// A capped running total; the first `add` to overflow short-circuits the
-/// stream. `None` = unlimited.
 pub struct Counter {
     metric: &'static str,
     cap: Option<u64>,

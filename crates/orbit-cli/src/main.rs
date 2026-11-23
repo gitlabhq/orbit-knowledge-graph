@@ -24,10 +24,7 @@ use orbit_log_fields::debug;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-/// Only bounds commands too fast to hide a round trip behind their own work.
-/// Raising it buys no extra delivery and lengthens exit against a dead collector.
 const TELEMETRY_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
-/// A detached `send-event` child has no caller waiting, so it can give the collector longer.
 const DETACHED_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Parser)]
@@ -89,7 +86,6 @@ struct IndexArgs {
     #[arg(long = "async", conflicts_with_all = ["wait", "timeout", "stats", "verbose"], help = "Start the index in the background and return once it holds its locks")]
     detach: bool,
 
-    // Not read: blocking is already the default.
     #[arg(
         long,
         help = "Index in the foreground, first waiting for a running index of the same repository (the default)"
@@ -333,8 +329,6 @@ async fn run_grep(args: GrepArgs) -> Result<()> {
     commands::grep::run(query, args.repo, args.db, paths, options).await
 }
 
-/// grep and rg flags that `orbit grep` already behaves as: line numbers, recursion, ignoring
-/// case, skipping binaries, regex syntax, file names, and quiet errors.
 const GREP_NOOP_SHORTS: &str = "nrRiIEPHhsS";
 const GREP_NOOP_LONGS: &[&str] = &[
     "binary-files",
@@ -356,7 +350,6 @@ const GREP_NOOP_LONGS: &[&str] = &[
 
 const GLAB_UPDATE_COMMAND: &str = "update";
 
-/// glab owns `update` but forwards `--help` here, so list it under glab.
 fn cli_command(launcher: &str) -> clap::Command {
     let command = Cli::command();
     if launcher != commands::setup::spec::GLAB_LAUNCHER {
@@ -368,9 +361,6 @@ fn cli_command(launcher: &str) -> clap::Command {
     )
 }
 
-/// Lets `orbit grep` take rg and grep invocations as agents write them, so a stray flag costs no
-/// turn: flags it already behaves as are dropped, unsupported ones are dropped with a warning,
-/// and `-NUM` means `-C NUM`.
 fn tolerate_grep_flags(args: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
     if args.get(1).and_then(|arg| arg.to_str()) != Some("grep") {
         return args;
@@ -992,7 +982,6 @@ async fn main() -> Result<()> {
             exit_code,
         } => {
             send_event(command, *exit_code, Duration::from_millis(*duration_ms)).await;
-            // Skips the runtime's wait on blocking DNS lookups past the flush timeout.
             std::process::exit(0);
         }
         Commands::Refresh { repo, db, files } => {
@@ -1007,7 +996,6 @@ async fn main() -> Result<()> {
 
     let coding_agent = telemetry::detect_coding_agent(|key| std::env::var(key).ok());
 
-    // labkit-events ships no TLS provider; the tracker below builds an HTTPS client.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let tracker = match cli.command {
         Commands::Setup { .. } | Commands::Uninstall { .. } => {

@@ -1,22 +1,3 @@
-//! gRPC load-test subcommand.
-//!
-//! Replays the performance query corpus (the scenario YAML files under
-//! `crates/integration-tests/tests/server/performance/scenarios`) against a
-//! running Orbit server over gRPC and reports latency percentiles per query.
-//!
-//! It reuses the canonical proto and the generated `OrbitServiceClient` from
-//! `orbit-server`, and mints JWTs with the server's own `Claims` struct, so
-//! there is no vendored proto and no hand-rolled token to drift from the
-//! service. The bidirectional `ExecuteQuery` stream is driven end to end,
-//! auto-authorizing every resource in the redaction exchange.
-//!
-//! Each round runs every query once in a seeded shuffled order, sending
-//! `concurrency` requests at once, so slow server drift spreads across queries
-//! instead of landing on whichever ran last; warm-up rounds are discarded.
-//! Every request carries a correlation id that the server prefixes onto its
-//! ClickHouse `query_id`s, so `system.query_log` rows can be joined back to
-//! scenario and phase.
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -47,16 +28,12 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::Request;
 use tonic::transport::Channel;
 
-/// Fixed identity for the minted JWT, matching the seeded data.
 const USER_ID: u64 = 1;
 const USERNAME: &str = "root";
 const ORG_ID: u64 = 1;
 const MIN_ACCESS_LEVEL: u32 = 20;
-/// Token lifetime; generous so a long run never fails auth mid-flight.
 const TOKEN_TTL: i64 = 3600;
-/// gRPC metadata key the server's labkit correlation layer reads.
 const CORRELATION_HEADER: &str = "x-gitlab-correlation-id";
-/// Bound on each ClickHouse call so an unreachable host cannot stall the report.
 const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct Options {
@@ -79,7 +56,6 @@ pub struct ClickHouseOptions {
     pub password: Option<String>,
 }
 
-/// Minimal view of a scenario file; unknown fields are ignored on purpose.
 #[derive(Debug, Deserialize)]
 struct ScenarioFile {
     query: BTreeMap<String, String>,
@@ -90,7 +66,6 @@ struct LoadQuery {
     body: String,
 }
 
-/// Which pass a request belongs to; the code is embedded in the correlation id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Phase {
     Warmup,
@@ -119,18 +94,15 @@ impl Phase {
     }
 }
 
-/// Shared state for every request in a run.
 struct Ctx {
     client: OrbitServiceClient<Channel>,
     token: String,
     per_call: Duration,
     run_id: String,
     seed: u64,
-    /// Per-run counter so every correlation id is unique.
     seq: AtomicU64,
 }
 
-/// One pass: `rounds` rounds of `concurrency` requests per query, all in flight at once.
 #[derive(Clone, Copy)]
 struct PassSpec {
     phase: Phase,
@@ -196,7 +168,6 @@ pub async fn run(opts: Options) -> Result<()> {
         .await
         .with_context(|| format!("connecting to {}", opts.endpoint))?;
 
-    // Fail fast if the server is unreachable or the secret is wrong.
     client
         .get_cluster_health(authed(GetClusterHealthRequest::default(), &token, None))
         .await
@@ -246,14 +217,12 @@ pub async fn run(opts: Options) -> Result<()> {
     };
     print!("{}", render_report(&report));
 
-    // After the report, so CI still publishes it; a failing exit marks the job.
     if let Some(reason) = failure(&report.queries) {
         bail!("{reason}");
     }
     Ok(())
 }
 
-/// Why the run failed: any request errored or a query had no successful request.
 fn failure(queries: &[QuerySummary]) -> Option<String> {
     let bad: Vec<String> = queries
         .iter()
@@ -277,18 +246,14 @@ fn to_base36(mut n: u64) -> String {
     }
 }
 
-/// The server only adopts correlation ids made of `[A-Za-z0-9-]`.
 fn is_id_safe(id: &str) -> bool {
     !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
-/// `lt-<run_id>-<phase>-q<NN>-<seq>`.
 fn correlation_id(run_id: &str, phase: Phase, query_idx: usize, seq: u64) -> String {
     format!("lt-{run_id}-{}-q{query_idx:02}-{seq}", phase.code())
 }
 
-/// Recover `(phase, query index, seq)` from a correlation id or a ClickHouse
-/// `query_id` built from one (`<corr>-base-<ulid>`, `<corr>-hydration-...-<ulid>`).
 fn parse_correlation(run_id: &str, id: &str) -> Option<(Phase, usize, u64)> {
     let rest = id.strip_prefix(&format!("lt-{run_id}-"))?;
     let mut parts = rest.splitn(4, '-');
@@ -298,7 +263,6 @@ fn parse_correlation(run_id: &str, id: &str) -> Option<(Phase, usize, u64)> {
     Some((phase, idx, seq))
 }
 
-/// Seeded query order, stable for a given seed, phase and round.
 fn round_order(seed: u64, phase: Phase, round: usize, n: usize) -> Vec<usize> {
     let salt = (phase.code().as_bytes()[0] as u64) << 32 | round as u64;
     let mut rng =
@@ -308,7 +272,6 @@ fn round_order(seed: u64, phase: Phase, round: usize, n: usize) -> Vec<usize> {
     order
 }
 
-/// Per-query outcomes for one pass, with successful latencies kept per round.
 #[derive(Default)]
 struct QueryRun {
     rounds: Vec<Vec<f64>>,
@@ -351,7 +314,6 @@ async fn run_pass(ctx: &Ctx, queries: &[LoadQuery], spec: PassSpec) -> Vec<Query
     runs
 }
 
-/// Send `spec.concurrency` requests for one query at once, each with its own correlation id.
 async fn run_batch(
     ctx: &Ctx,
     idx: usize,
@@ -376,9 +338,6 @@ async fn run_batch(
         .await
 }
 
-/// Drive one `ExecuteQuery` stream to completion: send the request, answer any
-/// redaction request by authorizing every resource, then return on the result
-/// or error. Latency is measured by the caller across this whole exchange.
 async fn execute(
     client: &mut OrbitServiceClient<Channel>,
     token: &str,
@@ -454,38 +413,28 @@ async fn execute(
     }
 }
 
-/// Everything the report shows; rendering reads only this.
 struct Report {
     run_id: String,
     seed: u64,
     warmup_rounds: usize,
     rounds: usize,
     concurrency: usize,
-    /// One entry per scenario, in scenario-index order.
     queries: Vec<QuerySummary>,
-    /// ClickHouse stats per scenario index; `None` when not collected.
     server: Option<BTreeMap<usize, ServerStats>>,
-    /// One-line note about the ClickHouse columns (not collected, unavailable,
-    /// flush failed, or fewer requests matched than sent).
     server_note: Option<String>,
 }
 
-/// Client-side latency for one scenario over the measured rounds.
 struct QuerySummary {
     label: String,
     n: usize,
     err: usize,
-    /// Median of the per-round medians.
     med: f64,
     p90: f64,
     max: f64,
-    /// Sorted per-round medians (rounds with no successful request skipped).
     round_medians: Vec<f64>,
     errors: BTreeMap<String, usize>,
 }
 
-/// Pooled stats over all rounds, except `med`, which is taken over the
-/// per-round medians so one noisy round cannot shift it on its own.
 fn summarize(label: &str, run: QueryRun) -> QuerySummary {
     let mut pooled: Vec<f64> = run.rounds.iter().flatten().copied().collect();
     pooled.sort_by(f64::total_cmp);
@@ -511,7 +460,6 @@ fn summarize(label: &str, run: QueryRun) -> QuerySummary {
     }
 }
 
-/// `min–max (±X%)` of the round medians, where X is half the range as a share of Med.
 fn fmt_spread(sorted_meds: &[f64], med: f64) -> String {
     let (Some(lo), Some(hi)) = (sorted_meds.first(), sorted_meds.last()) else {
         return "-".to_string();
@@ -524,9 +472,6 @@ fn fmt_spread(sorted_meds: &[f64], med: f64) -> String {
     }
 }
 
-/// Markdown report: the run line (kept first; orbit-perf.sh inserts a line after
-/// it), one under-load table, errors in a text fence so `|` and backticks cannot
-/// break rendering, then the ClickHouse note.
 fn render_report(report: &Report) -> String {
     let c = report.concurrency;
     let mut out = format!(
@@ -562,7 +507,6 @@ fn render_report(report: &Report) -> String {
     out
 }
 
-/// Client and ClickHouse columns side by side; CH cells are `-` without stats.
 fn render_table(report: &Report) -> String {
     let mut table = Builder::default();
     table.push_record([
@@ -581,7 +525,6 @@ fn render_table(report: &Report) -> String {
     for (i, q) in report.queries.iter().enumerate() {
         let ch = report.server.as_ref().and_then(|s| s.get(&i));
         let cell = |f: fn(&ServerStats) -> String| ch.map_or_else(|| "-".to_string(), f);
-        // No successful request means no latency, not a latency of 0.
         let ms = |v: f64| if q.n == 0 { "-".to_string() } else { fmt_ms(v) };
         table.push_record([
             q.label.clone(),
@@ -600,11 +543,9 @@ fn render_table(report: &Report) -> String {
     table.build().with(Style::markdown()).to_string()
 }
 
-/// Per-scenario ClickHouse work, summed across a request's stages.
 #[derive(Debug, PartialEq)]
 struct ServerStats {
     med_read_rows: u64,
-    /// Largest stage memory of any request.
     peak_memory: i64,
     med_ms: u64,
     p90_ms: u64,
@@ -637,7 +578,6 @@ fn fmt_bytes(bytes: f64) -> String {
     }
 }
 
-/// One finished ClickHouse query from `system.query_log`.
 #[derive(Debug, Row, Deserialize)]
 struct QueryLogRow {
     query_id: String,
@@ -646,8 +586,6 @@ struct QueryLogRow {
     query_duration_ms: u64,
 }
 
-/// Finished queries for this run's measured pass, from the local
-/// `system.query_log` rather than `clusterAllReplicas`.
 fn server_stats_sql(run_id: &str) -> String {
     format!(
         "SELECT query_id, toUInt64(read_rows) AS read_rows, \
@@ -659,14 +597,11 @@ fn server_stats_sql(run_id: &str) -> String {
     )
 }
 
-/// Per-scenario ClickHouse stats and how many distinct requests they cover.
 struct ServerAggregate {
     stats: BTreeMap<usize, ServerStats>,
     matched: usize,
 }
 
-/// Fold stage rows into requests, then requests into per-scenario stats.
-/// Rows that are not this run's measured pass are ignored.
 fn aggregate_server(run_id: &str, rows: &[QueryLogRow]) -> ServerAggregate {
     #[derive(Default)]
     struct Req {
@@ -711,7 +646,6 @@ fn aggregate_server(run_id: &str, rows: &[QueryLogRow]) -> ServerAggregate {
     ServerAggregate { stats, matched }
 }
 
-/// Note for the ClickHouse columns when the flush failed or rows are missing.
 fn server_note(flush_error: Option<&str>, matched: usize, sent: usize) -> Option<String> {
     let mut parts = Vec::new();
     if let Some(e) = flush_error {
@@ -727,8 +661,6 @@ fn server_note(flush_error: Option<&str>, matched: usize, sent: usize) -> Option
     (!parts.is_empty()).then(|| parts.join(" "))
 }
 
-/// Flush and read `system.query_log`. A failed flush or fewer matched requests
-/// than `sent` is reported as a note; a failed connection or read is an error.
 async fn fetch_server_stats(
     opts: &ClickHouseOptions,
     run_id: &str,
@@ -765,8 +697,6 @@ async fn fetch_server_stats(
     Ok((agg.stats, note))
 }
 
-/// Index-based percentile over a pre-sorted slice (no interpolation), matching
-/// the previous driver's convention so numbers stay comparable.
 fn pct<T: Copy + Default>(sorted: &[T], p: f64) -> T {
     let idx = ((sorted.len() as f64) * p) as usize;
     sorted
@@ -788,7 +718,6 @@ fn truncate(msg: &str) -> String {
     }
 }
 
-/// Collapse whitespace so a multi-line error fits the one-line report note.
 fn one_line(msg: &str) -> String {
     truncate(&msg.split_whitespace().collect::<Vec<_>>().join(" "))
 }
@@ -823,9 +752,6 @@ fn mint_token(secret_b64: &str, admin: bool) -> Result<String> {
         token_type: None,
         license_checksum: None,
     };
-    // Rails base64-decodes the secret before signing; mirror that so the
-    // server's JwtValidator accepts the token. Fall back to raw bytes if the
-    // value is not valid base64.
     let key = STANDARD
         .decode(secret_b64.trim().as_bytes())
         .unwrap_or_else(|_| secret_b64.as_bytes().to_vec());
@@ -842,8 +768,6 @@ fn authed<T>(message: T, token: &str, correlation_id: Option<&str>) -> Request<T
     request
 }
 
-/// Recursively collect scenario files, using each file's path relative to the
-/// root (without extension) as its label.
 fn load_scenarios(root: &Path) -> Result<Vec<LoadQuery>> {
     let mut queries = Vec::new();
     collect(root, root, &mut queries)?;
@@ -865,7 +789,7 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<LoadQuery>) -> Result<()> {
         let scenario: ScenarioFile = orbit_utils::yaml::from_str(&text)
             .with_context(|| format!("parsing {}", path.display()))?;
         let Some(body) = scenario.query.get("json") else {
-            continue; // gql-only or non-executable scenario
+            continue;
         };
         let label = path
             .strip_prefix(root)
@@ -881,7 +805,6 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<LoadQuery>) -> Result<()> {
     Ok(())
 }
 
-/// Minimal view of a query body: the entity and pinned ids of each node.
 #[derive(Deserialize)]
 struct QueryNodes {
     #[serde(default)]
@@ -895,7 +818,6 @@ struct QueryNode {
     node_ids: Vec<i64>,
 }
 
-/// `(entity, id)` for every pinned node id in a query body, deduplicated.
 fn node_refs(body: &str) -> Result<Vec<(String, i64)>> {
     let parsed: QueryNodes = serde_json::from_str(body).context("parsing query.json")?;
     let mut refs: Vec<(String, i64)> = parsed
@@ -908,7 +830,6 @@ fn node_refs(body: &str) -> Result<Vec<(String, i64)>> {
     Ok(refs)
 }
 
-/// Print `<entity>\t<id>\t<label>` per pinned node id, so CI can check the ids exist.
 pub fn list_node_ids(scenarios: &Path, filter: Option<&str>) -> Result<()> {
     let queries = load_scenarios(scenarios)
         .with_context(|| format!("loading scenarios from {}", scenarios.display()))?;
@@ -1194,7 +1115,6 @@ mod tests {
             parse_correlation("123456", &id),
             Some((Phase::Measured, 7, 42))
         );
-        // ClickHouse query_ids append the stage and a ULID after the correlation id.
         let ulid = "01M7V5PMAW0H93HS96V7F9PA1B";
         assert_eq!(
             parse_correlation("123456", &format!("{id}-base-{ulid}")),
@@ -1266,7 +1186,6 @@ mod tests {
         assert_eq!(agg.matched, 4);
         let stats = agg.stats;
         assert_eq!(stats.len(), 2);
-        // Requests: (15 rows, 900 mem, 8 ms), (30, 700, 20), (20, 600, 10).
         assert_eq!(
             stats[&0],
             ServerStats {
@@ -1283,7 +1202,6 @@ mod tests {
     #[test]
     fn percentile_uses_nearest_rank_index() {
         let sorted: Vec<f64> = (1..=100).map(f64::from).collect();
-        // idx = (100 * p) as usize, clamped to the last element.
         assert_eq!(pct(&sorted, 0.5), 51.0);
         assert_eq!(pct(&sorted, 0.9), 91.0);
         assert_eq!(pct(&sorted, 0.99), 100.0);

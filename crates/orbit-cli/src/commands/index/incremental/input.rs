@@ -26,8 +26,6 @@ pub(super) fn directory(root: &Path) -> Result<Repository> {
     })
 }
 
-/// The per-path load fails on a parent that is no longer a real directory, and
-/// sparse checkout, skip-worktree or assume-unchanged can keep such paths listed.
 fn under_real_directories(root: &Path, path: &str) -> bool {
     Path::new(path)
         .ancestors()
