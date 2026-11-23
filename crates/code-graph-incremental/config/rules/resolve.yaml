@@ -74,7 +74,7 @@ resolve:
           - { to: '$O | type | member($M) | foreign', site: $ROOT }
           - { to: '$ROOT | sited(type_flow) | producing | member($M)', site: $ROOT }
     - '(__call (__callee $I:__ivar))':
-        calls: { to: 'lookup(@$I, $ROOT, enclosing | class) | foreign', site: $ROOT }
+        calls: { to: 'lookup(@$I, $ROOT, scope($ROOT) | class) | foreign', site: $ROOT }
     - '(__call (__callee "/./"))':
         calls: { to: 'targets($ROOT, false) | callable | foreign', site: $ROOT }
 

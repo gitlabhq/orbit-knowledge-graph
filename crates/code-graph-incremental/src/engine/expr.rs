@@ -36,6 +36,8 @@ pub enum Op {
     /// Matches of a declared index in every file.
     SelectProject(u32),
     Enclose,
+    /// The innermost scope above a node, or the node itself at the root.
+    Scope,
     /// Every ancestor of a node, innermost first.
     Ancestors,
     Follow(EdgeKind),
@@ -54,8 +56,6 @@ pub enum Op {
     Nodes,
     /// The last value of a set.
     Last,
-    /// The innermost scope the walk is in, or the file root.
-    Enclosing,
     /// Writes an edge from each node of the first set to each of the second,
     /// at the third's first node; a fourth set names the call resolution.
     Edge(EdgeKind, CallResolution),
@@ -341,13 +341,14 @@ impl<'s> Parser<'s, '_> {
                 }
                 return Ok(Expr::Op(Op::Project, Box::new([])));
             }
-            "enclose" | "ancestors" | "file" => {
+            "enclose" | "scope" | "ancestors" | "file" => {
                 let args = self.args(piped)?;
                 if args.len() != 1 {
                     return Err(self.error(&format!("{word} takes 1 argument")));
                 }
                 let op = match word {
                     "enclose" => Op::Enclose,
+                    "scope" => Op::Scope,
                     "ancestors" => Op::Ancestors,
                     _ => Op::File,
                 };

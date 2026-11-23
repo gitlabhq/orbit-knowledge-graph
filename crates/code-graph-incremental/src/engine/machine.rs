@@ -11,9 +11,7 @@ use super::expr::{Expr, Op, apply};
 use std::time::{Duration, Instant};
 
 use super::program::{Case, Cases, DefImpl, Scratch};
-use super::{
-    Cursor, FnId, Key, Loc, MAX_FIXPOINT_ROUNDS, Memo, Run, Store, Val, Vals, WALK, truthy,
-};
+use super::{Cursor, FnId, Key, Loc, MAX_FIXPOINT_ROUNDS, Memo, Run, Store, Val, Vals, truthy};
 
 type Args = SmallVec<[Vals; 3]>;
 
@@ -24,7 +22,7 @@ struct Pending {
     def: u16,
     args: Args,
     deps: u8,
-    epochs: [u64; WALK + 1],
+    epochs: [u64; super::SLOTS],
     outer: FxHashSet<Key>,
     reading: u8,
     rounds: u32,

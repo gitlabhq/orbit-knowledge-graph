@@ -432,7 +432,7 @@ impl Links {
             uses.push(called);
         }
         let own = |id: FnId| match function(id) {
-            f if f.kind == Kind::Flow && !f.required => (1 << f.slot) | (1 << WALK),
+            f if f.kind == Kind::Flow && !f.required => 1 << f.slot,
             _ => 0,
         };
         let mut deps: Vec<u8> = ids()
@@ -475,7 +475,7 @@ impl Links {
 }
 
 static TABLE: LazyLock<Vec<Entry>> = LazyLock::new(|| {
-    assert!(modules::ALL.len() < WALK);
+    assert!(modules::ALL.len() <= SLOTS);
     modules::ALL
         .iter()
         .enumerate()
@@ -513,7 +513,8 @@ macro_rules! fn_id {
     }};
 }
 
-const WALK: usize = 7;
+/// Module state slots; a dependency set is a `u8` mask over them.
+const SLOTS: usize = 8;
 
 type Key = (FnId, SmallVec<[Val; 4]>);
 
@@ -568,9 +569,8 @@ pub struct Run<'t, S: Store = Compact> {
     rows: Vec<Row>,
     /// The stage cases that fired at the node, each with what its value wrote.
     fired: Vec<(u16, Vec<Option<u32>>)>,
-    defs: Vec<u32>,
     states: Box<[Box<dyn Any>]>,
-    epochs: [u64; WALK + 1],
+    epochs: [u64; SLOTS],
     reading: u8,
     memo: Table,
     reads: FxHashSet<Key>,
@@ -638,9 +638,8 @@ impl<'t, S: Store> Run<'t, S> {
             edges: Vec::new(),
             rows: Vec::new(),
             fired: Vec::new(),
-            defs: Vec::new(),
             states: modules::ALL.iter().map(|m| (m.state)()).collect(),
-            epochs: [0; WALK + 1],
+            epochs: [0; SLOTS],
             reading: u8::MAX,
             memo: Table::default(),
             reads: FxHashSet::default(),
@@ -687,14 +686,6 @@ impl<'t, S: Store> Run<'t, S> {
             self.killed = Some(killed);
         }
         self.killed.is_none()
-    }
-
-    /// The innermost enclosing scope of the walk, or the file root.
-    pub(crate) fn enclosing_loc(&self) -> Loc {
-        Loc {
-            fi: self.fi,
-            node: self.defs.last().copied().unwrap_or(0),
-        }
     }
 
     /// Runs one of the engine's operations on evaluated arguments.
@@ -849,7 +840,11 @@ impl<'t, S: Store> Run<'t, S> {
                     push(&mut out, Val::Node(Loc { fi: at.fi, node: 0 }));
                 }
             }
-            Op::Enclosing => out.push(Val::Node(self.enclosing_loc())),
+            Op::Scope => {
+                for at in nodes(&args[0]) {
+                    push(&mut out, Val::Node(self.scope_above(at).unwrap_or(at)));
+                }
+            }
             Op::Edge(kind, fixed) => {
                 let site = args[2].first().and_then(|v| v.loc()).map(|l| l.node);
                 let call_resolution = match args.get(3).and_then(|v| v.first()) {
@@ -907,16 +902,6 @@ impl<'t, S: Store> Run<'t, S> {
                 .collect();
             self.rows.push(Row { shape, at, values });
         }
-    }
-
-    fn enter_def(&mut self, node: u32) {
-        self.defs.push(node);
-        self.epochs[WALK] += 1;
-    }
-
-    fn leave_def(&mut self) {
-        self.defs.pop();
-        self.epochs[WALK] += 1;
     }
 
     fn stamp(&self, deps: u8) -> u64 {
@@ -1157,7 +1142,7 @@ impl Links {
     }
 }
 
-fn stamp(epochs: &[u64; WALK + 1], mut deps: u8) -> u64 {
+fn stamp(epochs: &[u64; SLOTS], mut deps: u8) -> u64 {
     let mut sum = 0;
     while deps != 0 {
         sum += epochs[deps.trailing_zeros() as usize];
@@ -1545,18 +1530,6 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
 
     pub fn call1(&mut self, id: FnId, arg: Val) -> Vals {
         self.call(id, &[one(arg)])
-    }
-
-    pub fn enclosing(&mut self) -> u32 {
-        self.enclosing_def().unwrap_or(0)
-    }
-
-    pub fn enclosing_def(&mut self) -> Option<u32> {
-        debug_assert!(
-            self.run.reading & (1 << WALK) != 0,
-            "walk read outside Flow"
-        );
-        self.run.defs.last().copied()
     }
 
     pub fn emit(&mut self, edge: Edge) {

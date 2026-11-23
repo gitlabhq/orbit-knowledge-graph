@@ -6,7 +6,7 @@ link:
 
   def:
     - '(__def (__defname "/./") $$$S:__supertype)':
-        defines: { from: enclosing_def, to: $ROOT }
+        defines: { from: 'minus(scope($ROOT), file($ROOT))', to: $ROOT }
         extends: { from: $ROOT, to: '$ROOT | supers' }
 
   decorator:
@@ -58,7 +58,7 @@ link:
           - { to: '$ROOT | mod.ssa.deferred | unmatched($M) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
     - '(__call (__callee (__member)))': none
     - '(__call (__callee $I:__ivar))':
-        calls: { to: 'lookup(@$I, $ROOT, enclosing | class)', site: $ROOT }
+        calls: { to: 'lookup(@$I, $ROOT, scope($ROOT) | class)', site: $ROOT }
     - '(__call (__callee "/./")) when targets($ROOT, false)':
         calls: { to: 'targets($ROOT, false) | callable', site: $ROOT }
         imports: { to: 'targets($ROOT, false) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }

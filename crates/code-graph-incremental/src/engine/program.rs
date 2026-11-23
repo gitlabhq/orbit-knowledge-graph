@@ -1289,7 +1289,7 @@ impl Loader<'_> {
         let to = self.parse(to, slots)?;
         let from = match from {
             Some(f) => self.parse(f, slots)?,
-            None => Expr::Op(Op::Enclosing, Box::new([])),
+            None => Expr::Op(Op::Scope, Box::new([Expr::Var(0)])),
         };
         let site = match site {
             Some(s) => self.parse(s, slots)?,
@@ -1508,33 +1508,20 @@ impl<S: Store> Scratch<S> {
 }
 
 impl Phase {
-    /// Walks a tree in source order and runs the edges or rows rules at each
-    /// node, with the innermost enclosing scope known. `all` visits the root.
+    /// Runs the edges or rows rules at each node of a tree in source order.
+    /// `all` visits the root.
     pub fn flow<'t, S: Store>(&'t self, run: &mut Run<'t, S>, root: Cursor<'_, S>, all: bool) {
-        let mut stack: Vec<(u32, bool)> = match all {
-            true => vec![(root.index(), false)],
-            false => root.children_rev().map(|c| (c.index(), false)).collect(),
+        let Body::Rules(rules, slots) = &self.body else {
+            return;
         };
-        while let Some((node, leaving)) = stack.pop() {
+        let nodes = root.descendants();
+        for c in all.then_some(root).into_iter().chain(nodes) {
             if !run.step() {
                 return;
             }
-            if leaving {
-                run.leave_def();
-                continue;
-            }
-            let c = root.jump(root.fi(), node);
-            let Body::Rules(rules, slots) = &self.body else {
-                return;
-            };
             if rules.tries(c.kind()) {
                 super::machine::fire(run, rules, *slots, c.into());
             }
-            if self.enclosing.contains(&c.kind()) {
-                run.enter_def(c.index());
-                stack.push((c.index(), true));
-            }
-            stack.extend(c.children_rev().map(|child| (child.index(), false)));
         }
     }
 

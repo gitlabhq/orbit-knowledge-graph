@@ -1,6 +1,6 @@
 define:
   name(ROOT): 'minus(read($ROOT), opaque)'
-  ivar(ROOT): "first(select_all(enclosing | class, '(__binding $I:__ivar)', $ROOT), b => typed_field(b)) | producer"
+  ivar(ROOT): "first(select_all(scope(ROOT) | class, '(__binding $I:__ivar)', $ROOT), b => typed_field(b)) | producer"
   typed_field(ROOT):
     '_ when typed($ROOT)': '$ROOT'
   resolution(ROOT, site):
@@ -135,7 +135,7 @@ define:
     '(_ #labelled)': '$ROOT'
   targets(ROOT, implicit):
     '(__call $K:(__callee "/./")) when read($K)': 'read($K) | read_target(implicit) | member_for($ROOT)'
-    '(__call $K:(__callee "/./")) when implicit': 'members(enclosing | class, $K, cursor_role($ROOT))'
+    '(__call $K:(__callee "/./")) when implicit': 'members(scope($ROOT) | class, $K, cursor_role($ROOT))'
   read_target(ROOT, implicit):
     '_ when implicit': 'named_value($ROOT)'
     '(_)': '$ROOT'
