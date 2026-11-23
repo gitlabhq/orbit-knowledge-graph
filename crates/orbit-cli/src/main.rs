@@ -43,51 +43,64 @@ struct Cli {
 
 #[derive(Args, Debug, PartialEq)]
 struct RetryArgs {
-    /// Retries for rate-limited or unreachable requests; 0 disables them.
     #[arg(
         long,
         env = "ORBIT_RETRIES",
         value_name = "N",
-        default_value_t = remote::retry::DEFAULT_RETRIES
+        default_value_t = remote::retry::DEFAULT_RETRIES,
+        help = "Retries for rate-limited or unreachable requests; 0 disables them",
     )]
     retries: u32,
 }
 
 #[derive(Args, Debug, PartialEq)]
 struct IndexArgs {
-    /// Repository path, a folder inside one, or a directory that holds repositories (default: current directory).
-    #[arg(value_name = "PATH", default_value = ".")]
+    #[arg(
+        value_name = "PATH",
+        default_value = ".",
+        help = "Repository path, a folder inside one, or a directory that holds repositories (default: current directory)"
+    )]
     path: PathBuf,
 
-    /// Include detailed statistics, with the slowest files per phase
-    #[arg(short, long)]
+    #[arg(
+        short,
+        long,
+        help = "Include detailed statistics, with the slowest files per phase"
+    )]
     stats: bool,
 
-    /// Verbose logging to stderr
-    #[arg(short, long)]
+    #[arg(short, long, help = "Verbose logging to stderr")]
     verbose: bool,
 
-    /// DuckDB file to write (default: ~/.gitlab/orbit/graph.duckdb).
-    #[arg(long, value_name = "PATH")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "DuckDB file to write (default: ~/.gitlab/orbit/graph.duckdb)"
+    )]
     db: Option<PathBuf>,
 
-    /// Seconds a language family may take before the run stops (default: no limit).
-    #[arg(long, value_name = "SECONDS")]
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        help = "Seconds a language family may take before the run stops (default: no limit)"
+    )]
     budget: Option<u64>,
 
-    /// Start the index in the background and return once it holds its locks.
-    #[arg(long = "async", conflicts_with_all = ["wait", "timeout", "stats", "verbose"])]
+    #[arg(long = "async", conflicts_with_all = ["wait", "timeout", "stats", "verbose"], help = "Start the index in the background and return once it holds its locks")]
     detach: bool,
 
-    /// Index in the foreground, first waiting for a running index of the same repository
-    /// (the default).
     // Not read: blocking is already the default.
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Index in the foreground, first waiting for a running index of the same repository (the default)"
+    )]
     wait: bool,
 
-    /// Seconds to wait for a running index or open readers before exiting with code 75
-    /// (default: ORBIT_WAIT_TIMEOUT_MS, else 600).
-    #[arg(long, value_name = "SECONDS")]
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        help = "Seconds to wait for a running index or open readers before exiting with code 75 (default: ORBIT_WAIT_TIMEOUT_MS, else 600)"
+    )]
     timeout: Option<u64>,
 
     #[arg(long, value_name = "PATH", hide = true, conflicts_with = "detach")]
@@ -122,82 +135,134 @@ struct GrepArgs {
     )]
     query: Option<String>,
 
-    /// A pattern to search for, as with `rg -e`; repeatable. QUERY is then read as a path.
-    #[arg(short = 'e', long, value_name = "PATTERN")]
+    #[arg(
+        short = 'e',
+        long,
+        value_name = "PATTERN",
+        help = "A pattern to search for, as with `rg -e`; repeatable. QUERY is then read as a path"
+    )]
     regexp: Vec<String>,
 
-    /// Match each pattern as a literal string, not a regex.
-    #[arg(short = 'F', long)]
+    #[arg(
+        short = 'F',
+        long,
+        help = "Match each pattern as a literal string, not a regex"
+    )]
     fixed_strings: bool,
 
-    /// Only match whole words.
-    #[arg(short = 'w', long)]
+    #[arg(short = 'w', long, help = "Only match whole words")]
     word_regexp: bool,
 
-    /// Print the lines that do not match.
-    #[arg(short = 'v', long)]
+    #[arg(short = 'v', long, help = "Print the lines that do not match")]
     invert_match: bool,
 
-    /// Print NUM lines after each match.
-    #[arg(short = 'A', long, value_name = "NUM")]
+    #[arg(
+        short = 'A',
+        long,
+        value_name = "NUM",
+        help = "Print NUM lines after each match"
+    )]
     after_context: Option<usize>,
 
-    /// Print NUM lines before each match.
-    #[arg(short = 'B', long, value_name = "NUM")]
+    #[arg(
+        short = 'B',
+        long,
+        value_name = "NUM",
+        help = "Print NUM lines before each match"
+    )]
     before_context: Option<usize>,
 
-    /// Print NUM lines before and after each match; `-NUM` works too.
-    #[arg(short = 'C', long = "context", value_name = "NUM")]
+    #[arg(
+        short = 'C',
+        long = "context",
+        value_name = "NUM",
+        help = "Print NUM lines before and after each match; `-NUM` works too"
+    )]
     context_lines: Option<usize>,
 
-    /// Stop after NUM matching lines in each file.
-    #[arg(short = 'm', long, value_name = "NUM")]
+    #[arg(
+        short = 'm',
+        long,
+        value_name = "NUM",
+        help = "Stop after NUM matching lines in each file"
+    )]
     max_count: Option<u64>,
 
-    /// Print only the paths of files with matches.
-    #[arg(short = 'l', long)]
+    #[arg(short = 'l', long, help = "Print only the paths of files with matches")]
     files_with_matches: bool,
 
-    /// Print each matching file with its number of matching lines.
-    #[arg(short = 'c', long)]
+    #[arg(
+        short = 'c',
+        long,
+        help = "Print each matching file with its number of matching lines"
+    )]
     count: bool,
 
-    /// Print nothing; exit 0 when something matches and 1 otherwise.
-    #[arg(short = 'q', long)]
+    #[arg(
+        short = 'q',
+        long,
+        help = "Print nothing; exit 0 when something matches and 1 otherwise"
+    )]
     quiet: bool,
 
-    /// Search only files matching GLOB, or skip them with a leading `!`, as with `rg -g`;
-    /// repeatable.
-    #[arg(short = 'g', long, value_name = "GLOB")]
+    #[arg(
+        short = 'g',
+        long,
+        value_name = "GLOB",
+        help = "Search only files matching GLOB, or skip them with a leading `!`, as with `rg -g`; repeatable"
+    )]
     glob: Vec<String>,
 
-    /// Search only files whose name matches GLOB, as with `grep --include`; repeatable.
-    #[arg(long, value_name = "GLOB")]
+    #[arg(
+        long,
+        value_name = "GLOB",
+        help = "Search only files whose name matches GLOB, as with `grep --include`; repeatable"
+    )]
     include: Vec<String>,
 
-    /// Skip files whose name matches GLOB, as with `grep --exclude`; repeatable.
-    #[arg(long, value_name = "GLOB")]
+    #[arg(
+        long,
+        value_name = "GLOB",
+        help = "Skip files whose name matches GLOB, as with `grep --exclude`; repeatable"
+    )]
     exclude: Vec<String>,
 
-    /// Skip directories named DIR, as with `grep --exclude-dir`; repeatable.
-    #[arg(long, value_name = "DIR")]
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Skip directories named DIR, as with `grep --exclude-dir`; repeatable"
+    )]
     exclude_dir: Vec<String>,
 
-    /// Search only files of TYPE, such as `rust` or `py`, as with `rg -t`; repeatable.
-    #[arg(short = 't', long = "type", value_name = "TYPE")]
+    #[arg(
+        short = 't',
+        long = "type",
+        value_name = "TYPE",
+        help = "Search only files of TYPE, such as `rust` or `py`, as with `rg -t`; repeatable"
+    )]
     file_type: Vec<String>,
 
-    /// Skip files of TYPE, as with `rg -T`; repeatable.
-    #[arg(short = 'T', long, value_name = "TYPE")]
+    #[arg(
+        short = 'T',
+        long,
+        value_name = "TYPE",
+        help = "Skip files of TYPE, as with `rg -T`; repeatable"
+    )]
     type_not: Vec<String>,
 
-    /// Repository path (default: current directory).
-    #[arg(long, value_name = "PATH")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Repository path (default: current directory)"
+    )]
     repo: Option<PathBuf>,
 
-    /// Print `[Omitted long line]` in place of lines longer than NUM bytes, as with `rg -M`
-    /// (default: print every line in full).
-    #[arg(short = 'M', long, value_name = "NUM")]
+    #[arg(
+        short = 'M',
+        long,
+        value_name = "NUM",
+        help = "Print `[Omitted long line]` in place of lines longer than NUM bytes, as with `rg -M` (default: print every line in full)"
+    )]
     max_columns: Option<usize>,
 
     #[arg(
@@ -209,13 +274,17 @@ struct GrepArgs {
     )]
     paths: Vec<String>,
 
-    /// Read a specific revision DuckDB file.
-    #[arg(long, value_name = "PATH")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Read a specific revision DuckDB file"
+    )]
     db: Option<PathBuf>,
 
-    /// Read the existing index as is: never build or refresh it, and fail when the commit has
-    /// none.
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Read the existing index as is: never build or refresh it, and fail when the commit has none"
+    )]
     no_index: bool,
 }
 
@@ -409,17 +478,24 @@ struct ContextArgs {
     #[arg(value_name = "TARGET", help = context_target_help())]
     target: Vec<String>,
 
-    /// Repository path (default: current directory).
-    #[arg(long, value_name = "PATH")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Repository path (default: current directory)"
+    )]
     repo: Option<PathBuf>,
 
-    /// Read a specific revision DuckDB file.
-    #[arg(long, value_name = "PATH")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Read a specific revision DuckDB file"
+    )]
     db: Option<PathBuf>,
 
-    /// Read the existing index as is: never build or refresh it, and fail when the commit has
-    /// none.
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Read the existing index as is: never build or refresh it, and fail when the commit has none"
+    )]
     no_index: bool,
 }
 
@@ -427,58 +503,69 @@ struct ContextArgs {
 #[command(about = descriptions::short("run_sql"))]
 #[command(long_about = sql_long_about())]
 struct SqlArgs {
-    /// SQL query, or `-` to read from stdin.
-    #[arg(value_name = "QUERY", conflicts_with = "file")]
+    #[arg(
+        value_name = "QUERY",
+        conflicts_with = "file",
+        help = "SQL query, or `-` to read from stdin"
+    )]
     query: Option<String>,
 
-    /// Read SQL from a file.
-    #[arg(long, short, value_name = "PATH")]
+    #[arg(long, short, value_name = "PATH", help = "Read SQL from a file")]
     file: Option<PathBuf>,
 
-    /// Output format.
-    #[arg(long, short = 'F', default_value = "table")]
+    #[arg(long, short = 'F', default_value = "table", help = "Output format")]
     format: sql_format::Format,
 
-    /// Query only this checkout's current revision.
-    #[arg(long, value_name = "PATH", conflicts_with = "all")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        conflicts_with = "all",
+        help = "Query only this checkout's current revision"
+    )]
     repo: Option<PathBuf>,
 
-    /// Query every indexed repository and commit (the default).
-    #[arg(long)]
+    #[arg(long, help = "Query every indexed repository and commit (the default)")]
     all: bool,
 
-    /// Read a specific revision DuckDB file.
-    #[arg(long, value_name = "PATH")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Read a specific revision DuckDB file"
+    )]
     db: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("get_graph_schema"))]
 struct SchemaArgs {
-    /// Read a specific revision DuckDB file.
-    #[arg(long, value_name = "PATH")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Read a specific revision DuckDB file"
+    )]
     db: Option<PathBuf>,
 
-    /// Emit JSON instead of the default table view.
-    #[arg(long)]
+    #[arg(long, help = "Emit JSON instead of the default table view")]
     raw: bool,
 
-    /// Optional table names to scope the output.
-    /// When provided, only columns for those tables are shown.
-    /// e.g. `orbit workspace schema gl_definition gl_edge`
-    #[arg(value_name = "TABLE")]
+    #[arg(
+        value_name = "TABLE",
+        help = "Optional table names to scope the output. When provided, only columns for those tables are shown. e.g. `orbit workspace schema gl_definition gl_edge`"
+    )]
     tables: Vec<String>,
 }
 
-/// List the repositories indexed in the local DuckDB graph.
 #[derive(Args, Debug, PartialEq)]
+#[command(about = "List the repositories indexed in the local DuckDB graph")]
 struct ListArgs {
-    /// Output format.
-    #[arg(long, short = 'F', default_value = "table")]
+    #[arg(long, short = 'F', default_value = "table", help = "Output format")]
     format: sql_format::Format,
 
-    /// Read a specific manifest DuckDB file.
-    #[arg(long, value_name = "PATH")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Read a specific manifest DuckDB file"
+    )]
     db: Option<PathBuf>,
 }
 
@@ -499,15 +586,16 @@ enum WorkspaceCommands {
     Reset(ResetArgs),
 }
 
-/// Delete the local graph so the next index starts from nothing. Settings stay.
 #[derive(Args, Debug, PartialEq)]
+#[command(about = "Delete the local graph so the next index starts from nothing. Settings stay")]
 struct ResetArgs {
-    /// Skip the confirmation prompt.
-    #[arg(long, short = 'y')]
+    #[arg(long, short = 'y', help = "Skip the confirmation prompt")]
     yes: bool,
 
-    /// Print what would be removed and exit without removing it.
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Print what would be removed and exit without removing it"
+    )]
     dry_run: bool,
 }
 
@@ -517,16 +605,16 @@ struct GraphStatusArgs {
     #[command(flatten)]
     retry: RetryArgs,
 
-    /// Full path of a project or group, such as `gitlab-org/gitlab`.
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Full path of a project or group, such as `gitlab-org/gitlab`"
+    )]
     full_path: Option<String>,
 
-    /// Namespace (group) ID to inspect.
-    #[arg(long)]
+    #[arg(long, help = "Namespace (group) ID to inspect")]
     namespace_id: Option<i64>,
 
-    /// Project ID to inspect.
-    #[arg(long)]
+    #[arg(long, help = "Project ID to inspect")]
     project_id: Option<i64>,
 
     #[arg(
@@ -563,12 +651,18 @@ struct SkillsArgs {
     #[command(subcommand)]
     command: Option<SkillsCommands>,
 
-    /// Skill name or a path in the default orbit skill.
-    #[arg(value_name = "NAME_OR_PATH", hide = true)]
+    #[arg(
+        value_name = "NAME_OR_PATH",
+        hide = true,
+        help = "Skill name or a path in the default orbit skill"
+    )]
     name_or_path: Option<String>,
 
-    /// File to print from the named skill.
-    #[arg(value_name = "PATH", hide = true)]
+    #[arg(
+        value_name = "PATH",
+        hide = true,
+        help = "File to print from the named skill"
+    )]
     path: Option<String>,
 }
 
@@ -579,38 +673,48 @@ enum SkillsCommands {
         long_about = "Print a file from an agent skill served by the selected instance. The orbit skill is composed with local CLI guidance; other skills are printed as the server returns them."
     )]
     Get {
-        /// Skill name.
-        #[arg(value_name = "NAME")]
+        #[arg(value_name = "NAME", help = "Skill name")]
         name: String,
 
-        /// File relative to the skill root.
-        #[arg(value_name = "PATH", default_value = "SKILL.md")]
+        #[arg(
+            value_name = "PATH",
+            default_value = "SKILL.md",
+            help = "File relative to the skill root"
+        )]
         path: String,
     },
 }
 
 #[derive(Args, Debug, PartialEq)]
 struct SetupFlags {
-    /// Skip the prompts: use the pre-selected agents and the default components, minus
-    /// `--skip`, plus `--install`.
-    #[arg(long, short = 'y')]
+    #[arg(
+        long,
+        short = 'y',
+        help = "Skip the prompts: use the pre-selected agents and the default components, minus `--skip`, plus `--install`"
+    )]
     yes: bool,
 
-    /// Print what would change and exit without writing.
-    #[arg(long)]
+    #[arg(long, help = "Print what would change and exit without writing")]
     dry_run: bool,
 
-    /// List every file touched instead of a per-component summary.
-    #[arg(long, short = 'v')]
+    #[arg(
+        long,
+        short = 'v',
+        help = "List every file touched instead of a per-component summary"
+    )]
     verbose: bool,
 
-    /// Write into the current project instead of the user-global config
-    /// files.
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Write into the current project instead of the user-global config files"
+    )]
     project: bool,
 
-    /// Project directory (implies --project; default: current directory).
-    #[arg(long, value_name = "PATH")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Project directory (implies --project; default: current directory)"
+    )]
     dir: Option<PathBuf>,
 }
 
@@ -663,7 +767,7 @@ impl Commands {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Print the version string and exit.
+    #[command(about = "Print the version string and exit")]
     Version,
     Grep(Box<GrepArgs>),
     Context(ContextArgs),
@@ -678,44 +782,43 @@ enum Commands {
     Skills(SkillsArgs),
     #[command(about = descriptions::short("setup"), long_about = descriptions::long("setup"))]
     Setup {
-        /// Agents to pre-select in the picker. Default: every agent detected
-        /// on this machine.
-        #[arg(value_name = "AGENT", value_parser = commands::setup::agent_name_parser())]
+        #[arg(value_name = "AGENT", value_parser = commands::setup::agent_name_parser(), help = "Agents to pre-select in the picker. Default: every agent detected on this machine")]
         agents: Vec<String>,
 
-        /// Configure every supported agent, detected or not.
-        #[arg(long, conflicts_with = "agents")]
+        #[arg(
+            long,
+            conflicts_with = "agents",
+            help = "Configure every supported agent, detected or not"
+        )]
         all: bool,
 
-        /// Add a component without asking, such as `agent-plugins` (repeatable).
-        #[arg(long, value_enum, value_name = "COMPONENT")]
+        #[arg(
+            long,
+            value_enum,
+            value_name = "COMPONENT",
+            help = "Add a component without asking, such as `agent-plugins` (repeatable)"
+        )]
         install: Vec<commands::setup::Component>,
 
-        /// Leave a component out (repeatable). By default setup installs hooks, through which
-        /// each agent loads the Orbit instructions, skill, and agent-plugins, which show Orbit
-        /// calls in Claude Code, OpenCode, and Pi. `instructions` removes the
-        /// instruction block an earlier release wrote to CLAUDE.md or AGENTS.md.
-        #[arg(long, value_enum, value_name = "COMPONENT")]
+        #[arg(
+            long,
+            value_enum,
+            value_name = "COMPONENT",
+            help = "Leave a component out (repeatable). By default setup installs hooks, through which each agent loads the Orbit instructions, skill, and agent-plugins, which show Orbit calls in Claude Code, OpenCode, and Pi. `instructions` removes the instruction block an earlier release wrote to CLAUDE.md or AGENTS.md"
+        )]
         skip: Vec<commands::setup::Component>,
 
-        /// Do not index the current repository after configuring.
-        #[arg(long)]
+        #[arg(long, help = "Do not index the current repository after configuring")]
         no_index: bool,
 
-        /// Keep GitLab Duo and Claude Code on local Orbit: setup does not
-        /// contact GitLab, and their hooks print local-only instructions even
-        /// when signed in.
-        #[arg(long, env = "ORBIT_NO_GITLAB", value_parser = clap::builder::FalseyValueParser::new())]
+        #[arg(long, env = "ORBIT_NO_GITLAB", value_parser = clap::builder::FalseyValueParser::new(), help = "Keep GitLab Duo and Claude Code on local Orbit: setup does not contact GitLab, and their hooks print local-only instructions even when signed in")]
         no_gitlab: bool,
 
-        /// What to install as the `orbit` skill. `wrapper` loads the real
-        /// skill when the agent reads it. `full` writes the skill tree now,
-        /// for agents that cannot run commands at that point; it needs the
-        /// instance for the current content and falls back to the embedded
-        /// skill when the instance does not answer. Without this flag, an
-        /// agent that cannot run commands (Duo) gets `full`, and a directory
-        /// keeps the kind it already has.
-        #[arg(long, value_enum)]
+        #[arg(
+            long,
+            value_enum,
+            help = "What to install as the `orbit` skill. `wrapper` loads the real skill when the agent reads it. `full` writes the skill tree now, for agents that cannot run commands at that point; it needs the instance for the current content and falls back to the embedded skill when the instance does not answer. Without this flag, an agent that cannot run commands (Duo) gets `full`, and a directory keeps the kind it already has"
+        )]
         skill: Option<commands::setup::SkillKind>,
 
         #[command(flatten)]
@@ -723,8 +826,7 @@ enum Commands {
     },
     #[command(about = descriptions::short("uninstall"), long_about = descriptions::long("uninstall"))]
     Uninstall {
-        /// Agents to clean up. Default: all of them.
-        #[arg(value_name = "AGENT", value_parser = commands::setup::agent_name_parser())]
+        #[arg(value_name = "AGENT", value_parser = commands::setup::agent_name_parser(), help = "Agents to clean up. Default: all of them")]
         agents: Vec<String>,
 
         #[command(flatten)]
@@ -741,15 +843,20 @@ enum Commands {
         #[arg(long, hide = true, value_name = "MODE")]
         mode: Option<String>,
 
-        /// Also point glab calls at Orbit's GitLab search and context; setup adds it when Orbit reaches GitLab.
-        #[arg(long, hide = true)]
+        #[arg(
+            long,
+            hide = true,
+            help = "Also point glab calls at Orbit's GitLab search and context; setup adds it when Orbit reaches GitLab"
+        )]
         gitlab: bool,
 
         #[arg(long, hide = true, conflicts_with = "gitlab")]
         no_gitlab: bool,
     },
-    /// Sends one command event; every command runs it detached so none waits on telemetry.
-    #[command(hide = true)]
+    #[command(
+        hide = true,
+        about = "Sends one command event; every command runs it detached so none waits on telemetry"
+    )]
     SendEvent {
         #[arg(value_name = "COMMAND")]
         command: String,
@@ -760,8 +867,10 @@ enum Commands {
         #[arg(long, value_name = "CODE", default_value_t = 0)]
         exit_code: i32,
     },
-    /// Refreshes edited files into the incremental graph; `grep` and `context` run it detached.
-    #[command(hide = true)]
+    #[command(
+        hide = true,
+        about = "Refreshes edited files into the incremental graph; `grep` and `context` run it detached"
+    )]
     Refresh {
         repo: PathBuf,
         #[arg(long, value_name = "PATH")]
@@ -769,8 +878,7 @@ enum Commands {
         #[arg(last = true)]
         files: Vec<String>,
     },
-    /// POST a query to the remote Orbit API and stream the response.
-    #[command(group(clap::ArgGroup::new("input").required(true).args(["query", "file"])))]
+    #[command(group(clap::ArgGroup::new("input").required(true).args(["query", "file"])), about = "POST a query to the remote Orbit API and stream the response")]
     Query {
         #[command(flatten)]
         retry: RetryArgs,
@@ -785,24 +893,31 @@ enum Commands {
         )]
         file: Option<String>,
 
-        /// Server response format. Overrides the body's `response_format`;
-        /// defaults to `llm` when neither is set.
-        #[arg(long, value_enum)]
+        #[arg(
+            long,
+            value_enum,
+            help = "Server response format. Overrides the body's `response_format`; defaults to `llm` when neither is set"
+        )]
         response_format: Option<remote::ResponseFormat>,
     },
-    /// Show Orbit cluster health, or indexing progress for a namespace or project.
-    ///
-    /// Without a scope flag, shows cluster health. With `--full-path`, `--namespace-id`, or
-    /// `--project-id`, shows indexing progress for that scope.
+    #[command(
+        about = "Show Orbit cluster health, or indexing progress for a namespace or project",
+        long_about = "Show Orbit cluster health, or indexing progress for a namespace or project.\n\n\
+            Without a scope flag, shows cluster health. With `--full-path`, `--namespace-id`, or `--project-id`, shows indexing progress for that scope."
+    )]
     Status(GraphStatusArgs),
-    /// Show the remote Orbit schema: node types, properties, and edges.
-    #[command(alias = "ontology")]
+    #[command(
+        alias = "ontology",
+        about = "Show the remote Orbit schema: node types, properties, and edges"
+    )]
     Schema {
         #[command(flatten)]
         retry: RetryArgs,
 
-        /// Node names to expand with their properties. Quote '*' to expand all.
-        #[arg(value_name = "NODE")]
+        #[arg(
+            value_name = "NODE",
+            help = "Node names to expand with their properties. Quote '*' to expand all"
+        )]
         nodes: Vec<String>,
 
         #[arg(long, value_name = "PATH", hide = true)]
@@ -811,12 +926,15 @@ enum Commands {
         #[arg(long, hide = true)]
         raw: bool,
     },
-    /// Show indexing progress for a namespace or project.
-    ///
-    /// Without a scope flag, inspects the project behind this clone's `origin` remote.
-    #[command(name = "graph-status", hide = true)]
+    #[command(
+        name = "graph-status",
+        hide = true,
+        about = "Show indexing progress for a namespace or project",
+        long_about = "Show indexing progress for a namespace or project.\n\n\
+            Without a scope flag, inspects the project behind this clone's `origin` remote."
+    )]
     GraphStatus(GraphStatusArgs),
-    /// Read and write persisted CLI settings (`~/.gitlab/orbit/settings.json`).
+    #[command(about = "Read and write persisted CLI settings (`~/.gitlab/orbit/settings.json`)")]
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
@@ -825,19 +943,19 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum ConfigCommands {
-    /// Print the saved value of a setting.
+    #[command(about = "Print the saved value of a setting")]
     Get {
         #[arg(value_name = "KEY")]
         key: String,
     },
-    /// Save a setting, such as `telemetry.enabled false`.
+    #[command(about = "Save a setting, such as `telemetry.enabled false`")]
     Set {
         #[arg(value_name = "KEY")]
         key: String,
         #[arg(value_name = "VALUE")]
         value: String,
     },
-    /// List all known settings and their saved values.
+    #[command(about = "List all known settings and their saved values")]
     List,
 }
 
