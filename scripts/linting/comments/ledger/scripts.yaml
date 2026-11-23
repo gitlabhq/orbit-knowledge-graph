@@ -21,12 +21,6 @@
   preview: "# Verify that every pin in config/versions.yaml whose covered files cha…"
   hash: 7cfe7de1b93d17df
   lines: 8
-"scripts/checks/check_workspace_deps.py":
-- category: tool-read
-  reason: "Documents the Cargo.toml metadata key the checker reads for opt-outs"
-  preview: "\"\"\"Fail when a workspace member declares a dependency without `workspac…"
-  hash: 3a1413cf32162fba
-  lines: 1
 "scripts/checks/ci-skip-utils.sh":
 - category: upstream
   reason: "GitLab CI snapshots the MR description at pipeline start, so commit messages are the fallback"
@@ -60,12 +54,6 @@
   preview: "# Checks the dependency graphs from Cargo.lock: the server must resolve…"
   hash: 893abb7bf39de799
   lines: 3
-"scripts/checks/fips/duckdb-mbedtls/check.py":
-- category: compliance
-  reason: "FIPS: pins every DuckDB mbedtls entry point so an upgrade needs review"
-  preview: "\"\"\"Pins every place the compiled DuckDB code reaches mbedtls."
-  hash: 1939065b191d63f1
-  lines: 1
 "scripts/ci/cargo-home-cache.sh":
 - category: security
   reason: "Only protected main pipelines write the cache and Cargo does not re-check cached crates"

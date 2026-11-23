@@ -147,14 +147,3 @@
   preview: "# Tarballs are published to the project's Generic Package Registry under"
   hash: 2beb44f2bd600367
   lines: 2
-"lefthook.yml":
-- category: upstream
-  reason: "Lefthook has no per-job allow_failure, so || true keeps the job advisory"
-  preview: "# Advisory/non-blocking: narration lint prints warnings but must not bl…"
-  hash: 37fadea12e5405a1
-  lines: 5
-- category: invariant
-  reason: "The hook blocks only on flagged comments; tool failures must skip, not block"
-  preview: "# Blocking. Skip with COMMENTS_CHECK=0 or LEFTHOOK_EXCLUDE=comments. The"
-  hash: b61a1e5ee7908709
-  lines: 3
