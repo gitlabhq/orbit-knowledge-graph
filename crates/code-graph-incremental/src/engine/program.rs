@@ -82,7 +82,7 @@ pub fn resolution(name: &str) -> Option<CallResolution> {
     }
 }
 
-struct Match {
+pub(super) struct Match {
     src: Box<str>,
     pat: Pat,
     depth: u8,
@@ -154,12 +154,12 @@ struct Rewrite {
 /// Ordered cases, each anchored at some node kinds or at any. `by_kind`
 /// lists, per kind, the cases a node of that kind tries in order: the kind's
 /// own merged with `any`, the cases for every kind.
-struct Cases<T> {
-    items: Vec<T>,
+pub(super) struct Cases<T> {
+    pub(super) items: Vec<T>,
     /// Each case's group: at a node, only a group's first matching case fires.
     groups: Vec<u16>,
-    by_kind: HashMap<u16, Vec<u16>>,
-    any: Vec<u16>,
+    pub(super) by_kind: HashMap<u16, Vec<u16>>,
+    pub(super) any: Vec<u16>,
 }
 
 impl<T> Cases<T> {
@@ -209,7 +209,7 @@ impl<T> Cases<T> {
 /// A case anchored by a pattern.
 /// A case: its pattern, none for `_`, which takes any value, and a guard
 /// read after the arguments are bound.
-trait Anchored {
+pub(super) trait Anchored {
     fn at(&self) -> Option<&Match>;
     fn guard(&self) -> Option<&Expr> {
         None
@@ -243,13 +243,13 @@ impl<T: Anchored> Cases<T> {
     /// the rest of `args` bound after the captures, its guard is true. `fire`
     /// applies the case and returns false to stop. Each attempt is profiled
     /// by the case's pattern.
-    fn fire<'c, S: Store>(
+    fn fire<'c: 't, 't, S: Store>(
         &'c self,
-        run: &mut Run<S>,
+        run: &mut Run<'t, S>,
         w: &mut Scratch<S>,
         node: Option<Cursor<'_, S>>,
         args: &[Vals],
-        mut fire: impl FnMut(&mut Run<S>, &Scratch<S>, &'c T) -> bool,
+        mut fire: impl FnMut(&mut Run<'t, S>, &Scratch<S>, &'c T) -> bool,
     ) {
         let mut fired: SmallVec<[u16; 8]> = SmallVec::new();
         let list = node
@@ -317,7 +317,7 @@ type EdgeRules = Cases<(Match, Vec<Emit>)>;
 type RowRules = Cases<(Match, Vec<RowRule>)>;
 
 /// A definition case: its match (none for `_`, which takes any value), guard and value.
-type DefCase = (Option<Match>, Option<Expr>, Expr);
+pub(super) type DefCase = (Option<Match>, Option<Expr>, Expr);
 
 /// A declared index compiled for one language, or for all.
 struct Indexer {
@@ -337,13 +337,13 @@ enum Body {
 /// argument, the first case whose pattern and guard match giving the value.
 pub struct Def {
     pub(super) name: Box<str>,
-    params: usize,
-    body: DefImpl,
+    pub(super) params: usize,
+    pub(super) body: DefImpl,
     pub(super) deps: u8,
-    slots: usize,
+    pub(super) slots: usize,
 }
 
-enum DefImpl {
+pub(super) enum DefImpl {
     Expr(Expr),
     Cases(Cases<DefCase>),
 }
@@ -356,42 +356,6 @@ impl Def {
             key.extend_from_slice(vals);
         }
         key
-    }
-
-    pub(super) fn eval<S: Store>(&self, run: &mut Run<S>, args: &[Vals]) -> Vals {
-        match &self.body {
-            DefImpl::Expr(expr) => {
-                let mut bound: Vec<Vals> = vec![Vals::new(); self.slots.max(self.params)];
-                bound[..args.len()].clone_from_slice(args);
-                expr.eval(run, &bound)
-            }
-            DefImpl::Cases(_) if args[0].len() > 1 => {
-                let mut out = Vals::new();
-                let mut each = args.to_vec();
-                for &v in &args[0] {
-                    each[0] = SmallVec::from_elem(v, 1);
-                    for found in self.eval(run, &each) {
-                        if !out.contains(&found) {
-                            out.push(found);
-                        }
-                    }
-                }
-                out
-            }
-            DefImpl::Cases(cases) => {
-                let node = args[0]
-                    .first()
-                    .and_then(|v| v.loc())
-                    .map(|h| Cursor::new(run.trees, h.fi, h.node));
-                let mut w = Scratch::<S>::new(self.slots.max(args.len()));
-                let mut found = Vals::new();
-                cases.fire(run, &mut w, node, args, |run, w, (_, _, value)| {
-                    found = value.eval(run, &w.vals);
-                    false
-                });
-                found
-            }
-        }
     }
 }
 
@@ -1578,7 +1542,7 @@ fn split_notes(value: &str) -> (&str, Vec<(&str, Option<&str>, &str)>) {
 }
 
 impl Emit {
-    fn run<S: Store>(&self, run: &mut Run<S>, caps: &[Vals]) {
+    fn run<'t, S: Store>(&'t self, run: &mut Run<'t, S>, caps: &[Vals]) {
         let sites = match &self.site {
             Some(s) => s.eval(run, caps),
             None => Vals::new(),
@@ -1620,7 +1584,7 @@ impl Emit {
 
 impl RowRule {
     /// One row per combination of the values; a column with no value is empty.
-    fn run<S: Store>(&self, run: &mut Run<S>, caps: &[Vals]) {
+    fn run<'t, S: Store>(&'t self, run: &mut Run<'t, S>, caps: &[Vals]) {
         let Some(at) = caps[0].first().and_then(|v| v.loc()) else {
             return;
         };
@@ -1645,20 +1609,30 @@ impl RowRule {
     }
 }
 
-struct Scratch<S: Store> {
+pub(super) struct Scratch<S: Store> {
     caps: Vec<Cap<S::Id>>,
-    vals: Vec<Vals>,
+    pub(super) vals: Vec<Vals>,
 }
 
 impl<S: Store> Scratch<S> {
-    fn new(slots: usize) -> Self {
+    /// Ready for `slots` captures, every one empty, keeping its buffers.
+    pub(super) fn reset(&mut self, slots: usize) {
+        if self.caps.len() < slots {
+            self.caps.resize(slots, SmallVec::new());
+            self.vals.resize(slots, Vals::new());
+        }
+        self.caps.iter_mut().for_each(|c| c.clear());
+        self.vals.iter_mut().for_each(|v| v.clear());
+    }
+
+    pub(super) fn new(slots: usize) -> Self {
         Self {
             caps: vec![SmallVec::new(); slots],
             vals: vec![Vals::new(); slots],
         }
     }
 
-    fn matches(&mut self, run: &Run<S>, at: &Match, c: Cursor<'_, S>) -> bool {
+    pub(super) fn matches(&mut self, run: &Run<S>, at: &Match, c: Cursor<'_, S>) -> bool {
         if at.lang.is_some_and(|l| usize::from(l) != run.lang) {
             return false;
         }
@@ -1699,7 +1673,7 @@ impl<S: Store> Scratch<S> {
         true
     }
 
-    fn holds(&self, run: &mut Run<S>, at: &Match) -> bool {
+    fn holds<'t>(&self, run: &mut Run<'t, S>, at: &'t Match) -> bool {
         at.when
             .as_ref()
             .is_none_or(|when| super::truthy(&when.eval(run, &self.vals)))
@@ -1709,7 +1683,7 @@ impl<S: Store> Scratch<S> {
 impl Phase {
     /// Walks a tree in source order and runs the edges or rows rules at each
     /// node, with the innermost enclosing scope known. `all` visits the root.
-    pub fn flow<S: Store>(&self, run: &mut Run<S>, root: Cursor<'_, S>, all: bool) {
+    pub fn flow<'t, S: Store>(&'t self, run: &mut Run<'t, S>, root: Cursor<'_, S>, all: bool) {
         let mut w = Scratch::<S>::new(self.slots);
         let mut stack: Vec<(u32, bool)> = match all {
             true => vec![(root.index(), false)],
@@ -1747,9 +1721,9 @@ impl Phase {
 
     /// One tree's piece of the declared index `id`: each match filed under
     /// its innermost enclosing scope and under the whole tree.
-    pub fn piece<S: Store>(
-        &self,
-        run: &mut Run<S>,
+    pub fn piece<'t, S: Store>(
+        &'t self,
+        run: &mut Run<'t, S>,
         root: Cursor<'_, S>,
         id: u32,
     ) -> crate::tree::Piece {
@@ -1980,10 +1954,10 @@ impl Phase {
 }
 
 /// A fired rewrite's tag values and template texts, from the captures in `w`.
-fn settle<S: Store>(
-    run: &mut Run<S>,
+fn settle<'t, S: Store>(
+    run: &mut Run<'t, S>,
     w: &Scratch<S>,
-    rule: &Rewrite,
+    rule: &'t Rewrite,
 ) -> (Vec<(u32, u32)>, Vec<Vec<u32>>) {
     let tags = rule
         .tags

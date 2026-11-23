@@ -110,71 +110,12 @@ impl Expr {
         }
     }
 
-    pub fn eval<S: Store>(&self, cx: &mut Run<S>, caps: &[Vals]) -> Vals {
-        match self {
-            Expr::Var(slot) => caps[*slot as usize].clone(),
-            Expr::Lit(val) => SmallVec::from_elem(*val, 1),
-            Expr::Empty => Vals::new(),
-            Expr::Data(at) => cx.data[usize::from(*at)].clone(),
-            Expr::Union(parts) => parts.iter().flat_map(|p| p.eval(cx, caps)).collect(),
-            Expr::Or(a, b) => {
-                let found = a.eval(cx, caps);
-                match found.is_empty() {
-                    true => b.eval(cx, caps),
-                    false => found,
-                }
-            }
-            Expr::First(list, slot, body) => {
-                let mut local = caps.to_vec();
-                for v in list.eval(cx, caps) {
-                    local[usize::from(*slot)] = SmallVec::from_elem(v, 1);
-                    let found = body.eval(cx, &local);
-                    if !found.is_empty() {
-                        return found;
-                    }
-                }
-                Vals::new()
-            }
-            Expr::Every(list, slot, body) => {
-                let mut local = caps.to_vec();
-                let mut common: Option<Vals> = None;
-                for v in list.eval(cx, caps) {
-                    local[usize::from(*slot)] = SmallVec::from_elem(v, 1);
-                    let found = body.eval(cx, &local);
-                    common = Some(match common {
-                        None => found,
-                        Some(c) => c.into_iter().filter(|x| found.contains(x)).collect(),
-                    });
-                }
-                common.unwrap_or_default()
-            }
-            Expr::Def(def, args) => {
-                let mut args: SmallVec<[Vals; 3]> = args.iter().map(|a| a.eval(cx, caps)).collect();
-                let heads = std::mem::take(&mut args[0]);
-                let mut out = Vals::new();
-                for head in heads {
-                    args[0] = SmallVec::from_elem(head, 1);
-                    for found in cx.call_def(*def, &args) {
-                        if !out.contains(&found) {
-                            out.push(found);
-                        }
-                    }
-                }
-                out
-            }
-            Expr::Call(id, args) => {
-                let args: SmallVec<[Vals; 3]> = args.iter().map(|a| a.eval(cx, caps)).collect();
-                apply(cx, *id, &args)
-            }
-            Expr::Op(op, args) => {
-                let args: SmallVec<[Vals; 3]> = args.iter().map(|a| a.eval(cx, caps)).collect();
-                cx.operate(*op, &args)
-            }
-        }
+    pub fn eval<'t, S: Store>(&'t self, cx: &mut Run<'t, S>, caps: &[Vals]) -> Vals {
+        super::machine::eval(cx, self, caps)
     }
 }
 
-fn apply<S: Store>(cx: &mut Run<S>, id: FnId, args: &[Vals]) -> Vals {
+pub(super) fn apply<S: Store>(cx: &mut Run<S>, id: FnId, args: &[Vals]) -> Vals {
     let sig = function(id).sig;
     let spread = sig
         .iter()

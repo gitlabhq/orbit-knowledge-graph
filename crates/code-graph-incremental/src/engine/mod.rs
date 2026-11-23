@@ -1,5 +1,6 @@
 mod expr;
 pub mod lang;
+mod machine;
 pub mod pattern;
 pub mod profile;
 mod program;
@@ -575,6 +576,8 @@ pub struct Run<'t, S: Store = Compact> {
     round: u64,
     profile: Option<Box<profile::Profile>>,
     roles: &'t [program::Roles],
+    /// The evaluator's stacks, reused by each evaluation of this run.
+    machine: Option<machine::Machine<'t, S>>,
     /// Each node's nearest ancestor that is a scope or the root, filled on use.
     scopes: FxHashMap<Loc, Option<Loc>>,
 }
@@ -641,6 +644,7 @@ impl<'t, S: Store> Run<'t, S> {
             round: 0,
             profile: profile::ON.then(Box::default),
             roles: &[],
+            machine: None,
             scopes: FxHashMap::default(),
         }
     }
@@ -928,19 +932,7 @@ impl<'t, S: Store> Run<'t, S> {
 
     /// A YAML function's result, cached like a module function's.
     pub(crate) fn call_def(&mut self, def: u16, args: &[Vals]) -> Vals {
-        let def = self
-            .overrides
-            .and_then(|o| o.get(&def).copied())
-            .unwrap_or(def);
-        let defs = self.fns;
-        let deps = defs[usize::from(def)].deps;
-        let key = defs[usize::from(def)].key(self, args);
-        let reading = std::mem::replace(&mut self.reading, deps);
-        let found = self.memoized((FnId(u16::MAX - def), key), deps, |run| {
-            defs[usize::from(def)].eval(run, args)
-        });
-        self.reading = reading;
-        found
+        machine::call_def(self, def, args)
     }
 
     /// Cached calls compute least fixpoints. A call already in progress
