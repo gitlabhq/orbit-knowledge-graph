@@ -11,6 +11,7 @@ logical:
 
 physical:
   clickhouse:
+    result_context: { query_type: path_finding }
     planned:
       expect: ["(PathFinding start->end depth=3 forward=2 backward=1 ... (_) (_))"]
     emitted:

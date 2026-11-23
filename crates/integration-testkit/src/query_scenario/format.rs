@@ -55,7 +55,7 @@ impl QueryScenario {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioConfig {
     pub ontology_overlay: Option<String>,
@@ -69,8 +69,48 @@ pub struct ScenarioConfig {
     pub security: Option<PresetOr<SecurityOverride>>,
     #[serde(default)]
     pub redaction: Option<PresetOr<RedactionConfig>>,
-    #[serde(default)]
-    pub duckdb: bool,
+    #[serde(default = "clickhouse_only", deserialize_with = "backends")]
+    pub backends: Vec<Backend>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Backend {
+    Clickhouse,
+    Duckdb,
+}
+
+impl Default for ScenarioConfig {
+    fn default() -> Self {
+        Self {
+            ontology_overlay: None,
+            seed: None,
+            extra_seed: Seed::default(),
+            unmerged_seed: false,
+            security: None,
+            redaction: None,
+            backends: clickhouse_only(),
+        }
+    }
+}
+
+fn clickhouse_only() -> Vec<Backend> {
+    vec![Backend::Clickhouse]
+}
+
+fn backends<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Backend>, D::Error> {
+    let backends = Vec::<Backend>::deserialize(deserializer)?;
+    if backends.is_empty()
+        || backends
+            .iter()
+            .enumerate()
+            .any(|(index, backend)| backends[..index].contains(backend))
+    {
+        return Err(serde::de::Error::custom(
+            "backends must list clickhouse, duckdb, or both, once each",
+        ));
+    }
+    Ok(backends)
 }
 
 /// Either a preset name (string) or an inline value.

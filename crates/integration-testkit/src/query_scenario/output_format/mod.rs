@@ -83,37 +83,8 @@ fn assert_encoded<E: Encoding>(
         );
     }
     if let Some(expected) = &expect.value
-        && let Some(mismatch) = subset_mismatch(format, expected, &value)
+        && let Some(mismatch) = crate::scenario::subset_mismatch(format, expected, &value)
     {
         panic!("{label}: {mismatch}\n{value}");
-    }
-}
-
-fn subset_mismatch(path: &str, expected: &Value, actual: &Value) -> Option<String> {
-    match (expected, actual) {
-        (Value::Object(expected), Value::Object(actual)) => {
-            expected
-                .iter()
-                .find_map(|(key, value)| match actual.get(key) {
-                    Some(found) => subset_mismatch(&format!("{path}.{key}"), value, found),
-                    None => Some(format!("{path}.{key} is missing")),
-                })
-        }
-        (Value::Array(expected), Value::Array(actual)) if expected.len() == actual.len() => {
-            expected
-                .iter()
-                .zip(actual)
-                .enumerate()
-                .find_map(|(index, (value, found))| {
-                    subset_mismatch(&format!("{path}[{index}]"), value, found)
-                })
-        }
-        (Value::Array(expected), Value::Array(actual)) => Some(format!(
-            "{path} has {} items, expected {}",
-            actual.len(),
-            expected.len()
-        )),
-        _ if expected == actual => None,
-        _ => Some(format!("{path} is {actual}, expected {expected}")),
     }
 }

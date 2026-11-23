@@ -15,6 +15,7 @@ orbit-arrow = { path = "../utils/arrow" }
 orbit-versions = { path = "../orbit-versions" }
 futures = { workspace = true }
 jsonschema = { workspace = true }
+named-queries = { path = "../named-queries" }
 orbit-server = { path = "../orbit-server" }
 ontology = { path = "../ontology" }
 orbit-migrations = { path = "../orbit-migrations" }

@@ -83,3 +83,30 @@ cases:
             - (Filter l.title = 'bug', ... (_))
           reject:
             - (Filter StartsWith(l.traversal_path, scalar(gl_merge_request AS _orbit_scope WHERE _orbit_scope.id = 7)) OR (scalar(gl_merge_request AS _orbit_scope WHERE _orbit_scope.id = 7) = '0/'), ... (_))
+
+  - name: A pinned prune-to-target endpoint keeps its own bound
+    security: { paths: [1/9970/] }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"p","entity":"Project","node_ids":[15846663]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}]}
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(p:Project {id: 15846663}) RETURN u, p
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Filter StartsWith(_orbit_edge_0.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663) = '0/'), ... (Scan Table(gl_edge) AS _orbit_edge_0))"]
+
+  - name: A prune-to-target bound does not cross a user hub
+    security: { paths: [1/9970/] }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Project","node_ids":[15846663]},{"id":"u","entity":"User"},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"a"},{"type":"MEMBER_OF","from":"u","to":"b"}]}
+      gql: |
+        MATCH (a:Project {id: 15846663})<-[:MEMBER_OF]-(u:User)-[:MEMBER_OF]->(b:Project) RETURN a, u, b
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Filter StartsWith(_orbit_edge_0.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663) = '0/'), ... (Scan Table(gl_edge) AS _orbit_edge_0))"]
+          reject:
+            - "(Filter StartsWith(_orbit_edge_1.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663) = '0/'), ... (_))"
+            - "(Filter StartsWith(b.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663) = '0/'), ... (_))"

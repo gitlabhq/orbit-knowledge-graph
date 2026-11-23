@@ -23,4 +23,4 @@ cases:
           contains: []
           not_contains:
             - AS n_created_at
-        hydration: static
+        hydration: { static: { mr: { node_alias: mr } } }
