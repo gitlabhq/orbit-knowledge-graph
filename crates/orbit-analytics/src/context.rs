@@ -10,26 +10,16 @@
 //! [`OrbitQueryContext`] to attach it to a `StructuredEvent` — these
 //! wrappers `impl labkit_events::SnowplowContext`.
 
-use std::borrow::Cow;
-
 use labkit_events::SnowplowContext;
 use orbit_server_config::DeploymentKind;
 
 include!(concat!(env!("OUT_DIR"), "/iglu_schemas.rs"));
 
-const FITTED_DIGEST_LENGTH: usize = 8;
-
-fn fit_to_length(value: &str, max_length: usize) -> Cow<'_, str> {
-    if value.chars().count() <= max_length {
-        return Cow::Borrowed(value);
+fn fit_to_length(value: &str, max_length: usize) -> &str {
+    match value.char_indices().nth(max_length) {
+        Some((cut, _)) => &value[..cut],
+        None => value,
     }
-
-    let digest = twox_hash::XxHash3_64::oneshot(value.as_bytes()) & u64::from(u32::MAX);
-    let prefix: String = value
-        .chars()
-        .take(max_length - FITTED_DIGEST_LENGTH - 1)
-        .collect();
-    Cow::Owned(format!("{prefix}_{digest:08x}"))
 }
 
 impl From<DeploymentKind> for orbit_common::OrbitCommonDeploymentType {
@@ -303,8 +293,6 @@ mod tests {
 
     const IDENTIFIER_PIPELINE: &str =
         "HAS_IDENTIFIER_siphon_vulnerability_occurrence_identifiers_VulnerabilityIdentifier";
-    const VULNERABILITY_PIPELINE: &str =
-        "HAS_VULNERABILITY_siphon_sbom_occurrences_vulnerabilities_Vulnerability";
 
     fn parse_entity_type(value: &str) -> String {
         value
@@ -322,18 +310,10 @@ mod tests {
     }
 
     #[test]
-    fn over_long_value_fits_the_limit_and_keeps_a_readable_prefix() {
-        let fitted = parse_entity_type(IDENTIFIER_PIPELINE);
-
-        assert_eq!(fitted.chars().count(), 64);
-        assert!(fitted.starts_with("HAS_IDENTIFIER_siphon_vulnerability_occurrence_"));
-    }
-
-    #[test]
-    fn distinct_over_long_values_stay_distinct() {
-        assert_ne!(
+    fn over_long_value_is_cut_to_the_limit() {
+        assert_eq!(
             parse_entity_type(IDENTIFIER_PIPELINE),
-            parse_entity_type(VULNERABILITY_PIPELINE)
+            "HAS_IDENTIFIER_siphon_vulnerability_occurrence_identifiers_Vulne"
         );
     }
 

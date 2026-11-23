@@ -175,12 +175,8 @@ fn fit_length_checks(body: &str) -> (String, usize) {
         );
         let indent = &line[..line.len() - line.trim_start().len()];
         rewritten.push_str(&format!(
-            "{indent}const _: () = assert!({max_length} > super::FITTED_DIGEST_LENGTH + 1);\n"
+            "{indent}let value = super::fit_to_length(value, {max_length});\n"
         ));
-        rewritten.push_str(&format!(
-            "{indent}let fitted = super::fit_to_length(value, {max_length});\n"
-        ));
-        rewritten.push_str(&format!("{indent}let value: &str = &fitted;\n"));
         fitted_checks += 1;
     }
     (rewritten, fitted_checks)
