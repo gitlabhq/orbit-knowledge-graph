@@ -157,7 +157,7 @@ pub(super) fn eval<'t, S: Store>(run: &mut Run<'t, S>, expr: &'t Expr, caps: &[V
 /// The value of a call to module function `id`, as module code makes it.
 pub(super) fn call<S: Store>(run: &mut Run<'_, S>, id: FnId, args: &[Vals]) -> Vals {
     on_machine(run, |m, run| {
-        let fns = run.fns;
+        let fns = &run.phase.defs;
         m.call(run, fns, Callee::Native(id), args.iter().cloned().collect())
     })
 }
@@ -175,7 +175,7 @@ impl<'e, S: Store> Machine<'e, S> {
     where
         't: 'e,
     {
-        let fns: &'e [Def] = run.fns;
+        let fns: &'e [Def] = &run.phase.defs;
         while let Some(task) = self.tasks.pop() {
             self.step(run, fns, task);
         }
@@ -344,7 +344,7 @@ impl<'e, S: Store> Machine<'e, S> {
         let at = match callee {
             Callee::Def(_) => (args.first().is_some_and(|a| a.len() != 1)).then_some(0),
             Callee::Native(id) => run
-                .registry
+                .registry()
                 .function(id)
                 .sig
                 .iter()
@@ -373,24 +373,26 @@ impl<'e, S: Store> Machine<'e, S> {
         let (key, deps, callee) = match callee {
             Callee::Def(def) => {
                 let def = run
+                    .phase
                     .overrides
+                    .get(run.input.rules)
                     .and_then(|o| o.get(&def).copied())
                     .unwrap_or(def);
                 let d = &fns[usize::from(def)];
                 (
                     (FnId(u16::MAX - def), d.key(&args)),
-                    run.def_deps[usize::from(def)],
+                    run.phase.def_deps[usize::from(def)],
                     Callee::Def(def),
                 )
             }
             Callee::Native(id) => {
-                let links = run.links;
+                let links = &run.phase.links;
                 if let Some(def) = links.defs[usize::from(id.0)] {
                     return self.call(run, fns, Callee::Def(def), args);
                 }
                 let deps = links.deps[usize::from(id.0)];
                 let id = links.to[usize::from(id.0)];
-                let f = run.registry.function(id);
+                let f = run.registry().function(id);
                 if matches!(f.kind, Kind::Effect | Kind::Inline) {
                     let reading = match f.kind {
                         Kind::Effect => std::mem::replace(&mut run.reading, u64::MAX),
@@ -410,7 +412,7 @@ impl<'e, S: Store> Machine<'e, S> {
                 if let Some(p) = &mut run.profile {
                     p.hit(key.0, true);
                 }
-                run.reads.insert(key);
+                run.cycle_reads.insert(key);
                 self.values.push(partial);
                 return;
             }
@@ -428,7 +430,7 @@ impl<'e, S: Store> Machine<'e, S> {
                 }
                 if let Some((_, read)) = within {
                     let read = read.clone();
-                    run.reads.extend(read);
+                    run.cycle_reads.extend(read);
                 }
                 self.values.push(vals);
                 return;
@@ -442,7 +444,7 @@ impl<'e, S: Store> Machine<'e, S> {
         let pending = Pending {
             started: run.profile.as_mut().map(|p| p.enter(key.0)),
             written: run.written,
-            outer: std::mem::take(&mut run.reads),
+            outer: std::mem::take(&mut run.cycle_reads),
             reading: std::mem::replace(&mut run.reading, deps),
             deps,
             key,
@@ -492,7 +494,7 @@ impl<'e, S: Store> Machine<'e, S> {
     /// Queues trying `cases` on `args`, whose first set holds one value.
     fn try_cases<'t>(&mut self, run: &mut Run<'t, S>, cases: &'e Cases, slots: usize, args: Args) {
         let node = args[0].first().and_then(|v| v.loc());
-        let kind = node.map(|h| Cursor::new(run.trees, h.fi, h.node).kind());
+        let kind = node.map(|h| Cursor::new(run.input.trees, h.fi, h.node).kind());
         let list = kind
             .and_then(|k| cases.by_kind.get(&k))
             .unwrap_or(&cases.any);
@@ -517,8 +519,8 @@ impl<'e, S: Store> Machine<'e, S> {
     /// call is still growing, then caches the value and hands it on.
     fn finish<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [Def], mut p: Pending) {
         let found = self.values.pop().unwrap_or_default();
-        let heads = run.reads.remove(&p.key);
-        if heads && run.reads.is_empty() && p.rounds < MAX_FIXPOINT_ROUNDS {
+        let heads = run.cycle_reads.remove(&p.key);
+        if heads && run.cycle_reads.is_empty() && p.rounds < MAX_FIXPOINT_ROUNDS {
             if let Some(Memo::Busy(partial)) = run.memo.entries.get(&p.key) {
                 let same =
                     found.len() == partial.len() && found.iter().all(|v| partial.contains(v));
@@ -534,8 +536,8 @@ impl<'e, S: Store> Machine<'e, S> {
         if let (Some(prof), Some(start)) = (&mut run.profile, p.started) {
             prof.leave(p.key.0, start, p.rounds);
         }
-        let read: Vec<Key> = run.reads.iter().cloned().collect();
-        run.reads.extend(p.outer);
+        let read: Vec<Key> = run.cycle_reads.iter().cloned().collect();
+        run.cycle_reads.extend(p.outer);
         if p.written != run.written {
             run.memo.entries.remove(&p.key);
         } else {
@@ -601,7 +603,9 @@ impl<'e, S: Store> Machine<'e, S> {
             t.started = run.profiling().then(Instant::now);
             t.matched = None;
             let matched = match (pat, t.args[0].first().and_then(|v| v.loc())) {
-                (Some(m), Some(h)) => t.w.matches(run, m, Cursor::new(run.trees, h.fi, h.node)),
+                (Some(m), Some(h)) => {
+                    t.w.matches(run, m, Cursor::new(run.input.trees, h.fi, h.node))
+                }
                 (Some(_), None) => false,
                 (None, _) => {
                     t.w.vals[0] = t.args[0].clone();
@@ -720,7 +724,7 @@ impl<'e, S: Store> Machine<'e, S> {
             Expr::Var(slot) => self.envs[env][usize::from(*slot)].clone(),
             Expr::Lit(val) => SmallVec::from_elem(*val, 1),
             Expr::Empty => Vals::new(),
-            Expr::Data(at) => run.data[usize::from(*at)].clone(),
+            Expr::Data(at) => run.phase.data[run.input.rules][usize::from(*at)].clone(),
             _ => return None,
         })
     }
@@ -728,8 +732,8 @@ impl<'e, S: Store> Machine<'e, S> {
 
 /// Runs module function `id` natively.
 fn invoke<S: Store>(run: &mut Run<'_, S>, id: FnId, args: &[Vals]) -> Vals {
-    let f = run.registry.function(id);
-    let hooks = S::hooks(run.registry.module(f.slot));
+    let f = run.registry().function(id);
+    let hooks = S::hooks(run.registry().module(f.slot));
     (hooks.invoke)(run, f.slot, f.index, args)
 }
 

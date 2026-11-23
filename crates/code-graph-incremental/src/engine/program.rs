@@ -326,8 +326,8 @@ impl<S: Store> Scratch<S> {
     /// Whether `at` matches at `c`; slot 0 holds `c`, and each capture slot
     /// the captured nodes its kind test admits.
     pub(super) fn matches(&mut self, run: &Run<S>, at: &Match, c: Cursor<'_, S>) -> bool {
-        if at.lang.is_some_and(|l| usize::from(l) != run.lang)
-            || !at.capture(run.lang_ref, c, &mut self.caps)
+        if at.lang.is_some_and(|l| usize::from(l) != run.input.rules)
+            || !at.capture(run.lang(), c, &mut self.caps)
         {
             return false;
         }

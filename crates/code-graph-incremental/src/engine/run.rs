@@ -48,8 +48,19 @@ impl<'t, S: Store> Indexed<'t, S> {
         trees[fi as usize]
             .indexes
             .piece(phase.index_count, id as usize, || {
-                let rules = engine.rules_index(&trees[fi as usize].label);
-                let mut run = Run::new(trees, fi, rules, engine, phase, budget, budget);
+                let input = Input {
+                    trees,
+                    fi,
+                    rules: engine.rules_index(&trees[fi as usize].label),
+                    graph: None,
+                    graph_fi: 0,
+                    indexed: None,
+                    files: trees.len() as u32,
+                    project: None,
+                    budget,
+                    file: budget,
+                };
+                let mut run = Run::new(input, phase, engine);
                 walk::piece(phase, &mut run, Cursor::new(trees, fi, 0), id)
             })
     }
@@ -101,32 +112,33 @@ pub(super) struct Table {
     pub(super) swept: usize,
 }
 
+/// What a run reads besides its phase and engine.
+pub(super) struct Input<'t, S: Store> {
+    pub(super) trees: &'t [Tree<S>],
+    /// The tree the run walks.
+    pub(super) fi: u32,
+    /// The rule set the run's tree runs.
+    pub(super) rules: usize,
+    pub(super) graph: Option<&'t Graph>,
+    /// The run's tree's file index in the graph.
+    pub(super) graph_fi: u32,
+    pub(super) indexed: Option<&'t Indexed<'t, S>>,
+    /// How many files the run covers.
+    pub(super) files: u32,
+    pub(super) project: Option<u32>,
+    pub(super) budget: &'t Sentinel,
+    pub(super) file: &'t Sentinel,
+}
+
 /// One phase run over one tree: navigation, the budget, the edges written,
 /// one state slot per module, and the memo.
 pub struct Run<'t, S: Store = Compact> {
-    pub(super) trees: &'t [Tree<S>],
-    pub(super) fi: u32,
-    pub(crate) lang_ref: &'t crate::intern::Lang,
-    pub(super) registry: &'t Registry,
-    pub(super) links: &'t Links,
-    pub(super) budget: &'t Sentinel,
-    pub(super) file: &'t Sentinel,
+    pub(super) input: Input<'t, S>,
+    pub(super) phase: &'t Phase,
+    pub(super) engine: &'t Engine,
     pub(super) killed: Option<Killed>,
-    pub(super) max_edges: usize,
-    pub(super) graph: Option<&'t Graph>,
     /// The graph ends the run looked edges up by.
     pub(super) graph_reads: std::cell::RefCell<Vec<super::graph::End>>,
-    pub(super) files: u32,
-    pub(super) project: Option<u32>,
-    pub(super) indexed: Option<&'t Indexed<'t, S>>,
-    pub(super) fns: &'t [program::Def],
-    /// Per definition: the module states it reaches under the phase's binds.
-    pub(super) def_deps: &'t [u64],
-    pub(super) overrides: Option<&'t std::collections::HashMap<u16, u16>>,
-    pub(super) enclosing_kinds: &'t [u16],
-    pub(super) graph_fi: u32,
-    pub(super) lang: usize,
-    pub(super) data: &'t [Vals],
     pub(super) edges: Vec<Edge>,
     /// The tree writes of the node being fired, applied once it is done.
     pub(super) writes: Vec<Write>,
@@ -135,12 +147,11 @@ pub struct Run<'t, S: Store = Compact> {
     pub(super) written: u64,
     pub(super) reading: u64,
     pub(super) memo: Table,
-    pub(super) reads: FxHashSet<Key>,
+    /// The unfinished calls that results of the current cycle read.
+    pub(super) cycle_reads: FxHashSet<Key>,
     /// Bumped each time a cycle head reruns, retiring results of the last round.
     pub(super) round: u64,
     pub(super) profile: Option<Box<profile::Profile>>,
-    pub(super) roles: &'t [program::Roles],
-    pub(super) phase_modules: &'t [u8],
     /// The evaluator's stacks, reused by each evaluation of this run.
     pub(super) machine: Option<machine::Machine<'t, S>>,
     /// Each node's nearest ancestor that is a scope or the root, filled on use.
@@ -148,69 +159,14 @@ pub struct Run<'t, S: Store = Compact> {
 }
 
 impl<'t, S: Store> Run<'t, S> {
-    pub(super) fn new(
-        trees: &'t [Tree<S>],
-        fi: u32,
-        rules: usize,
-        engine: &'t Engine,
-        phase: &'t Phase,
-        budget: &'t Sentinel,
-        file: &'t Sentinel,
-    ) -> Self {
-        let mut run = Self::detached(
-            trees,
-            fi,
-            &engine.lang,
-            &engine.pipeline.registry,
-            &phase.links,
-            budget,
-            file,
-        );
-        run.max_edges = engine.limits.max_file_edges;
-        run.lang = rules;
-        run.data = phase.data.get(rules).map_or(&[], Vec::as_slice);
-        run.fns = &phase.defs;
-        run.def_deps = &phase.def_deps;
-        run.overrides = phase.overrides.get(rules);
-        run.enclosing_kinds = &phase.enclosing;
-        run.roles = &phase.roles;
-        run.phase_modules = &phase.modules;
-        run
-    }
-
-    /// A run with no language rules, data or edge cap, for evaluating
-    /// expressions outside a phase walk.
-    pub fn detached(
-        trees: &'t [Tree<S>],
-        fi: u32,
-        lang: &'t crate::intern::Lang,
-        registry: &'t Registry,
-        links: &'t Links,
-        budget: &'t Sentinel,
-        file: &'t Sentinel,
-    ) -> Self {
+    pub(super) fn new(input: Input<'t, S>, phase: &'t Phase, engine: &'t Engine) -> Self {
+        let registry = &engine.pipeline.registry;
         Self {
-            trees,
-            fi,
-            lang_ref: lang,
-            registry,
-            links,
-            budget,
-            file,
+            input,
+            phase,
+            engine,
             killed: None,
-            max_edges: 0,
-            graph: None,
             graph_reads: Default::default(),
-            files: trees.len() as u32,
-            project: None,
-            indexed: None,
-            fns: &[],
-            def_deps: &[],
-            overrides: None,
-            enclosing_kinds: &[],
-            graph_fi: 0,
-            lang: 0,
-            data: &[],
             edges: Vec::new(),
             writes: Vec::new(),
             states: registry.modules.iter().map(|m| (m.state)()).collect(),
@@ -218,24 +174,33 @@ impl<'t, S: Store> Run<'t, S> {
             written: 0,
             reading: u64::MAX,
             memo: Table::default(),
-            reads: FxHashSet::default(),
+            cycle_reads: FxHashSet::default(),
             round: 0,
             profile: profile::ON.then(Box::default),
-            roles: &[],
-            phase_modules: &[],
             machine: None,
             scopes: FxHashMap::default(),
         }
     }
 
+    pub(super) fn registry(&self) -> &'t Registry {
+        &self.engine.pipeline.registry
+    }
+
+    pub(super) fn lang(&self) -> &'t crate::intern::Lang {
+        &self.engine.lang
+    }
+
     pub(super) fn check(&self) -> Result<(), Killed> {
-        self.budget.check().and_then(|()| self.file.check())?;
-        match self.max_edges {
+        self.input
+            .budget
+            .check()
+            .and_then(|()| self.input.file.check())?;
+        match self.engine.limits.max_file_edges {
             0 => Ok(()),
             cap if self.edges.len() <= cap => Ok(()),
             cap => Err(Killed::limit(
                 "edges",
-                &self.trees[self.fi as usize].label,
+                &self.input.trees[self.input.fi as usize].label,
                 self.edges.len(),
                 cap,
             )),
@@ -253,7 +218,7 @@ impl<'t, S: Store> Run<'t, S> {
     }
 
     pub(crate) fn sym_at(&self, loc: Loc) -> u32 {
-        self.trees[loc.fi as usize].sym_at(loc.node, self.lang_ref)
+        self.input.trees[loc.fi as usize].sym_at(loc.node, self.lang())
     }
 
     pub(super) fn step(&mut self) -> bool {
@@ -285,8 +250,8 @@ impl<'t, S: Store> Run<'t, S> {
                 KeyPart::Arg(at) => arg(&mut key, usize::from(at)),
                 KeyPart::Of(at, derive) => {
                     let loc = args[usize::from(at)].first().and_then(|v| v.loc());
-                    let derived =
-                        loc.map(|l| S::derive(&derive)(Cursor::new(self.trees, l.fi, l.node)));
+                    let derived = loc
+                        .map(|l| S::derive(&derive)(Cursor::new(self.input.trees, l.fi, l.node)));
                     key.push(Val::Sym(derived.unwrap_or(u32::MAX)));
                 }
             }
@@ -320,8 +285,9 @@ impl<'t, S: Store> Run<'t, S> {
 
     /// Starts the phase's modules on the run's tree.
     pub(super) fn start_modules(&mut self) {
-        for &slot in self.phase_modules {
-            (S::hooks(self.registry.module(slot)).start)(self, slot, 0);
+        let (phase, registry) = (self.phase, self.registry());
+        for &slot in &phase.modules {
+            (S::hooks(registry.module(slot)).start)(self, slot, 0);
         }
     }
 
@@ -331,8 +297,9 @@ impl<'t, S: Store> Run<'t, S> {
         if let Some(killed) = self.killed.take() {
             return Err(killed);
         }
-        for &slot in self.phase_modules.iter().rev() {
-            (S::hooks(self.registry.module(slot)).finish)(self, slot);
+        let (phase, registry) = (self.phase, self.registry());
+        for &slot in phase.modules.iter().rev() {
+            (S::hooks(registry.module(slot)).finish)(self, slot);
         }
         if let Some(killed) = self.killed.take() {
             return Err(killed);
@@ -341,8 +308,8 @@ impl<'t, S: Store> Run<'t, S> {
         self.edges
             .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.label)));
         let mut outputs = Outputs::default();
-        for &slot in self.phase_modules {
-            let module = self.registry.module(slot);
+        for &slot in &phase.modules {
+            let module = registry.module(slot);
             if let Some(collect) = module.collect {
                 let output = (collect.take)(self.states[usize::from(slot)].as_mut());
                 outputs.0.push((module.name, collect, output));
@@ -369,9 +336,9 @@ impl<'t, S: Store> Run<'t, S> {
     }
 
     pub(super) fn scope_above(&mut self, at: Loc) -> Option<Loc> {
-        let kinds = self.enclosing_kinds;
+        let kinds = &self.phase.enclosing;
         let mut path = Vec::new();
-        let mut c = Cursor::new(self.trees, at.fi, at.node);
+        let mut c = Cursor::new(self.input.trees, at.fi, at.node);
         let found = loop {
             if let Some(&known) = self.scopes.get(&Loc::from(c)) {
                 break known;
@@ -392,12 +359,17 @@ impl<'t, S: Store> Run<'t, S> {
     }
 
     pub(super) fn fn_name(&self, id: FnId) -> String {
-        match self.registry.table.get(usize::from(id.0)) {
-            Some(f) => format!("{}.{}", self.registry.module(f.slot).name, f.name),
-            None => self.fns.get(usize::from(u16::MAX - id.0)).map_or_else(
-                || format!("def #{}", u16::MAX - id.0),
-                |d| d.name.to_string(),
-            ),
+        let registry = self.registry();
+        match registry.table.get(usize::from(id.0)) {
+            Some(f) => format!("{}.{}", registry.module(f.slot).name, f.name),
+            None => self
+                .phase
+                .defs
+                .get(usize::from(u16::MAX - id.0))
+                .map_or_else(
+                    || format!("def #{}", u16::MAX - id.0),
+                    |d| d.name.to_string(),
+                ),
         }
     }
 }

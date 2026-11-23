@@ -12,7 +12,7 @@ use super::graph::End;
 use super::pattern::{self, Cap, Pat};
 use super::program::{Pass, Phase, Scratch, Template, order};
 use super::{
-    Compact, Cursor, Graph, Indexed, Loc, Outputs, Run, Store, Tree, WHOLE, Write, machine,
+    Compact, Cursor, Graph, Indexed, Input, Loc, Outputs, Run, Store, Tree, WHOLE, Write, machine,
 };
 use crate::engine::Engine;
 use crate::intern::Lang;
@@ -275,12 +275,19 @@ fn run_files(
                     if passes.is_empty() {
                         continue;
                     }
-                    let mut run = Run::new(trees, fi as u32, rules, engine, phase, &scope, &file);
-                    run.graph = Some(graph);
-                    run.graph_fi = fi as u32;
-                    run.indexed = Some(&indexed);
-                    run.files = files;
-                    run.project = project;
+                    let input = Input {
+                        trees,
+                        fi: fi as u32,
+                        rules,
+                        graph: Some(graph),
+                        graph_fi: fi as u32,
+                        indexed: Some(&indexed),
+                        files,
+                        project,
+                        budget: &scope,
+                        file: &file,
+                    };
+                    let mut run = Run::new(input, phase, engine);
                     run.start_modules();
                     for pass in passes {
                         let nodes = region_nodes(tree, &regions, region, pass.post);
@@ -328,18 +335,19 @@ impl On<'_> {
             let writes = {
                 let trees = std::slice::from_ref(&*tree);
                 let indexed = Indexed::new(self.phase, trees, 1, self.engine, self.budget);
-                let mut run = Run::new(
+                let input = Input {
                     trees,
-                    0,
-                    self.rules,
-                    self.engine,
-                    self.phase,
-                    self.budget,
-                    self.file,
-                );
-                run.graph = self.graph;
-                run.graph_fi = self.fi;
-                run.indexed = Some(&indexed);
+                    fi: 0,
+                    rules: self.rules,
+                    graph: self.graph,
+                    graph_fi: self.fi,
+                    indexed: Some(&indexed),
+                    files: 1,
+                    project: None,
+                    budget: self.budget,
+                    file: self.file,
+                };
+                let mut run = Run::new(input, self.phase, self.engine);
                 run.start_modules();
                 at = fire_from(&mut run, pass, &nodes, at);
                 let writes = std::mem::take(&mut run.writes);
@@ -367,13 +375,13 @@ fn fire_from<'t, S: Store>(
         if !run.step() {
             return nodes.len();
         }
-        let tree = &run.trees[run.fi as usize];
+        let tree = &run.input.trees[run.input.fi as usize];
         if tree.storage.is_removed(tree.storage.id(node))
             || !pass.cases.tries(tree.storage.node(node).kind)
         {
             continue;
         }
-        let fi = run.fi;
+        let fi = run.input.fi;
         machine::fire(run, &pass.cases, pass.slots, Loc { fi, node });
         if !run.writes.is_empty() {
             break;

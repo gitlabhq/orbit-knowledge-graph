@@ -436,35 +436,36 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
     }
 
     pub fn fi(&self) -> u32 {
-        self.run.fi
+        self.run.input.fi
     }
 
     pub fn tree(&self) -> &'t Tree<S> {
-        &self.run.trees[self.run.fi as usize]
+        &self.run.input.trees[self.run.input.fi as usize]
     }
 
     pub fn at(&self, node: u32) -> Cursor<'t, S> {
-        Cursor::new(self.run.trees, self.run.fi, node)
+        Cursor::new(self.run.input.trees, self.run.input.fi, node)
     }
 
     pub fn jump(&self, loc: Loc) -> Cursor<'t, S> {
-        Cursor::new(self.run.trees, loc.fi, loc.node)
+        Cursor::new(self.run.input.trees, loc.fi, loc.node)
     }
 
     pub fn loc(&self, node: u32) -> Loc {
         Loc {
-            fi: self.run.fi,
+            fi: self.run.input.fi,
             node,
         }
     }
 
     pub fn lang(&self) -> &'t crate::intern::Lang {
-        self.run.lang_ref
+        self.run.lang()
     }
 
     /// The kind ids bound to the module's `KINDS` roles, in their order.
     pub fn kinds(&self) -> &'t [u16] {
         self.run
+            .phase
             .roles
             .get(usize::from(self.slot))
             .map_or(&[], |r| &r.kinds)
@@ -473,6 +474,7 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
     /// The tag ids bound to the module's `TAGS` roles, in their order.
     pub fn tags(&self) -> &'t [u32] {
         self.run
+            .phase
             .roles
             .get(usize::from(self.slot))
             .map_or(&[], |r| &r.tags)
@@ -486,14 +488,17 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
     /// Whether `node` of this tree has an edge of `kind` in the phase's graph.
     pub fn has_edge(&self, kind: EdgeKind, incoming: bool, node: u32) -> bool {
         let at = Loc {
-            fi: self.run.graph_fi,
+            fi: self.run.input.graph_fi,
             node,
         };
         self.run
             .graph_reads
             .borrow_mut()
             .push((kind, at.fi, at.node));
-        self.run.graph.is_some_and(|g| g.has(kind, incoming, at))
+        self.run
+            .input
+            .graph
+            .is_some_and(|g| g.has(kind, incoming, at))
     }
 
     /// The targets of `from`'s edges of `kind` in the graph so far.
@@ -502,7 +507,7 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
             .graph_reads
             .borrow_mut()
             .push((kind, from.fi, from.node));
-        self.run.graph.map_or(&[], |g| g.targets(kind, from))
+        self.run.input.graph.map_or(&[], |g| g.targets(kind, from))
     }
 
     /// The targets of `from`'s edges of `kind` that carry no label.
@@ -511,7 +516,10 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
             .graph_reads
             .borrow_mut()
             .push((kind, from.fi, from.node));
-        self.run.graph.map_or(&[], |g| g.unlabelled(kind, from))
+        self.run
+            .input
+            .graph
+            .map_or(&[], |g| g.unlabelled(kind, from))
     }
 
     /// The edges of `kind` made at `site`, as (from, to).
@@ -520,19 +528,20 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
             .graph_reads
             .borrow_mut()
             .push((kind, site.fi, site.node));
-        self.run.graph.map_or(&[], |g| g.at_site(kind, site))
+        self.run.input.graph.map_or(&[], |g| g.at_site(kind, site))
     }
 
     /// How many files the run covers; file indexes are `0..files()`.
     pub fn files(&self) -> u32 {
-        self.run.files
+        self.run.input.files
     }
 
     /// The project tree's root, in a family run.
     pub fn project(&self) -> Option<Cursor<'t, S>> {
         self.run
+            .input
             .project
-            .map(|fi| Cursor::new(self.run.trees, fi, 0))
+            .map(|fi| Cursor::new(self.run.input.trees, fi, 0))
     }
 
     pub fn state(&mut self) -> &mut M::State {
@@ -557,7 +566,7 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
     }
 
     pub fn call(&mut self, id: FnId, args: &[Vals]) -> Vals {
-        let registry = self.run.registry;
+        let registry = self.run.registry();
         assert_eq!(
             registry.function(id).slot,
             self.slot,
@@ -575,7 +584,7 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
             .iter()
             .position(|f| f.name == name)
             .unwrap_or_else(|| panic!("{} declares no function {name}", M::NAME));
-        let first = self.run.registry.starts[usize::from(self.slot)];
+        let first = self.run.registry().starts[usize::from(self.slot)];
         self.call(FnId(first + index as u16), args)
     }
 
@@ -599,12 +608,12 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
 
     /// One tree's piece of a declared rule index, in a run that has them.
     pub fn piece(&self, fi: u32, id: u32) -> Option<&'t crate::tree::Piece> {
-        Some(self.run.indexed?.piece(fi, id))
+        Some(self.run.input.indexed?.piece(fi, id))
     }
 
     /// A declared rule index's whole-tree matches across the family, by key.
     pub fn family(&self, id: u32) -> Option<&'t FxHashMap<u32, Vec<Loc>>> {
-        Some(self.run.indexed?.family(id))
+        Some(self.run.input.indexed?.family(id))
     }
 
     pub fn emitted(&self) -> usize {
