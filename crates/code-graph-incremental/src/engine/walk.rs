@@ -10,7 +10,7 @@ use smallvec::SmallVec;
 use super::pattern::{self, Cap, Pat};
 use super::program::{Pass, Phase, Scratch, Template, order};
 use super::{
-    Compact, Cursor, EdgeIndex, Indexed, Indexes, Loc, Row, Run, Store, Tree, WHOLE, Write, machine,
+    Compact, Cursor, EdgeIndex, Indexed, Loc, Row, Run, Store, Tree, WHOLE, Write, machine,
 };
 use crate::env::Env;
 use crate::intern::Lang;
@@ -52,19 +52,16 @@ pub fn run_tree<S: Store>(
 /// Runs a phase on the first `walk` trees of a family in parallel, over all
 /// its trees and the graph so far; returns the edges and rows it wrote.
 /// `project` is the project tree's file, if the family has one.
-#[allow(clippy::too_many_arguments)]
 pub fn run_trees(
     phase: &Phase,
     trees: &[Tree<Compact>],
     walk: usize,
     project: Option<u32>,
-    edges: &[Edge],
     graph: &EdgeIndex,
     env: &Env,
     budget: &Sentinel,
 ) -> Result<(Vec<Edge>, Vec<Row>), Killed> {
     let scope = scope_budget(phase, env, budget);
-    let indexes = Indexes::new(&env.lang, trees, edges, &phase.modules);
     let files = project.unwrap_or(trees.len() as u32);
     let indexed = Indexed::new(phase, trees, files as usize, env, &scope);
     let found: Vec<Result<(Vec<Edge>, Vec<Row>), Killed>> = (0..walk)
@@ -75,7 +72,6 @@ pub fn run_trees(
             let mut run = Run::new(trees, fi as u32, rules, env, phase, &scope, &file);
             run.graph = Some(graph);
             run.graph_fi = fi as u32;
-            run.indexes = Some(&indexes);
             run.indexed = Some(&indexed);
             run.files = files;
             run.project = project;
@@ -121,8 +117,6 @@ impl On<'_> {
         while at < nodes.len() {
             let writes = {
                 let trees = std::slice::from_ref(&*tree);
-                let indexes = S::compact(trees)
-                    .map(|trees| Indexes::new(&self.env.lang, trees, &[], &self.phase.modules));
                 let indexed = Indexed::new(self.phase, trees, 1, self.env, self.budget);
                 let mut run = Run::new(
                     trees,
@@ -135,7 +129,6 @@ impl On<'_> {
                 );
                 run.graph = self.graph;
                 run.graph_fi = self.fi;
-                run.indexes = indexes.as_ref();
                 run.indexed = Some(&indexed);
                 run.start_modules();
                 at = fire_from(&mut run, pass, &nodes, at);

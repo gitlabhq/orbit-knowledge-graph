@@ -241,7 +241,6 @@ fn finish(env: &Env, state: &mut State, run: &Sentinel, report: &mut Report) -> 
                         &state.trees,
                         project as usize,
                         Some(project),
-                        &state.edges,
                         &graph,
                         env,
                         run,

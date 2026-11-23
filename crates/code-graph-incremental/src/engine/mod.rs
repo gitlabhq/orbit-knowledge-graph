@@ -32,8 +32,6 @@ pub trait Store: Storage<Node = Node> + Sized + 'static {
     fn derive(d: &Derive) -> fn(Cursor<'_, Self>) -> u32;
     /// The tree as one templates can build in, if this storage allows it.
     fn writable(tree: &mut Tree<Self>) -> Option<&mut Tree<Mutable>>;
-    /// The trees as module indexes read them, if this storage is theirs.
-    fn compact(trees: &[Tree<Self>]) -> Option<&[Tree<Compact>]>;
 }
 
 impl Store for Compact {
@@ -49,9 +47,6 @@ impl Store for Compact {
     fn writable(_: &mut Tree<Self>) -> Option<&mut Tree<Mutable>> {
         None
     }
-    fn compact(trees: &[Tree<Self>]) -> Option<&[Tree<Compact>]> {
-        Some(trees)
-    }
 }
 
 impl Store for Mutable {
@@ -66,9 +61,6 @@ impl Store for Mutable {
     }
     fn writable(tree: &mut Tree<Self>) -> Option<&mut Tree<Mutable>> {
         Some(tree)
-    }
-    fn compact(_: &[Tree<Self>]) -> Option<&[Tree<Compact>]> {
-        None
     }
 }
 
@@ -187,25 +179,11 @@ pub trait Module: Sized + 'static {
     fn functions() -> &'static [Function<Self>];
     fn start<'t, S: Store>(_cx: &mut Cx<'_, 't, Self, S>, _root: Cursor<'t, S>) {}
     fn finish<S: Store>(_cx: &mut Cx<'_, '_, Self, S>) {}
-    fn indexes() -> &'static [IndexDecl] {
-        &[]
-    }
     /// The node kinds the module recognizes, by role; pipeline.yaml binds each
     /// role to a kind of the vocabulary.
     const KINDS: &'static [&'static str] = &[];
     /// The tags the module reads, by role, bound the same way.
     const TAGS: &'static [&'static str] = &[];
-}
-
-/// An index a module declares over a family's trees and edges. The engine
-/// builds it the first time a file of a family run asks for it, and every
-/// file of that run shares it.
-pub type BuildIndex =
-    fn(&crate::intern::Lang, &[Tree<Compact>], &[Edge]) -> Box<dyn Any + Send + Sync>;
-
-pub struct IndexDecl {
-    pub name: &'static str,
-    pub build: BuildIndex,
 }
 
 /// The anchor under which a piece files every match of a tree.
@@ -270,43 +248,6 @@ impl<'t, S: Store> Indexed<'t, S> {
     }
 }
 
-/// The module-declared indexes of one family run, built before the walk.
-pub struct Indexes {
-    built: Vec<(u8, &'static str, Box<dyn Any + Send + Sync>)>,
-}
-
-static INDEXES: LazyLock<Vec<(u8, &'static IndexDecl)>> = LazyLock::new(|| {
-    modules::ALL
-        .iter()
-        .enumerate()
-        .flat_map(|(slot, m)| (m.indexes)().iter().map(move |d| (slot as u8, d)))
-        .collect()
-});
-
-impl Indexes {
-    pub fn new(
-        lang: &crate::intern::Lang,
-        trees: &[Tree<Compact>],
-        edges: &[Edge],
-        modules: &[u8],
-    ) -> Self {
-        use rayon::prelude::*;
-        let built = INDEXES
-            .par_iter()
-            .filter(|(slot, _)| modules.contains(slot))
-            .map(|&(slot, decl)| (slot, decl.name, (decl.build)(lang, trees, edges)))
-            .collect();
-        Self { built }
-    }
-
-    fn get(&self, slot: u8, name: &str) -> Option<&(dyn Any + Send + Sync)> {
-        self.built
-            .iter()
-            .find(|(s, n, _)| *s == slot && *n == name)
-            .map(|(_, _, b)| b.as_ref())
-    }
-}
-
 pub type Call<M, S> = for<'r, 't> fn(&mut Cx<'r, 't, M, S>, &[Vals]) -> Vals;
 
 pub struct Calls<M: Module> {
@@ -339,7 +280,6 @@ pub struct Registration {
     describe: fn(u8) -> Vec<Entry>,
     compact: Hooks<Compact>,
     mutable: Hooks<Mutable>,
-    indexes: fn() -> &'static [IndexDecl],
     pub(crate) kinds: &'static [&'static str],
     pub(crate) tags: &'static [&'static str],
 }
@@ -359,7 +299,6 @@ pub const fn register<M: Module>() -> Registration {
             start: start::<M, Mutable>,
             finish: finish::<M, Mutable>,
         },
-        indexes: M::indexes,
         kinds: M::KINDS,
         tags: M::TAGS,
     }
@@ -591,7 +530,6 @@ pub struct Run<'t, S: Store = Compact> {
     graph: Option<&'t EdgeIndex>,
     files: u32,
     project: Option<u32>,
-    indexes: Option<&'t Indexes>,
     indexed: Option<&'t Indexed<'t, S>>,
     fns: &'t [program::Def],
     overrides: Option<&'t std::collections::HashMap<u16, u16>>,
@@ -663,7 +601,6 @@ impl<'t, S: Store> Run<'t, S> {
             graph: None,
             files: trees.len() as u32,
             project: None,
-            indexes: None,
             indexed: None,
             fns: &[],
             overrides: None,
@@ -1009,11 +946,6 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
             .roles
             .get(usize::from(self.slot))
             .map_or(&[], |r| &r.tags)
-    }
-
-    /// One of this module's declared indexes, in a family run.
-    pub fn index<T: 'static>(&self, name: &str) -> Option<&'t T> {
-        self.run.indexes?.get(self.slot, name)?.downcast_ref()
     }
 
     /// A value's text: a symbol as is, or a node's own text.

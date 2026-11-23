@@ -344,17 +344,8 @@ pub fn export(
     state.trees.push(state.project_compact(env));
     let graph = crate::engine::EdgeIndex::new(&state.edges);
     let walk = state.trees.len();
-    let rows = crate::engine::run_trees(
-        phase,
-        &state.trees,
-        walk,
-        Some(project),
-        &state.edges,
-        &graph,
-        env,
-        run,
-    )
-    .map(|(_, rows)| rows);
+    let rows = crate::engine::run_trees(phase, &state.trees, walk, Some(project), &graph, env, run)
+        .map(|(_, rows)| rows);
     let written = rows.map_err(Error::from).and_then(|rows| {
         Sink {
             env,
