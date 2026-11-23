@@ -15,9 +15,10 @@ pub struct GrpcConfig {
     pub stream_window_size: u32,
     pub concurrency_limit: usize,
     /// Connection age at which the server closes a connection so clients
-    /// reconnect and spread across pods behind an L4 load balancer. Unset or
-    /// `null` turns the maximum age off: behind the Orbit Gateway, which balances
-    /// each request, the closes rebalance nothing and can end running queries.
+    /// reconnect and spread across pods behind an L4 load balancer. Defaults to
+    /// 300. Set it to `null` to turn the maximum age off: behind the Orbit
+    /// Gateway, which balances each request, the closes rebalance nothing and
+    /// can end running queries.
     #[schemars(range(min = 1))]
     pub max_connection_age_secs: Option<u64>,
     // Must stay paired with max_connection_age_secs: without a grace value,

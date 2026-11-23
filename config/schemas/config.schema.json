@@ -1448,7 +1448,7 @@
           "minimum": 0
         },
         "max_connection_age_secs": {
-          "description": "Connection age at which the server closes a connection so clients\nreconnect and spread across pods behind an L4 load balancer. Unset or\n`null` turns the maximum age off: behind the Orbit Gateway, which balances\neach request, the closes rebalance nothing and can end running queries.",
+          "description": "Connection age at which the server closes a connection so clients\nreconnect and spread across pods behind an L4 load balancer. Defaults to\n300. Set it to `null` to turn the maximum age off: behind the Orbit\nGateway, which balances each request, the closes rebalance nothing and\ncan end running queries.",
           "type": [
             "integer",
             "null"
