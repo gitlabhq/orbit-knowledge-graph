@@ -47,20 +47,23 @@ update this table.
 1. `publish` checks the writer report, runs `check.py` again as a hard gate,
    refuses a branch that changes files outside the user docs, pushes one
    commit, and opens or updates the draft docs MR. The description lists
-   what to check. The run ends here: it never waits for CI or the review.
-1. The docs MR pipeline starts docs-review. When the pipeline failed on any
-   job other than `docs-write-merge-order-check`, docs-review posts one note
-   that mentions docs-write and asks it to fix CI. When it is green,
-   docs-review posts its threads and a summary note that mentions
-   docs-write.
+   what to check. Then it requests the docs-review account's review
+   (`REVIEW_USER`) and the run ends: it never waits for CI or the review.
+1. The review request starts docs-review as a chained run. GitLab starts no
+   flow for a pipeline that the flow's own push created, so the request,
+   not the pipeline, starts it. docs-review waits up to 840 seconds for the
+   head's pipeline. When it failed on a docs job, docs-review posts one note
+   that mentions docs-write and asks it to fix CI. When it is green, or only
+   `docs-write-merge-order-check` failed, docs-review posts its threads and
+   a summary note that mentions docs-write.
 1. The mention starts a new docs-write run on the docs MR. `ci` reads the
    pipeline on the head once: failed docs jobs go to a fixer, and a
-   pipeline that is still running ends the run, because its pipeline event
-   starts docs-review again. On green, `threads` reads the docs-review
+   pipeline that is still running ends the run, because docs-review
+   mentions docs-write when it finishes. On green, `threads` reads the docs-review
    summary on the head once. With no summary yet, the run ends: docs-review
    mentions docs-write when it posts one. docs-write no longer reviews its
    own change.
-1. A fresh fixer agent, one per cycle and four at most per docs MR, fixes the unresolved
+1. A fresh fixer agent, one per cycle and three at most per docs MR, fixes the unresolved
    threads from trusted authors in one pass: the flow identity, the
    docs-review account (`REVIEW_USER`), Duo Code Review, the authors and
    reviewers of the feature MRs in the group, the docs MR reviewers, and
@@ -72,12 +75,15 @@ update this table.
    merges and do not hold the handoff. The flow replies once per thread. It
    resolves what it fixed once `check.py` is clean. A thread it cannot fix
    gets a reply and stays open as a reviewer decision.
-1. A fix push ends the run and starts a new pipeline, so docs-review reviews
-   the new head. It posts only findings it has not posted before, and
-   mentions docs-write again. The cap of four fix cycles counts the fix
-   pushes on the docs branch, people's commits included. At the cap,
-   docs-write hands off and holds the MR in draft instead of fixing, and
-   pushes nothing, so the loop stops.
+1. A fix push requests docs-review's review again and ends the run, so
+   docs-review reviews the new head. It posts only findings it has not
+   posted before, and mentions docs-write again. The cap of three fix
+   cycles counts the flow's fix pushes since its last write push. Each hop
+   is one level of GitLab's chain depth limit of 10: the write run, its
+   review, and three fix and review pairs end with the handoff run at
+   depth 9. At the cap, docs-write hands off and holds the MR in draft
+   instead of fixing, and pushes nothing, so the loop stops. A person's
+   mention starts a new chain.
 1. When CI is green, the head has a review, and only decision threads and
    threads from other people are open, the flow removes `Draft:`, adds the
    feature MR author and the `DOCS_REVIEWERS` as reviewers, and posts one
@@ -109,8 +115,9 @@ flowchart TD
 ## How docs-review runs
 
 1. `setup` fetches the skills like docs-write, then decides with no model
-   call. It ends the run when the goal is neither an MR pipeline nor a
-   mention; the pipeline is not green (a failed
+   call. A review request or a mention waits up to 840 seconds for the
+   head's pipeline first. It ends the run when the goal is not an MR
+   pipeline, a mention, or a review request; the pipeline is not green (a failed
    `docs-write-merge-order-check` alone counts as green), after one note
    per head that asks docs-write to fix CI when the MR is an open
    docs-write MR and `WRITE_USER` is set; the MR is closed,
@@ -141,8 +148,8 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  T[MR pipeline finished, or a mention] --> S[setup: no model call]
-  S -->|not an MR pipeline or mention| E[end]
+  T[review request from docs-write, a mention, or a person's MR pipeline] --> S[setup: no model call]
+  S -->|no MR in the goal| E[end]
   S -->|pipeline not green| E
   S -->|failed docs-write MR pipeline: note that mentions docs-write| E
   S -->|closed, fork, opted out, or moved on| E
@@ -164,20 +171,21 @@ sequenceDiagram
   participant CI as Docs MR pipeline
   participant R as docs-review
   Dev->>W: mention on the feature MR
-  W->>D: push docs, open draft docs MR, end the run
+  W->>D: push docs, open draft docs MR, request docs-review, end the run
+  D-->>R: the review request starts a chained run
   D->>CI: pipeline on head 1
-  CI-->>R: pipeline event, green
+  CI-->>R: green, after setup waits for it
   R->>D: inline threads and a summary for head 1 that mentions docs-write
   D-->>W: the mention starts a new run
   W->>D: CI green, the fixer fixes the threads
-  W->>D: push head 2, reply, resolve fixed threads, end the run
+  W->>D: push head 2, reply, resolve fixed threads, request docs-review, end the run
   D->>CI: pipeline on head 2
-  CI-->>R: pipeline event, failed on a docs job
+  CI-->>R: failed on a docs job, after setup waits for it
   R->>D: one note that mentions docs-write: fix CI
   D-->>W: the mention starts a new run
-  W->>D: the fixer fixes the docs job, push head 3, end the run
+  W->>D: the fixer fixes the docs job, push head 3, request docs-review, end the run
   D->>CI: pipeline on head 3
-  CI-->>R: pipeline event, green
+  CI-->>R: green, after setup waits for it
   R->>D: only new findings, and a summary for head 3 that mentions docs-write
   D-->>W: the mention starts a new run
   W->>D: no thread to fix: handoff, ready for review
@@ -199,6 +207,10 @@ anchors, and missing runbook steps. No style guide, word list, topic type,
 or brevity findings: `post` drops them even when a linter reports them.
 
 ## Guardrails and residual risk
+
+`.docs-write/` must stay readable: the flows' `read_file` steps read the
+route files there, and `read_file` refuses paths that Git ignores, so never add
+`.docs-write/` to `.gitignore`.
 
 Every agent in both flows, the docs-review reviewer included, has
 `run_command`, a shell in the same workload as the run's `GITLAB_TOKEN`. Tool options cannot restrict a shell, so an agent can read
@@ -330,15 +342,16 @@ GitLab starts no flow for a pipeline that a service account's push created,
 so docs-write requests the docs-review account's review after each push
 (`REVIEW_USER`). Its API calls send `X-Gitlab-Duo-Workflow-Id`, so GitLab
 starts docs-review as a child of the docs-write run, acting for the person
-who started the chain (`ai_flow_trigger_chaining`, on for gitlab.com). Setup
+who started the chain (`ai_flow_trigger_chaining`, on for GitLab.com). Setup
 waits up to 840 seconds for the head's pipeline, then reviews a green one or
-asks docs-write to fix failed docs jobs. A chain allows at most 30 sessions.
+asks docs-write to fix failed docs jobs. GitLab limits a chain to depth 10,
+which the fix-cycle cap of three fits.
 
-Then switch to **Pipeline** events (`eventTypes: [3]`), like Duo Code
-Review, once `FLOW_USER`, `REVIEW_USER`, and `WRITE_USER` are set and
-`SKILLS_REF` points at a `team/skills` commit with `review_step.py`. The
-docs-write chain needs this trigger: docs-write ends after each push, and
-only docs-review's mention on the next pipeline starts its next run.
+To also review docs MRs that people push, add **Pipeline** events
+(`eventTypes: [3]`), like Duo Code Review, once `FLOW_USER`, `REVIEW_USER`,
+and `WRITE_USER` are set. A person's pipeline starts docs-review; a pipeline
+from the flow's push starts no flow, so the docs-write chain does not need
+this trigger.
 
 ```json
 {"pipeline_hooks": {"rules": [
@@ -388,7 +401,9 @@ MRs with `~documentation` or `~"docs-factory::skip"`. Each run still spends abou
   merge, so docs never merge before the code. The new pipeline that the flow
   starts at merge, or a retry of the job, turns it green. Both flows count
   this one failure as expected, so docs-review still reviews the docs MR and
-  docs-write still hands it off.
+  docs-write still hands it off. They match the job by name (`ci_loop.py` in
+  `team/skills`): renaming the job turns every docs MR pipeline into a real
+  failure for the flows.
 
 ## Shadow mode
 
