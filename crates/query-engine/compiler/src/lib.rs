@@ -257,6 +257,25 @@ mod tests {
     }
 
     #[test]
+    fn compiles_traversal_against_builder_ontology() {
+        let ontology = Arc::new(
+            Ontology::new()
+                .with_nodes(["User", "Project"])
+                .with_edges(["MEMBER_OF"])
+                .with_fields("User", [("username", ontology::DataType::String)]),
+        );
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
+            "limit": 10
+        }"#;
+
+        let result = compile(json, Frontend::JsonDsl, &ontology, &ctx).unwrap();
+        assert!(!result.base.sql.is_empty());
+    }
+
+    #[test]
     fn relationship_filter_keeps_edge_column_type() {
         let query = r#"{
             "query_type": "traversal",
