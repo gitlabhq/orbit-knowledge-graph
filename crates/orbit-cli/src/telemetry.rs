@@ -96,16 +96,13 @@ pub fn emit_command_event<T: AnalyticsTracker + ?Sized>(
     duration: Duration,
     coding_agent: Option<&str>,
 ) {
-    let Ok(command) = action.parse() else {
-        return;
-    };
     let outcome = orbit_cli_command::OrbitCliCommand {
-        command,
+        command: action.to_owned(),
         tool_name: None,
         success: exit_code == 0,
         exit_code: u8::try_from(exit_code).ok(),
         duration_ms: i64::try_from(duration.as_millis()).ok(),
-        cli_version: crate::version::get().parse().ok(),
+        cli_version: Some(crate::version::get().to_owned()),
     };
     track_event(
         tracker,
@@ -189,11 +186,10 @@ fn track_event<T: AnalyticsTracker + ?Sized>(
 
 fn build_cli_context() -> OrbitCliContext {
     OrbitCliContext::new(orbit_cli::OrbitCli {
-        cli_version: crate::version::get().parse().ok(),
-        os: std::env::consts::OS.parse().ok(),
-        arch: std::env::consts::ARCH.parse().ok(),
-        distribution: detect_distribution(|key| std::env::var(key).ok())
-            .and_then(|d| d.parse().ok()),
+        cli_version: Some(crate::version::get().to_owned()),
+        os: Some(std::env::consts::OS.to_owned()),
+        arch: Some(std::env::consts::ARCH.to_owned()),
+        distribution: detect_distribution(|key| std::env::var(key).ok()).map(str::to_owned),
     })
 }
 
@@ -202,9 +198,8 @@ fn build_common_context(coding_agent: Option<&str>) -> OrbitCommonContext {
         deployment_type: None,
         surface: Some(orbit_common::OrbitCommonSurface::Cli),
         environment: None,
-        coding_agent: coding_agent
-            .and_then(|a| a.parse::<orbit_common::OrbitCommonCodingAgent>().ok()),
-        correlation_id: invocation_id().parse().ok(),
+        coding_agent: coding_agent.map(str::to_owned),
+        correlation_id: Some(invocation_id().to_string()),
         instance_id: None,
         unique_instance_id: None,
         host_name: None,

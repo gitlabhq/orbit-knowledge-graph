@@ -95,18 +95,8 @@ impl AnalyticsObserver {
             return;
         }
 
-        let common = match build_common(&self.config, &self.claims, &self.schema_version) {
-            Ok(c) => c,
-            Err(e) => {
-                orbit_log_fields::warn!(
-                    safe(ERROR_TYPE) = e.kind(),
-                    expanded(ERROR_MESSAGE) = %e,
-                    "failed to build orbit_common context, skipping analytics event"
-                );
-                return;
-            }
-        };
-        let mut query = match build_query(
+        let common = build_common(&self.config, &self.claims, &self.schema_version);
+        let mut query = build_query(
             &self.claims,
             &self.tool_name,
             &self.user_agent,
@@ -114,19 +104,9 @@ impl AnalyticsObserver {
             row_count,
             redacted_count,
             self.start.elapsed(),
-        ) {
-            Ok(q) => q,
-            Err(e) => {
-                orbit_log_fields::warn!(
-                    safe(ERROR_TYPE) = e.kind(),
-                    expanded(ERROR_MESSAGE) = %e,
-                    "failed to build orbit_query context, skipping analytics event"
-                );
-                return;
-            }
-        };
+        );
 
-        query.data.graph_schema_version = self.schema_version.parse().ok();
+        query.data.graph_schema_version = Some(self.schema_version.clone());
         apply_outcome(&mut query.data, error);
 
         match StructuredEvent::builder(GKG_CATEGORY, ACTION_QUERY_EXECUTED)
@@ -412,12 +392,13 @@ mod tests {
                 FailureReason::Timeout,
                 FailureReason::Custom,
             ]);
+        let (_, max_length) = orbit_analytics::orbit_query::MAX_LENGTHS
+            .iter()
+            .find(|(field, _)| *field == "failure_reason")
+            .expect("orbit_query caps failure_reason");
         for reason in reasons {
             assert!(
-                reason
-                    .as_str()
-                    .parse::<orbit_analytics::orbit_query::OrbitQueryFailureReason>()
-                    .is_ok(),
+                reason.as_str().chars().count() <= *max_length,
                 "{} does not fit orbit_query.failure_reason",
                 reason.as_str()
             );

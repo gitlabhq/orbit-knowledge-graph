@@ -101,6 +101,7 @@ fn render_module(iglu_dir: &Path, schema_name: &str, type_name: &str) -> String 
     }
     inject_defaults(&mut parsed, schema_name);
     promote_defaults_on_required(&mut parsed);
+    let max_lengths = take_max_lengths(&mut parsed, schema_name);
 
     let mut type_space = TypeSpace::new(
         TypeSpaceSettings::default()
@@ -121,13 +122,7 @@ fn render_module(iglu_dir: &Path, schema_name: &str, type_name: &str) -> String 
     let body_tokens = type_space.to_stream();
     let body_file = syn::parse2::<syn::File>(body_tokens)
         .unwrap_or_else(|e| panic!("typify output is not valid Rust for {schema_name}: {e}"));
-    let (body_pretty, fitted_checks) = fit_length_checks(&prettyplease::unparse(&body_file));
-    let max_length_constraints = count_max_length_constraints(&parsed);
-    assert_eq!(
-        fitted_checks, max_length_constraints,
-        "{schema_name}: rewrote {fitted_checks} typify length checks for {max_length_constraints} \
-         maxLength constraints; update fit_length_checks to match the typify output"
-    );
+    let body_pretty = prettyplease::unparse(&body_file);
 
     let schema_uri = format!("iglu:{VENDOR}/{schema_name}/jsonschema/{version}");
 
@@ -148,59 +143,53 @@ fn render_module(iglu_dir: &Path, schema_name: &str, type_name: &str) -> String 
     out.push_str(&format!(
         "    pub const SCHEMA_JSON: &str = {schema_raw:?};\n"
     ));
+    out.push_str("    pub const MAX_LENGTHS: &[(&str, usize)] = &[\n");
+    for (field, max_length) in &max_lengths {
+        out.push_str(&format!("        ({field:?}, {max_length}),\n"));
+    }
+    out.push_str("    ];\n");
     out.push_str("}\n\n");
     out
 }
 
-/// Rewrite each typify `maxLength` rejection so `parse()` fits the value instead.
-fn fit_length_checks(body: &str) -> (String, usize) {
-    let mut rewritten = String::with_capacity(body.len());
-    let mut fitted_checks = 0;
-    let mut lines = body.lines();
-    while let Some(line) = lines.next() {
-        let Some(max_length) = parse_max_length_check(line) else {
-            rewritten.push_str(line);
-            rewritten.push('\n');
-            continue;
-        };
-        assert_eq!(
-            lines.next().map(str::trim),
-            Some(format!("return Err(\"longer than {max_length} characters\".into());").as_str()),
-            "unexpected typify output after a maxLength check"
-        );
-        assert_eq!(
-            lines.next().map(str::trim),
-            Some("}"),
-            "unexpected typify output after a maxLength check"
-        );
-        let indent = &line[..line.len() - line.trim_start().len()];
-        rewritten.push_str(&format!(
-            "{indent}let value = super::fit_to_length(value, {max_length});\n"
-        ));
-        fitted_checks += 1;
+/// Take `maxLength` out of the schema, so the runtime cuts a value instead of rejecting it.
+fn take_max_lengths(schema: &mut Value, schema_name: &str) -> Vec<(String, usize)> {
+    let mut max_lengths = Vec::new();
+    if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        for (field, property) in properties {
+            let constrained = if property.get("items").is_some() {
+                &mut property["items"]
+            } else {
+                property
+            };
+            if let Some(max_length) = constrained
+                .as_object_mut()
+                .and_then(|constraints| constraints.remove("maxLength"))
+            {
+                let max_length = max_length
+                    .as_u64()
+                    .and_then(|max_length| usize::try_from(max_length).ok())
+                    .unwrap_or_else(|| {
+                        panic!("{schema_name}.{field}: maxLength must be an integer")
+                    });
+                max_lengths.push((field.clone(), max_length));
+            }
+        }
     }
-    (rewritten, fitted_checks)
+    assert!(
+        !contains_max_length(schema),
+        "{schema_name}: maxLength is supported only on a property or on its array items"
+    );
+    max_lengths
 }
 
-fn parse_max_length_check(line: &str) -> Option<usize> {
-    line.trim()
-        .strip_prefix("if value.chars().count() > ")?
-        .strip_suffix("usize {")?
-        .parse()
-        .ok()
-}
-
-fn count_max_length_constraints(schema: &Value) -> usize {
+fn contains_max_length(schema: &Value) -> bool {
     match schema {
         Value::Object(object) => {
-            usize::from(object.contains_key("maxLength"))
-                + object
-                    .values()
-                    .map(count_max_length_constraints)
-                    .sum::<usize>()
+            object.contains_key("maxLength") || object.values().any(contains_max_length)
         }
-        Value::Array(items) => items.iter().map(count_max_length_constraints).sum(),
-        _ => 0,
+        Value::Array(items) => items.iter().any(contains_max_length),
+        _ => false,
     }
 }
 

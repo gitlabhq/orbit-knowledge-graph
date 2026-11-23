@@ -132,17 +132,7 @@ impl SnowplowIndexingObserver {
         };
         let (namespace_id, root_namespace_id) = self.namespace_ids();
 
-        let common = match build_common(&self.config, self.instance.identity(), root_namespace_id) {
-            Ok(context) => context,
-            Err(error) => {
-                orbit_log_fields::warn!(
-                    safe(ERROR_TYPE) = error.kind(),
-                    expanded(ERROR_MESSAGE) = %error,
-                    "failed to build orbit_common context, skipping indexing event"
-                );
-                return;
-            }
-        };
+        let common = build_common(&self.config, self.instance.identity(), root_namespace_id);
 
         let event = match self.pipeline_type {
             Some(PipelineType::Sdlc) => {
@@ -164,7 +154,7 @@ impl SnowplowIndexingObserver {
                     written_bytes: self.written_bytes,
                     duration_ms: self.duration_ms,
                 });
-                build_event(context.map(EventContext::Sdlc), common)
+                build_event(EventContext::Sdlc(context), common)
             }
             Some(PipelineType::Code) => {
                 let Some(project_id) = self.project_id else {
@@ -192,7 +182,7 @@ impl SnowplowIndexingObserver {
                     written_bytes: self.written_bytes,
                     duration_ms: self.duration_ms,
                 });
-                build_event(context.map(EventContext::Code), common)
+                build_event(EventContext::Code(context), common)
             }
             None => return,
         };
@@ -216,11 +206,11 @@ enum EventContext {
 }
 
 fn build_event(
-    context: Result<EventContext, labkit_events::Error>,
+    context: EventContext,
     common: orbit_analytics::OrbitCommonContext,
 ) -> Result<StructuredEvent, labkit_events::Error> {
     let builder = StructuredEvent::builder(GKG_CATEGORY, ACTION_INDEXING_COMPLETED).context(common);
-    match context? {
+    match context {
         EventContext::Sdlc(context) => builder.context(context).build(),
         EventContext::Code(context) => builder.context(context).build(),
     }

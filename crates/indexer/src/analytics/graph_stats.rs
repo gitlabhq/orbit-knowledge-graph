@@ -64,7 +64,7 @@ impl GraphStatsReporter {
     }
 
     fn instance_event(&self, stats: &GraphStats) -> Result<StructuredEvent, labkit_events::Error> {
-        let common = build_common(&self.config, self.instance.identity(), None)?;
+        let common = build_common(&self.config, self.instance.identity(), None);
         let context = OrbitGraphStatsContext::new(orbit_graph_stats::OrbitGraphStats {
             graph_bytes: saturating_i64(stats.graph_bytes),
             entity_counts: typed_entity_counts(&stats.entity_counts)?,
@@ -85,7 +85,7 @@ impl GraphStatsReporter {
             &self.config,
             self.instance.identity(),
             Some(namespace.root_namespace_id),
-        )?;
+        );
         let context = OrbitNamespaceGraphStatsContext::new(
             orbit_namespace_graph_stats::OrbitNamespaceGraphStats {
                 graph_bytes: saturating_i64(namespace.graph_bytes),
