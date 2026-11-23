@@ -242,6 +242,7 @@ pub fn detect_coding_agent(get_env: impl Fn(&str) -> Option<String>) -> Option<S
     }
 }
 
+/// glab sets `GITLAB_ORBIT_DISTRIBUTION=glab` on the binary it runs for `glab orbit`.
 pub fn detect_distribution(get_env: impl Fn(&str) -> Option<String>) -> Option<&'static str> {
     (get_env(DISTRIBUTION_ENV).as_deref() == Some(GLAB_DISTRIBUTION)).then_some(GLAB_DISTRIBUTION)
 }

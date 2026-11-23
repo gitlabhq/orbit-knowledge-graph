@@ -331,6 +331,7 @@ fn stage(
     })
 }
 
+/// Puts each pending snapshot in place. The rename keeps the read time that freshness compares against.
 pub(super) fn commit_snapshots(refreshed: &[Refreshed]) -> Result<()> {
     for family in refreshed {
         State::commit_staged(&family.pending, &family.snapshot)

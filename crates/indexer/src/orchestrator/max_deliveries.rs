@@ -1,3 +1,10 @@
+//! Reconciles NATS JetStream messages that have exhausted `max_deliver`.
+//!
+//! GKG streams allow one message per subject (`discard_new_per_subject`), so
+//! a message JetStream gives up on without ack/nack/term permanently blocks
+//! that subject. This listens for JetStream's `MAX_DELIVERIES` advisory and
+//! deletes the exhausted message so the existing sweep/backfill dispatchers
+//! can retry it.
 use async_nats::jetstream::ErrorCode;
 use async_nats::jetstream::stream::{DeleteMessageErrorKind, RawMessageErrorKind};
 use async_trait::async_trait;

@@ -38,6 +38,13 @@ pub fn resolve_dest_within(root: &Path, dest: &Path) -> io::Result<PathBuf> {
     }
 }
 
+/// Create parent directories for `path`, validating that no existing
+/// path component resolves outside `root` via symlinks.
+///
+/// Returns the canonicalized destination path (parent joined with filename).
+///
+/// Without this check, `create_dir_all` follows symlinks planted by earlier
+/// operations, creating directories outside the intended root.
 pub fn safe_create_dir_all(path: &Path, root: &Path) -> io::Result<PathBuf> {
     let parent = match path.parent() {
         Some(p) => p,
@@ -70,6 +77,14 @@ pub fn longest_existing_ancestor(path: &Path) -> &Path {
     current
 }
 
+/// Walk a directory tree and remove any symlink that resolves outside
+/// `root`. Dangling symlinks are also removed. Removed symlinks are
+/// returned for callers that need to observe skipped archive entries.
+///
+/// The scan never short-circuits: every entry is visited and every bad
+/// symlink is deleted even if earlier entries failed. This prevents a
+/// malicious archive from planting multiple escaping symlinks where only
+/// the first gets cleaned up.
 pub fn validate_symlinks(root: &Path) -> io::Result<Vec<RemovedSymlink>> {
     let mut first_err: Option<io::Error> = None;
     let mut removed_symlinks = Vec::new();

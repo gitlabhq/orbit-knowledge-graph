@@ -93,6 +93,8 @@ fn no_index_reads_an_existing_index() {
     }
 }
 
+/// The nightly search guard (packages/agent-plugins-nightly/search-guard) parses these two outputs.
+/// Its fixtures in tests/search-guard-support.ts must change with them.
 #[test]
 fn grep_and_context_print_the_shapes_the_search_guard_parses() {
     let (repo, data) = (repo(), tempfile::tempdir().expect("tempdir"));

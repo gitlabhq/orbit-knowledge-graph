@@ -320,6 +320,11 @@ pub fn hydrate_static(
     Ok((nodes, total_ids))
 }
 
+/// Uses pre-resolved column specs from the compilation plan; no ontology
+/// lookups at runtime.
+///
+/// `traversal_paths` is the authorized scope; `ref_paths` narrows an entity type to the paths
+/// its own rows carry. A neighbor can sit above the center node, so the center path is no fallback.
 pub fn hydrate_dynamic(
     entity_specs: &[DynamicEntityColumns],
     refs: &HashMap<String, Vec<i64>>,

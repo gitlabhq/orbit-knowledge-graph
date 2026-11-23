@@ -30,6 +30,11 @@ postgres:
 nats:
   enabled: true
 
+# The chart defaults to the floating clickhouse:lts-jammy tag, which now resolves
+# to 26.8. GitLab does not support ClickHouse 26.7+ yet: it rejects some GitLab
+# AggregatingMergeTree tables, so migrations fail with Code: 36 (BAD_ARGUMENTS)
+# on fresh installs. Pin the newest supported release instead.
+# See repos/gitlab/doc/integration/clickhouse.md ("ClickHouse 26.7 and later").
 clickhouse:
   image: clickhouse:26.6.4.55-jammy
 

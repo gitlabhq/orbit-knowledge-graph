@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Submit an in-cluster Job that imports the datalake dump from GCS into
+# the standalone ClickHouse. Tables already exist (created by Siphon
+# one-shot in provision.sh). Data never leaves GCP.
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

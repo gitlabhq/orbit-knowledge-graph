@@ -1,3 +1,6 @@
+//! Gitaly tar.gz input is processed sequentially. Rejected bodies are streamed past, not retained.
+//! Entry paths are validated before stripping the archive root. Hard links name archive entries;
+//! symlink targets stay virtual. Malformed streams fail rather than returning partial contents.
 use std::io::Read;
 use std::sync::Arc;
 

@@ -176,6 +176,9 @@ pub(crate) const MAX_PATH_ANCHOR_LIMIT: i64 = 500;
 
 const CONDITION_COLUMN_RULE: &str = "every condition must compare a property of a matched node or relationship with a value or another property";
 
+/// Whether a path_finding endpoint has bounded selectivity.
+/// Uses the tighter MAX_PATH_ANCHOR_RANGE cap for id_range because
+/// the BFS frontier cost is O(anchors * E^depth).
 fn path_endpoint_has_selectivity(node: &InputNode) -> bool {
     if !node.node_ids.is_empty() || !node.filters.is_empty() {
         return true;
@@ -607,6 +610,8 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             )));
         }
         for rel in &input.relationships {
+            // "both" generates OR joins that defeat CH index usage; schema also rejects it,
+            // but this guard covers code paths that bypass schema validation.
             if rel.direction == crate::input::Direction::Both
                 && input.query_type == QueryType::Aggregation
             {

@@ -73,6 +73,8 @@ for env in orbit-stg orbit-prd; do
   [[ "$(read_tag "$values")" == "$VERSION" ]] || { log "Failed to bump ${env} to ${VERSION}"; exit 1; }
 done
 
+# The deployed tag predates the shallow CI clone, so fetch it explicitly to
+# read its schema version.
 new_schema="$(awk '/^schema:/ { print $2 }' config/versions.yaml)"
 old_schema=""
 if git fetch --quiet origin "refs/tags/v${deployed}:refs/tags/v${deployed}" --no-tags --depth=1 2>/dev/null; then

@@ -359,6 +359,10 @@ pub(crate) fn values_insert(
     )
 }
 
+/// `seed_settings` inserts go through JSONEachRow because some settings only
+/// take effect there: a textual VALUES insert saturates an out-of-range
+/// `Date32` to the type boundary even with `date_time_overflow_behavior` set,
+/// while JSONEachRow honours it and keeps the raw day count.
 async fn insert_json_rows(
     ctx: &TestContext,
     table: &str,
@@ -389,6 +393,8 @@ async fn insert_json_rows(
         lines.join("\n")
     );
 
+    // A FORMAT-bearing insert consumes the rest of the request body as data,
+    // so it must go over the raw HTTP interface rather than the typed client.
     let client = reqwest::Client::new();
     let url = format!("{}/?database={}", ctx.config.url, ctx.config.database);
     let response = client

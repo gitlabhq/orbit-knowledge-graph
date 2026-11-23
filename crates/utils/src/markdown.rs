@@ -679,6 +679,7 @@ mod tests {
         sections(source).into_iter().map(|s| s.anchor).collect()
     }
 
+    /// Expected anchors come from GitLab 19.6's renderer (`POST /api/v4/markdown`).
     #[test]
     fn anchors_match_gitlab_including_quoted_and_listed_headings() {
         let source = "# Edge cases\n\n> ## Install\n\n- ## Install\n\n## Install\n\n\

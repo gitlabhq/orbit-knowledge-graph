@@ -217,6 +217,7 @@ pub async fn run(opts: Options) -> Result<()> {
     };
     print!("{}", render_report(&report));
 
+    // After the report, so CI still publishes it; a failing exit marks the job.
     if let Some(reason) = failure(&report.queries) {
         bail!("{reason}");
     }
@@ -472,6 +473,9 @@ fn fmt_spread(sorted_meds: &[f64], med: f64) -> String {
     }
 }
 
+/// Markdown report: the run line (kept first; orbit-perf.sh inserts a line after
+/// it), one under-load table, errors in a text fence so `|` and backticks cannot
+/// break rendering, then the ClickHouse note.
 fn render_report(report: &Report) -> String {
     let c = report.concurrency;
     let mut out = format!(
@@ -753,6 +757,9 @@ fn mint_token(secret_b64: &str, admin: bool) -> Result<String> {
         token_type: None,
         license_checksum: None,
     };
+    // Rails base64-decodes the secret before signing; mirror that so the
+    // server's JwtValidator accepts the token. Fall back to raw bytes if the
+    // value is not valid base64.
     let key = STANDARD
         .decode(secret_b64.trim().as_bytes())
         .unwrap_or_else(|_| secret_b64.as_bytes().to_vec());

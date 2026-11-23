@@ -280,6 +280,7 @@ fn unwritable_cache_does_not_discard_a_valid_download() {
     let cache = tempfile::tempdir().unwrap();
     let cache_parent = cache.path().join("orbit");
     std::fs::create_dir(&cache_parent).unwrap();
+    // Use a file instead of chmod so this fails even when run as root.
     std::fs::write(cache_parent.join("skills"), b"blocked").unwrap();
     let (url, server) = mock_server(vec![tree_reply("1.0.0", "Remote without cache")]);
     let output = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);

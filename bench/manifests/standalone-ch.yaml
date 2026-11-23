@@ -1,3 +1,5 @@
+# Standalone ClickHouse for the RA bench harness.
+# Mirrors the e2e chart's StatefulSet so patch-ch-dicts.sh works unmodified.
 apiVersion: v1
 kind: Namespace
 metadata:

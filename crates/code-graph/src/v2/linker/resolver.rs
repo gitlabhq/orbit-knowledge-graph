@@ -1196,6 +1196,9 @@ impl<'a> ResolveCtx<'a> {
                         enclosing_def: None,
                     };
                     let mut nodes = self.resolve_bare(&fallback)?;
+                    // GlobalName: last-resort lookup for chain bases only.
+                    // Not in import_strategies to avoid O(candidates) scans
+                    // on every bare identifier ref.
                     if nodes.is_empty() {
                         nodes = self.import_resolver().global_name(name);
                     }

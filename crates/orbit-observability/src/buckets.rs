@@ -1,5 +1,7 @@
 pub const LATENCY: &[f64] = &[0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0];
 
+/// Query latency buckets (10 ms to 60 s). A superset of the previous layout, so
+/// mixed old and new pods still sum per `le` during a rollout.
 pub const QUERY_LATENCY: &[f64] = &[
     0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.35, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0,
     5.0, 7.5, 10.0, 15.0, 20.0, 25.0, 30.0, 60.0,

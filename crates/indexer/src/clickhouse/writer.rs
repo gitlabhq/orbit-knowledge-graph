@@ -72,6 +72,7 @@ pub(crate) fn insert_overrides(
     }
 }
 
+/// Blanket-retries a transient ClickHouse insert (its error codes are not stable enough to classify).
 const WRITE_RETRY: LocalRetry = LocalRetry {
     backoff: Backoff::Fixed(&[Duration::from_secs(2), Duration::from_secs(4)]),
     max_attempts: 3,

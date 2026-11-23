@@ -6,6 +6,8 @@ fn main() {
     regenerate_protos();
 }
 
+/// libduckdb-sys 2.0 adds no rpath for a downloaded libduckdb, so a debug `gkg-server` run
+/// outside Cargo finds the library only through this one. Release builds compile DuckDB in.
 fn link_downloaded_duckdb() {
     println!("cargo:rerun-if-env-changed=DUCKDB_DOWNLOAD_LIB");
     let downloads = std::env::var("DUCKDB_DOWNLOAD_LIB")

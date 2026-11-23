@@ -824,6 +824,8 @@ impl JsAnalyzer {
         }
 
         let semantic_ret = stacker::maybe_grow(128 * 1024, 8 * 1024 * 1024, || {
+            // oxc 0.137 flipped the default to off; the analyzer relies on
+            // random access to `semantic.nodes()` (e.g. nodes.kind(decl_node_id)).
             SemanticBuilder::new()
                 .with_build_nodes(true)
                 .with_check_syntax_error(true)
@@ -873,6 +875,7 @@ impl JsAnalyzer {
         );
 
         let imports = extract_imports(&ctx, &parsed);
+        // Grow the stack on demand: the recursive CallExtractor walk overflows the 2 MiB worker stack on deep expressions (uncatchable SIGSEGV).
         let (local_calls, calls) = stacker::maybe_grow(128 * 1024, 8 * 1024 * 1024, || {
             extract_call_edges(&ctx, &parsed.program, &defs, &imports, &class_hierarchy)
         });
@@ -891,6 +894,8 @@ impl JsAnalyzer {
         );
         module_info.cjs_exports = cjs_exports;
 
+        // OXC's module_record may not include `export default { ... }` for anonymous
+        // object expressions, so we synthesize the binding if a Vue virtual class exists.
         if is_vue_like_path(relative_path)
             && let Some(default_range) = module_info.exports.get("default").map(|b| b.range)
             && let Some(vc) = vue_default_component_def(&defs, default_range)

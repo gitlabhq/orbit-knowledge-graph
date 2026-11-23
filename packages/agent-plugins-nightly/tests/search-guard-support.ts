@@ -3,6 +3,9 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+// Output shaped like the CLI's for `parse_widget`, which lib.rs defines and two functions call:
+// `orbit grep --db DB parse_widget REPO` and `orbit context --db DB parse_widget`.
+// crates/orbit-cli/tests/no_index.rs pins the same shapes against the real binary.
 export const GREP_OUTPUT = `grep "parse_widget" @ 0d846e51: 3 lines in 1 files
 Function parse_widget — lib.rs:1-1
   1|pub fn parse_widget() {}

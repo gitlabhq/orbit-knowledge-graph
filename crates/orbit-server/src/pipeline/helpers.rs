@@ -175,6 +175,17 @@ pub async fn send_query_error(
         .await;
 }
 
+/// Sanitize error messages before sending to clients.
+///
+/// Only user-input validation errors are returned verbatim (parse errors,
+/// schema violations, reference errors, pagination errors, depth/limit
+/// exceeded). These are identified by the `Display` prefix that
+/// `QueryError` adds via thiserror.
+///
+/// All other errors (lowering, codegen, ontology, execution, authorization,
+/// etc.) may contain ClickHouse table names, column names, SQL fragments, or
+/// infrastructure details. These are replaced with a generic message;
+/// server-side logs capture the full error.
 fn sanitize_error_message(error: &PipelineError) -> String {
     match error {
         PipelineError::Compile {
@@ -264,6 +275,8 @@ mod tests {
 
     #[tokio::test]
     async fn query_error_line_names_the_clickhouse_limit() {
+        // A second dispatcher stops tracing-core from caching callsite interest
+        // from a test thread that has no subscriber.
         let _second = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
         let buffer = Buffer::default();
         let writer = buffer.clone();

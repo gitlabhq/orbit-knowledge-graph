@@ -25,6 +25,14 @@ impl QuotaMetrics {
     }
 }
 
+/// Pre-seed every labelled counter series at 0 so Prometheus never sees an absent
+/// series on the first scrape. OTel only exposes a series after it has been
+/// observed at least once.
+///
+/// `decisions{decision=fail_open|fail_closed, cache=hit}` is intentionally omitted:
+/// failed checks are never inserted into the cache, so that combination cannot occur.
+/// Histograms are not pre-seeded — `record(0.0)` would be a real observation that
+/// skews `_count` and `_sum`; they appear on the first genuine CDot call.
 pub fn register() {
     let metered_types = [
         "mcp",

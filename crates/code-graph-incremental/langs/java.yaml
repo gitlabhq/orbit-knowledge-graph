@@ -1,3 +1,16 @@
+# Java rewrite rules.
+# Handles: package, imports (named, wildcard, static), class/interface/enum/
+# record/annotation defs, fields, constructors, methods, this./super. calls,
+# unqualified calls as implicit this-calls, control flow, bindings.
+#
+# Import resolution is path-based: `import a.b.C` resolves to a/b/C.java under
+# the repo root or a marked source root (src, java).
+#
+# Known gaps (engine, not rules):
+# - Same-package siblings without an import need a package scope; the
+#   resolver is import-driven.
+# - Wildcard imports (`import a.b.*`) name a directory; the resolver resolves
+#   only files and index files.
 config:
   stdlib: [
       { module: java, precedence: runtime },

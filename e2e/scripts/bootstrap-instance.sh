@@ -17,6 +17,8 @@ if [[ -z "$ACTIVATION_CODE" ]]; then
   exit 1
 fi
 
+# Gate on the migrations Job, not the toolbox pod: toolbox goes Running
+# before migrations finish and rails-runner crashes on an unmigrated DB.
 MIGRATIONS=""
 for _ in $(seq 1 360); do
   MIGRATIONS=$($KC get jobs -n "$NS_GITLAB" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
@@ -46,6 +48,11 @@ if [[ -z "$TOOLBOX" ]]; then
   exit 1
 fi
 
+# Status messages go to stderr; only the PAT lands on stdout so the bash
+# capture below picks it up cleanly. Activation code is passed via ARGV so it
+# never appears in the pod's process list.
+# Retry up to 3 times — rails-runner can fail on transient connectivity issues
+# when the webservice is still warming up.
 PAT=""
 for attempt in 1 2 3; do
   PAT=$($KC exec -i -n "$NS_GITLAB" "$TOOLBOX" -c toolbox -- \

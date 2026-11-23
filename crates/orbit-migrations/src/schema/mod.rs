@@ -131,6 +131,8 @@ impl Dictionary {
     }
 }
 
+/// ClickHouse runs dictionary loads and view refreshes without the client's session settings,
+/// so their SQL repeats the session's `compatibility`.
 pub fn compatibility_clause(compatibility: Option<&str>) -> String {
     match compatibility {
         Some(version) => format!(" SETTINGS compatibility = {}", quote_sql_literal(version)),

@@ -87,6 +87,8 @@ race_for_lock() {
 }
 rm -f "$WATCH_LOCK"
 check "first watcher takes the lock" "0" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
+# A live holder looks like a watcher that has not exec'd watchexec yet: this script, sourced.
+# (the trailing `:` stops bash from exec'ing sleep in place of itself)
 bash -c "ORBIT_POD_CONFIG='$FIXTURE' GENERATED_DIR_OVERRIDE='$TMP/.dev' source '$SCRIPT'; sleep 60; :" & live_pid=$!
 sleep 0.5; echo "$live_pid" >"$WATCH_LOCK"
 check "second watcher is refused while the first lives" "1" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
@@ -118,6 +120,11 @@ check "watcher queues instead of restarting cargo" "yes" "$(grep -q -- '--on-bus
 check "watcher covers crates, config and the root manifests" "yes" "$(grep -q -- '-w crates' <<<"$watch_args" && grep -q -- '-w config' <<<"$watch_args" && grep -q -- '-w Cargo.toml' <<<"$watch_args" && grep -q -- '-w Cargo.lock' <<<"$watch_args" && echo yes || echo no)"
 check "watcher does not watch the repo root itself" "no" "$(grep -qE -- '(-W|--watch-non-recursive) ' <<<"$watch_args" && echo yes || echo no)"
 
+# launch_sets_library_path: a raw gkg-server needs the aws-lc-fips-sys artifacts on the
+# loader path, which cargo run would have added for us.
+# exec is shadowed by a function so the test sees the environment the launcher hands over.
+# (macOS purges DYLD_* on exec of SIP-protected binaries such as /usr/bin/env, so a fake
+# script binary cannot report it.)
 out="$(exec() { printf 'dyld=%s\nld=%s\nargs=%s\n' "${DYLD_FALLBACK_LIBRARY_PATH:-}" "${LD_LIBRARY_PATH:-}" "$*"; }; launch indexer "$overlay")"
 check "launcher passes mode and config" "args=$FAKE_BINARY --mode=indexer --config=$overlay" "$(grep '^args=' <<<"$out")"
 check "launcher adds every fips artifacts dir (macOS)" "yes" "$(grep '^dyld=' <<<"$out" | grep -q 'aws-lc-fips-sys/aaaa/out/build/artifacts' && grep '^dyld=' <<<"$out" | grep -q 'aws-lc-fips-sys/bbbb/out/build/artifacts' && echo yes || echo no)"

@@ -83,6 +83,8 @@ fn read_exact_at(file: &std::fs::File, bytes: &mut [u8], offset: u64) -> io::Res
     std::os::unix::fs::FileExt::read_exact_at(file, bytes, offset)
 }
 
+// Windows seek_read/seek_write take an explicit offset but may transfer
+// fewer bytes than asked, so loop like the unix `*_exact_at` helpers.
 #[cfg(windows)]
 fn write_all_at(file: &std::fs::File, mut bytes: &[u8], mut offset: u64) -> io::Result<()> {
     use std::os::windows::fs::FileExt;

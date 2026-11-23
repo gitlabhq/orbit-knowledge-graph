@@ -31,6 +31,7 @@ orbit-perf:
     - .gitlab/ci/orbit-perf-base.yml
     - .gitlab/ci/orbit-perf-mr.yml
 
+# No strategy: depend, so the merge does not wait for the perf run.
 orbit-perf:mr:
   stage: benchmark
   needs: []

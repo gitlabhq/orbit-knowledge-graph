@@ -71,6 +71,12 @@ pub fn cte_statements(ast: &Node) -> Result<Vec<CteStatement>> {
         .collect()
 }
 
+/// # Trust boundary
+///
+/// This function bypasses the compiler security pipeline (`apply_security_context`,
+/// `security_check`, `result_contract`). It must only be used for trusted, internally
+/// constructed ASTs (e.g. schema version management DDL/DML), never for
+/// user-supplied query input.
 pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamValue>)> {
     let mut ctx = Context::new();
     let sql = match node {
@@ -195,6 +201,9 @@ impl Context {
             });
         }
 
+        // ClickHouse binds a trailing ORDER BY / LIMIT to the last branch of an
+        // unparenthesized UNION ALL, not the whole union. Wrap so they apply
+        // to the combined result.
         if !q.union_all.is_empty()
             && (q.limit.is_some()
                 || q.offset.is_some()

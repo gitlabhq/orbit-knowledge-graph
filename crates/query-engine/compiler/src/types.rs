@@ -14,6 +14,8 @@ pub enum Realm {
     Dedicated,
 }
 
+/// GitLab access levels as sent in the JWT `min_access_level` field.
+/// Values match `Gitlab::Access` constants in Rails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AccessLevel {
     Guest = 10,

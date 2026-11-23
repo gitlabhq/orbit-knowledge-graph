@@ -213,6 +213,7 @@ impl CodeIndexer {
         let budget = self.pipeline_config.job_timeout();
         let mut clock = WorkClock::new(budget);
 
+        // Dropping the timed-out fetch is what stops it; nothing in that phase polls the token.
         let Some(fetched) = clock
             .run(self.fetch_repository(context, request, &cancel))
             .await
@@ -227,6 +228,7 @@ impl CodeIndexer {
             Fetched::Repository(repository) => repository,
         };
 
+        // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
         context.progress.notify_in_progress().await;
         let lane = self
             .acquire_indexing_lane(&repository, lock.time_left(), &cancel)
@@ -308,6 +310,9 @@ impl CodeIndexer {
         request: &IndexingRequest,
         cancel: &CancellationToken,
     ) -> Result<Fetched, IndexError> {
+        // Phase 1: Fetch — bounded by fetch_slots so we don't overwhelm
+        // Gitaly with concurrent downloads while still pre-fetching ahead
+        // of the processing phase.
         let fetch_queued = Instant::now();
         let _fetch_slot = acquire(&self.fetch_slots, "fetch").await?;
         self.metrics
@@ -410,6 +415,7 @@ impl CodeIndexer {
         within: Duration,
         cancel: &CancellationToken,
     ) -> Result<Option<OwnedSemaphorePermit>, IndexError> {
+        // A reserved big lane keeps a flood of small repos from starving monorepos.
         let lane = if repository.parseable_files() <= self.small_repo_max_files {
             &self.small_indexing_slots
         } else {
@@ -473,6 +479,7 @@ impl CodeIndexer {
             .build_code_graph(context, request, repository, indexed_at, cancel.clone())
             .await?;
 
+        // A cancelled run yields a partial graph with no error, so the fatal-error guard can't catch it.
         if cancel.is_cancelled() {
             return Err(HandlerError::Processing(
                 "code indexing cancelled mid-run; not checkpointing partial graph".to_string(),

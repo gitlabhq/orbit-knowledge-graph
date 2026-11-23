@@ -1,3 +1,12 @@
+//! Field-level access restriction.
+//!
+//! Rejects selecting, filtering, ordering, and aggregating on `admin_only`
+//! fields when the caller is not an instance administrator. Also rejects aggregation queries in which a
+//! globally-scoped node (no `traversal_path` column) is not reachable through
+//! `relationships` or `path` from a `traversal_path`-scoped node, since
+//! aggregation bypasses the Rails redaction layer that protects other query
+//! types. Rejects entities whose minimum access level no authorized path
+//! meets. Runs before lowering.
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, Input, QueryType};
 use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};

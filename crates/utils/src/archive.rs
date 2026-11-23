@@ -21,6 +21,9 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
 
     let mut archive_root: Option<OsString> = None;
 
+    // Symlinks are deferred until all regular files and directories exist, so no
+    // symlink is on disk during the main loop to redirect a create_dir_all or
+    // dest.exists() outside the target.
     let mut deferred_symlinks: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut inventory = Vec::new();
     let mut content = Vec::new();
@@ -82,6 +85,9 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
         let dest = target_canonical.join(&relative_path);
 
         if entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link {
+            // A symlink is never a parse candidate — we'd be parsing the link, not
+            // source — so the hooks settle it (and record why); we keep only the
+            // within-root deferral, which is the source's security mechanism.
             let mut meta = FileInventoryEntry {
                 path: relative_path.to_string_lossy().into_owned(),
                 size: entry.size(),

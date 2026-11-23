@@ -15,6 +15,8 @@ pub static VERBOSE_LOGS: LazyLock<VerboseLogsConfig> = LazyLock::new(|| {
 
 const MESSAGE_LEAKING_TARGET: &str = "ra_ap";
 
+/// rust-analyzer writes names from the parsed repository into its messages. EnvFilter
+/// prefers the most specific directive, so configured `ra_ap*` directives are dropped.
 pub fn log_directive(configured: Option<&str>) -> String {
     let base = configured
         .filter(|directive| !directive.is_empty())
@@ -50,6 +52,7 @@ pub fn anyhow_error_type(error: &anyhow::Error) -> &'static str {
     "fatal"
 }
 
+/// The default hook prints the panic text, which can hold parsed source code, to stderr.
 pub fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         let location = info.location().map(ToString::to_string);

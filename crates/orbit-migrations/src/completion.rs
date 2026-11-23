@@ -25,6 +25,7 @@ static FETCH_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+// Not `FINAL`: until a merge, a completed row still counts after an overlapping run's late page write.
 fn completed_checkpoint_keys_sql(key_filter: &str) -> String {
     format!(
         "SELECT key \

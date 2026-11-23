@@ -923,6 +923,8 @@ fn cfg_key_value(key: &str, value: &str) -> CfgAtom {
     }
 }
 
+// Pins cfg atoms to linux/x86_64 to match the server indexing environment.
+// Trades local-platform accuracy for reproducibility across indexer runs.
 fn server_rustc_cfg() -> Vec<CfgAtom> {
     vec![
         cfg_flag("unix"),

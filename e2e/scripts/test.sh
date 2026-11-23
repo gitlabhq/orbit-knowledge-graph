@@ -18,6 +18,9 @@ log "Creating ConfigMap from test files"
 $KC create configmap e2e-robot-tests -n "$NS_GKG" \
   --from-file="$E2E_DIR/tests/"
 
+# Bundle fixtures (binary tarball — preserves directory structure and exec bits
+# that --from-file= would flatten/strip). Robot job extracts at startup into
+# /fixtures and the git.resource pushes them to per-test GitLab projects.
 log "Bundling fixtures into ConfigMap"
 mkdir -p "$GKG_ROOT/.tmp"
 FIX_TMP="$(mktemp -d -p "$GKG_ROOT/.tmp" robot-fixtures.XXXXXX)"
@@ -50,6 +53,9 @@ log "Waiting for tests to complete (timeout: ${TIMEOUT_SECONDS}s)"
 result=timeout
 SECONDS=0
 while [ "$SECONDS" -lt "$TIMEOUT_SECONDS" ]; do
+  # Modern Job objects emit multiple True conditions (SuccessCriteriaMet +
+  # Complete on success; FailureTarget + Failed on failure), so jsonpath
+  # returns a space-joined list. Match Complete/Failed via substring.
   status=$($KC get job/"$JOB_NAME" -n "$NS_GKG" \
     -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type} {end}' 2>/dev/null || true)
   case " $status " in
@@ -70,6 +76,7 @@ fi
 log "Robot Framework output:"
 $KC logs job/"$JOB_NAME" -n "$NS_GKG" --tail=-1 2>&1 || true
 
+# Extract JUnit report from job logs (kubectl cp can't exec into completed pods)
 log "Extracting test report"
 $KC logs job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null | \
   sed -n '/---XUNIT_REPORT_START---/,/---XUNIT_REPORT_END---/p' | \

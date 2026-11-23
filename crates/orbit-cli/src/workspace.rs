@@ -51,6 +51,8 @@ impl Workspace {
         self.root.join("var").join(project_id.to_string())
     }
 
+    /// Index state comes first so a reset waits for running indexes before it locks the
+    /// manifest. `graph.duckdb` is the single-file graph from releases before the manifest.
     pub fn graph_paths(&self) -> Vec<PathBuf> {
         [
             "var",

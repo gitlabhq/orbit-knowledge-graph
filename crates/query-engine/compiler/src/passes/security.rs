@@ -1,3 +1,24 @@
+//! Security filter injection for multi-tenant isolation.
+//!
+//! Injects traversal_path filters on all node table scans.
+//! The org_id is encoded as the first segment of each path, validated at construction.
+//!
+//! Path filtering strategy:
+//! - 1 path: `startsWith(path)`
+//! - 2+ paths: `startsWith(p1) OR startsWith(p2) OR ...`
+//!
+//! # Per-entity role scoping
+//!
+//! Each entity's ontology can declare a `required_role`. Before injecting
+//! the `startsWith` predicate for an alias we look up the entity attached
+//! to that alias's physical table and drop any traversal path where the
+//! user's access level is below the entity's `required_access_level`.
+//!
+//! This closes the aggregation-query oracle where a Reporter-only user
+//! could count or binary-search properties on a higher-privilege entity
+//! (e.g. Vulnerability) by pairing a Project `group_by` with a Vulnerability
+//! target. The target entity's scan is filtered down to zero paths
+//! (producing a Bool(false) predicate) and the aggregation counts nothing.
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -18,6 +39,14 @@ pub fn apply_security_context(
     ctx: &SecurityContext,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
+    // An entirely empty security context is treated as a fail-closed bug:
+    // the caller forgot to populate traversal paths. Emitting `Bool(false)`
+    // here would silently return empty results, which is indistinguishable
+    // from "user has no namespaces" and obscures the root cause. Note that
+    // this differs from a role-mismatch empty-path set for a specific
+    // alias — in that case the user has paths, just none at the required
+    // role, and returning zero rows for the protected entity is the
+    // intended behavior.
     if ctx.traversal_paths.is_empty() {
         return Err(crate::error::QueryError::Security(
             "security context has no traversal_path entries; refusing to compile \

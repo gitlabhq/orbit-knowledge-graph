@@ -416,6 +416,9 @@ impl NatsBroker {
         };
 
         if !subscription.manage_stream {
+            // Unmanaged (Siphon) streams: historical data comes from the datalake backfill,
+            // not replay. If this consumer is auto-deleted after inactive_threshold and
+            // recreated, events from the gap are skipped by design.
             consumer_config.deliver_policy = async_nats::jetstream::consumer::DeliverPolicy::New;
             consumer_config.inactive_threshold = self.config.consumer_inactive_threshold();
         }

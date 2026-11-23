@@ -98,6 +98,7 @@ impl RepositoryCache for LocalRepositoryCache {
     ) -> Result<CachedRepository, RepositoryCacheError> {
         let dir = TempDir::new_in(&self.base_dir)?;
 
+        // The detached blocking reader outlives a dropped future; the flag makes its next read fail.
         let cancel = CancelOnDrop::default();
         let cancelled = cancel.flag();
         let reader = StreamReader::new(archive_stream.map(move |r| {
@@ -114,6 +115,10 @@ impl RepositoryCache for LocalRepositoryCache {
             detect_language_from_path,
         );
         let span = tracing::Span::current();
+        // The blocking task owns the `TempDir` for the duration of extraction and hands it back.
+        // If this future is dropped (a wall-clock timeout), the `spawn_blocking` still runs to
+        // completion detached and drops the `TempDir` itself, so the extractor never writes into a
+        // directory whose cleanup already ran.
         let extracted = tokio::task::spawn_blocking(move || {
             let _entered = span.enter();
             let bridge = SyncIoBridge::new_with_handle(reader, handle);

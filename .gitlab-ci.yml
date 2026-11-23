@@ -47,6 +47,8 @@ workflow:
         RUNNER_LARGE_ARM: saas-linux-medium-arm64
     - if: $CI_COMMIT_TAG
     - if: $CI_MERGE_REQUEST_EVENT_TYPE == 'merge_train'
+      # Every path outside docs/, plus the docs/ files that code checks read.
+      # Keep that list in sync with docs-in-code-mr-check.
       changes: &code-changes
         regexp: '\A(?!docs/)|\Adocs/(docs-gitlab-com/queries/query-language|pages/engineering/development/agents-crate-map)\.md\z'
       auto_cancel:
@@ -63,6 +65,8 @@ workflow:
         DOCS_ONLY: "true"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
+    # Security-template jobs can't reference .skip-on-solo-schedule, so solo
+    # schedules mute them through their documented kill-switch variables.
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY != ""
       variables:
         SAST_DISABLED: "true"
@@ -93,6 +97,7 @@ include:
   - local: .gitlab/ci/linting.yml
   - local: .gitlab/ci/rails-contract.yml
   - local: .gitlab/ci/indexing-engine-spec.yml
+  # Uses `secrets`, which dev.gitlab.org rejects and fork MR pipelines can't use.
   - local: .gitlab/ci/review-docs.yml
     rules:
       - if: '$CI_SERVER_URL != "https://gitlab.com" || $CI_PROJECT_PATH != "gitlab-org/orbit/knowledge-graph"'
@@ -151,6 +156,10 @@ stages:
       vault: access_tokens/${VAULT_SECRETS_PATH}/automation-bot/token@ci
       token: $VAULT_ID_TOKEN
 
+# "Solo" scheduled pipelines run exactly one job and skip the rest of the CI
+# suite. A schedule opts in by setting SCHEDULE_ONLY=<job-name>: the named job
+# gates on that value, and every shared job/anchor references this guard so it
+# drops out. Adding a new solo schedule needs no edits to existing jobs here.
 .skip-on-solo-schedule:
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY != ""
@@ -182,6 +191,11 @@ stages:
     - !reference [.skip-on-docs-only, rules]
     - !reference [.docs-mr-and-main-rules, rules]
 
+# Jobs that pull alpine through the group dependency proxy. The proxy answers
+# 404 when the job user lacks at least Guest on the top-level group, as with
+# project-only bot accounts. The runner pulls the job image before any script
+# runs, so the choice is made at pipeline creation. The login match is a
+# heuristic: a match only falls back to the public image, which is always safe.
 .alpine-image-mr-only:
   variables:
     ALPINE_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
@@ -580,6 +594,7 @@ lint-check:
     - cargo clippy -p duckdb-client --all-targets -- -D warnings
     - sccache --show-stats || true
 
+# Every server binary must link the AWS-LC FIPS module and nothing else for TLS.
 fips-check:
   stage: security
   extends:
@@ -664,6 +679,7 @@ generate-sbom:
     reports:
       cyclonedx: sbom.cdx.json
 
+# FedRAMP hardening (DISA container guide 2.2, NIST AC-6) requires a non-root image user.
 dockerfile-scan:
   stage: security
   image:
@@ -699,6 +715,9 @@ gitlab-advanced-sast:
 gitlab-advanced-sast-ext:
   needs: []
 
+# Override the default secret_detection rules so the job runs on MR pipelines.
+# The Jobs/Secret-Detection.gitlab-ci.yml template defaults to branch pipelines
+# only, which conflicts with this project's workflow (MR + main branch only).
 secret_detection:
   stage: security
   needs: []
@@ -756,6 +775,7 @@ check_docs_i18n_markdown:
     - bun install --frozen-lockfile --cache-dir .bun-cache
   script:
     - bun run test
+    # GitLab sets CI_PAGES_URL for Pages jobs and ignores job variables that override it.
     - export CI_PAGES_URL="${SITE_URL:-$CI_PAGES_URL}"
     - bun run build
     - bun run typecheck
@@ -768,6 +788,7 @@ pages:
   extends: .engineering-site
   resource_group: pages
   variables:
+    # Serve from the custom domain root; site-kit derives its base path from this.
     SITE_URL: https://gitlaborbit.dev/
   rules:
     - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
@@ -1205,6 +1226,8 @@ docker-manifest:
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-amd64@$(cat image-digests/amd64)"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-arm64@$(cat image-digests/arm64)"
 
+# Feeds the Vulnerability Report: every main image, and the latest release on
+# the weekly SCHEDULE_ONLY=container_scanning schedule (FedRAMP 30-day rescan).
 container_scanning:
   stage: publish
   needs:
@@ -1229,6 +1252,7 @@ docker-build-mr:
       allow_failure: true
       interruptible: true
 
+# Tag = Dockerfile hash; the e2e job resolves the same tag.
 e2e-robot-image:
   stage: build
   image: docker:29
@@ -1415,6 +1439,8 @@ release-build-arm64:
   variables:
     ARCH: arm64
 
+# Runs before the release tags move, so a root image or a fixable High or
+# Critical CVE never reaches a published version.
 release-image-scan:
   stage: build
   image:
@@ -1538,6 +1564,8 @@ e2e:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
   needs:
+    # The e2e cluster is amd64-only, so the per-arch image is enough. Waiting
+    # for docker-manifest would add the arm64 build and signing to the path.
     - job: docker-build-amd64
       optional: true
     - job: e2e-robot-image

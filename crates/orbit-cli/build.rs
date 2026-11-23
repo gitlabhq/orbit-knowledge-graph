@@ -13,6 +13,9 @@ fn main() {
     println!("cargo:rerun-if-changed=../../packages/agent-plugins");
     println!("cargo:rerun-if-changed=../../packages/agent-plugins-nightly");
 
+    // Publish strips the leading `v` (scripts/release/upload-local-cli-release.sh uses
+    // `${CI_COMMIT_TAG#v}`), so the package-registry version glab downloads and
+    // compares against in `--update` is a bare semver. Match that here.
     if let Some(tag) = std::env::var("CI_COMMIT_TAG")
         .ok()
         .filter(|tag| !tag.is_empty())
@@ -49,6 +52,11 @@ fn validate_skills() {
     );
 }
 
+/// libduckdb-sys 2.0 no longer adds an rpath for a downloaded libduckdb, so a debug `orbit` run
+/// outside Cargo finds the library only through this one. libduckdb-sys publishes the download
+/// directory, which holds the headers and the library, as DEP_DUCKDB_INCLUDE. Release builds
+/// compile DuckDB in, so they must not carry a path to the build machine, and Windows linkers
+/// have no rpath.
 fn link_downloaded_duckdb() {
     println!("cargo:rerun-if-env-changed=DUCKDB_DOWNLOAD_LIB");
     let downloads = std::env::var("DUCKDB_DOWNLOAD_LIB")

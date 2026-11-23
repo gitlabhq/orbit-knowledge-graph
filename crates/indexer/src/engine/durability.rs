@@ -1,5 +1,7 @@
 use crate::observer::IndexingMode;
 
+/// Whether a write blocks until the store confirms it durably landed. `Durable` is mandatory where
+/// a dropped write is unrecoverable: the watermark advances with no NATS retry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WriteDurability {
     FireAndForget,

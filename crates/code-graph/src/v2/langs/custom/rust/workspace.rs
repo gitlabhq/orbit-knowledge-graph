@@ -376,6 +376,11 @@ fn abs_path_from(path: &Path) -> AbsPathBuf {
         .unwrap_or_else(|| AbsPathBuf::assert(Utf8PathBuf::from("/")))
 }
 
+/// Load a rust-analyzer `ProjectWorkspace` into a fresh `RootDatabase` without
+/// touching `vfs_notify`. Upstream's `load_workspace` spawns a `VfsLoader`
+/// thread and (once `set_config` runs with a non-empty watch list) an inotify
+/// watcher; we bypass both by seeding the `Vfs` straight from the file set the
+/// pipeline already discovered.
 fn load_workspace_no_watcher(
     workspace: &ProjectWorkspace,
     repo_rust_files: &[AbsPathBuf],

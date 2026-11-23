@@ -1,3 +1,6 @@
+# Seeds siphon_projects and the route table directly rather than via the
+# `projects:` pseudo-table, which writes version DEFAULT now() and would
+# outrank any dated row the move step seeds.
 description: Transferring a project to another subgroup does not duplicate its edges under the old path
 scope: { namespace: 100 }
 

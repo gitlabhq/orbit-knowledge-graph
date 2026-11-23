@@ -71,8 +71,10 @@ function budgeted(timeoutMs, signal) {
         killSignal: "SIGKILL",
         signal,
         maxBuffer: MAX_OUTPUT_BYTES,
+        // A lock held by an index run must fail the lookup now, not hold it until the budget kills it.
         env: { ...process.env, NO_COLOR: "1", ORBIT_WAIT_TIMEOUT_MS: "0" },
       });
+      // A launcher that wants to prompt (for a download, say) must see end of input, not wait.
       running.child.stdin?.end();
       const { stdout } = await running;
       return { stdout, status: 0 };

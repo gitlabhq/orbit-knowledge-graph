@@ -1,7 +1,28 @@
+//! Log and span field names for Orbit.
+//!
+//! [`safe`] fields are written on every log line; [`safe::ALL`] is the allowlist for labkit's
+//! `ExpandedLogsPolicy`. [`expanded`] fields are written only on expanded log lines.
+//!
+//! A safe value can never hold customer data. The allowlist also passes dependency log
+//! events, so a safe name must not be a generic name that a dependency uses for free text.
+//!
+//! The macros take the `tracing` arguments, except `parent:` and `name:` on events:
+//!
+//! ```
+//! use orbit_log_fields::info;
+//!
+//! let project_id: u64 = 42;
+//! let path = "app/models/user.rb";
+//! info!(safe(GL_PROJECT_ID) = project_id, expanded(FILE_PATH) = path, "parsed file");
+//! ```
+//!
+//! `#[instrument]` and `Span::record` use the constants: `fields({ safe::GL_PROJECT_ID } = id)`.
+//!
+//! Record safe fields as plain values, never with `%` or `?`: the allowlist checks only the name.
 mod macros;
 
 #[doc(hidden)]
-// ast-grep-ignore: no-raw-tracing-macro
+// ast-grep-ignore: no-raw-tracing-macro -- the macros of this crate call tracing through this path
 pub use tracing as __tracing;
 
 #[doc(hidden)]
@@ -17,6 +38,7 @@ macro_rules! fields {
     };
 }
 
+/// Fields that are written on every log line and kept in exported traces.
 pub mod safe {
     use labkit_fields as labkit;
 
@@ -27,7 +49,10 @@ pub mod safe {
         GL_NAMESPACE_ID = labkit::GL_NAMESPACE_ID;
         GL_PROJECT_ID = labkit::GL_PROJECT_ID;
         GL_USER_ID = labkit::GL_USER_ID;
+        /// Billing namespace from the JWT `root_namespace_id` claim, not the namespace that a
+        /// request reads. The expanded logs predicate does not read it.
         GL_GOVERNING_NAMESPACE_ID = "gl_governing_namespace_id";
+        /// Numeric IDs, `<org_id>/<root_namespace_id>/.../`. The expanded logs predicate reads it.
         TRAVERSAL_PATH = "traversal_path";
         TRAVERSAL_PATHS = "traversal_paths";
         INSTANCE_ID = "instance_id";
@@ -56,6 +81,7 @@ pub mod safe {
         QUERY_FRONTEND = "query_frontend";
         RESPONSE_FORMAT = "response_format";
         METADATA_ONLY = "metadata_only";
+        /// Only names that Orbit defines, such as scheduled or named queries.
         QUERY_NAME = "query_name";
 
         INSTANCE_VERSION = "instance_version";
@@ -194,6 +220,7 @@ pub mod safe {
         FULL_SWEEP = "full_sweep";
         CLIENT_SAFE = "client_safe";
 
+        /// Fixed error kind. Never the error text.
         ERROR_TYPE = labkit::ERROR_TYPE;
         HTTP_STATUS_CODE = "http_status_code";
         PANIC_LOCATION = "panic_location";
@@ -207,6 +234,7 @@ pub mod expanded {
         GLOBAL_USER_ID = "global_user_id";
 
         RAW_REALM = "raw_realm";
+        /// Free text that CustomersDot returns.
         BLOCK_REASON = "block_reason";
         REQUESTED_NAME = "requested_name";
         CLIENT_SESSION_ID = "client_session_id";
@@ -214,6 +242,7 @@ pub mod expanded {
         RECEIVED_RESULT_ID = "received_result_id";
         CLIENT_ERROR_CODE = "client_error_code";
         CODING_AGENT = "coding_agent";
+        /// Without query string or fragment.
         URL = labkit::HTTP_URL;
         HOST = labkit::HTTP_HOST;
         RESOLVE_HOST = "resolve_host";

@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+# GitLab only caches paths under $CI_PROJECT_DIR, so symlink the downloadable
+# parts of CARGO_HOME (git, registry/cache, registry/index) into
+# $CI_PROJECT_DIR/.cargo-cache. CARGO_HOME itself is not moved because it also
+# holds the rustup proxies and the mold linker config. On a cache miss the
+# image's baked copies seed the directories, so a miss costs nothing extra.
+#
+# Trust: only main pipelines write the cache, under the -protected key. MR
+# pipelines only read it, and only those a Maintainer started get that key;
+# the rest look up -non_protected, which nothing writes, and fetch cold.
+# Release CLI builds skip it. Cargo does not re-check a cached .crate, so
+# archives that don't match Cargo.lock are deleted, and so is every symlink.
+# git/db and registry/index are not verified.
+#
+# Keep the cached paths in sync with `.cargo-home-cache` in .gitlab-ci.yml
+# (git/checkouts is rebuilt by cargo).
 set -euo pipefail
 
 [ -z "${SKIP_CARGO_HOME_CACHE:-}" ] || exit 0
@@ -43,6 +58,9 @@ drop_unverified_crates() {
   rm -f "$expected"
 }
 
+# `find -type f` in drop_unverified_crates skips symlinks, so a symlinked
+# .crate or directory would never be hashed while cargo still follows it.
+# Cargo creates none in these directories.
 [ -L "$cache_root" ] && rm -f "$cache_root"
 if [ -d "$cache_root" ]; then
   find "$cache_root" -mindepth 1 ! -type d ! -type f -delete

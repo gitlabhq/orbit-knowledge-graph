@@ -42,6 +42,7 @@ git checkout -B "$BRANCH"
 git add "$VERSIONS"
 git commit -m "chore(e2e): auto-bump siphon, gitlab, and gkg pins to current"
 
+# Named remote so git never echoes the token back into the job log.
 git remote set-url origin "https://oauth2:${TOKEN}@${SERVER_HOST}/${PROJECT_PATH}.git"
 git push --force origin "HEAD:${BRANCH}"
 
@@ -54,6 +55,7 @@ if [ -n "$existing" ]; then
   exit 0
 fi
 
+# Quick actions silently ignore unknown usernames.
 assign_line=""
 if glab api "users?username=${ASSIGNEE}" \
   | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin) else 1)'; then

@@ -23,6 +23,11 @@ reloaders:
           - "^/etc/tls(/.*)?$"
       network:
         outgoing:
+          # Caproni's supervisor dials localhost:<port> before it starts a
+          # process. Without this the dial is intercepted and answered by the
+          # pod, which reports the port as taken when nothing listens on the
+          # host. With it, the check sees the host, so a native `mise run dev`
+          # holding 50054 is reported for what it is.
           ignore_localhost: true
       edit_mode_processes:
         gkg-build:

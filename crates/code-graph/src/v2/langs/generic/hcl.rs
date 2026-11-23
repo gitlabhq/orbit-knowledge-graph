@@ -259,6 +259,14 @@ impl HasRules for HclRules {
             scopes,
             spec,
             vec![ResolveStage::SSA, ResolveStage::ImportStrategies],
+            // No ScopeFqnWalk: HCL has no lexical-scope-relative name resolution.
+            // Worse, since hcl_on_scope namespaces variable/module fqns (var.x /
+            // module.x), ScopeFqnWalk would walk a bare ref up to the "var"/"module"
+            // segment and do an UNBOUNDED global by_fqn match, fanning a single
+            // `var.region` ref out to every same-named variable across every module
+            // directory in the repo. SameFile then the CAPPED GlobalName keep
+            // bare-ref resolution bounded; dotted refs (resource/data/local) never
+            // reach these strategies — they resolve via the engine's by_fqn fast path.
             vec![ImportStrategy::SameFile, ImportStrategy::GlobalName],
             ReceiverMode::None,
             ".",
@@ -669,6 +677,11 @@ data "aws_ami" "ubuntu" {
 
     #[test]
     fn variable_and_module_fqns_are_namespaced_but_output_provider_stay_flat() {
+        // var.x / module.x refs stay bare in hcl_rewrite_ref; namespacing the def
+        // fqn (so fqn != name) is what lets the capped GlobalName strategy resolve
+        // them across files. Output/Provider stay flat on purpose: nothing
+        // references them by a bare name, so admitting them to GlobalName would
+        // only add cross-file false positives.
         let defs = parse_defs(
             r#"
 variable "region" { default = "us-east-1" }

@@ -51,6 +51,7 @@ if [ -n "${GKG_IMAGE_TAG:-}" ]; then
 fi
 wait_for_image() {
   [ -n "${GKG_IMAGE_TAG:-}" ] || return 0
+  # Log in like the other registry scripts, so an auth failure can't pass for "not pushed yet".
   if [ -n "${CI_REGISTRY_PASSWORD:-}" ]; then
     echo "$CI_REGISTRY_PASSWORD" | mise -C "$CAPRONI_DIR" exec -- docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY" >/dev/null \
       || log "     docker login failed, continuing without credentials (anonymous reads work)"
@@ -72,6 +73,8 @@ wait_for_image() {
   log "     image not pushed after 15 min; did the pipeline's docker-build job fail or not run?"
   return 1
 }
+# Once the webserver is Ready (DDL done, schema active): stop background work and
+# pin ClickHouse's CPU and memory. Runs before the bulk load, so the restart loses nothing.
 quiet_cluster() {
   kc -n gitlab scale deploy/gkg-dispatcher --replicas=0
   local gone=0
@@ -83,6 +86,7 @@ quiet_cluster() {
   kc -n gitlab-dev-stack patch statefulset gitlab-dev-stack-clickhouse --type=strategic -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"clickhouse\",\"resources\":{\"requests\":{\"cpu\":\"${CH_CPU}\",\"memory\":\"${CH_MEMORY}\"},\"limits\":{\"cpu\":\"${CH_CPU}\",\"memory\":\"${CH_MEMORY}\"}}}]}}}}"
   kc -n gitlab-dev-stack rollout status statefulset/gitlab-dev-stack-clickhouse --timeout=600s
   kc wait -n gitlab --for=condition=Ready pod -l "$GKG_SELECTOR" --timeout=300s
+  # Refreshable views would refresh mid-test; STOP VIEWS does not survive a restart, so it goes last.
   chq -q "SYSTEM STOP VIEWS" </dev/null
 }
 exec 3>&2
@@ -129,6 +133,7 @@ GKG_IMAGE_DIGEST="${GKG_IMAGE_ID##*@}"
 log "     gkg webserver image: ${GKG_IMAGE_ID:-unknown}"
 
 log "[3/4] loading synthetic graph into gkg ClickHouse"
+# Sort by version number, not lexically: a plain DESC ranks v9 above v72.
 PFX=""
 for _ in $(seq 1 60); do
   PFX="$(chq -q "SELECT name FROM system.tables WHERE database='gkg' AND name LIKE '%gl_file' ORDER BY toInt32OrZero(extract(name, '^v([0-9]+)_')) DESC LIMIT 1" 2>/dev/null | sed 's/_gl_file$//' | tr -d '[:space:]')" || true
@@ -150,6 +155,8 @@ load_one() {
   fi
 }
 
+# Largest first so the edge table does not start last; LOAD_JOBS inserts at a time.
+# shellcheck disable=SC2012  # generated lowercase names; ls -S gives size order
 # shellcheck disable=SC2012
 while read -r pq; do
   stem="$(basename "$pq" .parquet)"
@@ -168,6 +175,9 @@ if [ -s "$FAILED" ]; then
   exit 1
 fi
 
+# Merge every table down to its final parts, so background merges cannot run
+# during the load test and every run reads the same part layout.
+# OPTIMIZE can outlast clickhouse-client's default 300s receive timeout.
 : > "$OPT_FAILED"
 optimize_one() {
   local tbl="$1"
@@ -282,6 +292,7 @@ GKG_JWT_SECRET="$(kc -n gitlab get secret gitlab-dev-stack-gkg-secrets -o jsonpa
 export ORBIT_PERF_CLICKHOUSE_URL=http://127.0.0.1:8123 ORBIT_PERF_CLICKHOUSE_USER=gitlab-dev-stack ORBIT_PERF_CLICKHOUSE_PASSWORD
 ORBIT_PERF_CLICKHOUSE_PASSWORD="$(kc -n gitlab get secret gitlab-dev-stack-gkg-secrets -o jsonpath='{.data.graph-password}' | base64 -d)" \
   || ORBIT_PERF_CLICKHOUSE_PASSWORD=""
+# A missing key reads as empty with exit 0, so check the value too.
 [ -n "$ORBIT_PERF_CLICKHOUSE_PASSWORD" ] \
   || log "     could not read the ClickHouse password; server-side stats may be missing"
 

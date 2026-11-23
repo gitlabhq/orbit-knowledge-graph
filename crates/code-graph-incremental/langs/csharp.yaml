@@ -1,3 +1,12 @@
+# C# rewrite rules.
+# Handles: namespaces (block and file-scoped), using directives (namespace,
+# static, alias), classes, structs, records, interfaces, enums, fields,
+# properties, constructors, methods, this./base.
+# calls, implicit-this calls, control flow, bindings.
+#
+# Known gaps (engine, not rules):
+# - `using Ns;` imports a namespace, not a file; the resolver resolves files.
+# - Same-namespace siblings without a using need a namespace scope.
 config:
   stdlib: [{ module: System },
       { module: System/Math, symbols: [Abs, Acos, Acosh, Asin, Asinh, Atan,

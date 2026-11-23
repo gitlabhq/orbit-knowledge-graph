@@ -369,6 +369,8 @@ fn build_scope_cte(start: &Anchor, end: &Anchor) -> Option<Cte> {
     if !start.has_tp || !end.has_tp {
         return None;
     }
+    // UNION, not intersect: endpoints at different namespace depths are linked
+    // by edges carrying only the deeper tp, so equality yields an empty scope.
     let arm = |cte: &str, alias: &str| Query {
         select: vec![SelectExpr::col(alias, TRAVERSAL_PATH_COLUMN)],
         from: TableRef::cte(cte, alias),

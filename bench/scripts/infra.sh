@@ -84,6 +84,9 @@ case "${1:-}" in
     ;;
   apply)
     shift
+    # Two-phase apply: the kubernetes/helm providers need the cluster to
+    # exist before they can plan bootstrap resources (cert-manager, CRDs).
+    # Phase 1 targets the node pool, which pulls in all GCP dependencies.
     "$TF" -chdir="${TF_DIR}" apply -var "tier=${TIER}" \
       -target=google_container_node_pool.workload "$@"
     fetch_credentials

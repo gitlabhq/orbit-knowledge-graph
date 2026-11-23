@@ -1,3 +1,13 @@
+# Ruby rewrite rules.
+# Handles: require/require_relative, include/extend/prepend (as supertypes
+# and module imports), constant references as Zeitwerk-style autoload imports
+# (Foo::Bar -> foo/bar under a Rails root), classes, modules, methods,
+# singleton methods, constants and lambdas, attr_* and Rails metaprogramming
+# synthetic definitions, self./@ivar calls, implicit-self calls, control flow.
+#
+# Known gaps (engine, not rules):
+# - Bare identifiers cannot be told apart from locals, so implicit-self
+#   calls without parentheses are modeled as this-calls and may over-link.
 config:
   frameworks:
     - name: rails

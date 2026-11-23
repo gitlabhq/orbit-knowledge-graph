@@ -61,6 +61,10 @@ impl WorkerPool {
         }
     }
 
+    /// Acquires the group permit first, then the global permit. This ordering
+    /// prevents a group waiter from reserving global capacity.
+    ///
+    /// Returns `None` if the semaphore is closed (should not happen in normal operation).
     pub async fn acquire_handler_slot(
         &self,
         concurrency_group: Option<&str>,

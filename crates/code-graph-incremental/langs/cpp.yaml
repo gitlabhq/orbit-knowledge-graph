@@ -1,3 +1,15 @@
+# C++ rewrite rules.
+# Handles: #include as wildcard imports, namespaces (as class-like scopes),
+# classes, structs, enums, in-class and out-of-class methods (the latter as
+# __impl wrappers named after the class), free functions, new, member and
+# qualified calls, this->x, locals, control flow.
+# Definitions hang off the file stem (stem::ns::name).
+#
+# Known gaps (engine, not rules):
+# - A file has one wildcard slot, so with several includes only the last
+#   include receives unresolved calls.
+# - Concepts are displayed as Interface; the canonical alphabet has no
+#   Namespace or Concept kind.
 config:
   stdlib: [
       { module: cstdio, symbols: [clearerr, fclose, feof, ferror, fflush, fgetc,

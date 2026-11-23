@@ -592,6 +592,10 @@ fn base_resolve_options(
         JsResolutionMode::Require => vec!["node".to_string(), "require".to_string()],
     };
 
+    // Bound every resolution to the repo clone. `Restriction::Path`
+    // in oxc_resolver is stricter than "contained": it only matches
+    // the exact restriction path or `./`. Use the function form to
+    // check containment ourselves.
     let root_owned = root_dir.to_path_buf();
     let restrictions = vec![oxc_resolver::Restriction::Fn(std::sync::Arc::new(
         move |path: &Path| {

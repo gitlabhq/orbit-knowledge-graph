@@ -1,5 +1,11 @@
 use ontology::errors::format_candidate_list;
 
+/// Render a JSON Schema validation error into an actionable message.
+///
+/// jsonschema's own `Display` truncates enum rejections to three candidates
+/// and renders `oneOf` rejections as opaque prose, both of which leave an agent
+/// guessing the valid values. Reading the structured `ValidationErrorKind`
+/// recovers the full allowlist instead.
 pub(crate) fn format_schema_error(
     error: &jsonschema::ValidationError<'_>,
     schema: &serde_json::Value,

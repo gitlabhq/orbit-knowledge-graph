@@ -76,10 +76,12 @@ pub struct RustPipeline;
 
 static TY_INTERNER_GC: RwLock<()> = RwLock::new(());
 static RUST_JOBS_SINCE_TY_GC: AtomicUsize = AtomicUsize::new(0);
+// Sweeping sooner stalls Rust lanes measurably more often for a little less memory.
 const FORCE_TY_GC_AFTER_JOBS: usize = 256;
 const FORCE_TY_GC_MAX_WAIT: Duration = Duration::from_secs(60);
 
 fn hold_ty_interner() -> RwLockReadGuard<'static, ()> {
+    // A second waiting writer would stall every arriving Rust job and sweep nothing.
     if RUST_JOBS_SINCE_TY_GC.load(Ordering::Relaxed) >= FORCE_TY_GC_AFTER_JOBS
         && RUST_JOBS_SINCE_TY_GC.swap(0, Ordering::Relaxed) >= FORCE_TY_GC_AFTER_JOBS
     {
@@ -334,6 +336,8 @@ impl LanguagePipeline for RustPipeline {
 
         let total_bytes: u64 = parsed.iter().map(|f| f.file_size).sum();
         let file_count = parsed.len();
+        // The graph owns interned copies of everything resolution needed, so the
+        // Arrow conversion below must not run alongside a second copy.
         drop(parsed);
         graph.finalize(tracer);
 

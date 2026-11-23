@@ -24,6 +24,8 @@ use orbit_log_fields::debug;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+/// Only bounds commands too fast to hide a round trip behind their own work.
+/// Raising it buys no extra delivery and lengthens exit against a dead collector.
 const TELEMETRY_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 const DETACHED_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -92,6 +94,8 @@ struct IndexArgs {
     )]
     wait: bool,
 
+    /// Seconds to wait for a running index or open readers before exiting with code 75
+    /// (default: ORBIT_WAIT_TIMEOUT_MS, else 600).
     #[arg(
         long,
         value_name = "SECONDS",
@@ -149,6 +153,7 @@ struct GrepArgs {
     #[arg(short = 'w', long, help = "Only match whole words")]
     word_regexp: bool,
 
+    /// Print the lines that do not match.
     #[arg(short = 'v', long, help = "Print the lines that do not match")]
     invert_match: bool,
 
@@ -160,6 +165,7 @@ struct GrepArgs {
     )]
     after_context: Option<usize>,
 
+    /// Print NUM lines before each match.
     #[arg(
         short = 'B',
         long,
@@ -168,6 +174,7 @@ struct GrepArgs {
     )]
     before_context: Option<usize>,
 
+    /// Print NUM lines before and after each match; `-NUM` works too.
     #[arg(
         short = 'C',
         long = "context",
@@ -194,6 +201,7 @@ struct GrepArgs {
     )]
     count: bool,
 
+    /// Print nothing; exit 0 when something matches and 1 otherwise.
     #[arg(
         short = 'q',
         long,
@@ -277,6 +285,8 @@ struct GrepArgs {
     )]
     db: Option<PathBuf>,
 
+    /// Read the existing index as is: never build or refresh it, and fail when the commit has
+    /// none.
     #[arg(
         long,
         help = "Read the existing index as is: never build or refresh it, and fail when the commit has none"
@@ -798,6 +808,7 @@ enum Commands {
         )]
         skip: Vec<commands::setup::Component>,
 
+        /// Do not index the current repository after configuring.
         #[arg(long, help = "Do not index the current repository after configuring")]
         no_index: bool,
 
@@ -982,6 +993,7 @@ async fn main() -> Result<()> {
             exit_code,
         } => {
             send_event(command, *exit_code, Duration::from_millis(*duration_ms)).await;
+            // Skips the runtime's wait on blocking DNS lookups past the flush timeout.
             std::process::exit(0);
         }
         Commands::Refresh { repo, db, files } => {

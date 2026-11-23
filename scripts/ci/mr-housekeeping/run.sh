@@ -5,6 +5,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ci/mr-housekeeping/lib.sh
 source "$HERE/lib.sh"
 
+# stale runs first so the MRs it closes are not given a milestone in the same run.
 TASKS="${HOUSEKEEPING_TASKS:-stale milestone-assignee}"
 
 BOT_USER="$(api "user")"

@@ -61,6 +61,7 @@ impl SelectColumn {
         let name = &column.name;
         let expression = match column.data_type {
             DataType::Uuid => format!("toString({name}) AS {name}"),
+            // Postgres `date` exceeds ClickHouse `Date32` (1900..2299); one bad row poisons the Arrow batch.
             DataType::Date => format!(
                 "if({name} >= toDate('1900-01-01') AND {name} <= toDate('2299-12-31'), {name}, NULL) AS {name}"
             ),

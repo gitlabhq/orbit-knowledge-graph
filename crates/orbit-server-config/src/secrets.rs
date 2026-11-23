@@ -30,6 +30,7 @@ fn read_dir(dir: &Path) -> Result<Map<String, Value>, SecretError> {
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
+        // Kubernetes stages atomic updates behind a `..data` symlink.
         if name.starts_with('.') {
             continue;
         }

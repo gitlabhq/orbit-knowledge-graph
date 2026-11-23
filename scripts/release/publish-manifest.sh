@@ -1,4 +1,7 @@
 #!/bin/sh
+# Publishes a multi-arch index from the digests the build jobs stored and
+# signs it before any final tag exists, so a registry tag moved between build
+# and publish is never included and never signed.
 
 set -eu
 

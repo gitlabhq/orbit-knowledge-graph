@@ -30,6 +30,9 @@ CLONE="$TMP/gitlab"
 TARBALL="$TMP/tables.tar.gz"
 mkdir -p "$CLONE"
 
+# A path-filtered archive is one cached HTTP request. Fetching an arbitrary SHA
+# over git-upload-pack from a repo this large gets throttled with "GitLab is
+# currently unable to handle this request due to load", which no retry outlasts.
 ARCHIVE_URL="https://gitlab.com/api/v4/projects/${GITLAB_PROJECT}/repository/archive.tar.gz?sha=${GITLAB_REF}&path=${TABLES_PATH}"
 
 log "fetching $TABLES_PATH from gitlab-org/gitlab @ $GITLAB_REF"
@@ -48,6 +51,7 @@ done
 
 count="$(find "$CLONE/$TABLES_PATH" -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) | wc -l | tr -d ' ')"
 [[ "$count" -gt 0 ]] || { echo "no table files found at $TABLES_PATH in $GITLAB_REF"; exit 1; }
+# The siphon container reads the files as another user; a local umask of 077 breaks it.
 chmod -R u+rwX,go+rX "$CLONE/$TABLES_PATH"
 tar -czf "$TARBALL" -C "$CLONE/$TABLES_PATH" .
 log "packed $count table files ($(du -h "$TARBALL" | cut -f1 | tr -d ' '))"

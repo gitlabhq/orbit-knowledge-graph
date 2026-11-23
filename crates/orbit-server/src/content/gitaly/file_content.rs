@@ -108,6 +108,7 @@ struct FetchedContents {
     had_error: bool,
 }
 
+/// Gitaly lists a shared blob once per request, so the files a batch misses go in the next batch.
 async fn fetch_contents(client: &GitlabClient, mut missed: Vec<FileKey>) -> FetchedContents {
     let mut fetched = FetchedContents {
         contents: HashMap::new(),

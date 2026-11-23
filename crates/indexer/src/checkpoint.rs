@@ -223,6 +223,8 @@ impl ClickHouseCheckpointStore {
         }
     }
 
+    // The newest row wins per key, except `indexed_at`: a page write from an overlapping run must
+    // not hide a completion, so it is the newest value since the last tombstone.
     async fn load_current_checkpoints(
         &self,
         keys: KeyFilter,
@@ -291,6 +293,9 @@ impl ClickHouseCheckpointStore {
         Ok(())
     }
 
+    // Single-row inserts must pin async batching regardless of durability, or per-row inserts
+    // explode the part count. ClickHouse rejects async inserts on a quorum-write cluster, so
+    // those deployments take the part-count hit instead.
     fn insert(&self, sql: &str, durability: WriteDurability) -> ArrowQuery {
         let query = self.client.query(sql);
         if self.client.has_quorum_writes() {
@@ -306,6 +311,7 @@ impl ClickHouseCheckpointStore {
     }
 }
 
+/// Flush-time `now64` defaults would let a buffered progress row outrank a later durable completion.
 fn client_version() -> String {
     Utc::now().format(TIMESTAMP_FORMAT).to_string()
 }

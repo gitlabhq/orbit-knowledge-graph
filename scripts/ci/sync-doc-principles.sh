@@ -84,6 +84,7 @@ git checkout -B "$BRANCH"
 git add "$LOCAL_DIR"
 git commit -m "$TITLE"
 
+# Named remote so git never echoes the token back into the job log.
 git remote set-url origin "https://oauth2:${TOKEN}@${SERVER_HOST}/${PROJECT_PATH}.git"
 git push --force origin "HEAD:${BRANCH}"
 
@@ -96,6 +97,7 @@ if [ -n "$existing" ]; then
   exit 0
 fi
 
+# Quick actions silently ignore unknown usernames.
 assign_line=""
 if glab api "users?username=${ASSIGNEE}" \
   | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin) else 1)'; then
@@ -104,6 +106,9 @@ else
   log "WARNING: assignee '${ASSIGNEE}' not found; opening the MR unassigned."
 fi
 
+# No apostrophes in this body: bash 3.2, which is what macOS ships, scans a
+# command substitution for its closing paren before it handles the heredoc,
+# so a lone quote in here fails `bash -n` on a contributor machine.
 body="$(cat <<EOF
 ### What does this MR do and why?
 

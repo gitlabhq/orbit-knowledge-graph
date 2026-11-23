@@ -1,3 +1,14 @@
+# Kotlin rewrite rules.
+# Handles: package, imports (named, aliased, wildcard), classes, interfaces,
+# enums, objects, companion objects, extension functions (as __impl wrappers
+# named after the receiver type), properties with this.x typing, functions,
+# this./super. calls, control flow, bindings.
+#
+# Known gaps (engine, not rules):
+# - Same-package siblings without an import need a package scope.
+# - Wildcard imports name a directory; the resolver resolves only files.
+# - The DSL cannot see a node's parent, so local `val`/`var` declarations
+#   get the same treatment as properties: a __def plus SSA bindings.
 config:
   stdlib: [{ module: java, precedence: runtime }, { module: javax }, { module: jdk },
       { module: kotlin, availability: implicit, precedence: runtime, symbols: [

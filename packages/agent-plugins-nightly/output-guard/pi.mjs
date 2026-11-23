@@ -12,6 +12,10 @@ function scriptOutputLimit(toolName, input) {
   return Number(tokens ?? 0) * 4;
 }
 
+/**
+ * The spilled file lacks the codemode header and the status after the bash notice. Without them a
+ * truncated failure would read as a success.
+ */
 function withPiFraming(original, body, fullOutputPath) {
   const header = /^Script (?:completed|failed)\nWall time [^\n]*\nOutput:\n/.exec(original)?.[0] ?? "";
   const notice = original.lastIndexOf(`Full output: ${fullOutputPath}`);

@@ -221,6 +221,11 @@ impl NodeStyle {
     }
 }
 
+/// GitLab access levels. Discriminants match `Gitlab::Access` in Rails so
+/// that YAML strings, JWT claim integers, and compiler-side comparisons all
+/// agree. `SecurityManager` intentionally sits between `Reporter` and
+/// `Developer` (25) to match the role's hybrid scope: broader than reporter
+/// for security resources, narrower than developer for code changes.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, strum::FromRepr)]
 #[serde(rename_all = "snake_case")]
@@ -241,6 +246,8 @@ impl RequiredRole {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct RedactionConfig {
+    /// Rails resource type (e.g., "projects", "merge_requests", "groups", "users").
+    /// This maps to the key used in `Authz::RedactionService::RESOURCE_CLASSES`.
     pub resource_type: String,
     pub id_column: String,
     pub ability: String,
@@ -314,6 +321,8 @@ impl NodeEntity {
             .map(|field| field.name.as_str())
     }
 
+    /// Column-backed fields marked `mutable: false` outside the sort key. A tombstone must carry
+    /// them, or a pre-pick filter on one rejects the tombstone and resurrects an older live row.
     pub fn immutable_columns(&self) -> Vec<&str> {
         self.fields
             .iter()

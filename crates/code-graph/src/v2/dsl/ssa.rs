@@ -6,6 +6,8 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
+/// Past this reaching-def recursion depth a read degrades to `Opaque` rather
+/// than overflowing the worker stack (an uncatchable SIGSEGV).
 const MAX_SSA_READ_DEPTH: usize = 10_000;
 
 const SSA_READ_RED_ZONE: usize = 128 * 1024;

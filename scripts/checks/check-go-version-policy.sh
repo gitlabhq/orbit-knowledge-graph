@@ -33,6 +33,9 @@ list_cng_stable_branches() {
   done
 }
 
+# CNG cuts a stable branch a few days before the release, and the policy
+# excludes the active milestone, so the newest branch is dropped until CNG has
+# tagged its vX.Y.0.
 fetch_shipped_go_versions() {
   local branches newest_tag tag_status branch stable_yml stable_version versions=""
   branches=$(list_cng_stable_branches | sort -uV | tail -n 4)

@@ -34,6 +34,8 @@ export default Plugin.define({
     const timers = new Map<string, ReturnType<typeof setTimeout>>()
     const ended = new Set<string>()
 
+    // Memory storage outlives a plugin reload but these timers do not, so lines left by the
+    // previous instance would never clear. Start without them; the usage counts stay.
     update((draft) => {
       draft.lines = []
     })
@@ -70,6 +72,7 @@ export default Plugin.define({
       expire(data.key, data.state === 'start' ? STALE_MS : LINGER_MS)
     })
 
+    // An interrupted call may never send its end. When a session stops, its running lines go.
     const stopSessions = SESSION_STOPPED.map((type) =>
       context.data.on(type, (event) => {
         const sessionID = sessionOf(event)

@@ -134,6 +134,11 @@ impl TraversalPath {
         self.0.starts_with(&other.0) || other.0.starts_with(&self.0)
     }
 
+    /// A traversal path is valid when it matches `<org_id>/<namespace_id>/`
+    /// where both segments are unsigned integers.
+    ///
+    /// An empty or malformed path would cause `startsWith(traversal_path, '')`
+    /// to match every row in the table.
     pub fn is_valid(&self) -> bool {
         let Some(inner) = self.0.strip_suffix('/') else {
             return false;
@@ -181,6 +186,14 @@ impl TraversalPath {
         self.segments().nth(1).and_then(|s| s.parse().ok())
     }
 
+    /// The top-level-namespace prefix of a traversal path: the first two
+    /// segments with a trailing slash (`<org_id>/<top_level_ns_id>/`).
+    ///
+    /// `"42/100/" → Some("42/100/")`, `"42/100/1000/" → Some("42/100/")`.
+    /// Returns `None` when the path has fewer than two numeric segments, so a
+    /// malformed path can never produce `startsWith(traversal_path, "")` (which
+    /// would match every row). Used to bound the system-notes resolver scans to a
+    /// single top-level namespace partition.
     pub fn root_prefix(&self) -> Option<Self> {
         let mut segments = self.segments();
         let org = segments.next()?;

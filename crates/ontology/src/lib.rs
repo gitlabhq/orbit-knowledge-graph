@@ -926,6 +926,13 @@ impl Ontology {
             .unwrap_or_default()
     }
 
+    /// Returns `true` when **at least one** variant of `relationship_kind` is
+    /// scope-preserving. This is a coarse pre-filter — callers that need
+    /// per-variant accuracy must inspect [`EdgeEntity::scope`] directly,
+    /// because a relationship kind may have both scope-preserving and
+    /// non-scope-preserving variants (e.g. `CONTAINS` has `Group→Project`
+    /// but also `User→Project` and `WorkItem→WorkItem` which are not).
+    /// Fail-closed: unknown or unannotated edges return false.
     #[must_use]
     pub fn has_scope_preserving_variant(&self, relationship_kind: &str) -> bool {
         self.edges.get(relationship_kind).is_some_and(|variants| {
@@ -942,6 +949,12 @@ impl Ontology {
             .any(|l| l.entity == entity)
     }
 
+    /// True when a `startsWith(traversal_path, P)` predicate prunes granules
+    /// on this node's table: the table has a `traversal_path` column, its
+    /// dedup key (ORDER BY / `sort_key`) leads with it, and the node is not
+    /// global-scoped. Uses `sort_key` rather than `storage.primary_key`
+    /// because PRIMARY KEY is an index prefix that may omit leading columns
+    /// while `sort_key` is the actual ReplacingMergeTree dedup key.
     #[must_use]
     pub fn is_path_scopable(&self, entity: &str) -> bool {
         let Some(node) = self.nodes.get(entity) else {
@@ -992,6 +1005,10 @@ impl Ontology {
             .find(|j| strip_schema_version_prefix(&j.table) == normalized)
     }
 
+    /// Whether the specific `(relationship_kind, source_kind, target_kind)`
+    /// triple is scope-preserving. Unlike [`has_scope_preserving_variant`],
+    /// this resolves to the exact variant and is safe for mixed-variant edges
+    /// like `CONTAINS`.
     #[must_use]
     pub fn is_scope_preserving_triple(&self, kind: &str, source: &str, target: &str) -> bool {
         self.edges.get(kind).is_some_and(|variants| {

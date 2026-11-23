@@ -94,6 +94,8 @@ fn build_deletion_insert(
         .join(", ");
     let insert_columns = format!("{carried_cols}, {DELETED_COLUMN}, {VERSION_COLUMN}");
     let extra = extra_predicate.map(|p| format!(" {p}")).unwrap_or_default();
+    // FINAL reads the latest row per key. A raw scan still sees the old live
+    // version of a tombstoned row and writes a new tombstone on every run.
     let sql = format!(
         "INSERT INTO {prefixed_table} ({insert_columns}) \
          SELECT {carried_cols}, true, now64(6) \

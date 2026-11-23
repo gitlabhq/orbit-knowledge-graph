@@ -171,6 +171,7 @@ impl Filter for TraversalPathFilter<'_> {
     }
 }
 
+/// Half-open `[lower, upper)` window over the sort-key prefix; a bare `id` range rescans the namespace each page.
 pub(in crate::modules::sdlc) struct CompositeRangeFilter<'a> {
     pub columns: &'a [String],
     pub lower: Option<&'a [String]>,
@@ -211,6 +212,7 @@ impl KeyComparison {
     }
 }
 
+/// OR-of-ANDs `(c0 > v0) OR (c0 = v0 AND c1 > v1) …` — ClickHouse prunes this; a packed tuple compare full-scans.
 fn sort_key_prefix_compare(
     columns: &[String],
     values: &[String],

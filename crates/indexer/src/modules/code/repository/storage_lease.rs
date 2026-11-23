@@ -149,6 +149,7 @@ impl ArchiveLeases {
                 match guard.renew(ttl).await {
                     Ok(()) => {}
                     Err(LockError::Lost) => return LeaseError::Lost(scope.to_string()),
+                    // An expired lease may already be another pod's slot, so fence even without a Lost reply.
                     Err(error) if guard.time_left().is_zero() => {
                         warn!(
                             safe(GITALY_STORAGE) = scope,
@@ -176,6 +177,8 @@ impl ArchiveLeases {
     }
 }
 
+/// Releases the slot when the run future is dropped mid-work, unless the stored expiry has passed:
+/// the key may then belong to another pod, so it is left to its TTL.
 struct HeldSlot(Option<LockGuard>);
 
 impl HeldSlot {

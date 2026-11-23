@@ -16,6 +16,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
+/// Stable per-stream seed (FNV-1a + splitmix64); unlike DefaultHasher it never changes across builds.
 fn derive_seed(base: u64, org_id: u32, stream: &str) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in base

@@ -717,6 +717,7 @@ async fn repeated_status_write_survives_insert_block_dedup() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
 
+    // non_replicated_deduplication_window makes a single-node table dedup like Cloud's SharedMergeTree.
     ctx.execute(
         "CREATE TABLE gkg_schema_version \
          (version UInt32, \

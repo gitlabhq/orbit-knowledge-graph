@@ -51,6 +51,8 @@ done
 
 [[ -f "$SCHEMA" ]] || { echo "Schema file not found: $SCHEMA" >&2; exit 1; }
 
+# ClickHouse reads the password from the X-ClickHouse-Key header, so it never
+# appears in a URL or in `ps` output.
 ch_query() {
     local database="$1" stmt="$2"
     curl -sS --fail-with-body "$URL/?database=$database" \

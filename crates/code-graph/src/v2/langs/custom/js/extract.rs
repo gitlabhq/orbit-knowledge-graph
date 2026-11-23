@@ -129,6 +129,12 @@ pub fn analyze_files(
     (analyzed, errors)
 }
 
+/// Reject relative paths that could escape the repo clone.
+///
+/// A malicious repository is *not* expected to produce absolute paths or `..`
+/// components through the walker, but we defend in depth: the symlink check
+/// also catches a committed `link -> /etc/...` whose target the walker would
+/// happily hand us as a "file".
 fn safe_repo_join(root_path: &str, relative_path: &str) -> Result<PathBuf, AnalyzerError> {
     if relative_path.contains('\0') || relative_path.contains('\n') {
         return Err(AnalyzerError::skip(
@@ -192,6 +198,9 @@ fn dedup_and_cap_star_reexports(specifiers: &[String]) -> Vec<JsStarReexport> {
     out
 }
 
+/// Per-file ceiling for the JS pipeline. The walker also applies a cap,
+/// but callers that bypass the walker (`WorkspaceProbe`, SFC block
+/// recombination) rely on this constant to stay bounded.
 pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 
 fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
@@ -205,6 +214,13 @@ fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     sanitize_panic_message(&raw)
 }
 
+/// Panic payloads from OXC can embed source snippets (byte ranges of
+/// the file that triggered the panic). The surrounding pipeline writes
+/// this into a `PipelineError` that lands in logs and downstream
+/// telemetry, so a hostile repository could steer arbitrary repository
+/// bytes into observability pipelines. Keep only printable ASCII and
+/// cap the length so the message remains useful for debugging but
+/// cannot exfiltrate arbitrary content.
 fn sanitize_panic_message(raw: &str) -> String {
     const MAX: usize = 256;
     let mut out = String::with_capacity(MAX.min(raw.len()));

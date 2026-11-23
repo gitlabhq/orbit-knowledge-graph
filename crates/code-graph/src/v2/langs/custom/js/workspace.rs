@@ -14,6 +14,13 @@ pub struct WorkspaceProbe {
 
 impl WorkspaceProbe {
     pub fn load(root_dir: &Path, indexed_paths: &[String]) -> Self {
+        // Canonicalize once so downstream path containment checks
+        // (webpack evaluator, specifier resolver) all operate in the
+        // same absolute form. If canonicalization fails we fail
+        // *closed*: return a probe with no manifests so resolution
+        // silently degrades instead of comparing canonical paths
+        // against a non-canonical root and flipping a containment
+        // check on a coincidental prefix match.
         let Ok(root_dir) = std::fs::canonicalize(root_dir) else {
             orbit_log_fields::warn!(
                 expanded(LOCAL_PATH) = %root_dir.display(),
@@ -70,6 +77,13 @@ impl WorkspaceProbe {
         self.tsconfig_path.is_some() || self.jsconfig_path.is_some()
     }
 
+    /// Resolver configuration for the tsconfig/jsconfig the repo exposes.
+    ///
+    /// Always `Manual` and pinned to a file inside the repo, or `None`
+    /// if neither config was discovered. `Auto` walks parent directories
+    /// past `root_dir` and would pick up any ambient `tsconfig.json` from
+    /// the server's filesystem; a hostile repo cannot make us honor a
+    /// tsconfig we did not find underneath `root_dir`.
     pub fn tsconfig_discovery(&self) -> Option<TsconfigDiscovery> {
         if let Some(jsconfig) = &self.jsconfig_path {
             return Some(TsconfigDiscovery::Manual(TsconfigOptions {

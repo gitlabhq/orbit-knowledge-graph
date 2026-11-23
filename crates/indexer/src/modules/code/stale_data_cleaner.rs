@@ -127,6 +127,11 @@ impl ClickHouseStaleDataCleaner {
             return String::new();
         }
 
+        // gl_edge has no project_id/branch, so scope by code source_kind: a flat
+        // literal needs no source-id subquery (a UNION wedges mutation replay,
+        // #1221) and survives the source node being tombstoned first. Correct only
+        // because the indexer writes one branch per project into gl_edge; a
+        // second branch would tombstone the first's edges below the watermark.
         let code_source_kinds = CodeTableNames::node_kinds_sql_list();
         format!(
             r#"

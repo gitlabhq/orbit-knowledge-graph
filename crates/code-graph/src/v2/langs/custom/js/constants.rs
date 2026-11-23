@@ -7,6 +7,7 @@ pub const RESOLVER_EXTENSIONS: &[&str] = &[
     "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "vue", "graphql", "gql", "json",
 ];
 
+/// Same set as `RESOLVER_EXTENSIONS`, ordered to match Bun's loader priority.
 pub const RESOLVER_EXTENSIONS_BUN: &[&str] = &[
     "tsx", "jsx", "ts", "mts", "mjs", "js", "cjs", "cts", "vue", "graphql", "gql", "json",
 ];

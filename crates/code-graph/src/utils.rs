@@ -1,5 +1,8 @@
 pub const MINIMUM_STACK_REMAINING: usize = 128 * 1024;
 
+/// oxc has no recursion limit and aborts the process past depth 4000-8000, where
+/// tree-sitter walkers check [`MINIMUM_STACK_REMAINING`] and survive instead.
+/// Deepest real file seen was 131.
 pub const MAX_NESTING_DEPTH: usize = 1000;
 
 pub fn exceeds_nesting_cap(source: &str) -> bool {

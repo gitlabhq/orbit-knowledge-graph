@@ -18,6 +18,10 @@ const CC_TOKEN_REFRESH_LEAD_SECS: i64 = 30 * 60;
 
 const CC_TOKEN_RETRY_INTERVAL_SECS: i64 = 60;
 
+/// Caps the fetch while the cached token is still valid, so it can cover for
+/// a timeout (matches labkit's own OIDC token source). With no token, or only
+/// an expired one the collector would reject, a slow Rails is worth waiting
+/// out instead of giving up early.
 const CC_TOKEN_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub trait CloudConnectorTokenFetcher: Send + Sync {
@@ -60,6 +64,8 @@ impl CloudConnectorTokenCache {
         }
     }
 
+    /// Serves the cached token even past its `exp` on a failed refresh, so
+    /// the collector's 401 (not a silent local drop) is what surfaces it.
     pub async fn token(&self) -> Result<String, GitlabClientError> {
         if let Some(token) = self.cached_token_before_refresh_at(Utc::now().timestamp()) {
             return Ok(token);
@@ -178,6 +184,9 @@ mod tests {
             let exp = self.exp.load(Ordering::SeqCst);
             let fail = self.fail.load(Ordering::SeqCst);
             Box::pin(async move {
+                // Without a real suspension point, a concurrent burst resolves the
+                // first future to completion before the executor polls the rest,
+                // so single-flight dedup would never actually be exercised.
                 tokio::task::yield_now().await;
                 if fail {
                     return Err(GitlabClientError::Unexpected(

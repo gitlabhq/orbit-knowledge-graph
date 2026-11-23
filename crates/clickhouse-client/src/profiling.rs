@@ -319,6 +319,8 @@ fn validate_query_id(query_id: &str) -> Result<(), ClickHouseError> {
     Ok(())
 }
 
+/// `clusterAllReplicas` wraps columns in `Nullable`, which ClickHouse
+/// serializes as strings in JSONEachRow format, so a value may be a number or a string.
 fn json_u64(v: &serde_json::Value) -> u64 {
     v.as_u64()
         .or_else(|| v.as_str().and_then(|s| s.parse().ok()))

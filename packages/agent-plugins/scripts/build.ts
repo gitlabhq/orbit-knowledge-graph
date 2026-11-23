@@ -9,6 +9,8 @@ const NOTICE = '/*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/
 const OPENCODE_UI = '../../config/setup/agents/opencode_ui'
 const PI_UI = '../../config/setup/agents/pi_ui'
 
+// OpenCode resolves @opencode/plugin at runtime, and the server and TUI parts share rpc.ts as
+// installed, so the bundle imports them instead of inlining them.
 const keepExternal: BunPlugin = {
   name: 'keep-external',
   setup(build) {
@@ -29,6 +31,7 @@ await bundle('vendor/lib.ts', 'core/lib.js', true)
 
 await mkdir(join(root, OPENCODE_UI), { recursive: true })
 await bundle('opencode/index.ts', join(OPENCODE_UI, 'index.js'), false, [keepExternal])
+// The TUI part ships as source: OpenCode compiles TUI JSX with its own OpenTUI.
 for (const file of ['rpc.ts', 'tui.tsx']) {
   await copyFile(join(root, 'opencode', file), join(root, OPENCODE_UI, file))
 }

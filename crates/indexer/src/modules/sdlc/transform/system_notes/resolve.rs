@@ -12,6 +12,8 @@ fn del() -> &'static str {
     ontology::siphon_deleted_column()
 }
 
+/// The clickhouse crate serializes params into the URL query string, so these
+/// lookup arrays must stay bounded independently of Arrow block size.
 pub(super) fn lookup_chunks<T>(items: &[T], batch_size: usize) -> impl Iterator<Item = &[T]> {
     items.chunks(batch_size.max(1))
 }
@@ -47,6 +49,13 @@ pub static PROJECT_PATHS_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+/// Batch `(target_project_id, iid)` -> MR id lookup. Same `argMax` dedup and
+/// `root_prefix` bounding as [`ROUTES_SQL`].
+///
+/// `{project_ids:Array(Int64)}` and `{iids:Array(Int64)}` are passed as two
+/// index-aligned flat arrays and `arrayZip`-ed server-side, because the JSON
+/// param channel serializes a tuple as `[200,5]`, which ClickHouse rejects for
+/// `Array(Tuple(Int64, Int64))`. Returns `(id, target_project_id, iid)`.
 pub static MERGE_REQUESTS_SQL: LazyLock<String> = LazyLock::new(|| {
     let (version, del) = (version(), del());
     format!(

@@ -1539,6 +1539,7 @@ html.page-landing {
     padding-top: 0;
   }
 
+  /* site-kit's glow reaches 10rem past each side, which would scroll the page sideways on a phone. */
   .page-glow::before,
   .page-glow::after {
     inset-inline: -1.5rem;

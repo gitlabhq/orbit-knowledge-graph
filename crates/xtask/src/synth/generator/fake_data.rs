@@ -25,6 +25,8 @@ fn push_hex_u64(buf: &mut String, mut val: u64) {
     for _ in 0..nibbles {
         buf.push('0');
     }
+    // SAFETY: we only write ASCII hex digits (0-9, a-f) into positions
+    // that already contain ASCII '0', so the buffer remains valid UTF-8.
     let bytes = unsafe { buf.as_bytes_mut() };
     for i in (0..nibbles).rev() {
         bytes[start + i] = HEX_DIGITS[(val & 0xf) as usize];

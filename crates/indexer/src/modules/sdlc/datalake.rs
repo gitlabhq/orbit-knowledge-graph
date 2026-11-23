@@ -152,6 +152,8 @@ impl DatalakeQuery for Datalake {
     ) -> Result<FetchedPage, DatalakeError> {
         let mut query = self.build_query(sql, params);
         if max_block_size.is_some() {
+            // Retry after a datalake failure (the Arrow 2GB overflow): byte-cap
+            // blocks so the retry is safe regardless of row width.
             query = query.with_setting(
                 "preferred_block_size_bytes",
                 RETRY_PREFERRED_BLOCK_SIZE_BYTES,

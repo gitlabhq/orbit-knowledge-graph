@@ -63,6 +63,7 @@ if [[ -n "${RA_DATALAKE_SNAPSHOT:-}" ]]; then
           apiGroup: snapshot.storage.k8s.io"
 fi
 
+# StatefulSet volumeClaimTemplates are immutable; delete before re-applying.
 $KC delete statefulset clickhouse -n "${CH_NS}" --cascade=orphan 2>/dev/null || true
 
 log "Deploying standalone ClickHouse in ${CH_NS}"
@@ -76,6 +77,8 @@ envsubst < "${BENCH_DIR}/manifests/standalone-ch.yaml" | $KC apply -f -
 $KC rollout status -n "${CH_NS}" statefulset/clickhouse --timeout=600s
 log "  ClickHouse ready"
 
+# --- 4. Create databases and users ---
+# All passwords are hex (no special chars that break sed or SQL quoting).
 export E2E_CH_SIPHON_PASS=$(openssl rand -hex 24)
 export E2E_CH_GITLAB_PASS=$(openssl rand -hex 24)
 export E2E_CH_DATALAKE_PASS=$(openssl rand -hex 24)
@@ -148,6 +151,9 @@ else
   CH_NS="${CH_NS}" "${BENCH_DIR}/scripts/import-dump-job.sh"
 fi
 
+# --- 8. Reset dispatcher checkpoints to epoch so it re-indexes all dump data ---
+# The dump preserves original _siphon_watermark timestamps. Without this
+# the dispatcher's cursor starts at now() and never sees the old data.
 log "Resetting dispatcher checkpoints to epoch"
 CKPT=$($KC exec -n "${CH_NS}" clickhouse-0 -- \
   clickhouse-client --password "${CH_PASSWORD}" -d gkg \

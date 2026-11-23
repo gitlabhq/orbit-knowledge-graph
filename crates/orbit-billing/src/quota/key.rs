@@ -14,6 +14,9 @@ pub(crate) struct CacheKey {
     pub feature_qualified_name: String,
 }
 
+// `license_checksum` stays out of `CacheKey`: key fields are logged, and one
+// self-managed instance holds one license, so it adds no cache discrimination.
+// `correlation_id` differs on every request, so keying on it would defeat the cache.
 pub(crate) struct CdotRequest {
     pub key: CacheKey,
     pub global_user_id: String,

@@ -1,3 +1,5 @@
+# shellcheck shell=bash disable=SC2034  # variables are for the sourcing scripts
+# run.sh exports BOT_USERNAME and BOT_USER_ID before it starts a task.
 # shellcheck shell=bash disable=SC2034
 
 PROJECT_ID="${CI_PROJECT_ID:?CI_PROJECT_ID is required}"

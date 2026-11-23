@@ -1,4 +1,11 @@
 #!/bin/sh
+# Signs image digests with keyless cosign and verifies each result.
+# Runs only in the canonical project. Do not sign in forks, including private
+# forks: a keyless signature publishes the signing project's path and ref to
+# the public Rekor log, which would disclose them.
+# The project ID is read from the signed OIDC token and compared with a
+# literal, because CI variables can be overridden from project or pipeline
+# settings.
 
 set -eu
 

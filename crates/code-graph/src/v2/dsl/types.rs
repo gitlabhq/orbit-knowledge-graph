@@ -726,6 +726,9 @@ pub struct CustomParse {
     pub links: crate::v2::types::FileLinks,
 }
 
+/// `Custom` replaces tree-sitter parsing wholesale. It receives the parse CPU budget
+/// and must honor it if it parses with tree-sitter; the walk phases have no budget,
+/// so it must be robust to pathological input on its own.
 #[derive(Clone, Copy, Default)]
 pub enum LanguageParser {
     #[default]

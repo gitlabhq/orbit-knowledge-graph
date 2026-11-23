@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# Recreate the traversal-path dictionaries with LAYOUT(DIRECT). The upstream
+# CACHE layout can cache a routes-vs-namespaces CDC race miss as '0/',
+# poisoning every insert for that namespace until the entry expires, and the
+# reconciler never repairs '0/' rows (it only targets empty paths). DIRECT
+# removes the caching; the tiny e2e dataset makes per-lookup queries free.
+# Tracked in https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/483
 
 set -euo pipefail
 
@@ -27,9 +33,18 @@ for _ in $(seq 1 120); do
   sleep 5
 done
 
+# Pull the default-user password from the pod env so we can rewrite the
+# SOURCE block of each dict. The original SOURCE uses USER 'gitlab' and
+# SHOW CREATE redacts its password as literal `[HIDDEN]`; sending that DDL
+# back creates a dict that looks LOADED but fails every lookup with
+# AUTHENTICATION_FAILED. We swap the source user to `default` (which
+# already has full perms) and inject its real password.
 DEFAULT_PASS=$($KC exec -n "$NS_CH" "$CH_POD" -- printenv CLICKHOUSE_PASSWORD)
 [[ -n "$DEFAULT_PASS" ]] || { log "could not read CLICKHOUSE_PASSWORD from pod"; exit 1; }
 
+# SHOW CREATE round-trip preserves SOURCE/columns; DIRECT layouts reject
+# LIFETIME. TSVRaw is required — default TSV escapes newlines inside the
+# embedded SOURCE QUERY, breaking the DDL.
 for dict in "${DICTS[@]}"; do
   log "Patching $dict"
   ddl=$(ch_query "SHOW CREATE DICTIONARY $dict FORMAT TSVRaw" 2>/dev/null || true)
@@ -51,6 +66,10 @@ for dict in "${DICTS[@]}"; do
       *) log "  WARNING: $dict layout is '$layout', not DIRECT — cache race window remains" ;;
     esac
   else
+    # system.dictionaries.type stays empty until the dictionary first loads, so
+    # checking it right after CREATE OR REPLACE is a guaranteed false negative.
+    # A dictGet probe forces the lazy load and also proves the rewritten SOURCE
+    # credentials work (a bad password only surfaces on lookup, not on DDL).
     if ! ch_query "SELECT dictGetOrDefault('$dict', 'traversal_path', toUInt64(0), '')" >/dev/null; then
       log "  ERROR: $dict probe lookup failed after patch"
       exit 1

@@ -17,6 +17,7 @@ use crate::status_query::{
 const MAX_SDLC_ATTEMPTS: i64 = 5;
 const STALE_AFTER: TimeDelta = TimeDelta::hours(2);
 
+// Not `FINAL`: until a merge, a completed row still counts after an overlapping run's late page write.
 const PLAN_CHECKPOINTS_SQL: &str = "\
 SELECT root, plan, \
        maxIf(indexed_at, NOT _deleted AND _version >= tombstoned_at) AS last_completed_at, \

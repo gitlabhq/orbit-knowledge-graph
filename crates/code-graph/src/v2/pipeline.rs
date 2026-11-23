@@ -196,6 +196,13 @@ fn panic_payload_message(payload: &Box<dyn Any + Send>) -> String {
     }
 }
 
+/// Returns `true` when `message` matches Arrow's offset-overflow panic family.
+///
+/// Verified against Arrow 58.3.0 panic sites in `arrow-buffer`'s
+/// `OffsetBuffer::from_repeated_length` (`"offset overflow"`) and
+/// `arrow-array`'s `GenericByteBuilder::next_offset`
+/// (`"byte array offset overflow"`). Re-validate this substring after Arrow
+/// upgrades; a mismatch makes these panics fatal again.
 fn is_offset_overflow_message(message: &str) -> bool {
     message.to_ascii_lowercase().contains("offset overflow")
 }
@@ -222,6 +229,10 @@ fn affected_file_scope(files: &[FamilyFileInput]) -> String {
 }
 
 fn record_offset_overflow_skips(ctx: &PipelineContext, files: &[FamilyFileInput], detail: String) {
+    // Arrow reports only the batch-level offset overflow, not the row/file that
+    // crossed the cumulative `i32` limit. Marking the whole family batch is
+    // intentionally conservative so the repository self-heals without implying
+    // precise per-file attribution.
     for file in files {
         ctx.record_skip(
             file.path.clone(),
@@ -514,6 +525,7 @@ pub trait LanguagePipeline {
     }
 }
 
+/// Headroom for the native tree-sitter parse, whose stack overflow is an uncatchable SIGSEGV.
 pub const DEFAULT_PARSE_WORKER_STACK_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone)]

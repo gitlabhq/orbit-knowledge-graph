@@ -685,6 +685,11 @@ pub fn batch_slice_bytes(batch: &RecordBatch) -> u64 {
         .sum()
 }
 
+/// Column type fixup for a RecordBatch before ClickHouse insertion.
+/// - Dictionary-encodes `Utf8` columns named in `dict_columns` to
+///   `Dictionary<Int32, Utf8>` for smaller IPC payloads.
+/// - Zeroes the null slots of temporal columns, since ClickHouse range-checks them
+///   before it applies the column default.
 pub fn prepare_batch(batch: &RecordBatch, dict_columns: &HashSet<String>) -> RecordBatch {
     let dict_type = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
     let (fields, columns): (Vec<Field>, Vec<ArrayRef>) = batch

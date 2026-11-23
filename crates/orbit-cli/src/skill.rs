@@ -862,6 +862,8 @@ struct CacheLock {
 
 impl CacheLock {
     fn acquire(root: &Path) -> Result<Self> {
+        // Never unlink the inode: another writer could lock its replacement.
+        // The kernel releases this lock when the process dies.
         let file = OpenOptions::new()
             .read(true)
             .write(true)

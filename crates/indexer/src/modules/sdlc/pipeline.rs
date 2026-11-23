@@ -437,6 +437,8 @@ impl Pipeline {
                                 expanded(ERROR_MESSAGE) = %err,
                                 "datalake query failed, retrying with smaller block size"
                             );
+                            // An overflow only clears once blocks are small, and each halving step
+                            // re-scans the page, so jump straight to the floor.
                             let next = if is_arrow_string_overflow(&err) {
                                 retry_config.halving_min_block_size
                             } else {

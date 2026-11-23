@@ -2,6 +2,8 @@ import { execFile } from "child_process";
 import { existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+// One default export carries both plugin APIs and imports nothing from OpenCode, so the same file
+// loads in both: OpenCode 2 calls setup(), and OpenCode 1 (1.3.4 and later) calls server().
 
 const REMINDER = "{{reminder}}";
 const SHELL_TOOLS = ["bash", "shell"];

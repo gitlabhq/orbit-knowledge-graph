@@ -150,6 +150,7 @@ async fn arrow_string_overflow_recovers_with_byte_cap() {
     let context = TestContext::new().await;
     let client = context.create_client();
 
+    // index_granularity_bytes=0 makes the sort coalesce the page into one block.
     context
         .execute(
             "CREATE TABLE wide_overflow (id UInt32, s String) \
@@ -302,6 +303,8 @@ async fn datalake_watermark_reads_use_the_skip_index_on_tables_with_a_projection
     }
     .build_client("datalake");
 
+    // Large rows clustered in the sort key give the merged base part more marks than its
+    // projection, so ClickHouse 26.6 to 26.10 prefer the projection, which has no skip index.
     for statement in [
         "CREATE TABLE watermark_reads (k UInt32, id UInt64, payload String, watermark DateTime, \
          INDEX idx_watermark watermark TYPE minmax GRANULARITY 1, \

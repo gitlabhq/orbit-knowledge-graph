@@ -45,6 +45,7 @@ if [ -n "$SHA" ]; then
 
   helm uninstall e2e-robot-runner -n "e2e-${SHA}-gkg" --kube-context "$KCTX" 2>/dev/null || true
 
+  # helmfile needs all env vars to parse .gotmpl; values don't matter for destroy
   E2E_SHA="$SHA" \
   E2E_JWT_KEY=x E2E_CH_DEFAULT_PASS=x E2E_CH_SIPHON_PASS=x \
   E2E_CH_DATALAKE_PASS=x E2E_CH_GRAPH_PASS=x E2E_CH_GRAPH_READ_PASS=x \

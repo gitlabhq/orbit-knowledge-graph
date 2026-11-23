@@ -1,3 +1,11 @@
+# C rewrite rules.
+# Handles: #include as wildcard imports (quoted paths relative to the file),
+# functions and prototypes, structs, unions, enums, typedefs, calls, locals,
+# control flow. Definitions hang off the file stem (stem::name).
+#
+# Known gaps (engine, not rules):
+# - A file has one wildcard slot, so with several includes only the last
+#   include receives unresolved calls.
 config:
   stdlib: [
       { module: assert.h, symbols: [assert] },

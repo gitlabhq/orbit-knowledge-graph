@@ -13,6 +13,9 @@ struct CachedDecision {
     expires_at: Instant,
 }
 
+// ±10% jitter staggers expiry across instances that all populate their caches
+// from the same CustomersDot response. Without it, a fleet-wide cache miss happens
+// in lockstep whenever CustomersDot hands out identical max-age values.
 fn jittered(ttl: Duration) -> Duration {
     let nanos = ttl.as_nanos() as f64;
     let factor = 0.9_f64 + rand::random::<f64>() * 0.2_f64;
@@ -35,6 +38,8 @@ pub(crate) enum CacheOutcome {
 pub(crate) struct QuotaCache {
     inner: Cache<CacheKey, CachedDecision>,
     client: Arc<QuotaClient>,
+    // Kept alive for the lifetime of the cache so the OTel SDK keeps invoking
+    // the registered callback. Dropping the handle deregisters the gauge.
     _entries_gauge: ObservableGauge<i64>,
 }
 

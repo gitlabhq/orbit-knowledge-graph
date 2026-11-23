@@ -436,6 +436,13 @@ fn neighbor_path(edge_alias: &str, neighbor_type: &str, owned: &[(String, String
     }
 }
 
+/// Direction::Both collapsed into a single edge scan (see `fused_both_eligible`).
+///
+/// Inner query: scan the edge once with `WHERE (source side) OR (target side)`,
+/// projecting `arrayJoin(arrayFilter(matched, [out_tuple, in_tuple]))` so each
+/// row yields one entry per matched arm. Outer query: project the `_orbit_*`
+/// columns out of the tuple. `arrayFilter` (not `multiIf`) keeps self-loop
+/// semantics: when both arms match the same edge, both rows are emitted.
 #[allow(clippy::too_many_arguments)]
 fn build_fused_both_arm(
     center_id: &str,

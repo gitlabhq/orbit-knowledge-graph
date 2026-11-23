@@ -610,6 +610,8 @@ fn invocation_target(
 }
 
 fn expression_steps_from_expression(expression: &Expression<'_>) -> Option<Vec<ExpressionStep>> {
+    // Member-expression nesting is attacker-controlled (`a.b.c...` deep
+    // enough to exhaust a 2 MiB thread stack). Grow instead of crashing.
     stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
         match expression.get_inner_expression() {
             Expression::Identifier(identifier) => {

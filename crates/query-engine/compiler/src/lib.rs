@@ -96,6 +96,10 @@ pub fn compile_model(
     }
 }
 
+/// Compile a graph query into DuckDB SQL for local execution.
+///
+/// Collapses edge tables to the local single-table layout before compiling.
+/// No security or hydration phases — local mode trusts all data.
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local(
     raw: &str,

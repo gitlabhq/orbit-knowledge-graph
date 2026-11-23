@@ -95,6 +95,9 @@ Reopen it any time the work is still relevant, and add ~"${KEEP_LABEL}" to keep 
 EOF
 }
 
+# process_mr runs in a context where errexit is suspended (the caller inspects
+# its status), so every API-touching step carries an explicit `|| return 1` —
+# a failure skips this MR rather than acting on defaulted data.
 process_mr() {
   local mr="$1"
   local iid author created_at has_keep has_scheduled
@@ -113,6 +116,9 @@ process_mr() {
   has_label "$mr" "$KEEP_LABEL" && has_keep=true
   has_label "$mr" "$SCHEDULED_LABEL" && has_scheduled=true
 
+  # KEEP_LABEL and SCHEDULED_LABEL share the "stale" scope, so adding keep makes
+  # GitLab drop the scheduled label automatically — an MR never carries both, and
+  # a kept MR falls through to the has_keep skip below.
   if [ "$has_scheduled" = true ]; then
     local label_epoch activity_epoch
     label_epoch="$(get_scheduled_label_epoch "$iid")" || return 1
@@ -134,6 +140,8 @@ process_mr() {
       log "MR !$iid: grace elapsed (${age}s >= ${GRACE_SECONDS}s), closing"
       post_comment "$iid" "$(close_comment_body)" || return 1
       close_mr "$iid" || return 1
+      # Drop the label so a later reopen starts a fresh warn/grace cycle instead
+      # of being closed again immediately off the original (now-ancient) warning.
       remove_scheduled_label "$iid" || return 1
     else
       local remaining=$(( (GRACE_SECONDS - age + 86399) / 86400 ))

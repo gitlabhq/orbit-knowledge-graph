@@ -58,6 +58,9 @@ upload_package() {
   done
 }
 
+# semantic-release's @semantic-release/git plugin pushes the tag, which fires
+# this pipeline; @semantic-release/gitlab creates the release in a later step
+# of the same job. Poll briefly so the asset-link calls don't 404.
 wait_for_release() {
   local url="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases/${CI_COMMIT_TAG}"
   for attempt in $(seq 1 30); do

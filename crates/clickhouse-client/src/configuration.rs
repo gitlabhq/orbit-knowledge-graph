@@ -4,6 +4,7 @@ use orbit_server_config::ClickHouseConfiguration;
 
 use crate::arrow_client::ArrowClickHouseClient;
 
+/// Serialized inserts make `select_sequential_consistency` work; `async_insert` (on by default since 26.x) is rejected with a quorum.
 const QUORUM_SESSION_SETTINGS: [(&str, &str); 4] = [
     ("insert_quorum", "auto"),
     ("insert_quorum_parallel", "0"),

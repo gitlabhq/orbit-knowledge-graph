@@ -9,6 +9,10 @@ style:
   size: 24
   color: "#A78BFA"
 
+# Project-delegated on purpose: the session's existence is visible to anyone with
+# read_code (Reporter+) on the project, like the source-code nodes. read_duo_workflow
+# is invoker-only for non-pipeline sessions and would hide that. Only
+# source = gitlab_duo is extracted today; the other values are declared for later.
 redaction:
   resource_type: project
   id_column: project_id

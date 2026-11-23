@@ -60,6 +60,8 @@ fn required<'a>(value: &'a Option<String>, key: &str) -> anyhow::Result<&'a str>
         })
 }
 
+// The contract has no ON CLUSTER: users reach every replica only through replicated
+// user storage, and replicated tables need a database the operator made Replicated.
 async fn check_replicated_prerequisites(
     admin: &ArrowClickHouseClient,
     graph_db: &str,

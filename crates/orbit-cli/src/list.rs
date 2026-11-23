@@ -5,6 +5,9 @@ use anyhow::Result;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+// Cast the enum and timestamp to text so JSON/CSV don't render them as a
+// dictionary index or epoch-millis integer. The ORDER BY qualifies the
+// table column so it sorts the TIMESTAMP, not the CAST alias.
 const MANIFEST_QUERY: &str = "SELECT \
        repo_path, \
        branch, \

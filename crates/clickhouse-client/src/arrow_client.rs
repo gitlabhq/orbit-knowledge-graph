@@ -26,6 +26,7 @@ pub use clickhouse::QuerySummary;
 use crate::error::ClickHouseError;
 use crate::extract::FromArrowColumn;
 
+/// ClickHouse rejects an async insert that also carries `insert_quorum`.
 const ASYNC_INSERT_SETTING_KEYS: [&str; 2] = ["async_insert", "wait_for_async_insert"];
 
 const REPLICATION_TRANSIENTS: [&str; 11] = [
@@ -172,6 +173,9 @@ impl ArrowClickHouseClient {
         self
     }
 
+    /// Mark the client as read-only so ClickHouse cancels its queries when the
+    /// caller drops them. Never use it on a client that inserts or runs DDL.
+    /// Mode 2 rather than 1 because every query sends settings, which mode 1 forbids.
     pub fn read_only(mut self) -> Self {
         self.client = self.client.with_setting("readonly", "2");
         self
@@ -444,6 +448,9 @@ impl ArrowClickHouseClient {
     }
 }
 
+/// ClickHouse's HTTP parameter parser for DateTime64 and Date rejects the ISO 8601
+/// trailing `Z` ("only 19 of 20 bytes was parsed"). Columns already pin UTC, so
+/// dropping it keeps the value.
 fn parameter_text(text: &str, temporal: bool) -> &str {
     if temporal {
         text.strip_suffix('Z').unwrap_or(text)
@@ -480,6 +487,7 @@ pub struct ArrowQuery {
 
 type FirstChunk = (clickhouse::query::BytesCursor, Option<Bytes>);
 
+/// A quorum conflict arrives with the first chunk, before any rows, so only that read retries.
 async fn open_cursor(query: Query) -> Result<FirstChunk, ClickHouseError> {
     let mut cursor = query
         .fetch_bytes("ArrowStream")
@@ -646,6 +654,7 @@ impl ArrowQuery {
                         return;
                     }
                 }
+                // Take whole chunks: the cursor's AsyncRead loses bytes when the next chunk is late.
                 next = tokio::select! {
                     biased;
                     _ = tx.closed() => return,

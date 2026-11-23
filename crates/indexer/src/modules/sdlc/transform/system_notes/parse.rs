@@ -119,6 +119,18 @@ impl Action {
         matches!(self, Self::Closed | Self::Merged | Self::Opened)
     }
 }
+// Reference token grammar, derived from Rails:
+//
+// * `Project.reference_pattern` in `app/models/project.rb` accepts an optional
+//   namespace prefix (up to 20 segments) followed by a project path. Each
+//   path segment matches `[a-zA-Z0-9_][a-zA-Z0-9_\-\.]{0,254}`.
+// * `Issue.reference_pattern` is `(<project>?)#<digits>`.
+// * `MergeRequest.reference_pattern` is `(<project>?)!<digits>`.
+// * `Commit.reference_pattern` is `(<project>@)?<sha 7..40>`.
+//
+// We bound the namespace depth at 20 segments to match
+// `Namespace::NUMBER_OF_ANCESTORS_ALLOWED`. The IID is bounded at 20 digits to
+// fit `Gitlab::Database::MAX_INT_VALUE`.
 
 // Reference token grammar, derived from Rails:
 //

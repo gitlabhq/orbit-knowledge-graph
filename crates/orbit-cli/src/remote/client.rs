@@ -331,6 +331,8 @@ impl OrbitClient {
                         EXIT_GENERIC,
                         request_failure_message("Orbit request", &error),
                     );
+                    // A connect timeout means the host drops packets: retrying
+                    // would pay the timeout again, so it fails fast instead.
                     if pending.is_none() || !error.is_connect() || error.is_timeout() {
                         return Err(failure);
                     }

@@ -211,6 +211,8 @@ install_orbit() {
     fi
     echo "Installing the Orbit local CLI ${VERSION}..."
 
+    # Tarballs are published to the project's Generic Package Registry under
+    # 'orbit-cli/<version>/<artifact>'. The version segment omits the leading 'v'.
     local pkg_version="${VERSION#v}"
     local pkg_base="https://gitlab.com/api/v4/projects/${project_id}/packages/generic/orbit-cli/${pkg_version}"
     local download_url="${pkg_base}/${artifact_name}"

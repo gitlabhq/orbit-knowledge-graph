@@ -39,6 +39,7 @@ struct QuotaServiceInner {
 }
 
 impl QuotaServiceInner {
+    // Self-managed operators control egress to CustomersDot, so only GitLab.com fails open.
     fn fails_open(&self, reason: FailureReason) -> bool {
         self.auth_mode == QuotaAuthMode::AdminToken && reason.is_brief_outage()
     }
@@ -139,6 +140,8 @@ impl QuotaService {
             return Ok(());
         }
 
+        // Temporary until Rails rejects SaaS requests without a governing namespace.
+        // CustomersDot can't resolve them, so they are neither checked nor billed.
         if inputs.root_namespace_id.is_none()
             && inputs.realm.as_deref().and_then(normalize_realm) == Some(REALM_SAAS)
         {

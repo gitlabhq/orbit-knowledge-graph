@@ -1,3 +1,6 @@
+// SECURITY: Only HS256 (HMAC-SHA256) is supported. Do NOT add RSA algorithms
+// (RS256, RS384, RS512, PS256, PS384, PS512) until jsonwebtoken updates to
+// rsa 0.10+ which fixes RUSTSEC-2023-0071 (Marvin Attack timing vulnerability).
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
@@ -23,6 +26,8 @@ impl JwtValidator {
             )));
         }
 
+        // Rails base64-decodes the secret file before signing JWTs
+        // (via Gitlab::JwtAuthenticatable). Decode here to match.
         let decoded = STANDARD
             .decode(secret.trim().as_bytes())
             .unwrap_or_else(|_| secret.as_bytes().to_vec());

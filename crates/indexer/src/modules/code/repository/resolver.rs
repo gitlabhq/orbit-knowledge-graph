@@ -42,6 +42,7 @@ impl From<RetryExhausted> for ResolveError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmptyRepositoryReason {
     NotFound,
+    /// Rails raises 500 for a repository that does not exist.
     ServerError,
     EmptyArchive,
     RepositoryTooLarge,
@@ -57,6 +58,8 @@ impl EmptyRepositoryReason {
         }
     }
 
+    /// Only the size cap is known to be permanent; the other reasons can be
+    /// Gitaly visibility lag, which a retry may clear.
     pub fn is_permanent(self) -> bool {
         match self {
             EmptyRepositoryReason::RepositoryTooLarge => true,

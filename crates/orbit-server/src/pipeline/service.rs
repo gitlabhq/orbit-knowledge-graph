@@ -129,6 +129,10 @@ impl QueryPipelineService {
         };
         ctx.phases.insert(QuerySettings(query.settings));
 
+        // The timeout lives inside run_query so the observer is still alive
+        // when it fires. Dropping the future from outside would tear down
+        // the observer before record_error could run, leaving
+        // timed-out queries invisible to every metric.
         let pipeline = async {
             let route = PipelineRunner::start(&mut ctx, &mut obs)
                 .then(&RoutingStage)

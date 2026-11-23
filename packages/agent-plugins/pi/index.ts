@@ -108,6 +108,7 @@ function show(ctx: ExtensionContext): void {
 }
 
 export default function (pi: ExtensionApi) {
+  // Older Pi has no renderer hook, and an extension that throws on load is reported at every start.
   if (typeof pi.registerToolRenderer !== 'function') return
   pi.registerToolRenderer((toolName, next) => {
     const theirs = next()

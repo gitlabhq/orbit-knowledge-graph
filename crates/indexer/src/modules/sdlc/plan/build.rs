@@ -644,6 +644,7 @@ mod tests {
         assert!(normalized.contains("WITH _batch AS ("), "sql: {sql}");
         assert!(normalized.contains("LIMIT 10000"), "sql: {sql}");
 
+        // Bare siphon_notes scan, not the INNER JOIN that caused FillingRightJoinSide OOM.
         let batch_body = normalized
             .split("WITH _batch AS (")
             .nth(1)

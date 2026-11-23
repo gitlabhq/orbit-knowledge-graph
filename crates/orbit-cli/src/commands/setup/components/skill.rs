@@ -63,6 +63,7 @@ fn is_ours(path: &Path) -> bool {
     tree_digest(&current) == marker.digest || is_wrapper_tree(&current)
 }
 
+/// Matches a lone wrapper `SKILL.md` ignoring its `version:` line, which `glab skills update` rewrites.
 fn wrapper_launcher(tree: &BTreeMap<String, Vec<u8>>) -> Option<&'static str> {
     let [(path, contents)] = tree.iter().collect::<Vec<_>>()[..] else {
         return None;
@@ -425,6 +426,7 @@ fn write_skill_files(
         agents: owners,
         digest: tree_digest(tree),
     };
+    // Keeping the other launcher's wrapper stops `glab skills update` from swapping it back.
     if let Some(current) = read_tree(skill_root).filter(|current| {
         current == tree
             || (kind == SkillKind::Wrapper

@@ -82,6 +82,9 @@ pub const DESTINATION_ROWS_WRITTEN: MetricSpec = MetricSpec::counter(
     DOMAIN,
 );
 
+// Drop the `.bytes` token from the OTel name: the `By` unit already maps to
+// the `_bytes` Prometheus suffix, and `bytes_bytes_total` was a double suffix
+// in the current Prometheus exposure.
 pub const DESTINATION_BYTES_WRITTEN: MetricSpec = MetricSpec::counter(
     "gkg.etl.destination.written",
     "Total logical bytes written to ClickHouse per table (orbit_arrow::logical_byte_size, a deterministic count of row values, not allocator memory).",

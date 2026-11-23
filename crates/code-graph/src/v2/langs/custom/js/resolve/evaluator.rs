@@ -938,6 +938,8 @@ fn is_truthy(value: &EvaluatedValue) -> bool {
 }
 
 fn json_to_evaluated(value: serde_json::Value) -> Option<EvaluatedValue> {
+    // `serde_json` parses without a recursion limit, so a 256 KB file of
+    // nested arrays is possible. Grow the stack before re-descending.
     stacker::maybe_grow(32 * 1024, 1024 * 1024, || match value {
         serde_json::Value::Bool(value) => Some(EvaluatedValue::Bool(value)),
         serde_json::Value::String(value) => Some(EvaluatedValue::String(value)),

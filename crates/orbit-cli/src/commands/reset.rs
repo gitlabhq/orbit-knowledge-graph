@@ -42,6 +42,7 @@ pub(crate) fn run(yes: bool, dry_run: bool) -> Result<()> {
     ))
 }
 
+/// Shallow paths first, so index state and the manifest lock before the revisions.
 fn locked_databases(graph_paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut databases = Vec::new();
     let mut pending: VecDeque<PathBuf> = graph_paths.iter().cloned().collect();

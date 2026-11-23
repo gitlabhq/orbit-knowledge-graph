@@ -1,3 +1,16 @@
+# Go rewrite rules.
+# Handles: package clause, imports, struct/interface/func/method defs,
+# receiver methods (as __impl wrappers named after the receiver type),
+# composite literals as typed bindings, selector calls, control flow.
+#
+# Packages are directories: each file re-exports its directory (`./*`), so
+# files of one package see each other, and an import names the imported
+# package's directory, which go.mod's module path maps onto the repository.
+#
+# Known gaps (engine, not rules):
+# - The DSL cannot see a node's parent, so package-level and function-local
+#   var/const declarations get the same treatment: every var/const is a
+#   __def plus an SSA __binding.
 config:
   stdlib:
       - module: builtin

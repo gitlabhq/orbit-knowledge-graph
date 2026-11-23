@@ -423,6 +423,10 @@ impl GraphFormatter {
         node_map: &mut IndexMap<(String, i64), GraphNode>,
         edges: &mut Vec<GraphEdge>,
     ) {
+        // Dedupe paths by canonical (node_seq, edge_kinds) tuple. ReplacingMergeTree
+        // edge rows can leak multiple `_version` copies between background merges,
+        // which inflates path_finding into N identical logical paths. Collapse here
+        // so callers see one path_id per logical path.
         type PathKey = (Vec<(String, i64)>, Vec<String>);
         let mut seen_paths: HashSet<PathKey> = HashSet::new();
         let mut path_id_counter: usize = 0;

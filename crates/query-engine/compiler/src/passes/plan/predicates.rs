@@ -86,6 +86,7 @@ impl Predicate {
         }
     }
 
+    /// A text match on a changing column finds rows through the text index but does not bound a keyed re-read, so that scan keeps FINAL.
     pub fn is_text_match(&self) -> bool {
         matches!(self, Self::Property { filter, .. } if filter.op.is_some_and(FilterOp::is_text))
     }

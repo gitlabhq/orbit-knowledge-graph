@@ -56,6 +56,10 @@ fi
 command -v docker >/dev/null \
   || { echo "no siphon-cdc-values for $VALUES_KEY and no docker to generate them; run the e2e job for this lane once"; exit 1; }
 
+# Tmp dir must live somewhere the docker daemon can volume-mount. Under GitLab
+# CI's docker-in-docker the dind daemon only sees $CI_PROJECT_DIR; on macOS
+# colima only mounts $HOME by default (not /var/folders or /tmp). Default to
+# $GKG_ROOT/.tmp so both work without extra config.
 TMP_PARENT="${CI_PROJECT_DIR:-$GKG_ROOT/.tmp}"
 mkdir -p "$TMP_PARENT"
 TMP="$(mktemp -d -p "$TMP_PARENT" sync-cdc.XXXXXX)"

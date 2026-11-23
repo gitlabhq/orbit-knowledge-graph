@@ -1,3 +1,19 @@
+# PHP rewrite rules.
+# Handles: namespace, use imports (single, grouped, aliased, function, const),
+# class/interface/trait/enum defs, properties (typed and promoted), constants,
+# methods, $this-> and self::/static:: calls, member/static/function calls,
+# new, control flow, bindings.
+#
+# Import resolution is path-based. Namespaces map to files with the PSR-4
+# convention: drop the vendor root segment and look the rest up under a
+# source root (src, app, lib). A fully qualified reference (\Vendor\X\Y::f())
+# acts as an inline import of Vendor\X\Y.
+#
+# Known gaps (engine, not rules):
+# - Same-namespace siblings resolve only through `use`; the resolver is
+#   import-driven and has no namespace scope.
+# - `use function` / `use const` resolve only when the namespace path is a
+#   file; functions and constants usually live in helper files.
 config:
   stdlib: [
     { availability: implicit, symbols: [abs, array_filter, array_keys, array_map, array_merge, array_pop,

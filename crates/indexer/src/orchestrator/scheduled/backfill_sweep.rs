@@ -1,3 +1,11 @@
+//! Coverage-driven code-backfill sweep.
+//!
+//! On each tick, dispatches code indexing for every enabled namespace whose
+//! projects aren't yet checkpointed for the current schema version. This is
+//! deliberately coverage-driven rather than gated on a `migrating` version
+//! because a migration-gated sweep stranded projects that weren't
+//! indexed during the brief migration window. The scheduler's cadence lock
+//! keeps a single replica running the enumeration per interval.
 use std::sync::Arc;
 use std::time::Instant;
 

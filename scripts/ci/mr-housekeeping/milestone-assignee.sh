@@ -10,6 +10,7 @@ SKIP_LABELS="$(jq -n -c --arg exclude "$EXCLUDE_LABEL" --arg closing "${STALE_LA
 
 jq_rules() { jq -L "$HERE" "$@"; }
 
+# shellcheck disable=SC2329  # invoked through for_each_open_mr
 # shellcheck disable=SC2329
 process_mr() {
   local mr="$1" iid author_id issue_milestones='[]' rule_mr plan
@@ -28,6 +29,7 @@ process_mr() {
     author: {id: .author.id, bot: .author.bot}
   }')" || return 1
 
+  # shellcheck disable=SC2016  # $-names are jq variables
   # shellcheck disable=SC2016
   plan="$(jq_rules -n -c \
     --argjson mr "$rule_mr" \
@@ -62,6 +64,7 @@ process_mr() {
 }
 
 MILESTONES="$(api --paginate "projects/$PROJECT_ID/milestones?state=active&include_ancestors=true&per_page=100" | jq -s -c 'add // [] | map({id, title, start_date, due_date})')"
+# shellcheck disable=SC2016  # $-names are jq variables
 # shellcheck disable=SC2016
 CURRENT="$(jq_rules -n -r --argjson milestones "$MILESTONES" --arg today "$TODAY" \
   'include "milestone-assignee"; current_milestone($milestones; $today) | .title // empty')"
