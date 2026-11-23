@@ -32,9 +32,9 @@ Prerequisites:
 - The NATS server and the ClickHouse server that GitLab Orbit uses.
 - A ClickHouse account that can create databases and users, for the DIP migrations.
 - Outbound HTTPS from the exporter pod to `version.gitlab.com`.
-- Outbound HTTP (port 80) from the DIP pod to `iglucentral.com`, and outbound HTTPS to `gitlab-org.gitlab.io`, to resolve event schemas.
-  DIP fetches schemas from `iglucentral.com` over HTTP, which the upstream Iglu client requires.
-  To use an internal Iglu mirror over HTTPS instead, set `single.pipeline.iglu.repositories` in the DIP values.
+- Outbound access from the DIP pod to `iglucentral.com` and `gitlab-org.gitlab.io`, to resolve event schemas.
+  The DIP chart reaches `gitlab-org.gitlab.io` over HTTPS and, by default, `iglucentral.com` over HTTP on port 80.
+  To use HTTPS for both, set the Iglu Central entry in `single.pipeline.iglu.repositories` to `https://iglucentral.com`, or point it at an internal Iglu mirror.
 
 Set up Service Ping for GitLab Orbit in this order:
 
@@ -182,7 +182,8 @@ To install the exporter:
 
    Replace the following values:
 
-   - `<gitlab_url>`: The GitLab address the cluster reaches, the same as `gitlab.baseUrl` in `orbit-values.yaml`.
+   - `<gitlab_url>`: A GitLab address that goes through Workhorse: the public URL of your GitLab instance, or, when the exporter runs in the GitLab cluster, the `webservice` Service's Workhorse port, for example `http://<release>-webservice-default.<gitlab_namespace>.svc:8181`.
+     The exporter chart has no setting for a custom CA, host aliases, or a proxy. The exporter pod must resolve this address and trust its certificate with its default settings.
    - `<clickhouse_host>`: The host name of your ClickHouse server.
    - `<orbit_version>`: The GitLab Orbit version you run, 1.3.0 or later. Use the same value you set as `image.tag` in [Point GitLab Orbit at the Data Insights Platform](#point-gitlab-orbit-at-the-data-insights-platform). To see the version that runs today:
 
@@ -268,7 +269,8 @@ To verify the setup:
 ## Upgrade
 
 Upgrade the DIP and exporter releases with the `helm upgrade` commands above, and GitLab Orbit as in [Upgrade GitLab Orbit](orbit-setup.md#upgrade-gitlab-orbit).
-When you upgrade GitLab Orbit, set `component.version` in `exporter-values.yaml` to the new version and upgrade the exporter release.
+When you upgrade GitLab Orbit, set the new version as `image.tag` in `orbit-values.yaml`, because a pinned tag is not changed by a chart upgrade.
+Then set `component.version` in `exporter-values.yaml` to the same version and upgrade the exporter release.
 The DIP migrations run again on every upgrade.
 
 ## Remove Service Ping for GitLab Orbit
