@@ -26,7 +26,10 @@ fn rewrite_repo(env: &Env, root: &Path) -> (Vec<Tree>, Vec<Killed>) {
 }
 
 fn python_env(limits: Limits) -> Env {
-    Env::with_limits(SupportLang::Python, limits).unwrap()
+    Env::builder(SupportLang::Python)
+        .limits(limits)
+        .build()
+        .unwrap()
 }
 
 fn nodes<'a>(env: &Env, tree: &'a Tree, kind: &str) -> impl Iterator<Item = Cursor<'a>> {

@@ -32,7 +32,10 @@ fn link_repo(env: &Env, root: &Path) -> State {
 }
 
 fn python_env(limits: Limits) -> Env {
-    Env::with_limits(SupportLang::Python, limits).unwrap()
+    Env::builder(SupportLang::Python)
+        .limits(limits)
+        .build()
+        .unwrap()
 }
 
 fn label(env: &Env, node: Cursor) -> String {
@@ -166,14 +169,13 @@ fn link_one(
     std::thread::Builder::new()
         .stack_size(driver::WORKER_STACK_BYTES)
         .spawn(move || {
-            let env = Env::with_limits(
-                language,
-                Limits {
+            let env = Env::builder(language)
+                .limits(Limits {
                     file_link_ms,
                     ..Limits::UNLIMITED
-                },
-            )
-            .unwrap();
+                })
+                .build()
+                .unwrap();
             let repo = tempfile::tempdir().unwrap();
             write_all(repo.path(), &[(&path, source.as_bytes())]);
             let (_, report) =

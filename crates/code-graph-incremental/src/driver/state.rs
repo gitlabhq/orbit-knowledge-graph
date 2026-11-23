@@ -595,7 +595,10 @@ impl State {
     pub fn load(path: &Path, lang_id: SupportLang) -> io::Result<(Env, Self)> {
         let (mut input, index) = open_index(path)?;
         let shared: Shared = read_frame(&mut input, &mut rkyv::util::AlignedVec::new())?;
-        let env = Env::with_lang(lang_id, Lang::from(shared.lang), Limits::UNLIMITED)
+        let env = Env::builder(lang_id)
+            .lang(Lang::from(shared.lang))
+            .limits(Limits::UNLIMITED)
+            .build()
             .map_err(io::Error::other)?;
         let position: FxHashMap<&str, u32> = index
             .labels

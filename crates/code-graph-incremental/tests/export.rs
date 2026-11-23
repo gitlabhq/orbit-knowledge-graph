@@ -76,7 +76,10 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
     let sources = common::walk(repo.path());
-    let mut env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
+    let mut env = Env::builder(SupportLang::Python)
+        .limits(Limits::UNLIMITED)
+        .build()
+        .unwrap();
     let ontology = Ontology::load_embedded().unwrap();
     let mut config = ExportConfig::default();
     let specs = ontology
@@ -141,7 +144,10 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
 }
 
 fn export_repo(root: &Path) -> Exported {
-    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
+    let env = Env::builder(SupportLang::Python)
+        .limits(Limits::UNLIMITED)
+        .build()
+        .unwrap();
     let ontology = Ontology::load_embedded().unwrap();
     export_with(&env, &common::walk(root), &ontology, envelope()).unwrap()
 }
@@ -425,7 +431,10 @@ fn definition_coordinates_cover_the_same_span_as_bytes() {
     ] {
         let repo = tempfile::tempdir().unwrap();
         write_all(repo.path(), &[(path, source.as_bytes())]);
-        let env = Env::with_limits(language, Limits::UNLIMITED).unwrap();
+        let env = Env::builder(language)
+            .limits(Limits::UNLIMITED)
+            .build()
+            .unwrap();
         let ontology = Ontology::load_embedded().unwrap();
         let exported =
             export_with(&env, &common::walk(repo.path()), &ontology, envelope()).unwrap();
@@ -620,7 +629,10 @@ fn exporting_deeply_nested_definitions_grows_linearly() {
         source += &"}\n".repeat(levels);
         let repo = tempfile::tempdir().unwrap();
         write_all(repo.path(), &[("deep.js", source.as_bytes())]);
-        let env = Env::with_limits(SupportLang::JavaScript, Limits::UNLIMITED).unwrap();
+        let env = Env::builder(SupportLang::JavaScript)
+            .limits(Limits::UNLIMITED)
+            .build()
+            .unwrap();
         let ontology = Ontology::load_embedded().unwrap();
         let mut state = index(&env, repo.path());
         let tables = Tables::load(&env, &ontology).unwrap();
@@ -656,7 +668,10 @@ fn exporting_some_trees_matches_the_full_export_of_those_files() {
         repo.path(),
         &[("utils.py", UTILS.as_bytes()), ("main.py", MAIN.as_bytes())],
     );
-    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
+    let env = Env::builder(SupportLang::Python)
+        .limits(Limits::UNLIMITED)
+        .build()
+        .unwrap();
     let ontology = Ontology::load_embedded().unwrap();
     let tables = Tables::load(&env, &ontology).unwrap();
     let mut state = index(&env, repo.path());

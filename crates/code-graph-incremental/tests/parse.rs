@@ -61,7 +61,10 @@ fn unread_sources_and_manifests_remain_in_the_graph_and_report() {
     for path in ["main.ts", "package.json"] {
         std::fs::remove_file(root.path().join(path)).unwrap();
     }
-    let env = Env::with_limits(SupportLang::TypeScript, Limits::UNLIMITED).unwrap();
+    let env = Env::builder(SupportLang::TypeScript)
+        .limits(Limits::UNLIMITED)
+        .build()
+        .unwrap();
     let (state, report) = driver::index(&env, &repository, &Sentinel::disabled()).unwrap();
     assert_eq!(report.unread_files, ["main.ts", "package.json"]);
     assert!(
@@ -87,7 +90,10 @@ fn every_configured_language_parses_when_classified_for_parsing() {
             _ => b"x",
         };
         write_all(repo.path(), &[(&path, source)]);
-        let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
+        let env = Env::builder(lang)
+            .limits(Limits::UNLIMITED)
+            .build()
+            .unwrap();
 
         let parsed = parse_repo(&env, repo.path());
 
@@ -110,7 +116,10 @@ fn tsx_inside_the_typescript_pipeline_gets_the_tsx_grammar() {
         repo.path(),
         &[("app.tsx", jsx), ("util.ts", b"export const n = 1;\n")],
     );
-    let env = Env::with_limits(SupportLang::TypeScript, Limits::UNLIMITED).unwrap();
+    let env = Env::builder(SupportLang::TypeScript)
+        .limits(Limits::UNLIMITED)
+        .build()
+        .unwrap();
 
     let parsed = parse_repo(&env, repo.path());
 
@@ -135,7 +144,10 @@ fn only_this_familys_files_are_parsed() {
             ("data.json", b"{}"),
         ],
     );
-    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
+    let env = Env::builder(SupportLang::Python)
+        .limits(Limits::UNLIMITED)
+        .build()
+        .unwrap();
 
     let parsed = parse_repo(&env, repo.path());
 
@@ -185,7 +197,10 @@ fn a_family_parses_each_member_with_its_own_grammar() {
             ("main.py", b"x = 1\n"),
         ],
     );
-    let env = Env::with_limits(SupportLang::Kotlin, Limits::UNLIMITED).unwrap();
+    let env = Env::builder(SupportLang::Kotlin)
+        .limits(Limits::UNLIMITED)
+        .build()
+        .unwrap();
     assert_eq!(
         env.members,
         [SupportLang::Java, SupportLang::Kotlin, SupportLang::Scala]

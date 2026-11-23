@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fs::File as OutputFile, path::PathBuf, sync::Arc, time::Instant};
 
 use arrow::{ipc::writer::FileWriter, record_batch::RecordBatch};
-use code_graph_incremental::{Envelope, Limits, Scalar, driver, export::ExportConfig};
+use code_graph_incremental::{Envelope, Limits, Scalar, backend::tables::ExportConfig, driver};
 use orbit_utils::{
     vfs::{Vfs, sources::Directory},
     vfs_policies::CodePolicy,

@@ -116,7 +116,10 @@ fn index_and_check(yaml: &str) {
         .collect();
     let lang_id = detect_lang(&suite, &paths);
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
-    let env = Env::with_limits(lang_id, suite_limits(&suite)).expect("rules compile");
+    let env = Env::builder(lang_id)
+        .limits(suite_limits(&suite))
+        .build()
+        .expect("rules compile");
 
     let repository = Arc::new(
         orbit_utils::vfs::Vfs::load(

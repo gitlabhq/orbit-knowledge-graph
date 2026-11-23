@@ -54,7 +54,7 @@ impl Project<'_> {
                     return Err(tui::cancelled("Indexing cancelled."));
                 }
                 let read_at = std::time::SystemTime::now();
-                let mut env = Env::for_lang(family)?;
+                let mut env = Env::builder(family).build()?;
                 env.limits.total_ms = self.budget_ms;
                 let (mut state, report) = self.indexing(&env, paths)?.index(&env)?;
                 let snapshot = self.snapshot_path(family);
@@ -514,7 +514,7 @@ impl Reader<'_> {
             true => State::load(&snapshot, family)
                 .with_context(|| format!("failed to load {}", snapshot.display()))?,
             false => {
-                let env = Env::for_lang(family)?;
+                let env = Env::builder(family).build()?;
                 let state = State::new(&env);
                 (env, state)
             }

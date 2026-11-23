@@ -44,27 +44,72 @@ pub struct Project {
     pub parse_files: Vec<ParseFile>,
 }
 
+/// How an engine is configured: the family it serves, the modules it
+/// mounts, its budgets, the interner it compiles into, and the export's
+/// column overrides. Everything else comes from pipeline.yaml.
+pub struct EnvBuilder {
+    lang_id: SupportLang,
+    modules: &'static [Registration],
+    limits: Limits,
+    lang: Option<Lang>,
+    export_config: crate::backend::tables::ExportConfig,
+}
+
+impl EnvBuilder {
+    /// The modules the engine mounts; `modules::ALL` unless given.
+    pub fn modules(mut self, modules: &'static [Registration]) -> Self {
+        self.modules = modules;
+        self
+    }
+
+    /// The budgets; unlimited unless given.
+    pub fn limits(mut self, limits: Limits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// An existing interner, so ids in a graph restored from a snapshot and
+    /// ids in the rules agree; a fresh one unless given.
+    pub fn lang(mut self, lang: Lang) -> Self {
+        self.lang = Some(lang);
+        self
+    }
+
+    pub fn export_config(mut self, config: crate::backend::tables::ExportConfig) -> Self {
+        self.export_config = config;
+        self
+    }
+
+    /// Compiles the family's rules against the mounted modules.
+    pub fn build(self) -> Result<Env, LoadError> {
+        let lang = self.lang.unwrap_or_default();
+        Env::load(
+            self.lang_id,
+            lang,
+            self.limits,
+            self.modules,
+            self.export_config,
+        )
+    }
+}
+
 impl Env {
-    pub fn for_lang(lang_id: SupportLang) -> Result<Self, LoadError> {
-        Self::with_limits(lang_id, Limits::UNLIMITED)
+    pub fn builder(lang_id: SupportLang) -> EnvBuilder {
+        EnvBuilder {
+            lang_id,
+            modules: crate::modules::ALL,
+            limits: Limits::UNLIMITED,
+            lang: None,
+            export_config: Default::default(),
+        }
     }
 
-    pub fn with_limits(lang_id: SupportLang, limits: Limits) -> Result<Self, LoadError> {
-        Self::with_lang(lang_id, Lang::new(), limits)
-    }
-
-    /// Compiles the family's rules into an existing interner, so ids in a
-    /// graph restored from a snapshot and ids in the rules agree.
-    pub fn with_lang(lang_id: SupportLang, lang: Lang, limits: Limits) -> Result<Self, LoadError> {
-        Self::mounted(lang_id, lang, limits, crate::modules::ALL)
-    }
-
-    /// Like `with_lang`, with the engine running only the given modules.
-    pub fn mounted(
+    fn load(
         lang_id: SupportLang,
         lang: Lang,
         limits: Limits,
         modules: &'static [Registration],
+        export_config: crate::backend::tables::ExportConfig,
     ) -> Result<Self, LoadError> {
         let members = lang_id.family_members();
         let mut rules: FxHashMap<SupportLang, usize> = FxHashMap::default();
@@ -86,7 +131,7 @@ impl Env {
         let pipeline = crate::engine::Pipeline::load(&lang, &sources, modules)?;
         let project = project(&pipeline, &lang, sources.len())?;
         Ok(Self {
-            export_config: crate::backend::tables::ExportConfig::default(),
+            export_config,
             pipeline,
             project,
             lang,
