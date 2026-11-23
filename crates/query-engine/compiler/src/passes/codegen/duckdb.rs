@@ -1,16 +1,3 @@
-//! DuckDB SQL code generation.
-//!
-//! Emits parameterized SQL using DuckDB's positional `$N` bind syntax and
-//! DuckDB-native functions (`starts_with`, `list_contains`, `list_value`, etc.).
-//!
-//! Key differences from the ClickHouse backend:
-//! - Parameters use positional `$1`, `$2`, ... instead of `{name:Type}`.
-//! - Array IN clauses expand element-by-element (no native array bind).
-//! - Functions are remapped to DuckDB equivalents.
-//! - SET statements are skipped (ClickHouse-specific knobs).
-//! - `if(cond, then, else)` is rewritten to `CASE WHEN ... THEN ... ELSE ... END`.
-//! - Recursive CTE bodies have LIMIT/OFFSET stripped (DuckDB restriction).
-
 use orbit_server_config::QueryConfig;
 
 use crate::ast::{
@@ -187,8 +174,6 @@ impl Context {
             });
         }
 
-        // Filter out _version ORDER BY (ClickHouse dedup artifact — DuckDB
-        // has no _version column and no LIMIT 1 BY).
         let orders: Vec<_> = q
             .order_by
             .iter()
@@ -441,7 +426,6 @@ impl Context {
     fn emit_param(&mut self, data_type: SqlType, v: &Value) -> String {
         match v {
             Value::Null => "NULL".into(),
-            // DuckDB: no native array bind — always expand element-by-element.
             Value::Array(arr) => {
                 let placeholders: Vec<_> = arr
                     .iter()
@@ -449,7 +433,6 @@ impl Context {
                         self.param_counter += 1;
                         let name = format!("p{}", self.param_counter);
                         let placeholder = format!("${}", self.param_counter);
-                        // TODO: This will be abstracted away with LLQM to generic scalar types
                         let scalar_type = match data_type {
                             SqlType::Array(inner) => SqlType::from(inner),
                             _ => data_type,
@@ -537,7 +520,6 @@ impl Context {
     }
 }
 
-/// True if the expression is a reference to `_version` or `_deleted`.
 fn is_dedup_column(expr: &Expr) -> bool {
     matches!(expr, Expr::Column { column, .. } if column == "_version" || column == "_deleted")
 }
@@ -549,15 +531,11 @@ fn is_deleted_predicate(expr: &Expr) -> bool {
     )
 }
 
-/// Strip `_deleted = false` predicates from a WHERE clause.
-/// Returns None if the entire clause was just a deleted check.
 fn strip_deleted_predicates(expr: &Expr) -> Option<Expr> {
     match expr {
-        // _deleted = false → remove
         Expr::BinaryOp {
             op: Op::Eq, left, ..
         } if is_dedup_column(left) => None,
-        // (A AND B) → strip deleted from both sides
         Expr::BinaryOp {
             op: Op::And,
             left,
@@ -723,9 +701,7 @@ mod tests {
         };
 
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
-        // The outer LIMIT 10 should be present
         assert!(result.sql.contains("LIMIT 10"), "{}", result.sql);
-        // The CTE body should NOT have LIMIT 1000
         let cte_body_end = result.sql.find(") SELECT").unwrap();
         let cte_body = &result.sql[..cte_body_end];
         assert!(

@@ -1,7 +1,3 @@
-//! Neighbors emits its own redaction columns directly (rather than relying on
-//! the result-contract pass's _orbit_* injection) since the center edge column differs
-//! per direction arm.
-
 use ontology::constants::*;
 
 use std::collections::HashMap;
@@ -195,7 +191,6 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         };
 
         let mut where_parts: Vec<Expr> = Vec::new();
-        // Denorm tags aren't in the per-arm projection, so they filter the union output alias.
         for (_, filter) in &center_filters {
             let Some(property) = filter.property else {
                 continue;
@@ -441,13 +436,6 @@ fn neighbor_path(edge_alias: &str, neighbor_type: &str, owned: &[(String, String
     }
 }
 
-/// Direction::Both collapsed into a single edge scan (see `fused_both_eligible`).
-///
-/// Inner query: scan the edge once with `WHERE (source side) OR (target side)`,
-/// projecting `arrayJoin(arrayFilter(matched, [out_tuple, in_tuple]))` so each
-/// row yields one entry per matched arm. Outer query: project the `_orbit_*`
-/// columns out of the tuple. `arrayFilter` (not `multiIf`) keeps self-loop
-/// semantics: when both arms match the same edge, both rows are emitted.
 #[allow(clippy::too_many_arguments)]
 fn build_fused_both_arm(
     center_id: &str,
@@ -504,7 +492,6 @@ fn build_fused_both_arm(
         query_data_model::DenormalizedDirection::Target,
     );
 
-    // (matched, is_outgoing, neighbor_id, neighbor_kind, center_id)
     let out_tuple = Expr::func(
         Function::Tuple,
         vec![

@@ -1,7 +1,3 @@
-//! Schema-migration ledger and drift detection against a committed fingerprint
-//! snapshot. Shared by the `orbit-server` unit test and the `xtask` tooling. Runtime
-//! SDLC plan lowering isn't fingerprinted, and each entry carries one scope.
-
 mod edge_rows;
 mod fingerprint;
 mod ledger;

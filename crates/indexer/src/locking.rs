@@ -22,7 +22,6 @@ pub enum LockError {
     Lost,
 }
 
-/// `time_left` is `None` when the holder's lease could not be read.
 #[derive(Debug)]
 pub struct LockHeld {
     pub time_left: Option<Duration>,
@@ -38,7 +37,6 @@ pub trait LockService: Send + Sync {
         ttl: Duration,
     ) -> Result<Result<LockRevision, LockHeld>, LockError>;
 
-    /// `Ok(None)`: the lease was lost to another holder.
     async fn renew(
         &self,
         key: &str,
@@ -57,7 +55,6 @@ struct Lease {
 pub struct LockGuard {
     service: Option<Arc<dyn LockService>>,
     key: String,
-    // std Mutex, never held across an await: renew is &self because index_project borrows the guard.
     lease: std::sync::Mutex<Lease>,
 }
 
@@ -116,7 +113,6 @@ impl LockGuard {
         }
     }
 
-    /// Drop without releasing: after `LockError::Lost` the key belongs to another holder.
     pub fn abandon(mut self) {
         self.service = None;
     }

@@ -1,5 +1,3 @@
-//! Checks that limits expressed in the JSON schema match the shared query limits.
-
 use std::path::PathBuf;
 
 use serde_json::Value;
@@ -192,7 +190,6 @@ fn check_grammar_numeric_sentinel(grammar: &str, rule: &str, limit: u32) {
     );
 }
 
-// Locates the array branch by content, not index, so branch reordering can't skip it.
 fn check_array_branch_max_items(schema: &Value, ptr: &str, expected: usize) {
     let branches = schema
         .pointer(ptr)

@@ -1,6 +1,3 @@
-//! One planner per query type. Traversal and aggregation share the pattern planner; neighbors, path
-//! finding, and hydration have their own shapes. `EdgeTableConfig` is the edge routing the last two share.
-
 pub mod aggregation;
 pub mod hydration;
 pub mod neighbors;
@@ -14,10 +11,8 @@ use query_data_model::OrbitQueryModel;
 pub struct EdgeTableConfig {
     pub tables: Vec<String>,
     pub rel_type_filter: Option<Vec<String>>,
-    /// Entity kinds the relationship types allow at each end; empty for a wildcard.
     pub source_kinds: Vec<String>,
     pub target_kinds: Vec<String>,
-    /// Tables a neighbors arm scans per direction; `neighbors::plan` narrows them so empty arms are skipped.
     pub outgoing_tables: Vec<String>,
     pub incoming_tables: Vec<String>,
 }

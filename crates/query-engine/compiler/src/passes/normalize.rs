@@ -8,10 +8,6 @@ use query_data_model::EntityAuthConfig;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
-/// Build the entity auth map for every entity type in the ontology that has a
-/// redaction config. This is the single source of truth consumed by both the
-/// compilation pipeline (via `normalize`) and tests that construct `ResultContext`
-/// directly without going through `compile()`.
 pub fn build_entity_auth(ontology: &ontology::Ontology) -> HashMap<String, EntityAuthConfig> {
     ClickHouseDataModel::derive(std::sync::Arc::new(ontology.clone()))
         .map(|model| model.authorization().entity_auth().clone())

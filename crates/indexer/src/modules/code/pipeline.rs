@@ -37,11 +37,9 @@ pub struct IndexingRequest {
     pub task_id: i64,
     pub commit_sha: Option<String>,
     pub checkpoint: CodeCheckpoint,
-    /// Gitaly storage from the project lookup; `None` uses the tenant-wide archive budget.
     pub repository_storage: Option<String>,
 }
 
-/// Keeps the NATS message alive during long pipeline runs so it is not redelivered.
 struct NatsHeartbeat {
     runtime: tokio::runtime::Handle,
     notifier: ProgressNotifier,
@@ -56,10 +54,7 @@ impl ProgressObserver for NatsHeartbeat {
 }
 
 pub enum IndexOutcome {
-    Indexed {
-        rows_written: u64,
-    },
-    /// No repository content to index (404, a non-gateway 5xx, an empty archive, or over the size cap); already checkpointed.
+    Indexed { rows_written: u64 },
     EmptyRepository,
 }
 
@@ -104,7 +99,6 @@ impl WorkClock {
         }
     }
 
-    /// `None` when the budget ran out before the phase finished.
     async fn run<T>(&mut self, phase: impl Future<Output = T>) -> Option<T> {
         if self.total.is_none() {
             return Some(phase.await);
@@ -195,9 +189,6 @@ impl CodeIndexer {
         }
     }
 
-    /// Derived inflight cap for the engine listen loop: a download can pre-fetch ahead of
-    /// every indexing lane. Returns `None` when any limit is unbounded (0), so the global
-    /// default applies.
     pub fn max_inflight(&self) -> Option<usize> {
         let small = self.pipeline_config.small_indexing_slots();
         let big = self.pipeline_config.big_indexing_slots();
@@ -207,7 +198,6 @@ impl CodeIndexer {
         Some(self.fetch_concurrency + small + big)
     }
 
-    /// Hard per-job wall-clock timeout, or `None` when disabled.
     pub fn job_timeout(&self) -> Option<std::time::Duration> {
         self.pipeline_config.job_timeout()
     }
@@ -223,7 +213,6 @@ impl CodeIndexer {
         let budget = self.pipeline_config.job_timeout();
         let mut clock = WorkClock::new(budget);
 
-        // Dropping the timed-out fetch is what stops it; nothing in that phase polls the token.
         let Some(fetched) = clock
             .run(self.fetch_repository(context, request, &cancel))
             .await
@@ -238,7 +227,6 @@ impl CodeIndexer {
             Fetched::Repository(repository) => repository,
         };
 
-        // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
         context.progress.notify_in_progress().await;
         let lane = self
             .acquire_indexing_lane(&repository, lock.time_left(), &cancel)
@@ -257,7 +245,6 @@ impl CodeIndexer {
         let run = match indexed {
             Some(result) => result.map_err(IndexError::Failed)?,
             None => {
-                // The blocking parse outlives the dropped future; cancel makes it bail.
                 cancel.cancel();
                 return Err(IndexError::BudgetExceeded {
                     budget: budget.unwrap_or_default(),
@@ -321,9 +308,6 @@ impl CodeIndexer {
         request: &IndexingRequest,
         cancel: &CancellationToken,
     ) -> Result<Fetched, IndexError> {
-        // Phase 1: Fetch — bounded by fetch_slots so we don't overwhelm
-        // Gitaly with concurrent downloads while still pre-fetching ahead
-        // of the processing phase.
         let fetch_queued = Instant::now();
         let _fetch_slot = acquire(&self.fetch_slots, "fetch").await?;
         self.metrics
@@ -416,8 +400,6 @@ impl CodeIndexer {
             "repository extraction completed"
         );
 
-        // Release the fetch slot before the caller queues for an indexing slot. This is the
-        // pipelining point: freeing it lets another handler start its Gitaly download.
         drop(_fetch_slot);
         Ok(Fetched::Repository(repository))
     }
@@ -428,7 +410,6 @@ impl CodeIndexer {
         within: Duration,
         cancel: &CancellationToken,
     ) -> Result<Option<OwnedSemaphorePermit>, IndexError> {
-        // A reserved big lane keeps a flood of small repos from starving monorepos.
         let lane = if repository.parseable_files() <= self.small_repo_max_files {
             &self.small_indexing_slots
         } else {
@@ -470,8 +451,6 @@ impl CodeIndexer {
             .run_indexing(context, request, repository, indexed_at, observer, cancel)
             .await;
 
-        // `repository` owns a TempDir that removes the extraction tree on drop, so it is reclaimed
-        // whether this returns, errors, or is dropped mid-run on the wall-clock timeout.
         self.metrics.record_cleanup("success");
         indexing_result
     }
@@ -494,7 +473,6 @@ impl CodeIndexer {
             .build_code_graph(context, request, repository, indexed_at, cancel.clone())
             .await?;
 
-        // A cancelled run yields a partial graph with no error, so the fatal-error guard can't catch it.
         if cancel.is_cancelled() {
             return Err(HandlerError::Processing(
                 "code indexing cancelled mid-run; not checkpointing partial graph".to_string(),
@@ -609,7 +587,6 @@ impl CodeIndexer {
                     }
                 };
                 metered_bytes.fetch_add(batch_bytes, Ordering::Relaxed);
-                // The parse runs on plain threads: block for a slot so a job holds at most write_max_concurrent slices.
                 let mut offset = 0;
                 while offset < batch.num_rows() {
                     let len = (batch.num_rows() - offset).min(max_rows);
@@ -718,8 +695,6 @@ impl CodeIndexer {
             self.metrics.record_language_timing(lt);
         }
 
-        // Name the few genuinely-slow files so an engineer can open them; the
-        // per-phase CPU distribution lives in the phase_cpu_duration histogram.
         const SLOW_FILE_LOG_THRESHOLD_MS: f64 = 500.0;
         const SLOW_FILE_LOG_MAX: usize = 10;
         for entry in result
@@ -842,7 +817,6 @@ async fn lock_lost(cancel: &CancellationToken) {
     }
 }
 
-/// The first failure drops the set, which aborts the inserts still in flight.
 async fn await_inserts(mut inserts: InFlightInserts) -> Result<(), HandlerError> {
     while let Some(written) = inserts.join_next().await {
         written

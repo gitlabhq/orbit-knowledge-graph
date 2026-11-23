@@ -1,5 +1,3 @@
-//! Turns a node's fields (with FK edges) or an edge's mapping into a `TransformSpec`.
-
 use std::collections::{BTreeMap, HashSet};
 
 use ontology::{
@@ -32,7 +30,6 @@ pub(in crate::modules::sdlc) struct NodeTransformDeclaration {
     edges: Vec<EdgeMapping>,
 }
 
-/// How an extracted block becomes graph rows; a `Rust` transform owns its outputs and runs no SQL.
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) enum TransformSpec {
     DataFusion(Vec<Transformation>),
@@ -55,11 +52,9 @@ pub struct Transformation {
     pub dict_encode_columns: HashSet<String>,
 }
 
-/// A node property denormalized onto an edge row as a tag; opaque to `build.rs`.
 pub(super) struct DenormalizedColumnProjection {
     source_column: String,
     edge_column: String,
-    /// Tag key prefix; values become `"status:failed"` tokens.
     tag_key: String,
     enum_mapping: Option<BTreeMap<i64, String>>,
 }
@@ -662,7 +657,6 @@ fn edge_select_list(
             .push(tag_expr);
     }
 
-    // Both tag columns always emitted (empty when unused) so the Arrow schema matches the edge table.
     for col_name in &["source_tags", "target_tags"] {
         let expr = match tag_groups.remove(*col_name) {
             Some(tag_exprs) => format!("CAST([{}] AS VARCHAR[])", tag_exprs.join(", ")),
@@ -760,8 +754,6 @@ mod tests {
         }));
     }
 
-    // DuckDB resolves `<string column> = <int literal>` by casting the column,
-    // so an ordinal comparison against a string enum fails the cast at runtime.
     #[test]
     fn string_enum_denormalized_tag_never_compares_against_int_ordinals() {
         let ontology = test_ontology();

@@ -1,39 +1,3 @@
-//! Graph Query Compiler
-//!
-//! Compiles graph queries into parameterized ClickHouse SQL.
-//!
-//! # Pipeline
-//!
-//! ```text
-//! raw → {JSON | GQL} frontend → Input → shared compiler passes → SQL
-//! ```
-//!
-//! # Example
-//!
-//! ```rust
-//! use std::sync::Arc;
-//! use compiler::{compile, Frontend, SecurityContext};
-//! use ontology::{Ontology, DataType};
-//!
-//! let ontology = Arc::new(
-//!     Ontology::new()
-//!         .with_nodes(["User", "Project"])
-//!         .with_edges(["MEMBER_OF"])
-//!         .with_fields("User", [("username", DataType::String)]),
-//! );
-//!
-//! let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-//!
-//! let json = r#"{
-//!     "query_type": "traversal",
-//!     "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
-//!     "limit": 10
-//! }"#;
-//!
-//! let result = compile(json, Frontend::JsonDsl, &ontology, &ctx).unwrap();
-//! println!("SQL: {}", result.base.sql);
-//! ```
-
 pub mod analytics;
 pub mod ast;
 pub mod constants;
@@ -132,10 +96,6 @@ pub fn compile_model(
     }
 }
 
-/// Compile a graph query into DuckDB SQL for local execution.
-///
-/// Collapses edge tables to the local single-table layout before compiling.
-/// No security or hydration phases — local mode trusts all data.
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local(
     raw: &str,
@@ -161,7 +121,6 @@ pub fn compile_local(
     }
 }
 
-/// Run only `validate` + `normalize`, returning the normalized [`Input`].
 pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<Input> {
     let data_model = data_model::clickhouse(Arc::clone(ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
@@ -192,11 +151,6 @@ pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Inp
         .count_err()
 }
 
-/// Compile a pre-built hydration `Input` into ClickHouse SQL.
-///
-/// Runs the hydration pipeline: Restrict → Plan → Lower → Enforce → Settings → Codegen.
-/// Skips validation, normalization, security, check, and hydrate plan passes.
-/// Codegen defaults to `HydrationPlan::None`.
 pub fn compile_input(
     input: Input,
     options: HydrationCompileOptions,

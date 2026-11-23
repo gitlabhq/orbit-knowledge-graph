@@ -1,8 +1,3 @@
-//! SQL-oriented Abstract Syntax Tree
-//!
-//! Intermediate representation between JSON input and SQL output.
-//! Each node maps directly to ClickHouse SQL constructs.
-
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -16,9 +11,7 @@ pub enum Expr {
         table: String,
         column: String,
     },
-    /// Bare SQL identifier, used for lambda parameters.
     Identifier(String),
-    /// Constant value, type inferred from Value.
     Literal(Value),
     Param {
         data_type: SqlType,
@@ -57,22 +50,15 @@ pub enum Expr {
         op: Op,
         expr: Box<Expr>,
     },
-    /// Used for SIP pre-filtering: materialize IDs in a CTE, then filter
-    /// multiple tables against the same set.
     InSubquery {
         expr: Box<Expr>,
         cte_name: String,
         columns: Vec<String>,
     },
-    /// Like InSubquery but embeds the query directly instead of referencing
-    /// a CTE. Used for narrowing when CTE references would trigger
-    /// ClickHouse's correlated subquery rejection in parameterized mode.
     InSelect {
         expr: Box<Expr>,
         query: Box<Query>,
     },
-    /// Single-row, single-column subquery used as a value; ClickHouse folds it
-    /// to a constant before index analysis, so it still drives PK pruning.
     Scalar(Box<Query>),
     Star,
 }
@@ -183,12 +169,10 @@ pub enum TableRef {
         right: Box<TableRef>,
         on: Expr,
     },
-    /// Used for multi-hop traversals with unrolled joins.
     Union {
         queries: Vec<Query>,
         alias: String,
     },
-    /// Used internally for deduplication of aggregation queries.
     Subquery {
         query: Box<Query>,
         alias: String,
@@ -251,10 +235,6 @@ pub struct Cte {
     pub name: String,
     pub query: Box<Query>,
     pub recursive: bool,
-    /// When true, emit `name AS MATERIALIZED (...)` so ClickHouse evaluates
-    /// the CTE body once and caches the result. Without this, ClickHouse
-    /// inlines non-recursive CTEs at every reference site, re-executing the
-    /// scan for each `IN (SELECT ... FROM cte)`.
     pub materialized: bool,
 }
 
@@ -269,13 +249,6 @@ impl Cte {
     }
 }
 
-/// Complete SQL query:
-/// ```sql
-/// WITH cte1 AS (...), cte2 AS (...)
-/// SELECT ... FROM ... WHERE ... GROUP BY ... HAVING ... ORDER BY ... LIMIT ... OFFSET ...
-/// UNION ALL SELECT ...
-/// SETTINGS key = value
-/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {
     pub ctes: Vec<Cte>,
@@ -286,11 +259,9 @@ pub struct Query {
     pub group_by: Vec<Expr>,
     pub having: Option<Expr>,
     pub order_by: Vec<OrderExpr>,
-    /// `LIMIT n BY col1, col2` — ClickHouse per-group limit (applied after ORDER BY).
     pub limit_by: Option<(u32, Vec<Expr>)>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
-    /// UNION ALL with this query, used for recursive CTEs.
     pub union_all: Vec<Query>,
 }
 
@@ -334,9 +305,6 @@ impl Default for Query {
 static SAFE_IDENT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]*$").expect("valid regex"));
 
-/// Table and column names are interpolated as raw identifiers (not parameterized),
-/// so they are validated at construction time via [`Insert::new`]. Fields are
-/// private to enforce this — use the constructor.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Insert {
     table: String,
@@ -493,8 +461,6 @@ impl Expr {
         }
     }
 
-    /// Match a column against a set of values.
-    /// 0 values → None, 1 value → Eq, N values → IN.
     pub fn col_in(
         table: impl Into<String>,
         column: impl Into<String>,
@@ -525,7 +491,6 @@ impl Expr {
         }
     }
 
-    /// Combine two expressions with AND.
     pub fn and(left: Expr, right: Expr) -> Expr {
         Expr::binary(Op::And, left, right)
     }

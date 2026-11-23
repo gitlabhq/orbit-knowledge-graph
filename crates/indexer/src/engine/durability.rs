@@ -1,14 +1,11 @@
 use crate::observer::IndexingMode;
 
-/// Whether a write blocks until the store confirms it durably landed. `Durable` is mandatory where
-/// a dropped write is unrecoverable: the watermark advances with no NATS retry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WriteDurability {
     FireAndForget,
     Durable,
 }
 
-/// Full: data writes coalesce server-side (Durable), completion must persist. Incremental: each write persists, completion can be lost and re-derived.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RunDurability {
     pub attempt_start: WriteDurability,
