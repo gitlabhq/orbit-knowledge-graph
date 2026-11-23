@@ -141,8 +141,6 @@ tests:
       - { row: { caller: "title", callee: "dropdowni18nText" } }
 
   - name: Vue default import of CE component targets primary export proxy
-    # Known gap: A .vue default import does not target the component the file exports yet.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'

@@ -7,6 +7,24 @@ canonicalize:
   - stage: embed
     rewrite:
       - '(vue_script $L:vue_lang)': 'parse($ROOT, @$L)'
+  - stage: options-unwrap
+    before: regions
+    rewrite:
+      - '(export_statement $$$P value: (call_expression function: (identifier "/^define(Async|Nuxt)?Component$/") arguments: (arguments $O:object)))': '(export_statement $$$P value: $O)'
+  - stage: options-members
+    repeat: true
+    before: regions
+    rewrite:
+      - '(export_statement $$$P value: (object $$$A (pair key: (property_identifier "/^(methods|computed)$/") value: (object $$$M)) $$$B))': '(export_statement $$$P value: (object $$$A $$$M $$$B))'
+  - stage: options-component
+    before: regions
+    rewrite:
+      - '(export_statement $$$P value: (object $$$A (pair key: (property_identifier "name") value: (string $S:string_fragment)) $$$B))': '(export_statement $$$P (class_declaration name: (type_identifier @$S) body: (class_body $$$A $$$B)))'
+      - '(export_statement $$$P value: (object $$$A))': '(export_statement $$$P (class_declaration name: (type_identifier @$ROOT | tree_root | regex_replace("^.*/", "") | regex_replace("[.].*$", "")) body: (class_body $$$A)))'
+  - stage: options-this
+    before: regions
+    rewrite:
+      - '(variable_declarator name: $N value: (this))': '(variable_declarator name: $N value: (identifier @$ROOT | ancestor_sym("type_identifier")))'
 
 display:
   - stage: fqn
