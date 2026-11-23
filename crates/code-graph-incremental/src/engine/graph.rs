@@ -5,7 +5,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
 use super::Loc;
-use crate::tree::{CallResolution, Edge, EdgeKind};
+use crate::tree::{Edge, EdgeKind};
 
 /// An edge's kind, file and node at one end.
 type End = (EdgeKind, u32, u32);
@@ -16,7 +16,7 @@ type End = (EdgeKind, u32, u32);
 pub struct Graph {
     incoming: FxHashSet<End>,
     outgoing: FxHashMap<End, SmallVec<[Loc; 2]>>,
-    unresolved: FxHashMap<End, SmallVec<[Loc; 2]>>,
+    unlabelled: FxHashMap<End, SmallVec<[Loc; 2]>>,
     sites: FxHashMap<End, SmallVec<[(Loc, Loc); 1]>>,
 }
 
@@ -28,8 +28,8 @@ impl Graph {
             let key = (e.kind, e.from_tree, e.from_node);
             graph.incoming.insert((e.kind, e.to_tree, e.to_node));
             graph.outgoing.entry(key).or_default().push(to);
-            if e.call_resolution == CallResolution::Unknown {
-                graph.unresolved.entry(key).or_default().push(to);
+            if e.label == 0 {
+                graph.unlabelled.entry(key).or_default().push(to);
             }
             if let Some(site) = e.site {
                 graph
@@ -49,9 +49,9 @@ impl Graph {
             .map_or(&[], |t| t.as_slice())
     }
 
-    /// The targets of `from`'s edges of `kind` whose call resolution is unknown.
-    pub fn unresolved(&self, kind: EdgeKind, from: Loc) -> &[Loc] {
-        self.unresolved
+    /// The targets of `from`'s edges of `kind` that carry no label.
+    pub fn unlabelled(&self, kind: EdgeKind, from: Loc) -> &[Loc] {
+        self.unlabelled
             .get(&(kind, from.fi, from.node))
             .map_or(&[], |t| t.as_slice())
     }

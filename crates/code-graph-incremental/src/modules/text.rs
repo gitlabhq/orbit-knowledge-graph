@@ -249,7 +249,7 @@ fn targets<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals], unresolved: bool) -> 
         return Vals::new();
     };
     let found = match unresolved {
-        true => cx.unresolved_targets(kind, loc),
+        true => cx.unlabelled_targets(kind, loc),
         false => cx.targets(kind, loc),
     };
     found.iter().map(|&l| Val::Node(l)).collect()

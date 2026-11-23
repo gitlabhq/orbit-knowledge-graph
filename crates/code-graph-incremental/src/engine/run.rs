@@ -336,7 +336,7 @@ impl<'t, S: Store> Run<'t, S> {
         }
         let mut seen = FxHashSet::default();
         self.edges
-            .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.call_resolution)));
+            .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.label)));
         let mut outputs = Outputs::default();
         for &slot in self.phase_modules {
             let module = self.registry.module(slot);

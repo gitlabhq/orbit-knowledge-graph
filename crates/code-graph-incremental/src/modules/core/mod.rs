@@ -97,17 +97,15 @@ static FUNCTIONS: &[Function<Core>] = &[
     function!(Effect, "edge", [edge, set, set, set, set], |cx, a| {
         let kind = edge_kind(&a[0]);
         let site = a[3].first().and_then(|v| v.loc()).map(|l| l.node);
-        let call_resolution = match a[4].first() {
-            Some(&Val::Sym(name)) => {
-                crate::engine::resolution(cx.lang().syms.resolve(name)).unwrap_or_default()
-            }
-            _ => Default::default(),
+        let label = match a[4].first() {
+            Some(&Val::Sym(label)) => label,
+            _ => 0,
         };
         for from in nodes(&a[1]) {
             for to in nodes(&a[2]) {
                 cx.emit(Edge {
                     site,
-                    call_resolution,
+                    label,
                     ..Edge::new(from.fi, from.node, to.fi, to.node, kind)
                 });
             }

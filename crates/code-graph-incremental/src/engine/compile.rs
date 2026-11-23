@@ -12,7 +12,7 @@ use super::lang::{DataSpec, DefBody, DefSpec, Pair, RuleFiles, StageSpec, TableS
 use super::pattern::{self, Slots, Tpl};
 use super::program::{
     BudgetSpec, Cases, Def, DefImpl, Indexer, Match, Part, Pass, Phase, Pipeline, Roles, RowShape,
-    Template, resolution,
+    Template,
 };
 use super::{FnId, Kind, Registration, Registry, Val, Vals};
 use crate::error::LoadError;
@@ -996,8 +996,9 @@ impl<'a> Loader<'a> {
             None => Expr::Empty,
         };
         let kind = number(u32::from(kind.0));
+        let literal = |name: &str| name.chars().all(|c| c.is_ascii_lowercase() || c == '_');
         Ok(match res {
-            Some(name) if resolution(name).is_none() => {
+            Some(name) if !literal(name) => {
                 let slot = slots.borrow_mut().slot("TARGET");
                 let of = self.parse(name, slots, true)?;
                 let edge = self.core("edge", vec![kind, from, Expr::Var(slot), site, of]);

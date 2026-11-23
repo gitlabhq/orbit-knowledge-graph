@@ -10,7 +10,6 @@ use super::lang::DataSpec;
 use super::pattern::{self, Cap, Pat, Slots, Tpl};
 use super::{Cursor, FnId, Loc, Run, Store, Tree, Val, Vals};
 use crate::intern::Lang;
-use crate::tree::CallResolution;
 
 /// The budgets of a phase, by `Limits` field name: one per tree, and one for
 /// the whole scope.
@@ -22,15 +21,6 @@ pub struct BudgetSpec {
     pub scope: Option<String>,
     /// The reason a file this phase stops is reported with.
     pub skip: Option<String>,
-}
-
-pub fn resolution(name: &str) -> Option<CallResolution> {
-    match name {
-        "reference" => Some(CallResolution::Reference),
-        "callable" => Some(CallResolution::Callable),
-        "non_callable" => Some(CallResolution::NonCallable),
-        _ => None,
-    }
 }
 
 /// A pattern anchored at some node kinds, for one language or all.

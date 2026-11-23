@@ -4,29 +4,6 @@
 )]
 pub struct EdgeKind(pub u16);
 
-#[repr(u8)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub enum CallResolution {
-    #[default]
-    Unknown,
-    Callable,
-    /// On a TypeFlow edge: the producing call's callee root has a local
-    /// value, so wave 2 does not type the call by its name.
-    NonCallable,
-    Reference,
-}
-
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
@@ -36,8 +13,11 @@ pub struct Edge {
     pub to_tree: u32,
     pub to_node: u32,
     pub kind: EdgeKind,
+    /// The node the edge was made at, if any.
     pub site: Option<u32>,
-    pub call_resolution: CallResolution,
+    /// A symbol that qualifies the edge, such as how a call resolved; 0 for
+    /// none.
+    pub label: u32,
 }
 
 impl Edge {
@@ -58,7 +38,7 @@ impl Edge {
             to_node,
             kind,
             site: None,
-            call_resolution: CallResolution::Unknown,
+            label: 0,
         }
     }
     pub fn from_fi(&self) -> usize {

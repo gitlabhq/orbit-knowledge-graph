@@ -20,7 +20,7 @@ pub use host::{
     Arg, Backend, Call, Calls, Cx, Derive, Entry, FnId, Function, Hooks, KeyPart, Kind, Links,
     Module, Outputs, Registration, Registry, register, register_backend,
 };
-pub use program::{Def, Part, Phase, Pipeline, RowShape, resolution};
+pub use program::{Def, Part, Phase, Pipeline, RowShape};
 pub use run::{Indexed, Run, WHOLE, Write};
 use run::{Key, MAX_FIXPOINT_ROUNDS, Memo, SLOTS};
 pub use walk::{run_family, run_tree, run_trees, scope_budget};

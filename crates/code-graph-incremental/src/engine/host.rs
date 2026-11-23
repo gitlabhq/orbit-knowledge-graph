@@ -497,9 +497,9 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
         self.run.graph.map_or(&[], |g| g.targets(kind, from))
     }
 
-    /// The targets of the edges of `kind` from `from` whose call resolution is unknown.
-    pub fn unresolved_targets(&self, kind: EdgeKind, from: Loc) -> &'t [Loc] {
-        self.run.graph.map_or(&[], |g| g.unresolved(kind, from))
+    /// The targets of `from`'s edges of `kind` that carry no label.
+    pub fn unlabelled_targets(&self, kind: EdgeKind, from: Loc) -> &'t [Loc] {
+        self.run.graph.map_or(&[], |g| g.unlabelled(kind, from))
     }
 
     /// The edges of `kind` made at `site`, as (from, to).
