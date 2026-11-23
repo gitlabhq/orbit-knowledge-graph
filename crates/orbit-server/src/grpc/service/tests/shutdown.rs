@@ -30,8 +30,9 @@ async fn serve_until(
         None,
         grpc,
         Arc::new(defaults.analytics),
-    );
-    let handle = tokio::spawn(server.run_until_shutdown(listener, shutdown));
+    )
+    .with_shutdown(shutdown);
+    let handle = tokio::spawn(server.run(listener));
     (addr, handle)
 }
 

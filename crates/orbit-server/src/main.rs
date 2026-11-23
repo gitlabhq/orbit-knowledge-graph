@@ -225,7 +225,8 @@ async fn run_webserver(
         config.grpc.clone(),
         Arc::new(config.analytics.clone()),
     )
-    .with_resolver_registry(Arc::new(resolver_registry));
+    .with_resolver_registry(Arc::new(resolver_registry))
+    .with_shutdown(shutdown);
 
     orbit_billing::register_metrics();
     orbit_billing::register_quota_metrics();
@@ -317,10 +318,7 @@ async fn run_webserver(
     );
     serving.store(true, Ordering::Relaxed);
 
-    let result = grpc_server
-        .run_until_shutdown(grpc_listener, shutdown)
-        .await
-        .map_err(Into::into);
+    let result = grpc_server.run(grpc_listener).await.map_err(Into::into);
 
     tokio::join!(
         async {

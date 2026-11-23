@@ -34,6 +34,7 @@ pub struct GrpcServer {
     service: OrbitServiceImpl,
     tls_config: Option<ServerTlsConfig>,
     grpc_config: GrpcConfig,
+    shutdown: CancellationToken,
 }
 
 impl GrpcServer {
@@ -59,6 +60,7 @@ impl GrpcServer {
             service,
             tls_config,
             grpc_config,
+            shutdown: CancellationToken::new(),
         }
     }
 
@@ -82,25 +84,21 @@ impl GrpcServer {
         self
     }
 
-    /// Serves until the process exits. Tests use this; the web server uses
-    /// [`Self::run_until_shutdown`].
-    pub async fn run(self, listener: TcpListener) -> Result<(), tonic::transport::Error> {
-        self.run_until_shutdown(listener, CancellationToken::new())
-            .await
+    /// Without a shutdown token the server runs until the process exits.
+    pub fn with_shutdown(mut self, shutdown: CancellationToken) -> Self {
+        self.shutdown = shutdown;
+        self
     }
 
-    /// Serves until `shutdown` is cancelled, then drains: the listener
+    /// Serves until the shutdown token is cancelled, then drains: the listener
     /// closes, every connection gets a GOAWAY, and in-flight streams run to
     /// completion. After `grpc.shutdown_drain_timeout_secs` this stops
     /// waiting and returns; the remaining streams end when the process exits.
     ///
     /// The Kubernetes `terminationGracePeriodSeconds` must exceed the drain
     /// timeout, or the kubelet sends SIGKILL mid-drain.
-    pub async fn run_until_shutdown(
-        self,
-        listener: TcpListener,
-        shutdown: CancellationToken,
-    ) -> Result<(), tonic::transport::Error> {
+    pub async fn run(self, listener: TcpListener) -> Result<(), tonic::transport::Error> {
+        let shutdown = self.shutdown;
         let tls_enabled = self.tls_config.is_some();
         info!(safe(TLS_ENABLED) = tls_enabled, "Starting gRPC server");
 
