@@ -40,7 +40,7 @@ DIRECTIVES = [
         r"//\s*@ts-(expect-error|ignore|nocheck|check)",
         r"///\s*<reference (types|path|lib)=\"[^\"]+\"\s*/>",
         r"/\*\s*istanbul ignore (next|if|else|file)\s*\*/",
-        r"(#|//)\s*ast-grep-ignore: [a-z0-9-]+(, ?[a-z0-9-]+)*",
+        r"(#|//)\s*ast-grep-ignore: [a-z0-9-]+(, ?[a-z0-9-]+)*( -- \S.*)?",
         r"#\s*gitleaks:allow",
         r"/\*\*\s*@jsxImportSource \S+\s*\*/",
     )
@@ -68,8 +68,8 @@ the code. Remove each comment above and fix the root cause in the code:
 Exception process: if no step applies and a reviewer agrees, add an entry to
 scripts/linting/comments/ledger.toml. Code owners approve each change to it.
 An entry without "text" exempts every comment in the files that "glob" matches.
-An entry with "text" exempts only that exact comment; a multi-line "text"
-exempts each of its lines. "rules" limits the entry
+An entry with "text" exempts only that exact comment. A multi-line "text"
+exempts the block only while every line is unchanged and in order. "rules" limits the entry
 to some comments-* rules. Each entry needs a reason, and an entry that exempts
 no comment fails the check.
 
@@ -105,14 +105,23 @@ class Entry:
     rules: frozenset[str] | None
     text: str | None
     reason: str
-    keys: frozenset[str] = frozenset()
+    segments: tuple[str, ...] = ()
     used: int = 0
 
     def covers(self, finding: Finding) -> bool:
         return (
             self.pattern.fullmatch(finding.path) is not None
             and (self.rules is None or finding.rule in self.rules)
-            and (self.text is None or key(finding.text) in self.keys)
+            and (self.text is None or key(finding.text) == key(self.text))
+        )
+
+    def run_at(self, findings: list[Finding], start: int) -> bool:
+        run = findings[start : start + len(self.segments)]
+        return len(run) == len(self.segments) and all(
+            finding.line == run[0].line + offset
+            and key(finding.text) == segment
+            and (self.rules is None or finding.rule in self.rules)
+            for offset, (finding, segment) in enumerate(zip(run, self.segments))
         )
 
 
@@ -142,9 +151,8 @@ def load_ledger() -> list[Entry]:
             sys.exit(f"comment check: ledger entry {raw} needs glob and reason, and only {sorted(LEDGER_KEYS)}")
         rules = frozenset(raw["rules"]) if "rules" in raw else None
         text = raw.get("text")
-        lines = [line for line in (text or "").splitlines() if line.strip()]
-        keys = frozenset([key(text), *map(key, lines)]) if text else frozenset()
-        entries.append(Entry(raw["glob"], glob_to_regex(raw["glob"]), rules, text, raw["reason"], keys))
+        segments = tuple(key(line) for line in text.split("\n")) if text else ()
+        entries.append(Entry(raw["glob"], glob_to_regex(raw["glob"]), rules, text, raw["reason"], segments))
     return entries
 
 
@@ -167,22 +175,29 @@ def scan() -> list[Finding]:
 
 
 def apply_ledger(findings: list[Finding], ledger: list[Entry]) -> list[Finding]:
-    by_path: dict[str, list[Entry]] = collections.defaultdict(list)
+    exact: dict[str, list[Entry]] = collections.defaultdict(list)
     globbed = []
     for entry in ledger:
-        if any(char in entry.glob for char in "*?"):
-            globbed.append(entry)
-        else:
-            by_path[entry.glob].append(entry)
-    remaining = []
+        (globbed if any(char in entry.glob for char in "*?") else exact[entry.glob]).append(entry)
+    by_file: dict[str, list[Finding]] = collections.defaultdict(list)
     for finding in findings:
-        candidates = [*by_path.get(finding.path, ()), *globbed]
-        entry = next((entry for entry in candidates if entry.covers(finding)), None)
-        if entry is None:
-            remaining.append(finding)
-        else:
-            entry.used += 1
-    return remaining
+        by_file[finding.path].append(finding)
+    remaining = []
+    for path, in_file in by_file.items():
+        exempt = [False] * len(in_file)
+        entries = [*exact.get(path, ()), *(entry for entry in globbed if entry.pattern.fullmatch(path))]
+        for entry in entries:
+            for index, finding in enumerate(in_file):
+                if exempt[index]:
+                    continue
+                if entry.covers(finding):
+                    exempt[index] = True
+                    entry.used += 1
+                elif len(entry.segments) > 1 and entry.run_at(in_file, index):
+                    exempt[index : index + len(entry.segments)] = [True] * len(entry.segments)
+                    entry.used += 1
+        remaining.extend(finding for finding, done in zip(in_file, exempt) if not done)
+    return sorted(remaining)
 
 
 def tracked() -> list[str]:
