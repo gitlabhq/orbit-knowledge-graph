@@ -57,6 +57,9 @@ pub struct ResolveConfig {
     pub parse_files: Vec<ParseFileSpec>,
     pub merge_same_named_types: bool,
     pub submodule_imports: bool,
+    /// A `./` import with no match next to the importer is retried as written
+    /// against the source roots (C and C++ include directories).
+    pub root_include_fallback: bool,
 }
 
 impl ResolveConfig {
@@ -83,6 +86,7 @@ impl ResolveConfig {
         }
         self.merge_same_named_types |= other.merge_same_named_types;
         self.submodule_imports |= other.submodule_imports;
+        self.root_include_fallback |= other.root_include_fallback;
     }
 }
 
@@ -119,6 +123,8 @@ struct ResolveSettingsSection {
     merge_same_named_types: bool,
     #[serde(default)]
     submodule_imports: bool,
+    #[serde(default)]
+    root_include_fallback: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -265,6 +271,7 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
             .collect::<Result<_, _>>()?,
         merge_same_named_types: r.merge_same_named_types,
         submodule_imports: r.submodule_imports,
+        root_include_fallback: r.root_include_fallback,
     };
     Ok(Config { link, resolve })
 }

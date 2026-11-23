@@ -944,6 +944,12 @@ fn gather_imports_for(
                                 .unwrap_or_else(|| root.to_owned());
                     }
                     let mut direct = resolve_glob(&target_path, file_index, prefixes);
+                    if direct.is_empty()
+                        && config.root_include_fallback
+                        && let Some(bare) = source_str.strip_prefix("./")
+                    {
+                        direct = resolve_glob(bare, file_index, prefixes);
+                    }
                     direct.retain(|loc| loc.fi != fi);
                     if direct.is_empty() && stdlib {
                         return;

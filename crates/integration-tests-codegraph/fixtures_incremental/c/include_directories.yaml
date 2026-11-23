@@ -1,0 +1,51 @@
+name: "C: quoted includes resolve through the src and include roots"
+
+fixtures:
+  - path: include/calc/calc.h
+    content: |
+      int add(int a, int b);
+
+  - path: include/flat.h
+    content: |
+      int flat(int a);
+
+  - path: src/calc.c
+    content: |
+      #include "calc/calc.h"
+      int add(int a, int b) { return a + b; }
+
+  - path: src/flat.c
+    content: |
+      #include "flat.h"
+      int flat(int a) { return a; }
+
+  - path: src/main.c
+    content: |
+      #include "calc/calc.h"
+      #include "flat.h"
+      int run(void) { return add(1, 2) + flat(3); }
+
+  - path: src/orphan.c
+    content: |
+      #include "missing/gone.h"
+      int orphan(void) { return gone(); }
+
+tests:
+  - name: "an include directory path and a flat include reach the header definitions"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: add } }
+      - { row: { name: flat } }
+
+  - name: "a missing header produces no edge"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'orphan'
+      RETURN callee.name AS name
+    assert:
+      - { row_count: 0 }
