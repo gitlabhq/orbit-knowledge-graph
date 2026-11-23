@@ -87,11 +87,11 @@ use std::sync::Arc;
 
 use config::CompilerCtx as _;
 
-fn finish<C: config::CompilerCtx>(
+pub(crate) fn finish<C: config::Pipeline>(
     ctx: &mut C,
-    run: impl FnOnce(&mut C) -> Result<()>,
+    observer: &mut impl config::PhaseObserver,
 ) -> Result<CompiledQueryContext> {
-    run(ctx)
+    config::run_observed(ctx, observer)
         .and_then(|()| {
             ctx.take_output().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("pipeline did not produce output".into())
@@ -118,14 +118,14 @@ pub enum CompileSource<'a> {
 }
 
 impl CompileSource<'_> {
-    fn frontend(&self, requested: Frontend) -> Frontend {
+    pub(crate) fn frontend(&self, requested: Frontend) -> Frontend {
         match self {
             Self::Raw(_) => requested,
             Self::Parsed(_) => Frontend::Gql,
         }
     }
 
-    fn load(self, ctx: &mut impl config::CompilerCtx) {
+    pub(crate) fn load(self, ctx: &mut impl config::CompilerCtx) {
         match self {
             Self::Raw(raw) => ctx.set_raw(raw.to_string()),
             Self::Parsed(query) => query.load(ctx),
@@ -134,58 +134,21 @@ impl CompileSource<'_> {
 }
 
 pub trait CompileTarget: Sized {
-    fn compile(
+    fn compile_observed(
         source: CompileSource,
         fe: Frontend,
         model: &Arc<Self>,
         security: Option<&SecurityContext>,
+        observer: &mut impl config::PhaseObserver,
     ) -> Result<CompiledQueryContext>;
-}
 
-impl CompileTarget for query_data_model::ClickHouseDataModel {
     fn compile(
         source: CompileSource,
         fe: Frontend,
         model: &Arc<Self>,
         security: Option<&SecurityContext>,
     ) -> Result<CompiledQueryContext> {
-        let security = security
-            .ok_or_else(|| QueryError::PipelineInvariant("security context is required".into()))?
-            .clone();
-        match source.frontend(fe) {
-            Frontend::JsonDsl => {
-                let mut ctx = config::ClickhouseJsonDslCtx::new(security, Arc::clone(model));
-                source.load(&mut ctx);
-                finish(&mut ctx, config::run_clickhouse_json_dsl)
-            }
-            Frontend::Gql => {
-                let mut ctx = config::ClickhouseGqlCtx::new(security, Arc::clone(model));
-                source.load(&mut ctx);
-                finish(&mut ctx, config::run_clickhouse_gql)
-            }
-        }
-    }
-}
-
-impl CompileTarget for query_data_model::DuckDbDataModel {
-    fn compile(
-        source: CompileSource,
-        fe: Frontend,
-        model: &Arc<Self>,
-        _security: Option<&SecurityContext>,
-    ) -> Result<CompiledQueryContext> {
-        match source.frontend(fe) {
-            Frontend::JsonDsl => {
-                let mut ctx = config::DuckdbJsonDslCtx::new(Arc::clone(model));
-                source.load(&mut ctx);
-                finish(&mut ctx, config::run_duckdb_json_dsl)
-            }
-            Frontend::Gql => {
-                let mut ctx = config::DuckdbGqlCtx::new(Arc::clone(model));
-                source.load(&mut ctx);
-                finish(&mut ctx, config::run_duckdb_gql)
-            }
-        }
+        Self::compile_observed(source, fe, model, security, &mut config::NoObserver)
     }
 }
 
@@ -235,7 +198,7 @@ pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
     let mut ctx = config::ValidateNormalizeCtx::new(data_model);
     ctx.set_raw(json_input.to_string());
-    config::run_validate_normalize(&mut ctx)
+    config::run_observed(&mut ctx, &mut config::NoObserver)
         .and_then(|()| {
             ctx.take_input().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("validate_normalize produced no input".into())
@@ -249,7 +212,7 @@ pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Inp
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
     let mut ctx = config::ValidateNormalizeGqlCtx::new(data_model);
     ctx.set_raw(raw.to_string());
-    config::run_validate_normalize_gql(&mut ctx)
+    config::run_observed(&mut ctx, &mut config::NoObserver)
         .and_then(|()| {
             ctx.take_input().ok_or_else(|| {
                 error::QueryError::PipelineInvariant(
@@ -285,7 +248,7 @@ pub fn compile_input_model(
     let mut ctx = config::ChHydrationCtx::new(ctx.clone(), Arc::clone(data_model));
     ctx.set_input(input);
     ctx.set_hydration_options(options);
-    config::run_ch_hydration(&mut ctx)
+    config::run_observed(&mut ctx, &mut config::NoObserver)
         .and_then(|()| {
             ctx.take_output().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("pipeline did not produce output".into())

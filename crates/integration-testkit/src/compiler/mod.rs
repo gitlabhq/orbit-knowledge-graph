@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use compiler::config::CompilerCtx;
+use compiler::config::{self, CompilerCtx};
 use compiler::passes::{frontend, normalize, plan};
 use duckdb_client::{DuckDbClient, OpenMode};
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
@@ -563,8 +563,6 @@ impl Assertions {
     }
 }
 
-type PhaseTable = [(&'static str, &'static [&'static str])];
-
 type Compiled = (Vec<String>, Option<compiler::CompiledQueryContext>);
 
 struct Models {
@@ -794,44 +792,7 @@ struct Expectations<'a> {
 }
 
 impl Expectations<'_> {
-    fn run<C: CompilerCtx>(
-        &self,
-        mut ctx: C,
-        table: &PhaseTable,
-        run: impl FnOnce(&mut C, &mut dyn FnMut(&'static str, &C)) -> compiler::Result<()>,
-    ) -> Compiled {
-        let mut failures = self.unknown_targets(table);
-        if !failures.is_empty() {
-            return (failures, None);
-        }
-        let result = run(&mut ctx, &mut |phase, ctx| {
-            failures.extend(self.check_phase(phase, ctx))
-        });
-        match (result, self.rejection) {
-            (Ok(()), Some(_)) => {
-                failures.push(format!(
-                    "{}: expected a rejection, but the query compiled",
-                    self.label
-                ));
-            }
-            (Err(error), Some(rejection)) => failures.extend(rejection.check(
-                self.frontend,
-                ctx.current_phase(),
-                &error,
-                self.label,
-            )),
-            (Err(error), None) => failures.push(format!("{}: {error}", self.label)),
-            (Ok(()), None) => {
-                if let Some(output) = ctx.output() {
-                    failures.extend(self.backend.check_output(self.models, output, self.label));
-                }
-                return (failures, ctx.take_output());
-            }
-        }
-        (failures, None)
-    }
-
-    fn unknown_targets(&self, table: &PhaseTable) -> Vec<String> {
+    fn unknown_targets(&self, table: config::PhaseTable) -> Vec<String> {
         let mut failures = Vec::new();
         let position = |phase: &str| table.iter().position(|(name, _)| *name == phase);
         if let Some(rejection) = self.rejection {

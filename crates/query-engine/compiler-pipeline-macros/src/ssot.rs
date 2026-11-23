@@ -29,6 +29,7 @@ struct PipelineDecl {
     env: Vec<Ident>,
     state: Vec<Ident>,
     run: Vec<Ident>,
+    frontend: Option<Ident>,
 }
 
 struct CompilerCtxInput {
@@ -111,10 +112,12 @@ impl Parse for PipelineDecl {
         let mut model = None;
         let mut state = Vec::new();
         let mut run = Vec::new();
+        let mut frontend = None;
         while !content.is_empty() {
             let key: Ident = content.parse()?;
             content.parse::<Token![:]>()?;
             match key.to_string().as_str() {
+                "frontend" => frontend = Some(content.parse::<Ident>()?),
                 "model" => model = Some(content.parse::<Type>()?),
                 "env" => env = parse_ident_list(&content)?,
                 "state" => state = parse_ident_list(&content)?,
@@ -133,6 +136,7 @@ impl Parse for PipelineDecl {
             env,
             state,
             run,
+            frontend,
         })
     }
 }
@@ -255,10 +259,18 @@ pub fn generate(input: TokenStream) -> TokenStream {
         }
     });
 
+    let mut targets: Vec<(Type, Ident, Ident, bool)> = Vec::new();
     for pipeline in &ctx.pipelines {
         let ctx_name = format_ident!("{}Ctx", to_pascal(&pipeline.name.to_string()));
-        let run_fn = format_ident!("run_{}", pipeline.name);
         let model_ty = &pipeline.model;
+        if let Some(frontend) = &pipeline.frontend {
+            targets.push((
+                pipeline.model.clone(),
+                frontend.clone(),
+                ctx_name.clone(),
+                pipeline.env.iter().any(|name| name == "security_ctx"),
+            ));
+        }
 
         let env_fields: Vec<_> = pipeline
             .env
@@ -427,7 +439,6 @@ pub fn generate(input: TokenStream) -> TokenStream {
             }
         }
 
-        let run_observed_fn = format_ident!("run_{}_observed", pipeline.name);
         let phase_calls: Vec<_> = pipeline
             .run
             .iter()
@@ -437,7 +448,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
                     ctx.set_current_phase(#phase_str);
                     #phase_name(ctx)?;
                     ctx.set_current_phase("");
-                    observe(#phase_str, ctx);
+                    observe(#phase_str, &*ctx);
                 }
             })
             .collect();
@@ -468,9 +479,6 @@ pub fn generate(input: TokenStream) -> TokenStream {
             }
 
             impl #ctx_name {
-                pub const PHASES: &'static [(&'static str, &'static [&'static str])] =
-                    &[#(#phase_table),*];
-
                 pub fn new(#(#ctor_params,)* #model_param) -> Self {
                     Self {
                         data_model,
@@ -485,16 +493,71 @@ pub fn generate(input: TokenStream) -> TokenStream {
                 #(#trait_impls)*
             }
 
-            pub fn #run_fn(ctx: &mut #ctx_name) -> crate::error::Result<()> {
-                #run_observed_fn(ctx, |_, _| {})
-            }
+            impl Pipeline for #ctx_name {
+                const PHASES: PhaseTable = &[#(#phase_table),*];
 
-            pub fn #run_observed_fn(
-                ctx: &mut #ctx_name,
-                mut observe: impl FnMut(&'static str, &#ctx_name),
-            ) -> crate::error::Result<()> {
-                #(#phase_calls)*
-                Ok(())
+                fn run_phases(
+                    &mut self,
+                    observe: &mut dyn FnMut(&'static str, &Self),
+                ) -> crate::error::Result<()> {
+                    let ctx = self;
+                    #(#phase_calls)*
+                    Ok(())
+                }
+            }
+        });
+    }
+
+    let mut models: Vec<&Type> = Vec::new();
+    for (model, ..) in &targets {
+        if !models
+            .iter()
+            .any(|seen| quote!(#seen).to_string() == quote!(#model).to_string())
+        {
+            models.push(model);
+        }
+    }
+    for model in models {
+        let arms: Vec<_> = targets
+            .iter()
+            .filter(|(candidate, ..)| quote!(#candidate).to_string() == quote!(#model).to_string())
+            .map(|(_, frontend, ctx_name, secured)| {
+                let constructor = if *secured {
+                    quote! {
+                        #ctx_name::new(
+                            security
+                                .ok_or_else(|| crate::error::QueryError::PipelineInvariant(
+                                    "security context is required".into(),
+                                ))?
+                                .clone(),
+                            std::sync::Arc::clone(model),
+                        )
+                    }
+                } else {
+                    quote! { #ctx_name::new(std::sync::Arc::clone(model)) }
+                };
+                quote! {
+                    crate::Frontend::#frontend => {
+                        let mut ctx = #constructor;
+                        source.load(&mut ctx);
+                        crate::finish(&mut ctx, observer)
+                    }
+                }
+            })
+            .collect();
+        out.extend(quote! {
+            impl crate::CompileTarget for #model {
+                fn compile_observed(
+                    source: crate::CompileSource,
+                    fe: crate::Frontend,
+                    model: &std::sync::Arc<Self>,
+                    security: Option<&crate::types::SecurityContext>,
+                    observer: &mut impl PhaseObserver,
+                ) -> crate::error::Result<crate::passes::codegen::CompiledQueryContext> {
+                    match source.frontend(fe) {
+                        #(#arms)*
+                    }
+                }
             }
         });
     }

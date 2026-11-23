@@ -1,90 +1,78 @@
 use std::sync::Arc;
 
+use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
 use query_engine::compiler;
 
 use super::{
     Compiled, Expectations, IndexAssertion, Models, Scenario, clickhouse, hydration_input,
 };
 use crate::scenario::Backend;
-use compiler::config::{self, CompilerCtx};
+use compiler::config::{self, CompilerCtx, PhaseObserver, Pipeline};
+use compiler::{CompileSource, CompileTarget, Frontend};
 
-type Pipeline = fn(&Scenario, &Models, &str, &Expectations) -> Compiled;
-
-const PIPELINES: &[(Backend, &str, Pipeline)] = &[
-    (Backend::ClickHouse, "json", clickhouse_json),
-    (Backend::ClickHouse, "gql", clickhouse_gql),
-    (Backend::DuckDb, "json", duckdb_json),
-    (Backend::DuckDb, "gql", duckdb_gql),
-];
-
-fn security(scenario: &Scenario) -> compiler::SecurityContext {
-    crate::query_scenario::build_security(&scenario.security)
+pub(super) struct Observer<'a, 'b> {
+    expectations: &'a Expectations<'b>,
+    failures: Vec<String>,
+    output: Option<compiler::CompiledQueryContext>,
 }
 
-fn clickhouse_hydration(
-    scenario: &Scenario,
-    models: &Models,
-    language: &str,
-    raw: &str,
-    observe: &Expectations,
-) -> Compiled {
-    let Some(setup) = scenario.hydration.as_ref() else {
-        return (vec![], None);
-    };
-    match hydration_input(setup, language, raw, models.remote.as_ref()) {
-        Ok((input, options)) => {
-            let mut ctx =
-                config::ChHydrationCtx::new(security(scenario), Arc::clone(&models.remote));
-            ctx.set_input(input);
-            ctx.set_hydration_options(options);
-            observe.run(ctx, config::ChHydrationCtx::PHASES, |ctx, f| {
-                config::run_ch_hydration_observed(ctx, f)
-            })
+impl<'a, 'b> Observer<'a, 'b> {
+    pub(super) fn new(expectations: &'a Expectations<'b>) -> Self {
+        Self {
+            expectations,
+            failures: Vec::new(),
+            output: None,
         }
-        Err(error) => (vec![format!("{}: {error}", observe.label)], None),
+    }
+
+    pub(super) fn into_compiled(self) -> Compiled {
+        (self.failures, self.output)
     }
 }
 
-fn clickhouse_json(
-    scenario: &Scenario,
-    models: &Models,
-    raw: &str,
-    observe: &Expectations,
-) -> Compiled {
-    let mut ctx = config::ClickhouseJsonDslCtx::new(security(scenario), Arc::clone(&models.remote));
-    ctx.set_raw(raw.to_string());
-    observe.run(ctx, config::ClickhouseJsonDslCtx::PHASES, |ctx, f| {
-        config::run_clickhouse_json_dsl_observed(ctx, f)
-    })
+impl PhaseObserver for Observer<'_, '_> {
+    fn start<C: Pipeline>(&mut self) -> bool {
+        self.failures = self.expectations.unknown_targets(C::PHASES);
+        self.failures.is_empty()
+    }
+
+    fn phase<C: Pipeline>(&mut self, phase: &'static str, ctx: &C) {
+        self.failures
+            .extend(self.expectations.check_phase(phase, ctx));
+    }
+
+    fn finished<C: Pipeline>(&mut self, result: &compiler::Result<()>, ctx: &mut C) {
+        let expectations = self.expectations;
+        match (result, expectations.rejection) {
+            (Ok(()), Some(_)) => self.failures.push(format!(
+                "{}: expected a rejection, but the query compiled",
+                expectations.label
+            )),
+            (Err(error), Some(rejection)) => self.failures.extend(rejection.check(
+                expectations.frontend,
+                ctx.current_phase(),
+                error,
+                expectations.label,
+            )),
+            (Err(error), None) => self
+                .failures
+                .push(format!("{}: {error}", expectations.label)),
+            (Ok(()), None) => {
+                if let Some(output) = ctx.output() {
+                    self.failures.extend(expectations.backend.check_output(
+                        expectations.models,
+                        output,
+                        expectations.label,
+                    ));
+                }
+                self.output = ctx.output().clone();
+            }
+        }
+    }
 }
 
-fn clickhouse_gql(
-    scenario: &Scenario,
-    models: &Models,
-    raw: &str,
-    observe: &Expectations,
-) -> Compiled {
-    let mut ctx = config::ClickhouseGqlCtx::new(security(scenario), Arc::clone(&models.remote));
-    ctx.set_raw(raw.to_string());
-    observe.run(ctx, config::ClickhouseGqlCtx::PHASES, |ctx, f| {
-        config::run_clickhouse_gql_observed(ctx, f)
-    })
-}
-
-fn duckdb_json(_: &Scenario, models: &Models, raw: &str, observe: &Expectations) -> Compiled {
-    let mut ctx = config::DuckdbJsonDslCtx::new(Arc::clone(&models.local));
-    ctx.set_raw(raw.to_string());
-    observe.run(ctx, config::DuckdbJsonDslCtx::PHASES, |ctx, f| {
-        config::run_duckdb_json_dsl_observed(ctx, f)
-    })
-}
-
-fn duckdb_gql(_: &Scenario, models: &Models, raw: &str, observe: &Expectations) -> Compiled {
-    let mut ctx = config::DuckdbGqlCtx::new(Arc::clone(&models.local));
-    ctx.set_raw(raw.to_string());
-    observe.run(ctx, config::DuckdbGqlCtx::PHASES, |ctx, f| {
-        config::run_duckdb_gql_observed(ctx, f)
-    })
+fn security(scenario: &Scenario) -> compiler::SecurityContext {
+    crate::query_scenario::build_security(&scenario.security)
 }
 
 impl Backend {
@@ -94,26 +82,56 @@ impl Backend {
         models: &Models,
         language: &str,
         raw: &str,
-        observe: &Expectations,
+        expectations: &Expectations,
     ) -> Compiled {
-        if self == Self::ClickHouse && scenario.hydration.is_some() {
-            return clickhouse_hydration(scenario, models, language, raw, observe);
-        }
-        match PIPELINES
-            .iter()
-            .find(|(backend, frontend, _)| *backend == self && *frontend == language)
-        {
-            Some((_, _, pipeline)) if scenario.hydration.is_none() => {
-                pipeline(scenario, models, raw, observe)
+        let mut observer = Observer::new(expectations);
+        let frontend = language.parse::<Frontend>().ok();
+        match (self, frontend, scenario.hydration.as_ref()) {
+            (Self::ClickHouse, _, Some(setup)) => {
+                match hydration_input(setup, language, raw, models.remote.as_ref()) {
+                    Ok((input, options)) => {
+                        let mut ctx = config::ChHydrationCtx::new(
+                            security(scenario),
+                            Arc::clone(&models.remote),
+                        );
+                        ctx.set_input(input);
+                        ctx.set_hydration_options(options);
+                        let _ = config::run_observed(&mut ctx, &mut observer);
+                    }
+                    Err(error) => {
+                        return (vec![format!("{}: {error}", expectations.label)], None);
+                    }
+                }
             }
-            _ => (
-                vec![format!(
-                    "{}: no {self} pipeline for this fixture",
-                    observe.label
-                )],
-                None,
-            ),
+            (Self::ClickHouse, Some(frontend), None) => {
+                let _ = ClickHouseDataModel::compile_observed(
+                    CompileSource::Raw(raw),
+                    frontend,
+                    &models.remote,
+                    Some(&security(scenario)),
+                    &mut observer,
+                );
+            }
+            (Self::DuckDb, Some(frontend), None) => {
+                let _ = DuckDbDataModel::compile_observed(
+                    CompileSource::Raw(raw),
+                    frontend,
+                    &models.local,
+                    None,
+                    &mut observer,
+                );
+            }
+            _ => {
+                return (
+                    vec![format!(
+                        "{}: no {self} pipeline for this fixture",
+                        expectations.label
+                    )],
+                    None,
+                );
+            }
         }
+        observer.into_compiled()
     }
 
     pub(super) fn settings(

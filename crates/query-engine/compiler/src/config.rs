@@ -24,6 +24,39 @@ fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
     opt.ok_or_else(|| QueryError::PipelineInvariant(format!("{field} not yet populated")))
 }
 
+pub type PhaseTable = &'static [(&'static str, &'static [&'static str])];
+
+pub trait Pipeline: CompilerCtx + Sized {
+    const PHASES: PhaseTable;
+
+    fn run_phases(&mut self, observe: &mut dyn FnMut(&'static str, &Self)) -> Result<()>;
+}
+
+pub trait PhaseObserver {
+    fn start<C: Pipeline>(&mut self) -> bool {
+        true
+    }
+
+    fn phase<C: Pipeline>(&mut self, _phase: &'static str, _ctx: &C) {}
+
+    fn finished<C: Pipeline>(&mut self, _result: &Result<()>, _ctx: &mut C) {}
+}
+
+pub struct NoObserver;
+
+impl PhaseObserver for NoObserver {}
+
+pub fn run_observed<C: Pipeline>(ctx: &mut C, observer: &mut impl PhaseObserver) -> Result<()> {
+    if !observer.start::<C>() {
+        return Err(QueryError::PipelineInvariant(
+            "the observer skipped the pipeline".into(),
+        ));
+    }
+    let result = ctx.run_phases(&mut |phase, ctx| observer.phase(phase, ctx));
+    observer.finished(&result, ctx);
+    result
+}
+
 compiler_pipeline_macros::define_compiler_ctx! {
     env {
         pub security_ctx: SecurityContext,
@@ -137,12 +170,14 @@ compiler_pipeline_macros::define_compiler_ctx! {
 
     pipelines {
         clickhouse_json_dsl {
+            frontend: JsonDsl
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
             phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, settings, security, security_check, codegen]
         }
         clickhouse_gql {
+            frontend: Gql
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
@@ -155,12 +190,14 @@ compiler_pipeline_macros::define_compiler_ctx! {
             phases: [validate_conditions, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, settings, security, security_check, codegen]
         }
         duckdb_json_dsl {
+            frontend: JsonDsl
             model: query_data_model::DuckDbDataModel
             env: []
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
             phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, paginate, result_contract, duckdb_codegen]
         }
         duckdb_gql {
+            frontend: Gql
             model: query_data_model::DuckDbDataModel
             env: []
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
