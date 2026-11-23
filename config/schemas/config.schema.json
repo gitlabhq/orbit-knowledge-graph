@@ -1482,7 +1482,7 @@
           "description": "How long the server waits on shutdown for in-flight requests to\nfinish before it stops waiting and exits; requests still running then\nend with the process. Keep it above the longest query time and below\nthe Kubernetes `terminationGracePeriodSeconds`.",
           "type": "integer",
           "format": "uint64",
-          "minimum": 0
+          "minimum": 1
         }
       },
       "additionalProperties": false,

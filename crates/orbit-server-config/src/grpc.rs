@@ -27,6 +27,7 @@ pub struct GrpcConfig {
     /// finish before it stops waiting and exits; requests still running then
     /// end with the process. Keep it above the longest query time and below
     /// the Kubernetes `terminationGracePeriodSeconds`.
+    #[schemars(range(min = 1))]
     pub shutdown_drain_timeout_secs: u64,
 }
 
@@ -89,6 +90,16 @@ mod tests {
         let error = rejection("max_result_bytes", 1024 * 1024 - 1);
         assert!(error.contains("- grpc.max_result_bytes: "), "{error}");
         AppConfig::with_overlay("grpc:\n  max_result_bytes: 1048576\n").unwrap();
+    }
+
+    #[test]
+    fn shutdown_drain_timeout_cannot_be_zero() {
+        let error = rejection("shutdown_drain_timeout_secs", 0);
+        assert!(
+            error.contains("- grpc.shutdown_drain_timeout_secs: "),
+            "{error}"
+        );
+        AppConfig::with_overlay("grpc:\n  shutdown_drain_timeout_secs: 1\n").unwrap();
     }
 
     #[test]
