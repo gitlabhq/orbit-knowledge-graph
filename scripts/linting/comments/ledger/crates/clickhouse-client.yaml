@@ -1,79 +1,44 @@
 "crates/clickhouse-client/src/arrow_client.rs":
 - category: upstream
-  reason: "ClickHouse rejects an async insert that also carries insert_quorum"
+  reason: "ClickHouse rejects an async insert that also carries insert_quorum."
   preview: "/// ClickHouse rejects an async insert that also carries `insert_quorum…"
   hash: 1a00dfa5d925c144
   lines: 1
 - category: upstream
-  reason: "ClickHouse readonly mode 2 is needed because mode 1 forbids query settings; never for inserts or DDL"
+  reason: "Readonly mode 1 forbids the settings every query sends; never use on an inserting client."
   preview: "/// Mark the client as read-only so ClickHouse cancels its queries when…"
   hash: 984e375c72c1a57d
   lines: 3
-- category: invariant
-  reason: "Inserts must use insert_query, or they silently lose async-insert and write settings"
-  preview: "/// Use this for `INSERT` queries so they inherit async-insert and"
-  hash: f7dd819fd4cd6372
-  lines: 2
-- category: invariant
-  reason: "Settings are sorted so the emitted SETTINGS clause stays deterministic"
-  preview: "/// Sorted so the emitted `SETTINGS` clause is deterministic."
-  hash: b8d04dcb00f8701c
-  lines: 1
 - category: upstream
   reason: "The ClickHouse HTTP parameter parser rejects a trailing Z on DateTime64 and Date values."
   preview: "/// ClickHouse's HTTP parameter parser for DateTime64 and Date rejects …"
   hash: e2ed1cf91b6958bc
   lines: 3
 - category: upstream
-  reason: "Array binding silently drops elements of the wrong scalar type; the warning surfaces that"
-  preview: "/// Log a warning when array binding silently drops elements that don't"
-  hash: 81306f57e61d3859
-  lines: 6
-- category: upstream
-  reason: "ClickHouse sends a quorum conflict with the first chunk, so only that read can retry"
+  reason: "A quorum conflict arrives only with the first chunk; retrying a later read would duplicate rows."
   preview: "/// A quorum conflict arrives with the first chunk, before any rows, so…"
   hash: cce2ab796117d07f
   lines: 1
-- category: invariant
-  reason: "Non-idempotent statements such as ATTACH PARTITION FROM must not retry on quorum errors"
-  preview: "/// For statements that are not idempotent, such as `ATTACH PARTITION .…"
-  hash: 337e01b558be532a
-  lines: 1
 - category: upstream
-  reason: "The cursor AsyncRead loses bytes when the next chunk is late, so the code takes whole chunks"
+  reason: "The cursor AsyncRead loses bytes when the next chunk is late, so whole chunks are required."
   preview: "// Take whole chunks: the cursor's AsyncRead loses bytes when the next …"
   hash: 063d0e4747cdc80c
   lines: 1
 "crates/clickhouse-client/src/configuration.rs":
 - category: upstream
-  reason: "ClickHouse rejects async_insert with a quorum and enables it by default since 26.x"
+  reason: "ClickHouse 26.x enables async_insert by default and rejects it with quorum inserts."
   preview: "/// Serialized inserts make `select_sequential_consistency` work; `asyn…"
   hash: 1ee680bb576cef15
   lines: 1
-- category: upstream
-  reason: "The clickhouse crate rejects HTTPS without its rustls-tls features; the test guards dependency bumps."
-  preview: "// Without the rustls-tls-* features on the `clickhouse` crate, any HTT…"
-  hash: 65cf2ebf126fb843
-  lines: 3
 "crates/clickhouse-client/src/error.rs":
-- category: magic-value
-  reason: "ClickHouse error code 241 is MEMORY_LIMIT_EXCEEDED, and repeats signal server pressure"
-  preview: "// ClickHouse error code 241 (MEMORY_LIMIT_EXCEEDED). Repeated OOMs sig…"
-  hash: a13f60225b2c67f4
-  lines: 2
 - category: upstream
-  reason: "Only the ClickHouse server-wide tracker adds current RSS to the message"
+  reason: "Only the ClickHouse server-wide tracker adds current RSS; query limits are the caller's problem."
   preview: "// Only the server-wide memory tracker adds `current RSS` to MEMORY_LIM…"
   hash: 21f4074da31de05e
   lines: 2
 "crates/clickhouse-client/src/profiling.rs":
-- category: invariant
-  reason: "The query log needs a flush and the match string must be unique"
-  preview: "/// Flushes the query log first to ensure the entry is available."
-  hash: fcd830f35877e393
-  lines: 2
 - category: upstream
-  reason: "ClusterAllReplicas makes columns Nullable, which JSONEachRow serializes as strings, so the parser accepts both"
+  reason: "ClusterAllReplicas makes ClickHouse serialize Nullable numbers as strings; removing string parsing silently zeroes values."
   preview: "/// `clusterAllReplicas` wraps columns in `Nullable`, which ClickHouse"
   hash: c1e8f208b0e933a0
   lines: 2

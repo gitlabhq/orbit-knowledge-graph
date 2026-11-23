@@ -1,6 +1,0 @@
-"docs/navigation.yaml":
-- category: contract
-  reason: "Scripts/docs/site.sh replaces the docs-gitlab-com navigation section with this file until it merges upstream"
-  preview: "# The GitLab Orbit section of the docs.gitlab.com global navigation."
-  hash: 0939625cbdc3cb09
-  lines: 4

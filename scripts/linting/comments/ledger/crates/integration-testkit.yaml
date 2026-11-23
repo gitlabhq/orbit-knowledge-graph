@@ -1,63 +1,11 @@
-"crates/integration-testkit/src/cli.rs":
-- category: upstream
-  reason: "Git walks up from a scratch folder into an enclosing checkout unless GIT_CEILING_DIRECTORIES stops it."
-  preview: "// Keep a scratch folder from resolving to a checkout that encloses TMP…"
-  hash: 7c4304c9ed703644
-  lines: 1
-"crates/integration-testkit/src/compiler/clickhouse.rs":
-- category: upstream
-  reason: "Decoy parts give each ClickHouse skip index a granule to prune while FINAL still returns real rows"
-  preview: "/// Older twins in their own unmerged part give each skip index a granu…"
-  hash: 11ceb4747b9fe028
-  lines: 1
-"crates/integration-testkit/src/context.rs":
-- category: magic-value
-  reason: "More concurrent clones fail with TOO_MANY_SIMULTANEOUS_QUERIES on a 4-CPU runner"
-  preview: "// More concurrent clones per fork fail with TOO_MANY_SIMULTANEOUS_QUER…"
-  hash: cf90e319cb05b7ce
-  lines: 1
-"crates/integration-testkit/src/query_scenario/format.rs":
-- category: contract
-  reason: "Scenario YAML authors must write the key as group_key:EntityType; the map type cannot show that form"
-  preview: "/// Expected group node IDs collected across all pages, sorted."
-  hash: e442d1a345074f8c
-  lines: 2
-"crates/integration-testkit/src/scenario/expect.rs":
-- category: invariant
-  reason: "An absent column makes every row fail silently, so the check reports it, except on an empty result"
-  preview: "// An absent column means every row silently fails to match; surface it…"
-  hash: 54aec46f6fc4bbdd
-  lines: 3
-"crates/integration-testkit/src/scenario/mod.rs":
-- category: invariant
-  reason: "This crate must not depend on the indexer crate, so test crates implement the handler mapping"
-  preview: "/// Maps a scenario `run:` handler name to an actual indexer handler"
-  hash: 5dd86c65546da554
-  lines: 4
-- category: invariant
-  reason: "Database_name collapses non-alphanumerics, so two scenario paths can silently share one database"
-  preview: "// database_name collapses every non-alphanumeric character to '_', so …"
-  hash: bb997fc0336112ae
-  lines: 3
 "crates/integration-testkit/src/scenario/seed.rs":
-- category: invariant
-  reason: "The timestamp must stay below the 2024-01-21 test watermark or the indexer window drops the row"
-  preview: "/// Fixed replication timestamp injected when a seeded row omits"
-  hash: 151db48775c51598
-  lines: 3
 - category: upstream
-  reason: "A ClickHouse VALUES insert saturates out-of-range Date32 even with the overflow setting; JSONEachRow honours it"
+  reason: "A ClickHouse VALUES insert saturates out-of-range Date32 even with the overflow setting; JSONEachRow honours it."
   preview: "/// `seed_settings` inserts go through JSONEachRow because some setting…"
   hash: 460972d1cc684beb
   lines: 4
 - category: upstream
-  reason: "A FORMAT-bearing ClickHouse insert consumes the rest of the body, so it needs the raw HTTP interface"
+  reason: "A FORMAT insert consumes the rest of the request body, so it needs the raw HTTP interface."
   preview: "// A FORMAT-bearing insert consumes the rest of the request body as dat…"
   hash: d9502174b21c081b
   lines: 2
-"crates/integration-testkit/src/seed.rs":
-- category: contract
-  reason: "Siphon and system tables are never prefixed; another system owns those names"
-  preview: "/// Siphon tables (`siphon_*`) and system tables are never prefixed."
-  hash: e8a529ea1cd01ba2
-  lines: 1

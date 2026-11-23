@@ -1,149 +1,89 @@
 ".gitlab-ci.yml":
 - category: contract
-  reason: "The CI changes regexp must stay in sync with docs-in-code-mr-check; no code links the two files"
+  reason: "No code links the CI changes regexp to docs-in-code-mr-check; drift silently misroutes MR pipelines."
   preview: "# Every path outside docs/, plus the docs/ files that code checks read."
   hash: c4ff3522111bc2f3
   lines: 2
 - category: upstream
-  reason: "GitLab security templates cannot reference project rule anchors, so only their kill-switch variables mute them"
+  reason: "GitLab security templates cannot reference project rule anchors; only kill-switch variables mute them on solo schedules."
   preview: "# Security-template jobs can't reference .skip-on-solo-schedule, so solo"
   hash: 104681ccba756a5c
   lines: 2
 - category: upstream
-  reason: "Dev.gitlab.org and fork MR pipelines reject the secrets keyword; the rule cannot show that reason"
+  reason: "Dev.gitlab.org and fork MR pipelines reject the secrets keyword; removing the rule breaks those pipelines."
   preview: "# Uses `secrets`, which dev.gitlab.org rejects and fork MR pipelines ca…"
   hash: 97be7a92626ddb34
   lines: 1
-- category: security
-  reason: "The bot token comes from Vault and is readable only on protected refs; that trust boundary is not visible"
-  preview: "# Identity for jobs acting as the Orbit automation bot (infra-mgmt!3039…"
-  hash: d93a85786426e2c8
-  lines: 3
 - category: contract
-  reason: "External schedules set SCHEDULE_ONLY and every shared job must reference this guard; the YAML cannot show that rule"
+  reason: "New shared jobs must reference this guard or they silently run on solo schedules; YAML cannot enforce it."
   preview: "# \"Solo\" scheduled pipelines run exactly one job and skip the rest of t…"
   hash: 36ea4044cdc2f2b3
   lines: 4
 - category: upstream
-  reason: "The dependency proxy answers 404 below Guest on the top-level group, and image pull happens before scripts"
+  reason: "Dependency proxy returns 404 for users without top-level group Guest; the image choice must happen at pipeline creation."
   preview: "# Jobs that pull alpine through the group dependency proxy. The proxy a…"
   hash: 0acebfd6d55bb349
   lines: 5
-- category: invariant
-  reason: "The merge base exists only for these base SHAs and a deep enough clone; the script cannot show that."
-  preview: "# Prefer the commit a merged results pipeline merged into, then the MR …"
-  hash: 82de420942c12885
-  lines: 3
 - category: compliance
-  reason: "FIPS rule that every server binary links only AWS-LC for TLS; the job script cannot state the control"
+  reason: "FIPS control: server binaries link only the AWS-LC FIPS module for TLS; the job script cannot state the control."
   preview: "# Every server binary must link the AWS-LC FIPS module and nothing else…"
   hash: 3522aa076c3e9644
   lines: 1
 - category: compliance
-  reason: "Cites the FedRAMP and NIST control that requires a non-root image user; code cannot cite a control"
+  reason: "Cites the FedRAMP and NIST control that requires a non-root image user."
   preview: "# FedRAMP hardening (DISA container guide 2.2, NIST AC-6) requires a no…"
   hash: 544cba53f80dcf2b
   lines: 1
 - category: upstream
-  reason: "The Secret-Detection template defaults to branch pipelines only; the override exists for that template quirk"
+  reason: "The Secret-Detection template runs only on branch pipelines by default; removing this override silently stops MR scanning."
   preview: "# Override the default secret_detection rules so the job runs on MR pip…"
   hash: 52a0f6a70183f282
   lines: 3
 - category: upstream
-  reason: "GitLab Pages ignores job variables that override CI_PAGES_URL, so the script exports it; code cannot show that quirk"
+  reason: "GitLab Pages ignores job variables that override CI_PAGES_URL, so the export must stay in the script."
   preview: "# GitLab sets CI_PAGES_URL for Pages jobs and ignores job variables tha…"
   hash: ac05fa00e5b47066
   lines: 1
 - category: contract
-  reason: "Site-kit derives its base path from SITE_URL, so the value must be the domain root"
+  reason: "Site-kit derives its base path from SITE_URL; a non-root value silently breaks every site link."
   preview: "# Serve from the custom domain root; site-kit derives its base path fro…"
   hash: 29a70beacec56152
   lines: 1
-- category: contract
-  reason: "Pages serves previews under the branch path and site-kit derives its base path from SITE_URL"
-  preview: "# Pages serves previews at gitlaborbit.dev/<branch>/; site-kit derives …"
-  hash: f9005a2d6c1a6b5b
-  lines: 1
-- category: invariant
-  reason: "Some tests are unix-only, so adding --all-targets breaks the Windows check; code cannot show why"
-  preview: "# No --all-targets: some tests are unix-only."
-  hash: 2a8d9261b36e3d2b
-  lines: 1
-- category: upstream
-  reason: "Sigstore keyless signing needs an OIDC token with the sigstore audience; the job cannot show that need"
-  preview: "# Keyless signing needs a GitLab OIDC token with the sigstore audience;…"
-  hash: ebfaabb2852ba1a0
-  lines: 2
 - category: compliance
-  reason: "The FedRAMP 30-day rescan duty explains the schedule; the job config cannot show the requirement"
+  reason: "FedRAMP 30-day rescan duty drives this schedule; the job config cannot state the control."
   preview: "# Feeds the Vulnerability Report: every main image, and the latest rele…"
   hash: c62d647781bba34a
   lines: 2
 - category: contract
-  reason: "The e2e job resolves the same Dockerfile-hash tag, so both sides must compute it the same way"
+  reason: "The e2e job computes the same Dockerfile-hash tag; a one-sided change silently pulls the wrong image."
   preview: "# Tag = Dockerfile hash; the e2e job resolves the same tag."
   hash: f909a4c73dccf12a
   lines: 1
 - category: compliance
-  reason: "The CVE and root-image gate must run before tags move; job order alone hides the reason"
+  reason: "Compliance control: the scan must run before release tags move so vulnerable or root images never publish."
   preview: "# Runs before the release tags move, so a root image or a fixable High …"
   hash: f20f6bbcee61ac30
   lines: 2
-- category: security
-  reason: "Lists the required review-bot CI variables and which must be masked and hidden; no code records that"
-  preview: "# AI Review Stage"
-  hash: 592feee20a5d8566
-  lines: 10
 - category: invariant
-  reason: "The e2e cluster is amd64-only, so waiting on the manifest job only adds latency; the need list cannot say why"
+  reason: "Tradeoff: the e2e cluster is amd64-only, so waiting on docker-manifest adds arm64 build and signing latency."
   preview: "# The e2e cluster is amd64-only, so the per-arch image is enough. Waiti…"
   hash: 1f7c9b32573b697c
   lines: 2
-- category: invariant
-  reason: "Pin-bump MRs exist to validate pins, so e2e must run and block on them"
-  preview: "# Scheduled pin-bump MRs exist to be validated, so e2e runs and blocks."
-  hash: ee0023232185ac1e
-  lines: 1
-- category: invariant
-  reason: "The script must be sourced so the exported variables and background PID stay in this shell"
-  preview: "# Sourced: exports E2E_GKG_IMAGE/E2E_GKG_TAG and backgrounds the MR bui…"
-  hash: 341df2c09abf17b0
-  lines: 2
-- category: invariant
-  reason: "The dump must run before teardown wipes namespaces, and runs on failure only because it costs minutes"
-  preview: "# Before teardown wipes the namespaces; failure-only (the dump costs ~3…"
-  hash: 8d3ff5e8e5a48974
-  lines: 1
-- category: magic-value
-  reason: "Quorum inserts slow the Siphon snapshot merge about three times, which explains the budget multiplier"
-  preview: "# Quorum inserts make the initial Siphon snapshot merge about three tim…"
-  hash: 5d79456f945e755c
-  lines: 1
-".markdownlint-cli2.yaml":
-- category: contract
-  reason: "Rumdl enforces MD056 and MD055, so markdownlint leaves them unset"
-  preview: "# MD056, enforced by rumdl"
-  hash: aa32f7d365887d48
-  lines: 3
 "caproni-project.yaml":
-- category: invariant
-  reason: "Read-only patterns must cover directories, or the server stat runs locally and silently loads no secrets"
-  preview: "#"
-  hash: 364b7fee3299f170
-  lines: 23
-- category: invariant
-  reason: "The prepare step runs outside mirrord and must build first so the mirrord processes have a binary"
-  preview: "# Runs after clone or update, outside mirrord: tools for the processes …"
-  hash: 84bbe39ceba7256a
-  lines: 2
 - category: upstream
-  reason: "Caproni supervisor dials localhost before start and the pod intercepts it; code cannot show that tool quirk"
+  reason: "Without ignore_localhost the Caproni supervisor dial is intercepted by the pod and misreports port conflicts."
   preview: "# Caproni's supervisor dials localhost:<port> before it starts a"
   hash: 001e3b5ae2389118
   lines: 5
 "install.sh":
 - category: contract
-  reason: "Release tarballs live under a registry path whose version omits the leading v"
+  reason: "The registry version segment omits the leading v; a mismatch breaks every download URL."
   preview: "# Tarballs are published to the project's Generic Package Registry under"
   hash: 2beb44f2bd600367
   lines: 2
+"lefthook.yml":
+- category: upstream
+  reason: "Lefthook has no per-job allow_failure; the trailing || true is the intended advisory workaround."
+  preview: "# Advisory/non-blocking: narration lint prints warnings but must not bl…"
+  hash: 37fadea12e5405a1
+  lines: 5

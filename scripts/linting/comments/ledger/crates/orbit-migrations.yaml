@@ -6,12 +6,7 @@
   lines: 1
 "crates/orbit-migrations/src/schema/mod.rs":
 - category: upstream
-  reason: "ClickHouse runs dictionary loads and view refreshes without session settings, so the SQL repeats compatibility"
+  reason: "ClickHouse runs dictionary loads and view refreshes without session settings."
   preview: "/// ClickHouse runs dictionary loads and view refreshes without the cli…"
   hash: 58bbb463a0fdbeff
-  lines: 2
-- category: upstream
-  reason: "A ClickHouse Replicated database replicates DDL only, so engines need Replicated variants"
-  preview: "/// `replicated` renders every MergeTree engine as its `Replicated*` va…"
-  hash: 3f7da2479a78d284
   lines: 2

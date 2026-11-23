@@ -1,100 +1,47 @@
 ".gitlab/ci/doc-principles-sync.yml":
-- category: contract
-  reason: "The bot token is provisioned in infra-mgmt terraform and the job needs a named schedule; no code shows that"
-  preview: "# Daily sync of the distilled GitLab documentation principles into"
-  hash: 6f27bde3310310cc
-  lines: 8
 - category: upstream
-  reason: "Glab gives the GITLAB_TOKEN variable priority over auth login config, so the export must override it"
+  reason: "Project GITLAB_TOKEN outranks glab auth login, so without the override glab silently acts as the wrong bot."
   preview: "# The project-level GITLAB_TOKEN variable outranks glab auth login conf…"
   hash: 0c3a2fea9fb65b17
   lines: 2
 ".gitlab/ci/e2e-pin-bump.yml":
-- category: contract
-  reason: "The bot token is provisioned in infra-mgmt terraform and the job needs a named schedule; no code shows that"
-  preview: "# Scheduled e2e pin bumper. Token provisioned by infra-mgmt terraform"
-  hash: 7a0f7b139d37bf00
-  lines: 4
 - category: upstream
-  reason: "Glab lets the GITLAB_TOKEN variable outrank its login config, so the override is needed."
+  reason: "Project GITLAB_TOKEN outranks glab auth, so without the export glab silently acts as the wrong bot."
   preview: "# The project-level GITLAB_TOKEN variable outranks glab auth login conf…"
   hash: 0c3a2fea9fb65b17
   lines: 2
 ".gitlab/ci/mr-housekeeping.yml":
 - category: invariant
-  reason: "Empty needs keeps the blocking manual release job from gating this job"
+  reason: "Needs: [] stops the blocking manual release job from gating housekeeping; removing it silently stalls the job."
   preview: "# Run independently of stage order so the blocking manual release job c…"
   hash: 4d5ccf3407d317e3
   lines: 2
-".gitlab/ci/orbit-perf-base.yml":
-- category: contract
-  reason: "The docker-in-docker setup mirrors caproni .integration-base and must stay in step with it"
-  preview: "# docker:dind, mirrors caproni .integration-base"
-  hash: 5b5d2356e9302dce
-  lines: 1
-- category: magic-value
-  reason: "States the graph size these perf settings produce, which the numbers alone do not show"
-  preview: "# ~12M nodes / ~59M edges"
-  hash: 996d4038cbc4202c
-  lines: 1
 ".gitlab/ci/orbit-perf.yml":
 - category: invariant
-  reason: "The script waits for this commit's image itself, so a needs entry is not required"
-  preview: "# No needs on docker-build-amd64: the script waits for this commit's im…"
-  hash: a7918037b37295e1
-  lines: 1
-- category: invariant
-  reason: "Each run is one datapoint on a full cluster, so cancel or overlap corrupts results"
-  preview: "# Each run is a full cluster and one datapoint: never cancel, never ove…"
-  hash: 952d83edb20ec4a1
-  lines: 1
-- category: invariant
-  reason: "Solo schedules run on the default branch too, so the skip rule must come first"
-  preview: "# Solo schedules also run on the default branch."
-  hash: 36a7f6f92d451584
-  lines: 1
-- category: invariant
-  reason: "No strategy depend, so the merge does not wait for the perf run"
+  reason: "Adding strategy: depend would make merges wait for the perf run."
   preview: "# No strategy: depend, so the merge does not wait for the perf run."
   hash: 0d70d75b4b890bbe
   lines: 1
-".gitlab/ci/release-deploy-mr.yml":
-- category: security
-  reason: "The bot token can open argocd MRs but never merge them, and the job order guarantees the image exists"
-  preview: "# Opens the argocd-apps MR bumping orbit-stg + orbit-prd to this tag, t…"
-  hash: aa2728e9687411c0
-  lines: 4
 ".gitlab/ci/release-local.yml":
 - category: upstream
-  reason: "The macOS runner has no default toolchain and its system mise config installs failing tools"
+  reason: "The runner's system mise config installs broken unrelated tools, so the project mise.toml is bypassed on purpose."
   preview: "# macos-15-xcode-16 ships with rustup but no toolchain pre-selected; the"
   hash: 38443344319f1528
   lines: 4
 ".gitlab/ci/review-docs.yml":
 - category: invariant
-  reason: "The cleanup job runs after the branch is deleted, so it must download the script, not clone"
+  reason: "The cleanup job runs after branch deletion on merge, so cloning the repo would silently fail."
   preview: "# We need to download the script rather than clone the repo since the"
   hash: 1ddc5ff1b9ecb1e2
   lines: 3
 ".gitlab/ci/rust-job-templates.yml":
-- category: security
-  reason: "Points to the cache trust model; the template cannot show which pipelines may write"
-  preview: "# Trust model: scripts/ci/cargo-home-cache.sh."
-  hash: 1ee7eed7c896a857
-  lines: 1
 - category: invariant
-  reason: "Only merged code may write the cache; unit-test sets the policy variable"
+  reason: "Only merged code may write the cargo cache; otherwise MR branches could poison the shared cache."
   preview: "# So only merged code writes the cache; set in unit-test."
   hash: 25738f638c6cb7b0
   lines: 1
 - category: security
-  reason: "Fail closed, an empty policy would let the runner upload the cache; code shows no threat"
+  reason: "An empty cache policy lets the runner upload; pull is the fail-closed choice."
   preview: "# Fail closed: an empty policy would let the runner upload."
   hash: 6c206f7845f696d3
   lines: 1
-".gitlab/duo/catalog/flows/docs-write.yml":
-- category: contract
-  reason: "Steps and the router agree on route files and exact tokens, and the image has no python3"
-  preview: "# MODE and SKILLS_REF in setup: README.md in this folder."
-  hash: b322bdf6749d6b28
-  lines: 4

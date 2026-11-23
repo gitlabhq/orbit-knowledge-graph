@@ -1,6 +1,0 @@
-".vale/gitlab_base/ListIndentation.yml":
-- category: magic-value
-  reason: "Explains what each part of the list-indentation regex matches; the regex cannot show its intent"
-  preview: "# Regex guide:"
-  hash: 9aac3af3a2953573
-  lines: 15

@@ -1,286 +1,39 @@
-"crates/xtask/build.rs":
-- category: contract
-  reason: "The build fails when the crate map doc drifts from workspace members; only names are checked, not descriptions"
-  preview: "//! Fails the build when `docs/pages/engineering/development/agents-cra…"
-  hash: 4b88016fcfe3575a
-  lines: 4
-"crates/xtask/build_support/crate_map_drift.rs":
-- category: contract
-  reason: "The file is include!d by build.rs and a test, so it must stay free of filesystem and env access"
-  preview: "// Shared by `build.rs` and `tests/crate_map_drift.rs` via `include!`; …"
-  hash: 0505f4b6db4ae111
-  lines: 2
-- category: invariant
-  reason: "The full path keeps same-named crates distinct so one cannot mask the other's missing row"
-  preview: "// Keeps the full path below `crates/` (not just the leaf) so `a/shared…"
-  hash: 511ed078090563f5
-  lines: 2
-- category: invariant
-  reason: "Workspace globs are not expanded and would appear as a literal key; a limit the code cannot show"
-  preview: "// A real TOML parse so `default-members` can't be mis-read. Globs (`cr…"
-  hash: 9e7ba72feb87e907
-  lines: 3
-"crates/xtask/fake_data.yaml":
-- category: invariant
-  reason: "Classification rules are ordered and the first match wins; reordering the YAML changes output silently"
-  preview: "# Classification rules for string fields (first match wins)."
-  hash: e557db0a8f428bd5
-  lines: 3
-"crates/xtask/simulator-slim.yaml":
-- category: contract
-  reason: "The simulator must keep the per-node sort keys in sync with graph.sql"
-  preview: "# Use per-node sort_key from ontology YAML (matches graph.sql)."
-  hash: e8f767bb4f28aab8
-  lines: 1
-- category: contract
-  reason: "The edge table schema must match graph.sql; keep in sync"
-  preview: "# Edge table schema matches graph.sql exactly."
-  hash: 64a4d600a9a1f7aa
-  lines: 1
-"crates/xtask/simulator.yaml":
-- category: contract
-  reason: "The simulator sort keys must match graph.sql and the ontology sort_key values."
-  preview: "# Use per-node sort_key from ontology YAML (matches graph.sql)."
-  hash: 3acade54a8966eac
-  lines: 3
-- category: contract
-  reason: "The simulator edge schema must stay in sync with graph.sql"
-  preview: "# Edge table schema matches graph.sql exactly."
-  hash: 64a4d600a9a1f7aa
-  lines: 1
 "crates/xtask/src/loadtest.rs":
-- category: magic-value
-  reason: "User id 1 must match the seeded data, which lives outside this crate"
-  preview: "/// Fixed identity for the minted JWT, matching the seeded data."
-  hash: d068d9a13df653c5
-  lines: 1
-- category: magic-value
-  reason: "One hour is generous so a long run never fails auth mid-flight"
-  preview: "/// Token lifetime; generous so a long run never fails auth mid-flight."
-  hash: ec7787ca2e7e4201
-  lines: 1
-- category: contract
-  reason: "The labkit correlation layer on the server reads this exact metadata key"
-  preview: "/// gRPC metadata key the server's labkit correlation layer reads."
-  hash: a21f1737415829f8
-  lines: 1
 - category: invariant
-  reason: "Unknown fields are ignored on purpose so scenario files can carry fields this view does not need"
-  preview: "/// Minimal view of a scenario file; unknown fields are ignored on purp…"
-  hash: 033b5ef65ca6c1f4
-  lines: 1
-- category: invariant
-  reason: "The failure check runs after the report so CI still publishes it; moving it loses the report"
+  reason: "The failure check must run after the report so CI still publishes it."
   preview: "// After the report, so CI still publishes it; a failing exit marks the…"
   hash: c78755da4a189b67
   lines: 1
 - category: contract
-  reason: "The server only adopts correlation ids of [A-Za-z0-9-]; other ids are dropped server-side"
-  preview: "/// The server only adopts correlation ids made of `[A-Za-z0-9-]`."
-  hash: d4451b67acca524e
-  lines: 1
-- category: contract
-  reason: "The parser reads ClickHouse query_id values built elsewhere in the corr-base-ulid and corr-hydration formats"
-  preview: "/// Recover `(phase, query index, seq)` from a correlation id or a Clic…"
-  hash: 772cfe24a2e6bcab
-  lines: 2
-- category: contract
-  reason: "The run line must stay first because orbit-perf.sh inserts a line after it"
+  reason: "Orbit-perf.sh inserts a line after the first report line, so the run line must stay first."
   preview: "/// Markdown report: the run line (kept first; orbit-perf.sh inserts a …"
   hash: c713085651f1abee
   lines: 3
-- category: invariant
-  reason: "Index-based percentile without interpolation keeps numbers comparable with earlier results"
-  preview: "/// Index-based percentile over a pre-sorted slice (no interpolation), …"
-  hash: b8b40fb7ce86c11a
-  lines: 2
 - category: contract
-  reason: "Rails base64-decodes the secret before signing, so the token must use the decoded key to validate"
+  reason: "Rails base64-decodes the secret before signing; without this the JwtValidator rejects the token."
   preview: "// Rails base64-decodes the secret before signing; mirror that so the"
   hash: 89737ea1802a05eb
   lines: 3
-- category: contract
-  reason: "CI parses this tab-separated output to check that the pinned ids exist"
-  preview: "/// Print `<entity>\\t<id>\\t<label>` per pinned node id, so CI can check…"
-  hash: da474c3a4d798916
-  lines: 1
-- category: contract
-  reason: "ClickHouse query_ids append the stage and a ULID after the correlation id"
-  preview: "// ClickHouse query_ids append the stage and a ULID after the correlati…"
-  hash: 2cf4e2ecd93718ca
-  lines: 1
 "crates/xtask/src/main.rs":
 - category: tool-read
-  reason: "Clap renders this doc comment as --help text, so removing it changes CLI output"
-  preview: "/// Table prefix (e.g., \"v1_\"; remote only)."
-  hash: 91304255c8f591ca
-  lines: 1
+  reason: "Clap doc comment is the loadtest subcommand help, including the required GKG_JWT_SECRET."
+  preview: "/// Run a gRPC load test against a running Orbit server, replaying the"
+  hash: cb4c8067437232f1
+  lines: 5
 - category: tool-read
-  reason: "Clap renders this doc comment as --help text, so removing it changes CLI output"
-  preview: "/// Print each scenario's `<entity>\\t<node id>\\t<label>` and exit witho…"
-  hash: 4ca2955f5955b411
+  reason: "Clap reads this doc comment as the --help text for the flag; deleting it blanks user-facing help."
+  preview: "/// Discarded rounds, shaped like measured ones, before measuring (0 = …"
+  hash: 105f5f8441c8b2aa
   lines: 1
-"crates/xtask/src/metrics_catalog.rs":
-- category: contract
-  reason: "The check is the CI gate that keeps dashboards and emitted metrics from drifting apart"
-  preview: "//! With `--check`, compares the regenerated output against the committ…"
-  hash: d0a2e437762a6db8
-  lines: 3
-- category: magic-value
-  reason: "The floor catches an accidental catalog truncation that would otherwise ship an incomplete dashboard inventory"
-  preview: "/// Sanity floor so an accidental truncation (e.g. a missing `v.extend(…"
-  hash: 415fbd17d15a4b77
-  lines: 3
-- category: contract
-  reason: "Jsonnet dashboard consumers read both the catalog fields and the computed Prometheus name"
-  preview: "/// Serialisable wrapper that carries every catalog field plus the comp…"
-  hash: 36bd1e31b65968ed
-  lines: 2
-"crates/xtask/src/migration_ledger.rs":
-- category: invariant
-  reason: "A version gap leaves an entry-less version that the migration path treats as a full rebuild"
-  preview: "// A gap would leave an entry-less version, which the migration path tr…"
-  hash: 6721709350aa51d0
-  lines: 2
-- category: invariant
-  reason: "A none entry may under-declare drift; its gate lives in MigrationLedger::validate in another file"
-  preview: "// A `none` entry may under-declare drift; its gate is the note check i…"
-  hash: 226fa3b804d2f723
-  lines: 1
-"crates/xtask/src/proto.rs":
-- category: invariant
-  reason: "A stale descriptor set stops enforcing buf.validate rules without error; the committed output must exist first"
-  preview: "/// Regenerates the prost types and descriptor set for the server"
-  hash: ff00d6b0f0948bec
-  lines: 9
-- category: invariant
-  reason: "Validate.proto must come from the loader's crate so compiled rules match the runtime validator"
-  preview: "// `validate.proto` comes from the crate the loader validates with, so …"
-  hash: d76d13c2dad7557e
-  lines: 2
-- category: upstream
-  reason: "Prost-build would emit Rust for the imported package; the loader brings its own types"
-  preview: "// Keeps prost-build from emitting Rust for the imported package; only"
-  hash: 75d9cc3039bdeec2
-  lines: 2
-- category: invariant
-  reason: "Two package versions let generated and validating rules diverge, which skips rules silently"
-  preview: "// Two versions in the graph means the generated rules and the validati…"
-  hash: 12fe86263fffa8a2
-  lines: 3
-"crates/xtask/src/query_docs.rs":
-- category: contract
-  reason: "The table is generated from the ontology between markers and must never be hand-edited"
-  preview: "//! Regenerates the auto-derivable tables in the query language referen…"
-  hash: bf2dc4bcaad9b0f5
-  lines: 24
-- category: magic-value
-  reason: "The floor makes an ontology-loading regression fail the check rather than wipe the table"
-  preview: "/// Sanity floor so an accidental ontology-loading regression (or an em…"
-  hash: f2ad7e2553180d26
-  lines: 2
-- category: contract
-  reason: "Keep in sync with the validator token-op lookup; an edge text index needs both changed together"
-  preview: "// Node-only by design: the validator's token-op gate keys off"
-  hash: 8eacd9d8f73b9b48
-  lines: 4
-- category: invariant
-  reason: "Duplicate or misordered markers would let a stale region survive while check reports up to date"
-  preview: "/// Replaces the content between the BEGIN/END markers with `table`, le…"
-  hash: 41a24c90baccccde
-  lines: 11
-"crates/xtask/src/synth/arrow_schema.rs":
-- category: contract
-  reason: "Single source of truth for the type mapping that two generators share; a copy would drift"
-  preview: "/// Single source of truth for Arrow→ClickHouse type mapping."
-  hash: d2d17724d0437a7d
-  lines: 2
-"crates/xtask/src/synth/clickhouse/schema.rs":
-- category: contract
-  reason: "Sort keys must match graph.sql, where each table has its own ORDER BY"
-  preview: "// Matches graph.sql where each table has its own ORDER BY/PK."
-  hash: 8832031a40061b77
-  lines: 1
-"crates/xtask/src/synth/config.rs":
-- category: invariant
-  reason: "The column order is query-optimal and validated against EDGE_RESERVED_COLUMNS at startup"
-  preview: "// Subset of EDGE_RESERVED_COLUMNS in query-optimal order; validated ag…"
-  hash: e5c946a5041db255
-  lines: 1
-- category: invariant
-  reason: "Serde requires queries_path but Default leaves it empty, so callers must validate before evaluation"
-  preview: "/// `queries_path` has no serde default so YAML deserialization enforce…"
-  hash: 7c34f8af99215ee4
-  lines: 2
-"crates/xtask/src/synth/constants.rs":
-- category: magic-value
-  reason: "The value is validated against the ontology at startup and must name a real node type"
-  preview: "/// Validated against the ontology at startup, so it must name a real n…"
-  hash: a1b2aeb1b806f725
-  lines: 1
-- category: magic-value
-  reason: "The fixed timestamp makes seeded runs reproducible; the literal is 2026-01-01T00:00:00Z"
-  preview: "/// Fixed \"now\" for seeded runs (2026-01-01T00:00:00Z) so timestamps ar…"
-  hash: 2f44f56ffb7d0597
-  lines: 1
-"crates/xtask/src/synth/evaluation/executor.rs":
-- category: magic-value
-  reason: "The 1 MB cap prevents memory exhaustion on rows with large column values"
-  preview: "/// Prevents memory exhaustion when queries return rows with large colu…"
-  hash: a01794c641a90e40
-  lines: 2
-- category: invariant
-  reason: "Path-finding queries need distinct start and end nodes, so ids are not reused per entity"
-  preview: "// For path-finding queries, ensure we don't reuse IDs for the same ent…"
-  hash: 12824cc9bbf503d7
-  lines: 2
-"crates/xtask/src/synth/evaluation/metadata.rs":
-- category: security
-  reason: "Secret handling: the stored URL must be sanitized and carry no credentials"
-  preview: "/// Sanitized, no credentials."
-  hash: 52362115049a1ec2
-  lines: 1
-"crates/xtask/src/synth/generator/dependency.rs":
-- category: contract
-  reason: "Edge direction follows the ontology naming convention; associations must not appear in the relationship config"
-  preview: "/// Edge directionality from the ontology naming convention:"
-  hash: 438b4388e3cd80f2
-  lines: 4
 "crates/xtask/src/synth/generator/fake_data.rs":
 - category: safety
-  reason: "SAFETY argument that only ASCII hex goes over ASCII zeros, so the buffer stays valid UTF-8"
+  reason: "SAFETY argument for the unsafe UTF-8 buffer write."
   preview: "// SAFETY: we only write ASCII hex digits (0-9, a-f) into positions"
   hash: 873ea7dab5423444
   lines: 2
-- category: invariant
-  reason: "String rules are ordered and the first match wins; reordering changes output silently"
-  preview: "// order matters — first match wins"
-  hash: 59d98169da1f49bb
-  lines: 1
-- category: magic-value
-  reason: "26 of 256 gives about 10 percent nulls; the literal needs that derivation"
-  preview: "// Use lowest bits for nullable check (10% ≈ 26/256)"
-  hash: c8921fb18fb7abaa
-  lines: 1
 "crates/xtask/src/synth/generator/run.rs":
 - category: upstream
-  reason: "DefaultHasher output can change across Rust builds, so seeds use FNV-1a and splitmix64"
+  reason: "DefaultHasher output can change across Rust builds, so seeds must use FNV-1a and splitmix64."
   preview: "/// Stable per-stream seed (FNV-1a + splitmix64); unlike DefaultHasher …"
   hash: 5f77bf0c05ba401d
-  lines: 1
-- category: contract
-  reason: "Production scopes an edge to the scoped entity's namespace; the synthetic data must copy that rule."
-  preview: "/// In production, edges are scoped to the namespace where the resource…"
-  hash: e80ae550bef2c932
-  lines: 5
-"crates/xtask/src/synth/generator/traversal.rs":
-- category: invariant
-  reason: "Compaction must run after relationship generation and before associations"
-  preview: "/// Call after relationship generation is complete, before associations."
-  hash: 176b5614fc004702
-  lines: 1
-- category: invariant
-  reason: "The paths exist only after compaction, so an earlier call returns None silently."
-  preview: "/// Available after compaction (populated during compact_with_aliases)."
-  hash: 989f2de1fca429bf
   lines: 1

@@ -1,282 +1,74 @@
 "crates/utils/arrow/src/lib.rs":
 - category: upstream
-  reason: "ClickHouse toJSONString(map(...)) stringifies all values, so extraction falls back to parsing"
-  preview: "/// Types that can be extracted from a [`ColumnValue`], with fallback"
-  hash: bbdfdb51e452c222
-  lines: 3
-- category: tool-read
-  reason: "Rustdoc runs the example as a doctest"
-  preview: "/// Extract as the requested type, parsing from string if needed."
-  hash: 0bdcbe95970898b7
-  lines: 9
-- category: tool-read
-  reason: "Rustdoc runs the example as a doctest"
-  preview: "/// Schema-driven Arrow RecordBatch builder."
-  hash: 68551294fcc54551
-  lines: 26
-- category: invariant
-  reason: "The keys buffer needs row capacity; at zero it doubles and keeps the slop"
-  preview: "// The keys buffer is one i32 per row, so it needs the row"
-  hash: 6f0e437f6efe9096
-  lines: 2
-- category: invariant
-  reason: "Every fill call must push exactly one value per column, or rows misalign"
-  preview: "/// Every call to `fill` must push exactly one value to each column."
-  hash: de974953e45401c3
-  lines: 1
-- category: invariant
-  reason: "Each row must push exactly one value per declared column, or rows misalign"
-  preview: "/// Write one row into `builder`. Must push exactly one value to"
-  hash: 0ff625e26c31aa3b
-  lines: 3
-- category: upstream
-  reason: "ClickHouse range-checks null temporal slots before it applies the column default"
+  reason: "ClickHouse range-checks null temporal slots before it applies the column default."
   preview: "/// Column type fixup for a RecordBatch before ClickHouse insertion."
   hash: 34598cc321514e3f
   lines: 5
-"crates/utils/arrow/src/logical_bytes.rs":
-- category: contract
-  reason: "The byte counting rules define customer-data bytes that billing reads"
-  preview: "/// Deterministic, split-invariant count of the customer-data bytes in …"
-  hash: 7ac6356d48f34498
-  lines: 12
 "crates/utils/src/archive.rs":
 - category: security
-  reason: "Every entry must share the first Gitaly archive root, which contains extraction"
-  preview: "// The first entry sets the Gitaly archive root (`<slug>-<ref>/`); all …"
-  hash: 09ff9eaf35d8e582
-  lines: 2
-- category: security
-  reason: "Deferring symlinks stops one from redirecting directory creation outside the target"
+  reason: "Deferring symlinks stops an archive symlink from redirecting directory creation outside the target."
   preview: "// Symlinks are deferred until all regular files and directories exist,…"
   hash: f4bd07f4c561d971
   lines: 3
-- category: upstream
-  reason: "Tar crate signals an empty or truncated body only by a truncation error on the first next(); code cannot show that meaning"
-  preview: "// False + a truncation-shaped error on the first `next()` means the bo…"
-  hash: fad4b622f7d680fb
-  lines: 2
-- category: invariant
-  reason: "PAX global headers would otherwise be read as the archive root and break root stripping silently"
-  preview: "// PAX metadata entries are not real files; XGlobalHeader would otherwi…"
-  hash: d59ddf951adc3691
-  lines: 2
 - category: security
-  reason: "Symlinks are never parsed and the within-root deferral is the security mechanism"
+  reason: "The within-root deferral is the source's symlink security mechanism and must stay."
   preview: "// A symlink is never a parse candidate — we'd be parsing the link, not"
   hash: 5a60eab264bb3827
   lines: 3
-- category: security
-  reason: "A containment escape is fatal while other filesystem errors only skip the entry"
-  preview: "// A containment escape (PermissionDenied from resolve_dest_within)"
-  hash: 1e30d46378106883
-  lines: 3
-- category: contract
-  reason: "Gitaly archives wrap entries in a <slug>-<ref>/ root; the layout comes from Gitaly, not this code"
-  preview: "/// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry re…"
-  hash: cb742260fe718d23
-  lines: 2
-- category: security
-  reason: "A PAX record can carry the real size, so the guard must use it or the file loads before rejection."
-  preview: "/// An entry can carry its real size in a PAX record with the base head…"
-  hash: 899d9ccecac99714
-  lines: 3
 "crates/utils/src/fs.rs":
 - category: security
-  reason: "Marks the module as the security-critical path-traversal guard"
-  preview: "//! Filesystem security utilities (safe directory creation, symlink"
-  hash: 13becb997c4145b7
-  lines: 3
-- category: security
-  reason: "Every user-supplied path read must route through this traversal guard; root must be canonical"
-  preview: "/// Canonicalize `path` and return it only if the real target lives"
-  hash: a87cbb0c714adb77
-  lines: 13
-- category: security
-  reason: "Path traversal guard: names the climb-out components the check must reject before a join under a root"
-  preview: "/// `true` when `path` has only normal components — safe to join under …"
-  hash: 91c9ffac1ee56c68
-  lines: 2
-- category: security
-  reason: "Containment rule: the resolved target must stay within root, else PermissionDenied; code cannot state the threat"
-  preview: "/// Resolve `dest` to its canonical form within `root`, creating parent…"
-  hash: 4264639ce465d229
-  lines: 2
-- category: security
-  reason: "Without the check create_dir_all follows planted symlinks outside the root"
+  reason: "Plain create_dir_all follows planted symlinks outside root; this check must not be simplified away."
   preview: "/// Create parent directories for `path`, validating that no existing"
   hash: 433abe7ae6eef3db
   lines: 7
 - category: security
-  reason: "The ancestor check exists to detect symlinks in existing components before create_dir_all"
-  preview: "/// Walk up from `path` to find the deepest ancestor that exists on dis…"
-  hash: ef893b2d69861fe0
-  lines: 4
-- category: security
-  reason: "The scan never short-circuits so a malicious archive cannot plant several escaping symlinks"
+  reason: "The scan must never short-circuit, or a malicious archive keeps escaping symlinks."
   preview: "/// Walk a directory tree and remove any symlink that resolves outside"
   hash: 0ddb04879c6f3520
   lines: 8
-- category: invariant
-  reason: "Concurrent cleanup can remove an entry after listing, so NotFound is skipped"
-  preview: "// Cleanup elsewhere can race us and remove it after listing."
-  hash: b7f197cf4e79e01e
-  lines: 1
-"crates/utils/src/fs_walk/stream.rs":
-- category: contract
-  reason: "Variant names are metric label values that dashboards read, so their snake_case form must not change"
-  preview: "/// Why a file was not loaded. Snake_case for metric labels."
-  hash: a6ccee411981c3f8
-  lines: 1
-- category: security
-  reason: "Path traversal guard: relative paths that climb out of the root must be rejected, not normalized"
-  preview: "/// Normalize a `/`-joined relative path: drop `.` segments, reject any…"
-  hash: 0920a68d37d9e564
-  lines: 2
-- category: contract
-  reason: "Callers treat this error as an empty repository, not a retryable failure; the type cannot show caller behavior"
-  preview: "/// The source produced no entries (empty or truncated archive); callers"
-  hash: 1733a26d8453c47b
-  lines: 2
-- category: invariant
-  reason: "Admit runs for excluded entries too so the total-bytes cap counts them; skipping it breaks the cap silently"
-  preview: "/// Charge aggregate counters; called for every entry (so excluded blobs"
-  hash: 7a05fef556a4fd72
-  lines: 2
-- category: invariant
-  reason: "On_header must not return Parse on a first pass because Parse needs bytes; the signature cannot enforce this"
-  preview: "/// Settle from path + size alone, before any bytes are read. `Some` is"
-  hash: 32da1ff1f98a5b3c
-  lines: 5
-"crates/utils/src/fs_walk/walk.rs":
-- category: upstream
-  reason: "Ignore crate defaults differ from git listing; hidden(false) would enumerate .git, which the code cannot explain"
-  preview: "// git's listing semantics (matching the prior gitalisk listing): .giti…"
-  hash: 908ee55fecfeed3f
-  lines: 3
 "crates/utils/src/markdown.rs":
 - category: contract
-  reason: "Segments escape the separator with a backslash so every consumer can split the FQN unambiguously"
-  preview: "/// Separator between FQN segments. A `#` or `\\` inside heading text or…"
-  hash: 7bb36046c0a7178d
-  lines: 3
-- category: contract
-  reason: "Must match GitLab's rendered fragment, which counts headings in block quotes and list items for duplicate suffixes"
-  preview: "/// GitLab's rendered fragment, whose duplicate suffixes also count"
-  hash: 60554b8e59914e94
-  lines: 2
-- category: upstream
-  reason: "Comrak front matter slice starts after the BOM and includes the blank line; a comrak behavior the code relies on"
-  preview: "/// `block` is comrak's front matter slice of `source`: it starts after…"
-  hash: 7442788210f55521
-  lines: 3
-- category: contract
-  reason: "Anchors must equal comrak Anchorizer output; the linear-time rewrite cannot show that equivalence"
-  preview: "/// Same anchors as comrak's `Anchorizer`, in linear time: each base re…"
-  hash: a09aa8af36fb21b3
-  lines: 2
-- category: contract
-  reason: "The scheme grammar comes from RFC 3986; the reference names the external rule the check follows"
-  preview: "/// RFC 3986: a scheme is a letter, then letters, digits, `+`, `-` or `…"
-  hash: 4f3a0b001db8ea87
-  lines: 1
-- category: contract
-  reason: "A lone CR ends a line as in CommonMark so line numbers agree with comrak positions"
-  preview: "/// Zero-based (line, byte column) positions. A lone `\\r` ends a line, …"
-  hash: 55ad6d8a86e1ad67
-  lines: 2
-- category: contract
-  reason: "Expected anchors come from the GitLab 19.6 renderer API; the fixture source cannot be read from the test"
+  reason: "Expected anchors come from the GitLab 19.6 renderer, not local output, so they must not be regenerated locally."
   preview: "/// Expected anchors come from GitLab 19.6's renderer (`POST /api/v4/ma…"
   hash: 8cbedea156b5e2c0
   lines: 1
 "crates/utils/src/safe_fs/mod.rs":
 - category: security
-  reason: "Callers pick trusted paths and reads are not immutable snapshots, a trust boundary"
+  reason: "Security caveat: reads verify size but are not immutable snapshots, so callers must not assume content is stable."
   preview: "//! Host file access without following symlinks in any path component."
   hash: c91a985f49ae7085
   lines: 2
 - category: security
-  reason: "File::read re-validates each component, so a swapped ancestor can only misreport metadata"
+  reason: "File::read re-validates each component, so a swapped ancestor can only misreport metadata."
   preview: "// Looks up the leaf by path, not relative to `parent`. `File::read` re…"
   hash: 1e97c030dd3928de
   lines: 2
 "crates/utils/src/safe_fs/syscalls.rs":
 - category: security
-  reason: "Names the kernel calls per OS that refuse symlinks in one open; code cannot show the threat"
+  reason: "The kernel enforces no-symlink in one open; a separate check would add a TOCTOU race."
   preview: "//! OS-specific file access refuses host symlinks, including parent com…"
   hash: 3c2e5b61b2dec7f6
   lines: 3
-"crates/utils/src/strings.rs":
-- category: invariant
-  reason: "The quoting drops control bytes and is not JSON-compatible, so it must not be used for fidelity"
-  preview: "/// Wraps a string in quotes, escaping backslash, quote, newline, carri…"
-  hash: 8843d0e1862e5a47
-  lines: 5
-- category: invariant
-  reason: "Interning after seal silently appends duplicates; the flag exists to catch that bug"
-  preview: "/// Set by [`StringPool::seal`]. Interning after that point silently ap…"
-  hash: b998cdd25e9638df
-  lines: 2
-- category: invariant
-  reason: "After shrink a repeat alloc appends a second copy and find misses older ones; behavior changes silently"
-  preview: "/// Free the dedup index for a write-once pool. After this a repeat `al…"
-  hash: 055437116ad11ee7
-  lines: 2
 "crates/utils/src/traversal_path/mod.rs":
-- category: contract
-  reason: "The pattern is RE2 syntax because ClickHouse evaluates it; another dialect would fail or mismatch"
-  preview: "/// Regex (RE2) matching the top-level `<org_id>/<namespace_id>/` prefi…"
-  hash: cc4f1ca8f8acfd33
-  lines: 2
 - category: security
-  reason: "An empty or malformed path makes startsWith match every row, breaking scope isolation"
+  reason: "An empty or malformed path makes startsWith match every row in the table."
   preview: "/// A traversal path is valid when it matches `<org_id>/<namespace_id>/`"
   hash: 17df840bcbdf3436
   lines: 5
 - category: security
-  reason: "A malformed path must never yield an empty prefix, which would match every row in the startsWith scan"
+  reason: "Returning None stops a malformed path from producing startsWith(traversal_path, '') that matches every row."
   preview: "/// The top-level-namespace prefix of a traversal path: the first two"
   hash: 064d8588df6c8273
   lines: 8
-"crates/utils/src/vfs/loading.rs":
-- category: invariant
-  reason: "The byte and file limits count different sets at different times; the code does not state this"
-  preview: "//! Concurrent loading uses per-shard locks for entries and content-add…"
-  hash: 74da96d61503101f
-  lines: 6
-- category: invariant
-  reason: "The callback runs synchronously at most once and only for Keep or Pending; callers rely on this"
-  preview: "/// Called synchronously at most once, only for `Keep` or `Pending`."
-  hash: 472a1fefab9b4317
-  lines: 1
-"crates/utils/src/vfs/mod.rs":
-- category: invariant
-  reason: "States cancellation, memory-limit scope, and last-entry-wins for duplicate paths; types cannot show them"
-  preview: "//! A repository as a read-only filesystem, loaded once from a source."
-  hash: 3efa5c862f57b493
-  lines: 20
 "crates/utils/src/vfs/scratch.rs":
 - category: upstream
-  reason: "Windows seek_read and seek_write may transfer fewer bytes than asked"
+  reason: "Windows seek_read/seek_write can transfer fewer bytes than asked, so the loop is required for correctness."
   preview: "// Windows seek_read/seek_write take an explicit offset but may transfer"
   hash: 18314c428131768f
   lines: 2
 "crates/utils/src/vfs/sources/archive.rs":
 - category: security
-  reason: "Entry paths are validated before the archive root is stripped; reversing the order weakens the traversal guard"
+  reason: "Entry paths must be validated before the archive root is stripped; reversing the order weakens the traversal guard."
   preview: "//! Gitaly tar.gz input is processed sequentially. Rejected bodies are …"
   hash: 91c3dd2b71683272
   lines: 3
-"crates/utils/src/vfs/sources/directory.rs":
-- category: upstream
-  reason: "Windows read_link returns drive, UNC, or verbatim prefixes that the catalog cannot hold."
-  preview: "/// Windows `read_link` returns absolute targets with a drive, UNC or `…"
-  hash: 1817f4435221f250
-  lines: 3
-"crates/utils/src/vfs_policies/code.rs":
-- category: magic-value
-  reason: "These names are GitLab's machine-translated docs trees; the list values need that reason"
-  preview: "/// GitLab's machine-translated documentation trees, skipped at any dep…"
-  hash: d290c94a73f1205c
-  lines: 2

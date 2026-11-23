@@ -1,104 +1,12 @@
-"crates/orbit-observability/src/billing/quota.rs":
-- category: contract
-  reason: "Dashboards read the decision and cache labels; the fail-open scope and miss-ratio caveat are not in code"
-  preview: "// `decision=fail_open` is GitLab.com only: CDot timed out, refused the…"
-  hash: 236d6c8ccfba6b82
-  lines: 10
-- category: upstream
-  reason: "Moka coalescing makes this counter lower than cache misses under concurrent load"
-  preview: "// Recorded once per check that reaches CDot, never while the circuit i…"
-  hash: cdf67f2ccf651765
-  lines: 5
 "crates/orbit-observability/src/buckets.rs":
-- category: magic-value
-  reason: "The tail past 10 s keeps p99 measurable under load; bucket values cannot say why"
-  preview: "/// General request-latency buckets (25 ms to 60 s). Suitable for most …"
-  hash: 0aaf3cf1c87fcbd7
-  lines: 2
 - category: invariant
-  reason: "The layout must stay a superset so old and new pods sum per le during a rollout"
+  reason: "The buckets must stay a superset of the old layout so mixed pods still sum per le during rollouts."
   preview: "/// Query latency buckets (10 ms to 60 s). A superset of the previous l…"
   hash: 662ccccde03e2fdd
   lines: 2
-- category: magic-value
-  reason: "The 5 ms to 1 s range fits paths where most observations sit under 100 ms"
-  preview: "/// Sub-second buckets (5 ms to 1 s) for paths where the bulk of observ…"
-  hash: b8f9e3d7e5ad3cd1
-  lines: 2
-- category: magic-value
-  reason: "The top bucket is 100 GB because peak memory and source bytes saturate a 10 GB ceiling"
-  preview: "/// Memory-usage buckets (1 MB through 100 GB). Used for per-query peak…"
-  hash: 5c2684b3ff2c76b9
-  lines: 3
 "crates/orbit-observability/src/indexer/etl.rs":
 - category: upstream
-  reason: "The By unit already adds the _bytes Prometheus suffix, so the OTel name omits it"
+  reason: "The By unit already adds _bytes; a .bytes token renames the series and breaks dashboards."
   preview: "// Drop the `.bytes` token from the OTel name: the `By` unit already ma…"
   hash: 07b2a6cbfd063724
-  lines: 3
-"crates/orbit-observability/src/indexer/migration.rs":
-- category: upstream
-  reason: "The Prometheus exporter appends _total, so the OTel names omit it"
-  preview: "//! Schema migration metrics."
-  hash: 5f4960a5d6bb8724
-  lines: 5
-- category: upstream
-  reason: "The Prometheus exporter appends _seconds itself, so the Otel name must stay suffix-free"
-  preview: "/// Wall-clock seconds since the current migrating version's row was cr…"
-  hash: 3ebcfc0926bc12e4
-  lines: 5
-"crates/orbit-observability/src/indexer/sdlc.rs":
-- category: upstream
-  reason: "The By unit already adds the _bytes Prometheus suffix, so the OTel name omits it"
-  preview: "// Drop `.bytes` from the name so the Prometheus `By` unit suffix doesn…"
-  hash: dc70c489523280ef
-  lines: 2
-"crates/orbit-observability/src/lib.rs":
-- category: contract
-  reason: "The xtask serialises the catalog into the dashboards metrics JSON that another repo reads"
-  preview: "//! Central catalogue of every metric the GKG Rust service emits."
-  hash: ba8a0da24bb05937
-  lines: 11
-- category: invariant
-  reason: "One shared Meter keeps every metric under a single instrumentation scope; code cannot show why it is shared"
-  preview: "/// Returning the same `Meter` instance means every `Metrics::new()` ac…"
-  hash: 18de159da0830bad
-  lines: 2
-"crates/orbit-observability/src/query/engine.rs":
-- category: contract
-  reason: "Dashboards read the closed failure_reason label set; code cannot list the values at the metric"
-  preview: "/// Counter for every query the compiler rejects before execution."
-  hash: 3ed847e45ca30e90
-  lines: 4
-"crates/orbit-observability/src/query/pipeline.rs":
-- category: upstream
-  reason: "Prometheus histogram child series end in _count, so histogram names must avoid that suffix"
-  preview: "//! Query pipeline metrics: per-stage latency, ClickHouse resource cons…"
-  hash: 504a8ff3a06fe274
-  lines: 7
-- category: contract
-  reason: "Outcome values must match the orbit_query analytics event"
-  preview: "/// `success`, `caller_error` or `server_error`, as in the `orbit_query…"
-  hash: 57d7e9a819dd8be3
-  lines: 1
-- category: upstream
-  reason: "The name avoids the _count child series that Prometheus histograms generate"
-  preview: "// Renamed from `gkg.query.pipeline.batch.count` to avoid colliding wit…"
-  hash: 68927e7efacd1268
-  lines: 2
-- category: upstream
-  reason: "The By unit already adds the _bytes Prometheus suffix, so the OTel name omits it"
-  preview: "// Dropped `_bytes` from the OTel name; the `By` unit already maps to t…"
-  hash: ba2d064a0cbf5fed
-  lines: 2
-- category: contract
-  reason: "Dashboards read this closed failure_reason set and the split from compile rejections"
-  preview: "/// Counter for every query that failed during pipeline execution (post…"
-  hash: 64d4ba36b5655164
-  lines: 5
-"crates/orbit-observability/src/types.rs":
-- category: contract
-  reason: "The name must match what opentelemetry-prometheus produces; no code here can show that external rule"
-  preview: "/// Must match the name `opentelemetry-prometheus` produces: dots to"
-  hash: 6783282c32f71fe2
   lines: 3
