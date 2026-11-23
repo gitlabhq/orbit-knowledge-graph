@@ -3,6 +3,7 @@ mod clickhouse;
 mod explain;
 mod operator;
 mod pattern;
+mod schema;
 mod terms;
 
 use query_engine::compiler;
@@ -23,6 +24,7 @@ use crate::query_scenario::{SecurityOverride, rejection_reason, shown_private_de
 struct Scenario {
     name: Option<String>,
     ontology_overlay: Option<String>,
+    schema_version_prefix: Option<String>,
     query: BTreeMap<String, String>,
     missing_frontends: BTreeMap<String, String>,
     language_differs: BTreeMap<String, String>,
@@ -131,6 +133,7 @@ impl Rejection {
 struct RawScenario {
     name: Option<String>,
     ontology_overlay: Option<String>,
+    schema_version_prefix: Option<String>,
     query: BTreeMap<String, String>,
     #[serde(default)]
     missing_frontends: BTreeMap<String, String>,
@@ -178,6 +181,7 @@ impl TryFrom<RawScenario> for Scenario {
         Ok(Self {
             name: raw.name,
             ontology_overlay: raw.ontology_overlay,
+            schema_version_prefix: raw.schema_version_prefix,
             query: raw.query,
             missing_frontends: raw.missing_frontends,
             language_differs: raw.language_differs,
@@ -237,6 +241,7 @@ struct HydrationSetup {
     dynamic: bool,
     path_segment_budget: Option<usize>,
     paths: BTreeMap<String, Vec<String>>,
+    columns: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Default, Deserialize)]
@@ -246,7 +251,8 @@ struct StateAssertions {
     query_plan: Option<PlanAssertions>,
     node: Option<Assertions>,
     query_config: Option<SettingsAssertions>,
-    hydration_plan: Option<compiler::HydrationKind>,
+    hydration_plan: Option<serde_json::Value>,
+    result_ctx: Option<serde_json::Value>,
     output: Option<OutputAssertions>,
 }
 
@@ -258,6 +264,7 @@ impl StateAssertions {
             ("node", self.node.is_some()),
             ("query_config", self.query_config.is_some()),
             ("hydration_plan", self.hydration_plan.is_some()),
+            ("result_ctx", self.result_ctx.is_some()),
             ("output", self.output.is_some()),
         ]
         .into_iter()
@@ -309,7 +316,42 @@ struct SettingsAssertions {
 #[serde(default, deny_unknown_fields)]
 struct OutputAssertions {
     sql: Option<SqlAssertions>,
+    parameterized_sql: Option<SqlAssertions>,
+    params: Vec<serde_json::Value>,
+    param_count: Option<usize>,
     indexes: Vec<IndexAssertion>,
+}
+
+fn empty_map_path(expected: &serde_json::Value, path: &str) -> Option<String> {
+    match expected {
+        serde_json::Value::Object(map) if map.is_empty() => Some(path.to_string()),
+        serde_json::Value::Object(map) => map.iter().find_map(|(key, value)| match value {
+            serde_json::Value::Object(listed) if key == crate::scenario::EXACT_KEYS => listed
+                .iter()
+                .find_map(|(key, value)| empty_map_path(value, &format!("{path}.{key}"))),
+            _ => empty_map_path(value, &format!("{path}.{key}")),
+        }),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .find_map(|(index, value)| empty_map_path(value, &format!("{path}[{index}]"))),
+        _ => None,
+    }
+}
+
+fn state_mismatch(
+    expected: &serde_json::Value,
+    state: &impl serde::Serialize,
+    label: &str,
+) -> Result<(), String> {
+    if let Some(path) = empty_map_path(expected, label) {
+        return Err(format!("{path} is an empty map, which matches anything"));
+    }
+    let actual = serde_json::to_value(state).map_err(|error| format!("{label}: {error}"))?;
+    match crate::scenario::subset_mismatch(label, expected, &actual) {
+        Some(mismatch) => Err(mismatch),
+        None => Ok(()),
+    }
 }
 
 impl SqlAssertions {
@@ -401,6 +443,11 @@ impl Assertions {
         let parse = |text: &str, path: &str, captures: &terms::Captures, binding: bool| {
             let parsed = pattern::parse(text)
                 .map_err(|error| format!("{label}.{path}: {error}\npattern: {text}"))?;
+            if let Some(operator) = pattern::childless(&parsed) {
+                return Err(format!(
+                    "{label}.{path}: ({operator} ...) has no child list, so it matches only a {operator} without children, which never occurs; add (_) or (...)\npattern: {text}"
+                ));
+            }
             if !binding {
                 for name in pattern::variables(&parsed)? {
                     if !captures.contains_key(&name) {
@@ -522,6 +569,7 @@ struct Models {
     remote: Arc<ClickHouseDataModel>,
     local: Arc<DuckDbDataModel>,
     local_database: DuckDbClient,
+    reads_other_cte: std::cell::Cell<bool>,
 }
 
 impl Models {
@@ -534,6 +582,7 @@ impl Models {
             remote: Arc::new(ClickHouseDataModel::derive(ontology.clone()).unwrap()),
             local: Arc::new(DuckDbDataModel::derive(ontology).unwrap()),
             local_database,
+            reads_other_cte: std::cell::Cell::default(),
         }
     }
 }
@@ -693,6 +742,7 @@ fn check_pipeline(
         frontend: language,
         index_exists: &index_exists,
         local_database: (backend == "duckdb").then_some(&models.local_database),
+        reads_other_cte: &models.reads_other_cte,
         label,
     };
     match (backend, language, scenario.hydration.as_ref()) {
@@ -756,15 +806,12 @@ fn hydration_input(
     };
     let mut input = normalize::normalize(input, model)?;
     input.query_type = compiler::input::QueryType::Hydration;
+    for (alias, columns) in &setup.columns {
+        hydration_node(&mut input, alias)?.columns =
+            Some(compiler::ColumnSelection::List(columns.clone()));
+    }
     for (alias, paths) in &setup.paths {
-        let node = input
-            .nodes
-            .iter_mut()
-            .find(|node| &node.id == alias)
-            .ok_or_else(|| {
-                compiler::QueryError::PipelineInvariant(format!("unknown hydration node '{alias}'"))
-            })?;
-        node.traversal_paths = paths
+        hydration_node(&mut input, alias)?.traversal_paths = paths
             .iter()
             .map(|path| orbit_utils::traversal_path::TraversalPath::new_unchecked(path.clone()))
             .collect();
@@ -778,12 +825,26 @@ fn hydration_input(
     ))
 }
 
+fn hydration_node<'a>(
+    input: &'a mut compiler::input::Input,
+    alias: &str,
+) -> compiler::Result<&'a mut compiler::input::InputNode> {
+    input
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == alias)
+        .ok_or_else(|| {
+            compiler::QueryError::PipelineInvariant(format!("unknown hydration node '{alias}'"))
+        })
+}
+
 struct Expectations<'a> {
     phases: &'a BTreeMap<String, StateAssertions>,
     rejection: Option<&'a Rejection>,
     frontend: &'a str,
     index_exists: &'a dyn Fn(&str, &str) -> bool,
     local_database: Option<&'a DuckDbClient>,
+    reads_other_cte: &'a std::cell::Cell<bool>,
     label: &'a str,
 }
 
@@ -816,14 +877,33 @@ impl Expectations<'_> {
             )),
             (Err(error), None) => failures.push(format!("{}: {error}", self.label)),
             (Ok(()), None) => {
-                if let (Some(database), Some(output)) = (self.local_database, ctx.output()) {
-                    let sql = output.base.render();
-                    if let Err(error) = database.query_arrow(&sql) {
-                        failures.push(format!(
-                            "{}: DuckDB rejects the SQL: {error}\n{sql}",
-                            self.label
-                        ));
+                match (self.local_database, ctx.output()) {
+                    (Some(database), Some(output)) => {
+                        let sql = output.base.render();
+                        if let Err(error) = database.query_arrow(&sql) {
+                            failures.push(format!(
+                                "{}: DuckDB rejects the SQL: {error}\n{sql}",
+                                self.label
+                            ));
+                        }
                     }
+                    (None, Some(output)) => {
+                        match clickhouse::check_cte_reads(&output.ast, &output.base.render()) {
+                            Ok(reads) => {
+                                if reads.reads_other {
+                                    self.reads_other_cte.set(true);
+                                }
+                                failures.extend(
+                                    reads
+                                        .failures
+                                        .into_iter()
+                                        .map(|read| format!("{}: {read}", self.label)),
+                                );
+                            }
+                            Err(error) => failures.push(format!("{}: {error}", self.label)),
+                        }
+                    }
+                    _ => {}
                 }
                 return (failures, ctx.take_output());
             }
@@ -933,17 +1013,19 @@ impl Expectations<'_> {
                 }),
             );
         }
-        if let Some(expected) = state.hydration_plan {
+        if let Some(assertions) = &state.hydration_plan {
             check(
                 "hydration_plan",
                 ctx.hydration_plan().as_ref().map(|plan| {
-                    if plan.kind() == expected {
-                        return Ok(());
-                    }
-                    Err(format!(
-                        "{label}.hydration_plan: {:?}, expected {expected:?}",
-                        plan.kind()
-                    ))
+                    state_mismatch(assertions, plan, &format!("{label}.hydration_plan"))
+                }),
+            );
+        }
+        if let Some(assertions) = &state.result_ctx {
+            check(
+                "result_ctx",
+                ctx.result_ctx().as_ref().map(|context| {
+                    state_mismatch(assertions, context, &format!("{label}.result_ctx"))
                 }),
             );
         }
@@ -964,16 +1046,60 @@ impl Expectations<'_> {
         output: &compiler::CompiledQueryContext,
         label: &str,
     ) -> Result<(), String> {
-        if assertions.sql.is_none() && assertions.indexes.is_empty() {
-            return Err(format!("{label}: needs sql or indexes"));
+        if assertions.sql.is_none()
+            && assertions.parameterized_sql.is_none()
+            && assertions.params.is_empty()
+            && assertions.param_count.is_none()
+            && assertions.indexes.is_empty()
+        {
+            return Err(format!(
+                "{label}: needs sql, parameterized_sql, params, or indexes"
+            ));
         }
-        let sql = &output.base.render();
         let scans = explain::emitted(&output.ast).to_string();
-        let mut failures = assertions
-            .sql
-            .as_ref()
-            .map(|checks| checks.check(sql, &format!("{label}.sql")))
-            .unwrap_or_default();
+        let mut failures = Vec::new();
+        for (field, checks, sql) in [
+            ("sql", &assertions.sql, output.base.render()),
+            (
+                "parameterized_sql",
+                &assertions.parameterized_sql,
+                output.base.sql.clone(),
+            ),
+        ] {
+            if let Some(checks) = checks {
+                failures.extend(checks.check(&sql, &format!("{label}.{field}")));
+            }
+        }
+        let params: Vec<_> = output
+            .base
+            .params
+            .values()
+            .filter_map(|param| serde_json::to_value(param).ok())
+            .collect();
+        for (index, expected) in assertions.params.iter().enumerate() {
+            let label = format!("{label}.params[{index}]");
+            if let Some(mismatch) = empty_map_path(expected, &label) {
+                failures.push(format!(
+                    "{mismatch} is an empty map, which matches anything"
+                ));
+            } else if !params
+                .iter()
+                .any(|param| crate::scenario::subset_mismatch(&label, expected, param).is_none())
+            {
+                failures.push(format!(
+                    "{label}: no bound parameter matches {expected}\nparams: {}",
+                    serde_json::Value::Array(params.clone())
+                ));
+            }
+        }
+        if let Some(count) = assertions.param_count
+            && params.len() != count
+        {
+            failures.push(format!(
+                "{label}.param_count: {} bound parameters, expected {count}",
+                params.len()
+            ));
+        }
         for index in &assertions.indexes {
             if !(self.index_exists)(&index.table, &index.name) {
                 failures.push(format!(
@@ -1032,9 +1158,42 @@ impl SettingsAssertions {
 }
 
 pub use clickhouse::run_index_explains;
+pub use schema::run_schema_dir;
+
+pub(crate) fn record_duckdb_fixtures(
+    directory: &Path,
+    coverage: &mut crate::query_scenario::coverage::Coverage,
+) {
+    let base = Arc::new(ontology::Ontology::load_embedded().unwrap());
+    for (_, scenario) in read_fixtures(directory) {
+        if !scenario.physical.contains_key("duckdb") {
+            continue;
+        }
+        let ontology = scenario.ontology_overlay.as_deref().map_or_else(
+            || Arc::clone(&base),
+            |name| Arc::new(crate::load_ontology_overlay(name)),
+        );
+        for (language, raw) in &scenario.query {
+            let frontend = match language.as_str() {
+                "json" => compiler::Frontend::JsonDsl,
+                _ => compiler::Frontend::Gql,
+            };
+            if let Ok(compiled) = compiler::compile_local(raw, frontend, &ontology) {
+                coverage.record(&compiled.ast);
+            }
+        }
+    }
+}
 
 pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
-    if let Err(failures) = check_dir(directory, ontology) {
+    let (mut failures, reads_other_cte) = check_fixtures(directory, ontology);
+    if !reads_other_cte {
+        failures.push(
+            "no ClickHouse fixture has a CTE statement that reads another CTE, so the CTE read check checks nothing"
+                .into(),
+        );
+    }
+    if !failures.is_empty() {
         panic!(
             "{} plan fixture failure(s):\n\n{}",
             failures.len(),
@@ -1043,24 +1202,37 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
     }
 }
 
-fn read_fixtures(directory: &Path) -> Vec<(std::path::PathBuf, Scenario)> {
+fn fixture_paths(directory: &Path) -> Vec<std::path::PathBuf> {
     let mut paths = Vec::new();
     crate::scenario::discover(directory, &mut paths);
     paths.sort();
     assert!(!paths.is_empty());
     paths
+}
+
+fn read_fixtures(directory: &Path) -> Vec<(std::path::PathBuf, Scenario)> {
+    fixture_paths(directory)
         .into_iter()
         .flat_map(|path| {
-            crate::scenario::read_cases::<Scenario>(&path)
+            crate::scenario::read_cases::<serde_json::Value>(&path)
                 .into_iter()
-                .map(move |(_, scenario)| (path.clone(), scenario))
+                .flat_map(|(_, case)| {
+                    crate::scenario::generate::expand(case, &["named_queries", "repeat"])
+                        .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+                })
+                .map(|case| {
+                    let scenario = serde_json::from_value(case)
+                        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+                    (path.clone(), scenario)
+                })
+                .collect::<Vec<_>>()
         })
         .collect()
 }
 
-fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), Vec<String>> {
-    let models = Models::derive(ontology);
-    let mut overlays = BTreeMap::new();
+fn check_fixtures(directory: &Path, ontology: Arc<ontology::Ontology>) -> (Vec<String>, bool) {
+    let models = Models::derive(Arc::clone(&ontology));
+    let mut variants = BTreeMap::new();
     let mut cases = 0;
     let mut passed = 0;
     let mut failures = Vec::new();
@@ -1078,11 +1250,20 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
             failures.push(format!("{}: {error}", path.display()));
             continue;
         }
-        let scenario_models = match &scenario.ontology_overlay {
-            Some(name) => &*overlays
-                .entry(name.clone())
-                .or_insert_with(|| Models::derive(Arc::new(crate::load_ontology_overlay(name)))),
-            None => &models,
+        let scenario_models = match (&scenario.ontology_overlay, &scenario.schema_version_prefix) {
+            (None, None) => &models,
+            (overlay, prefix) => &*variants
+                .entry((overlay.clone(), prefix.clone()))
+                .or_insert_with(|| {
+                    let ontology = overlay
+                        .as_deref()
+                        .map_or_else(|| (*ontology).clone(), crate::load_ontology_overlay);
+                    let ontology = match prefix {
+                        Some(prefix) => ontology.with_schema_version_prefix(prefix),
+                        None => ontology,
+                    };
+                    Models::derive(Arc::new(ontology))
+                }),
         };
         let failure_count = failures.len();
         failures.extend(check(&scenario, scenario_models, path));
@@ -1092,6 +1273,15 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
         }
     }
     println!("{passed}/{cases} plan fixtures passed");
+    let reads_other_cte = std::iter::once(&models)
+        .chain(variants.values())
+        .any(|models| models.reads_other_cte.get());
+    (failures, reads_other_cte)
+}
+
+#[cfg(test)]
+fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), Vec<String>> {
+    let (failures, _) = check_fixtures(directory, ontology);
     if failures.is_empty() {
         Ok(())
     } else {
@@ -1405,6 +1595,116 @@ fn rejections_check_the_phase_reason_and_message() {
 }
 
 #[test]
+fn state_assertions_match_serialized_state_by_json_path() {
+    let run = |physical: &str| {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("fields.yaml"),
+            format!(
+                "name: fields\nquery:\n  json: '{{\"query_type\":\"traversal\",\"nodes\":[{{\"id\":\"u\",\"entity\":\"User\",\"node_ids\":[1],\"filters\":{{\"username\":\"alice\"}}}}]}}'\n  gql: \"MATCH (u:User {{id: 1, username: 'alice'}}) RETURN u\"\nphysical:\n  clickhouse: {physical}\n"
+            ),
+        )
+        .unwrap();
+        let ontology = ontology::Ontology::new()
+            .with_nodes(["User"])
+            .with_fields("User", [("username", ontology::DataType::String)]);
+        check_dir(directory.path(), Arc::new(ontology))
+            .err()
+            .unwrap_or_default()
+            .join("\n")
+    };
+    assert_eq!(
+        run(
+            "{params: [{value: alice, data_type: String}, {value: 1, data_type: Int64}], param_count: 8, parameterized_sql: {contains: ['{p'], not_contains: [alice]}, result_context: {query_type: traversal, nodes: {$exact: {u: {entity_type: User, id_column: _orbit_u_id}}}, neighbors_center: null}, hydration: none}"
+        ),
+        ""
+    );
+    for (physical, expected) in [
+        (
+            "{params: [{value: alice, data_type: Int64}]}",
+            "output.params[0]: no bound parameter matches",
+        ),
+        (
+            "{param_count: 2}",
+            "output.param_count: 8 bound parameters, expected 2",
+        ),
+        ("{params: [{}]}", "output.params[0] is an empty map"),
+        (
+            "{result_context: {query_type: neighbors}}",
+            "result_ctx.query_type is \"traversal\", expected \"neighbors\"",
+        ),
+        (
+            "{result_context: {nodes: {u: {entity_type: Project}}}}",
+            "result_ctx.nodes.u.entity_type is \"User\", expected \"Project\"",
+        ),
+        (
+            "{result_context: {labels: {User: username}}}",
+            "result_ctx.labels.User is missing",
+        ),
+        (
+            "{hydration: {static: {u: {node_alias: u}}}}",
+            "hydration_plan is \"none\"",
+        ),
+        (
+            "{result_context: {nodes: {}}}",
+            "result_ctx.nodes is an empty map",
+        ),
+        (
+            "{result_context: {nodes: {$exact: {u: {entity_type: User}}, x: 1}}}",
+            "result_ctx.nodes: $exact cannot share a map with other keys",
+        ),
+        (
+            "{result_context: {nodes: {$exact: {}}}}",
+            "result_ctx.nodes.u is not listed in $exact",
+        ),
+    ] {
+        let failures = run(physical);
+        assert!(failures.contains(expected), "{physical}: {failures}");
+    }
+}
+
+#[cfg(test)]
+fn run_one(fixture: &str, ontology: ontology::Ontology) -> String {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("case.yaml"), fixture).unwrap();
+    check_dir(directory.path(), Arc::new(ontology))
+        .err()
+        .unwrap_or_default()
+        .join("\n")
+}
+
+#[test]
+fn schema_version_prefix_renames_the_tables_a_fixture_sees() {
+    let fixture = |prefix: &str| {
+        format!(
+            "name: prefix\n{prefix}query:\n  json: '{{\"query_type\":\"traversal\",\"nodes\":[{{\"id\":\"u\",\"entity\":\"User\",\"node_ids\":[1]}}]}}'\n  gql: 'MATCH (u:User {{id: 1}}) RETURN u'\nphysical:\n  clickhouse:\n    final_ast: {{expect: ['(Scan Table(v1_gl_user) AS u)']}}\n"
+        )
+    };
+    let ontology = || ontology::Ontology::new().with_nodes(["User"]);
+    assert_eq!(
+        run_one(&fixture("schema_version_prefix: v1_\n"), ontology()),
+        ""
+    );
+    assert!(run_one(&fixture(""), ontology()).contains("expected pattern not found"));
+}
+
+#[test]
+fn hydration_columns_replace_the_selected_columns() {
+    let fixture = |alias: &str| {
+        format!(
+            "name: columns\nhydration: {{columns: {{{alias}: []}}}}\nquery:\n  json: '{{\"query_type\":\"traversal\",\"nodes\":[{{\"id\":\"u\",\"entity\":\"User\",\"node_ids\":[1],\"columns\":[\"username\"]}}]}}'\n  gql: 'MATCH (u:User {{id: 1}}) RETURN u.username'\nphysical:\n  clickhouse:\n    emitted: {{expect: [\"(Project u.id AS u_id, 'User' AS u_entity_type, '{{}}' AS u_props (...))\"]}}\n"
+        )
+    };
+    let ontology = || {
+        ontology::Ontology::new()
+            .with_nodes(["User"])
+            .with_fields("User", [("username", ontology::DataType::String)])
+    };
+    assert_eq!(run_one(&fixture("u"), ontology()), "");
+    assert!(run_one(&fixture("x"), ontology()).contains("unknown hydration node 'x'"));
+}
+
+#[test]
 fn rejections_need_contains_for_every_language() {
     let parse = |contains: &str| {
         orbit_utils::yaml::from_str::<Scenario>(&format!(
@@ -1488,6 +1788,42 @@ fn patterns_match_structure_and_reject_malformed_input() {
         "(Scan $)",
     ] {
         assert!(pattern::parse(text).is_err());
+    }
+}
+
+#[test]
+fn patterns_on_operators_with_children_need_a_child_list() {
+    let actual =
+        pattern::parse("(Union ALL (Filter a.p = 1 (Scan Table(t) AS a)) (Scan Table(u) AS b))")
+            .unwrap();
+    let check = |expect: &str, reject: &str| {
+        Assertions {
+            expect: vec![expect.into()],
+            reject: vec![reject.into()],
+            ..Default::default()
+        }
+        .check(&actual, "childless")
+    };
+    check(
+        "(Union ALL (Filter a.p = 1 (Scan Table(t) AS a)) (...))",
+        "(Join ... (...))",
+    )
+    .unwrap();
+    for (expect, reject, operator) in [
+        ("(Union ALL (...))", "(Union ...)", "Union"),
+        ("(Union ALL (...))", "(Sort ...)", "Sort"),
+        ("(Union ALL)", "(Join ... (...))", "Union"),
+        (
+            "(Union ALL (Filter a.p = 1) (...))",
+            "(Join ... (...))",
+            "Filter",
+        ),
+    ] {
+        let error = check(expect, reject).unwrap_err();
+        assert!(
+            error.contains(&format!("({operator} ...) has no child list")),
+            "{error}"
+        );
     }
 }
 

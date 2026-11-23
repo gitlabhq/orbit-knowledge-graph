@@ -108,9 +108,9 @@ can intermittently miss freshly-written data.
 Read-only subtests receive a shared `&TestContext` and only query:
 
 ```rust
-async fn search_returns_correct_values(ctx: &TestContext) {
-    let resp = run_query(ctx, "...", &allow_all()).await;
-    resp.assert_node_count(5);
+async fn seeded_users_are_visible(ctx: &TestContext) {
+    let batches = ctx.query("SELECT id FROM gl_user").await;
+    assert_eq!(batches.iter().map(|batch| batch.num_rows()).sum::<usize>(), 5);
 }
 ```
 
@@ -121,7 +121,7 @@ Mutating subtests call their own seed and do additional writes. They go in the
 async fn writes_extra_data_then_queries(ctx: &TestContext) {
     seed(ctx).await;
     ctx.execute("INSERT INTO gl_note ...").await;
-    let resp = run_query(ctx, "...", &allow_all()).await;
+    let batches = ctx.query("SELECT id FROM gl_note").await;
     // ...
 }
 ```
@@ -153,16 +153,11 @@ every field they list when they cover every returned node of the entity.
 
 ### Example: single-entity traversal with filter and ordering
 
-```rust
-async fn search_filter_eq(ctx: &TestContext) {
-    let resp = run_query(ctx, r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User",
-                 "filters": {"state": "blocked"}}],
-        "order_by": "u.id",
-        "limit": 10
-    }"#, &allow_all()).await;
+Query scenarios build the view and run the assertions from YAML. Direct
+assertions take a view made with `for_query`:
 
+```rust
+fn search_filter_eq(resp: &ResponseView) {
     resp.assert_filter("User", "state", |n| {
         n.prop_str("state") == Some("blocked")
     });
@@ -173,17 +168,7 @@ async fn search_filter_eq(ctx: &TestContext) {
 ### Example: traversal with edges
 
 ```rust
-async fn traversal_edges(ctx: &TestContext) {
-    let resp = run_query(ctx, r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "g", "entity": "Group"}
-        ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-        "limit": 10
-    }"#, &allow_all()).await;
-
+fn traversal_edges(resp: &ResponseView) {
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_referential_integrity();
 }
@@ -273,6 +258,19 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `query` | map | one of `query`/`steps` | Query strings keyed by frontend (`json`, `gql`) |
 | `expect` | `QueryExpect` | with `query` | Assertions on the result |
 | `steps` | [`QueryStep`] | one of `query`/`steps` | Ordered steps, each with an optional `seed` (rows inserted before the step runs), a `query` map, and an `expect`. Use it when a later query must observe a write made after an earlier one |
+| `generate` | generator or [generators] | no | Seed rows built before the scenario runs (below) |
+
+`generate` takes one generator or a list. `kind: rows` appends `count` copies
+of `row` to the list at the dotted path `into`, such as a seed table or a
+redaction allow list. In each copy, a string that is exactly `$i` becomes the
+integer `start + index`, and `$i` inside a longer string becomes that number as
+text. `start` defaults to 0.
+
+```yaml
+generate:
+  - {kind: rows, into: config.extra_seed.gl_project, count: 900, start: 20001, row: {id: $i, traversal_path: "1/100/$i/"}}
+  - {kind: rows, into: config.redaction.allow.project, count: 900, start: 20001, row: $i}
+```
 
 #### `config` — `ScenarioConfig`
 
@@ -283,7 +281,7 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `unmerged_seed` | bool | Default `false`. For extra seed rows, stop background merges on their tables, disable insert optimization, insert each row as its own part, and skip `OPTIMIZE`. Uses physical table names, such as `gl_project`. |
 | `security` | preset name or inline `SecurityOverride` | Authorization context |
 | `redaction` | preset name or inline `RedactionConfig` | Entity-level redaction |
-| `duckdb` | bool | Default `false`. Also run the scenario in local mode on an embedded DuckDB, through `run_duckdb_dir` in `cargo test --test local`. The runner creates the local tables from the ontology, inserts the preset and `extra_seed` rows of those tables, and applies the same `expect`. Local mode has no security or redaction, so use it only for scenarios on local entities, such as `Definition` and `File`, with CALLS rows in `gl_edge`. |
+| `backends` | [`clickhouse`, `duckdb`] | Default `[clickhouse]`. The backends that run the scenario, each once. `duckdb` runs it in local mode on an embedded DuckDB, through `run_duckdb_dir` in `cargo test --test local`. The runner creates the local tables from the ontology and `ontology_overlay`, inserts the preset and `extra_seed` rows of those tables, and applies the same `expect`. Local mode has no security or redaction, so use it only for scenarios on local entities, such as `Definition` and `File`, with code edge rows in `gl_edge`. List only `duckdb` when ClickHouse behaves differently by an open bug. After the DuckDB scenarios run, every function, aggregate, time bucket unit, and construct that the DuckDB code generator renders must have appeared in some scenario's compiled query, except the entries of `EXCLUDED` in `query_scenario/coverage.rs`, which no DuckDB pipeline emits. An exclusion that a scenario or a DuckDB compiler fixture reaches, or that DuckDB no longer renders, fails the run. |
 
 Scenarios with the same `seed`, `extra_seed`, `unmerged_seed`, and `ontology_overlay` share one database. The runner builds it for the first case and drops it after the last. A scenario whose steps add seed rows gets its own database.
 
@@ -333,7 +331,7 @@ only IDs and the relationship type.
 | `group_columns` | {name: "node.property"} | Group column metadata |
 | `empty_aggregation` | bool | Assert empty aggregation result |
 | `row_count` | N | Ungrouped aggregation row count |
-| `row_values` | [{col: val}] | Ungrouped aggregation values by index |
+| `row_values` | [{col: val}] | Aggregation row values by index; numbers, strings, lists, and null compare exactly |
 | `aggregation_columns` | [{name, function, target, property}] | The exact, ordered aggregation `columns`; a missing `property` means the column has none |
 
 **Paths:**
@@ -392,7 +390,8 @@ Each format also checks its format name and version. TOON decodes to its JSON va
 | `rows` | `[{id, prop: val}]` | Per-node property assertions |
 
 Filter operators: `eq`, `in`, `starts_with`, `contains`, `ends_with`, `is_null`,
-`is_not_null`, `gte`, `lte`, `lt`.
+`is_not_null`, `gte`, `lte`, `lt`, and `max_chars`, which bounds the length of a
+text value in characters.
 
 Row values support `{repeat: str, count: N, suffix: str}` for expansion.
 

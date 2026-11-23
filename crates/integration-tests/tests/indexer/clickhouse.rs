@@ -215,6 +215,60 @@ async fn arrow_string_overflow_recovers_with_byte_cap() {
     assert_eq!(rows, 2148);
 }
 
+/// Forwards responses in 1 KiB pieces, 1 ms apart, so a plain response reaches
+/// the client in many small chunks, as it does over a real network.
+async fn throttling_proxy(upstream_url: &str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let upstream = upstream_url
+        .strip_prefix("http://")
+        .expect("test ClickHouse URL uses http")
+        .to_string();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        let (client, _) = listener.accept().await.unwrap();
+        let server = tokio::net::TcpStream::connect(upstream).await.unwrap();
+        let (mut client_read, mut client_write) = client.into_split();
+        let (mut server_read, mut server_write) = server.into_split();
+        tokio::spawn(async move { tokio::io::copy(&mut client_read, &mut server_write).await });
+        let mut piece = [0; 1024];
+        loop {
+            let read = server_read.read(&mut piece).await.unwrap_or(0);
+            if read == 0 || client_write.write_all(&piece[..read]).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    });
+    url
+}
+
+#[tokio::test]
+async fn streamed_read_keeps_every_byte_of_a_slow_plain_response() {
+    use futures::StreamExt;
+
+    let context = integration_testkit::TestContext::new(&[]).await;
+    let config = ClickHouseConfiguration {
+        url: throttling_proxy(&context.config.url).await,
+        ..context.config.clone()
+    };
+
+    // Small blocks put many Arrow message headers across chunk boundaries.
+    let mut batches = config
+        .build_client("graph")
+        .query("SELECT number FROM numbers(3200)")
+        .with_setting("enable_http_compression", "0")
+        .fetch_arrow_streamed(Some(16))
+        .await
+        .expect("query opens");
+    let mut rows = 0;
+    while let Some(batch) = batches.next().await {
+        rows += batch.expect("every batch decodes").num_rows();
+    }
+    assert_eq!(rows, 3200);
+}
+
 #[tokio::test]
 async fn connection_failure_returns_error() {
     let config = ClickHouseConfiguration {

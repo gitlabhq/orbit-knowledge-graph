@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use super::run_duckdb_dir;
 
 fn run_suite(query: Value, expect: &str) {
-    run_suite_with(json!({"duckdb": true}), query, expect);
+    run_suite_with(json!({"backends": ["duckdb"]}), query, expect);
 }
 
 fn run_suite_with(config: Value, query: Value, expect: &str) {
@@ -323,7 +323,7 @@ fn gql_format_expectations_check_text_and_table() {
 fn seed_presets_replace_the_base_dataset() {
     let query = json!({"gql": "MATCH (d:Definition) WHERE d.id >= 1 AND d.id <= 10 RETURN d.name"});
     run_suite_with(
-        json!({"duckdb": true, "seed": "solo"}),
+        json!({"backends": ["duckdb"], "seed": "solo"}),
         query.clone(),
         "nodes: {Definition: {ids: [9]}}",
     );

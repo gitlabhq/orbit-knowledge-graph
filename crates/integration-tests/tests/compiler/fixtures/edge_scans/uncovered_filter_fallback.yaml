@@ -62,3 +62,17 @@ cases:
         planned:
           expect: ["(CTE _ (Project a.id AS id (Filter a.state = 'opened', ... (Deduplicate Final (Scan Table(gl_merge_request) AS a)))))"]
           reject: ["(Filter _orbit_edge_0.source_tags HAS ANY ['state:opened'], ... (_))"]
+
+  - name: A link-table edge carries no mutable endpoint tags, so a merge request state filter stays on the node read
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","filters":{"state":{"eq":"merged"}}}],"relationships":[{"type":"REVIEWER","from":"u","to":"mr"}],"group_by":["u"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1})-[:REVIEWER]->(mr:MergeRequest {state: 'merged'}) RETURN u, count(mr) AS n LIMIT 10
+    logical:
+      expect: ["(Filter mr.state = 'merged' (NodeScan MergeRequest AS mr))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter mr.state = 'merged', mr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))"]
+          reject: ["(Filter _orbit_edge_0.target_tags HAS ANY ['state:merged'], ... (_))"]

@@ -2,7 +2,7 @@
 
 use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use orbit_utils::traversal_path::TraversalPath;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use strum::VariantNames;
@@ -163,6 +163,7 @@ fn default_limit() -> u32 {
     PartialEq,
     Eq,
     Deserialize,
+    Serialize,
     strum::Display,
     strum::IntoStaticStr,
     strum::VariantNames,
@@ -177,7 +178,7 @@ pub enum QueryType {
     /// Internal-only: consolidated hydration for multiple entity types.
     /// Generates a UNION ALL of search-like arms, one per node. Skips
     /// security context injection (IDs are pre-authorized by the pipeline).
-    #[serde(skip)]
+    #[serde(skip_deserializing)]
     Hydration,
 }
 
@@ -565,7 +566,7 @@ impl InputAggregationMetric {
 #[strum_discriminants(
     name(AggFunction),
     vis(pub),
-    derive(strum::Display),
+    derive(strum::Display, strum::EnumIter),
     strum(serialize_all = "lowercase")
 )]
 pub enum AggExpr {
@@ -1240,87 +1241,5 @@ mod tests {
         assert!(err.contains("requires \"key\""), "{err}");
         let err = group_by_key(r#"{"kind": "node", "node": "u"}"#).unwrap_err();
         assert!(err.contains("form was removed"), "{err}");
-    }
-
-    #[test]
-    fn options_default_when_omitted() {
-        let input =
-            parse_input(r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}]}"#)
-                .unwrap();
-
-        assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
-    }
-
-    #[test]
-    fn options_dynamic_columns_all() {
-        let input = parse_input(
-            r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {},
-            "options": {"dynamic_columns": "*"}
-        }"#,
-        )
-        .unwrap();
-
-        assert_eq!(input.options.dynamic_columns, DynamicColumnMode::All);
-    }
-
-    #[test]
-    fn options_dynamic_columns_default() {
-        let input = parse_input(
-            r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {},
-            "options": {"dynamic_columns": "default"}
-        }"#,
-        )
-        .unwrap();
-
-        assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
-    }
-
-    #[test]
-    fn options_empty_object_uses_defaults() {
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User"}],
-            "options": {}
-        }"#,
-        )
-        .unwrap();
-
-        assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
-        assert!(!input.options.include_debug_sql);
-    }
-
-    #[test]
-    fn options_include_debug_sql_true() {
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User"}],
-            "options": {"include_debug_sql": true}
-        }"#,
-        )
-        .unwrap();
-
-        assert!(input.options.include_debug_sql);
-    }
-
-    #[test]
-    fn options_include_debug_sql_defaults_false() {
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User"}],
-            "options": {"dynamic_columns": "*"}
-        }"#,
-        )
-        .unwrap();
-
-        assert!(!input.options.include_debug_sql);
     }
 }

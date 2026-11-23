@@ -5,6 +5,7 @@ import { AgentLog } from "../next/AgentLog";
 import { Capabilities } from "../next/Capabilities";
 import { CodeSearch, SOURCES } from "../next/CodeSearch";
 import { type Hop, HopField } from "../next/HopField";
+import { Scenes } from "../next/Scenes";
 import { SearchMap } from "../next/SearchMap";
 import { CORPUS, CROSS_SEARCHES, LATENCY, type Search } from "../next/searches";
 import { NEXT_PAGE } from "../sections";
@@ -38,13 +39,14 @@ function Hero() {
         <SearchMap search={search} anchor=".next-chat" region=".next-demo-viz" />
       </div>
       <p className="orbit-hero-title next-hero-title">
-        Search all of your code,
+        Search all of your code,{" "}
         <br />
         <span className="orbit-fade">and every tool around it.</span>
       </p>
       <div className="next-hero-demo flex w-full justify-center">
         <CodeSearch onSearch={setSearch} />
       </div>
+      <Scenes only={["error", "unwrap"]} />
     </section>
   );
 }
@@ -105,6 +107,7 @@ function NextPage() {
           <div className="ripple-nodes hop-nodes" role="img" aria-label="Your agent starts at an incident in incident.io, follows the alert in Grafana to a deploy in GitLab, reads the Slack thread behind it, finds the line of code with code search, and ships the merge request that fixes it." />
           <AgentLog lines={LOG} loop={LOOP} />
         </div>
+        <Scenes only={["why"]} />
         <p className="next-notice">
           This page contains information related to upcoming products, features, and functionality. It is important to note that the information presented is for informational purposes only. Please do not rely on this information for purchasing or planning purposes. The development, release, and timing of any products, features, or functionality may be subject to change or delay and remain at the sole discretion of GitLab Inc.
         </p>

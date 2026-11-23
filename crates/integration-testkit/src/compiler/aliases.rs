@@ -17,7 +17,11 @@ const ALIASES: &[(&str, &str, &str, &str)] = &[
     ("final_ast",    "clickhouse",           "security",        "node"),
     ("hydration",    "clickhouse",           "hydrate_plan",    "hydration_plan"),
     ("settings",     "clickhouse",           "settings",        "query_config"),
+    ("result_context", "clickhouse",         "result_contract", "result_ctx"),
     ("sql",          "clickhouse",           "codegen",         "output.sql"),
+    ("parameterized_sql", "clickhouse",      "codegen",         "output.parameterized_sql"),
+    ("params",       "clickhouse",           "codegen",         "output.params"),
+    ("param_count",  "clickhouse",           "codegen",         "output.param_count"),
     ("indexes",      "clickhouse",           "codegen",         "output.indexes"),
 ];
 

@@ -8,7 +8,7 @@ title: Get started with GitLab Orbit on GitLab Self-Managed
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
+- Tier: [Premium, Ultimate](https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/#trials-and-purchases)
 - Offering: GitLab Self-Managed
 
 {{< /details >}}
@@ -18,6 +18,7 @@ Set up all four before you install GitLab Orbit.
 
 ## Prerequisites
 
+- A Premium or Ultimate subscription with GitLab Orbit. GitLab Orbit is a [separate purchase](https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/#trials-and-purchases).
 - A GitLab version that your GitLab Orbit version supports. See [Version requirements](version-requirements.md).
 - Administrator access to the GitLab instance and to its PostgreSQL server.
 - A maintenance window for one PostgreSQL restart.

@@ -218,19 +218,21 @@ fn load_named_queries() -> Vec<SmokeCase> {
         named_queries::NamedQueries::load_from_dir(std::path::Path::new(NAMED_QUERIES_DIR))
             .unwrap_or_else(|e| panic!("load named queries from {NAMED_QUERIES_DIR}: {e}"));
 
-    let values = named_queries::BindingValues { current_user_id: 1 };
-    let spellings = [
-        (named_queries::Language::Json, Frontend::JsonDsl),
-        (named_queries::Language::Gql, Frontend::Gql),
-    ];
-    queries
-        .iter()
-        .flat_map(|query| {
-            spellings.map(|(language, frontend)| SmokeCase {
-                key: format!("named_query::{}::{language:?}", query.name),
-                query: query
-                    .render_language(language, &values, &query.example_parameters())
-                    .unwrap_or_else(|e| panic!("render named query `{}`: {e}", query.name)),
+    integration_testkit::named_query_examples(&queries, 1)
+        .unwrap_or_else(|e| panic!("render named query {e}"))
+        .into_iter()
+        .flat_map(|example| {
+            [
+                (
+                    example.json,
+                    named_queries::Language::Json,
+                    Frontend::JsonDsl,
+                ),
+                (example.gql, named_queries::Language::Gql, Frontend::Gql),
+            ]
+            .map(|(query, language, frontend)| SmokeCase {
+                key: format!("named_query::{}::{language:?}", example.name),
+                query,
                 expects_error: false,
                 frontend,
             })

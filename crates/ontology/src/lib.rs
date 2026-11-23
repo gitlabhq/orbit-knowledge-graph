@@ -1507,7 +1507,9 @@ impl Ontology {
     /// write path (indexer) derive from it.
     ///
     /// - A standalone edge projects `column` only when the matching literal
-    ///   endpoint maps its ontology property to an extracted input field.
+    ///   endpoint maps an immutable ontology property to an extracted input
+    ///   field. Its rows change only with the link row, so a copy of a
+    ///   mutable property would go stale.
     /// - An FK edge projects only on the side holding the key.
     /// - A node-pipeline edge projects only the pipeline's own node, on the
     ///   side that names it literally; derived-entity edges project nothing.
@@ -1535,6 +1537,7 @@ impl Ontology {
                                         .iter()
                                         .find(|field| field.name == *property_name)
                                 })
+                                .filter(|field| !field.mutable)
                                 .and_then(|field| field.column_name())
                                 == Some(column)
                         })
@@ -2038,6 +2041,29 @@ mod tests {
         assert!(ontology.edge_projects_column("HAS_NOTE", "Note", Target, "confidential"));
         assert!(ontology.edge_projects_column("CREATOR", "Project", Target, "archived"));
         assert!(ontology.edge_projects_column("CALLS", "Definition", Source, "definition_type"));
+    }
+
+    #[test]
+    fn link_table_edges_copy_only_immutable_endpoint_properties() {
+        use crate::archive::OntologyArchive;
+        for version in OntologyArchive::bundled_versions().unwrap() {
+            let archive = OntologyArchive::bundled(version).unwrap().unwrap();
+            let ontology = archive.load_ontology().unwrap();
+            for copy in ontology.denormalized_properties() {
+                if !ontology.has_edge_etl(&copy.relationship_kind) {
+                    continue;
+                }
+                let node = ontology.get_node(&copy.node_kind).unwrap();
+                let field = node.fields.iter().find(|f| f.name == copy.property_name);
+                assert!(
+                    field.is_some_and(|field| !field.mutable),
+                    "v{version}: {} copies mutable {}.{}",
+                    copy.relationship_kind,
+                    copy.node_kind,
+                    copy.property_name
+                );
+            }
+        }
     }
 
     #[test]

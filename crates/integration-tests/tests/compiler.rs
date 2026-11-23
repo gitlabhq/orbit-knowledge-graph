@@ -9,3 +9,11 @@ fn yaml_compiler_fixtures() {
         Arc::new(ontology::Ontology::load_embedded().unwrap()),
     );
 }
+
+#[test]
+fn yaml_schema_fixtures() {
+    integration_testkit::compiler::run_schema_dir(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/compiler/schema"),
+        &ontology::Ontology::load_embedded().unwrap(),
+    );
+}
