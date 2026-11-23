@@ -1,4 +1,5 @@
 mod context;
+mod failure_log;
 mod gitlab_instance;
 mod tracker;
 

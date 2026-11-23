@@ -5,6 +5,8 @@ use labkit_events::StructuredEvent;
 use orbit_server_config::AnalyticsConfig;
 use tokio::time::{Instant, MissedTickBehavior};
 
+use crate::failure_log::{FAILURE_LOG_INTERVAL, FailureAction, FailureLog};
+
 const APP_ID: &str = "gkg-server";
 const FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -15,6 +17,7 @@ pub trait AnalyticsTracker: Send + Sync {
 #[derive(Clone)]
 pub struct SnowplowAnalyticsTracker {
     tracker: Arc<labkit_events::Tracker>,
+    failure_log: Arc<FailureLog>,
 }
 
 impl SnowplowAnalyticsTracker {
@@ -22,6 +25,7 @@ impl SnowplowAnalyticsTracker {
         let tracker = labkit_events::Tracker::builder(collector_url, app_id).build()?;
         Ok(Self {
             tracker: Arc::new(tracker),
+            failure_log: Arc::new(FailureLog::new(FAILURE_LOG_INTERVAL)),
         })
     }
 
@@ -81,12 +85,41 @@ impl SnowplowAnalyticsTracker {
 
 impl AnalyticsTracker for SnowplowAnalyticsTracker {
     fn track(&self, event: StructuredEvent) {
-        if let Err(e) = self.tracker.track_structured_event(event) {
-            orbit_log_fields::error!(
+        let e = match self.tracker.track_structured_event(event) {
+            Ok(_) => {
+                if let Some(recovery) = self.failure_log.record_success(std::time::Instant::now) {
+                    orbit_log_fields::info!(
+                        safe(ERROR_COUNT) = recovery.failures,
+                        safe(FAILING_FOR_SECS) = recovery.failing_for_secs,
+                        "analytics events are being queued again"
+                    );
+                }
+                return;
+            }
+            Err(e) => e,
+        };
+        match self.failure_log.record_failure(std::time::Instant::now()) {
+            FailureAction::LogFirst { suppressed } => orbit_log_fields::error!(
+                safe(ERROR_TYPE) = e.kind(),
+                expanded(ERROR_MESSAGE) = %e,
+                safe(SUPPRESSED) = suppressed,
+                "failed to track analytics event; repeated failures are summarised at most once per 60s"
+            ),
+            FailureAction::Suppress => orbit_log_fields::debug!(
                 safe(ERROR_TYPE) = e.kind(),
                 expanded(ERROR_MESSAGE) = %e,
                 "failed to track analytics event"
-            );
+            ),
+            FailureAction::LogSummary {
+                suppressed,
+                failing_for_secs,
+            } => orbit_log_fields::error!(
+                safe(ERROR_TYPE) = e.kind(),
+                expanded(ERROR_MESSAGE) = %e,
+                safe(SUPPRESSED) = suppressed,
+                safe(FAILING_FOR_SECS) = failing_for_secs,
+                "failed to track analytics event; still failing"
+            ),
         }
     }
 }

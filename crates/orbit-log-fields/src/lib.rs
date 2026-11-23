@@ -134,6 +134,7 @@ pub mod safe {
         FILE_COUNT = "file_count";
         ERROR_COUNT = "error_count";
         SKIPPED_COUNT = "skipped_count";
+        SUPPRESSED = "suppressed";
         ENTITY_COUNT = "entity_count";
         PROJECT_COUNT = "project_count";
         INDEXED_PROJECT_COUNT = "indexed_project_count";
@@ -173,6 +174,7 @@ pub mod safe {
         WRITE_DURATION_S = "write_duration_s";
         TIMEOUT_S = "timeout_s";
         RETRY_DELAY_S = "retry_delay_s";
+        FAILING_FOR_SECS = "failing_for_secs";
         EXPIRES_AT = "expires_at";
         REFRESH_AT = "refresh_at";
         WATERMARK = "watermark";
