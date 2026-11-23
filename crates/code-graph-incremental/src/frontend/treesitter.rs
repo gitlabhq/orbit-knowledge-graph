@@ -393,7 +393,7 @@ mod tests {
         .unwrap();
         assert_eq!(error.label, "parse");
         assert!(error.cancelled);
-        assert_eq!(error.to_string(), "tree-sitter cancelled");
+        assert_eq!(error.to_string(), "parse cancelled");
         assert_eq!(error.path, "large.py");
         assert_eq!(error.budget, Duration::from_millis(u64::MAX));
         assert!(checks.load(Ordering::Relaxed) >= 2);

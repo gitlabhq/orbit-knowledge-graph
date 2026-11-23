@@ -247,7 +247,7 @@ mod tests {
             [
                 "a.py reached 1100 in depth against a limit of 1024",
                 "a.py had 1000 bytes of stack left against a reserve of 2000",
-                "tree-sitter returned no result for a.py",
+                "parse returned no result for a.py",
             ]
         );
     }
