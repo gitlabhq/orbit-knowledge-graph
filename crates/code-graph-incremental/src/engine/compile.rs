@@ -778,9 +778,10 @@ impl<'a> Loader<'a> {
         })
     }
 
-    /// A rewrite or tag pair's value, `[template | + t1 + t2] [unique P]
-    /// [#key[@kind]=value]...`: a `build` per template, and a `tag` per
-    /// annotation not set on a replacing build.
+    /// A rewrite or tag pair's value: a call, `name(...)`, read as an
+    /// expression; or `[template | + t1 + t2] [unique P] [#key[@kind]=value]...`,
+    /// a `build` per template and a `tag` per annotation not set on a
+    /// replacing build.
     fn rewrite(
         &self,
         pair: &Pair,
@@ -793,6 +794,13 @@ impl<'a> Loader<'a> {
         let Value::String(value) = &pair.value else {
             return Err(LoadError("a rewrite is pattern: template".into()));
         };
+        let head = value.split('(').next().unwrap_or("");
+        if head.len() < value.len()
+            && !head.is_empty()
+            && head.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+        {
+            return self.parse(value, slots, true);
+        }
         let (body, notes) = split_notes(value);
         let (body, unique) = match body.find(" unique ") {
             Some(i) => (body[..i].trim(), Some(body[i + " unique ".len()..].trim())),

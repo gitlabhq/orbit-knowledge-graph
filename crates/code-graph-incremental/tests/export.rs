@@ -734,3 +734,28 @@ fn exporting_some_trees_matches_the_full_export_of_those_files() {
     assert_eq!(rows(table(&partial, "gl_edge"), &edge), touching);
     assert!(touching.iter().any(|row| row[1] == "CALLS"));
 }
+
+#[test]
+fn a_markdown_code_fence_indexes_its_language_in_place() {
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::write(
+        repo.path().join("README.md"),
+        "# Usage\n\n```python\ndef greet(name):\n    return name\n```\n",
+    )
+    .unwrap();
+    let engine = Engine::family(SupportLang::Markdown).build().unwrap();
+    let ontology = Ontology::load_embedded().unwrap();
+    let walked = common::walk(repo.path());
+    let exported = export_with(
+        &engine,
+        &walked,
+        &ontology,
+        &ExportConfig::default(),
+        envelope(),
+    )
+    .unwrap();
+    let definitions = column(table(&exported, "gl_definition"), "name");
+    assert!(definitions.iter().any(|d| d == "greet"), "{definitions:?}");
+    let files = column(table(&exported, "gl_file"), "path");
+    assert_eq!(files, ["README.md"]);
+}

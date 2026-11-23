@@ -11,6 +11,9 @@ canonicalize:
   - stage: tag-defs
     rewrite:
       - '(__def (__section))': '#scoped=true #definition_span=true'
+  - stage: embed
+    rewrite:
+      - '(code_block $I:code_info)': 'parse($ROOT, @$I)'
 
 display:
   - stage: fqn

@@ -1,1 +1,2 @@
-normalize: []
+normalize:
+  - '(__region $ROOT:(__source_file $$$C))': '$$$C'

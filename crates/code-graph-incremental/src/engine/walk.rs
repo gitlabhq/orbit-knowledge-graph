@@ -5,7 +5,7 @@
 
 use indextree::NodeId;
 use rayon::prelude::*;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
 use super::pattern::{self, Cap, Pat};
@@ -31,28 +31,100 @@ pub fn run_tree<S: Store>(
     budget: &Sentinel,
 ) -> Result<(Vec<Edge>, Outputs), Killed> {
     let file = tree_budget(phase, engine, &tree.label);
-    let rules = rules.unwrap_or_else(|| engine.rules_index(&tree.label));
-    let on = On {
-        phase,
-        rules,
-        engine,
-        graph,
-        fi,
-        budget,
-        file: &file,
-    };
+    let own = rules.unwrap_or_else(|| engine.rules_index(&tree.label));
     let (mut edges, mut outputs) = (Vec::new(), Outputs::default());
-    for pass in phase.passes(rules) {
-        settle(|| {
-            if !(on.walk(pass, tree, &mut edges, &mut outputs)? && pass.repeat) {
-                return Ok(false);
+    let mut done = FxHashSet::default();
+    let mut host = true;
+    loop {
+        let pending: Vec<_> = regions(tree, engine, own)
+            .into_iter()
+            .enumerate()
+            .filter(|(at, (root, _))| match at {
+                0 => std::mem::take(&mut host),
+                _ => done.insert(*root),
+            })
+            .map(|(_, region)| region)
+            .collect();
+        if pending.is_empty() {
+            break;
+        }
+        for (region, rules) in pending {
+            let on = On {
+                phase,
+                rules,
+                region,
+                engine,
+                graph,
+                fi,
+                budget,
+                file: &file,
+            };
+            for pass in phase.passes(rules) {
+                settle(|| {
+                    if !(on.walk(pass, tree, &mut edges, &mut outputs)? && pass.repeat) {
+                        return Ok(false);
+                    }
+                    budget.check()?;
+                    file.check()?;
+                    Ok(true)
+                })?;
             }
-            budget.check()?;
-            file.check()?;
-            Ok(true)
-        })?;
+        }
     }
     Ok((edges, outputs))
+}
+
+/// A tree's regions: the tree itself under its own rules, then each region
+/// node under the rules of the frontend that built it, in source order.
+fn regions<S: Store>(tree: &Tree<S>, engine: &Engine, own: usize) -> Vec<(u32, usize)> {
+    let lang = &engine.lang;
+    let (kind, key) = (lang.tree_kinds().region, lang.syms.intern(REGION));
+    let mut out = vec![(HOST, own)];
+    for c in tree.root().descendants().filter(|c| c.kind() == kind) {
+        let found = c
+            .tag(key)
+            .and_then(|name| engine.frontend_named(lang.syms.resolve(name)));
+        if let Some(mounted) = found {
+            out.push((c.index(), mounted.rules));
+        }
+    }
+    out
+}
+
+/// The region of a tree's own nodes, whatever its root is.
+const HOST: u32 = u32::MAX;
+
+/// The nodes of `region` in walk order: those whose nearest region at or
+/// above them is it.
+fn region_nodes<S: Store>(
+    tree: &Tree<S>,
+    regions: &[(u32, usize)],
+    region: u32,
+    post: bool,
+) -> Vec<u32> {
+    let nodes = order(tree, post);
+    if regions.len() == 1 {
+        return nodes;
+    }
+    let roots: FxHashSet<u32> = regions.iter().map(|(r, _)| *r).collect();
+    let root = tree.root();
+    let mut of: FxHashMap<u32, u32> = FxHashMap::default();
+    of.insert(root.index(), HOST);
+    for c in root.descendants() {
+        let parent = c.parent().map_or(HOST, |p| of[&p.index()]);
+        of.insert(
+            c.index(),
+            if roots.contains(&c.index()) {
+                c.index()
+            } else {
+                parent
+            },
+        );
+    }
+    nodes
+        .into_iter()
+        .filter(|n| of.get(n) == Some(&region))
+        .collect()
 }
 
 /// Runs a phase on a family's files, the project tree last in `trees`, with
@@ -128,19 +200,27 @@ pub fn run_trees(
     let found: Vec<Result<(Vec<Edge>, Outputs), Killed>> = (0..walk)
         .into_par_iter()
         .map(|fi| {
-            let file = tree_budget(phase, engine, &trees[fi].label);
-            let rules = engine.rules_index(&trees[fi].label);
-            let mut run = Run::new(trees, fi as u32, rules, engine, phase, &scope, &file);
-            run.graph = Some(graph);
-            run.graph_fi = fi as u32;
-            run.indexed = Some(&indexed);
-            run.files = files;
-            run.project = project;
-            run.start_modules();
-            for pass in phase.passes(rules) {
-                fire_from(&mut run, pass, &order(&trees[fi], pass.post), 0);
+            let tree = &trees[fi];
+            let file = tree_budget(phase, engine, &tree.label);
+            let regions = regions(tree, engine, engine.rules_index(&tree.label));
+            let (mut edges, mut outputs) = (Vec::new(), Outputs::default());
+            for &(region, rules) in &regions {
+                let mut run = Run::new(trees, fi as u32, rules, engine, phase, &scope, &file);
+                run.graph = Some(graph);
+                run.graph_fi = fi as u32;
+                run.indexed = Some(&indexed);
+                run.files = files;
+                run.project = project;
+                run.start_modules();
+                for pass in phase.passes(rules) {
+                    let nodes = region_nodes(tree, &regions, region, pass.post);
+                    fire_from(&mut run, pass, &nodes, 0);
+                }
+                let (e, o) = run.end()?;
+                edges.extend(e);
+                outputs.merge(o);
             }
-            run.end()
+            Ok((edges, outputs))
         })
         .collect();
     let (mut edges, mut outputs) = (Vec::new(), Outputs::default());
@@ -156,6 +236,8 @@ pub fn run_trees(
 struct On<'a> {
     phase: &'a Phase,
     rules: usize,
+    /// The region the walk covers: the tree's root or a region node.
+    region: u32,
     engine: &'a Engine,
     graph: Option<&'a Graph>,
     fi: u32,
@@ -174,7 +256,8 @@ impl On<'_> {
         edges: &mut Vec<Edge>,
         outputs: &mut Outputs,
     ) -> Result<bool, Killed> {
-        let nodes = order(tree, pass.post);
+        let regions = regions(tree, self.engine, self.rules);
+        let nodes = region_nodes(tree, &regions, self.region, pass.post);
         let (mut at, mut replaced) = (0, false);
         while at < nodes.len() {
             let writes = {
@@ -200,7 +283,7 @@ impl On<'_> {
                 outputs.merge(out);
                 writes
             };
-            replaced |= commit(tree, pass, &self.engine.lang, writes);
+            replaced |= commit(tree, pass, self.engine, self.file, writes);
         }
         Ok(replaced)
     }
@@ -236,7 +319,14 @@ fn fire_from<'t, S: Store>(
 
 /// Applies one node's tree writes in order; whether a build replaced it.
 /// Builds read their case's captures before any write lands.
-fn commit<S: Store>(tree: &mut Tree<S>, pass: &Pass, lang: &Lang, writes: Vec<Write>) -> bool {
+fn commit<S: Store>(
+    tree: &mut Tree<S>,
+    pass: &Pass,
+    engine: &Engine,
+    budget: &Sentinel,
+    writes: Vec<Write>,
+) -> bool {
+    let lang = &engine.lang;
     let mut caps: Vec<Vec<Cap<NodeId>>> = writes
         .iter()
         .filter_map(|w| match w {
@@ -250,7 +340,7 @@ fn commit<S: Store>(tree: &mut Tree<S>, pass: &Pass, lang: &Lang, writes: Vec<Wr
                     *at,
                 ))
             }
-            Write::Tag { .. } => None,
+            Write::Tag { .. } | Write::Parse { .. } => None,
         })
         .collect::<Vec<_>>();
     caps.reverse();
@@ -259,6 +349,11 @@ fn commit<S: Store>(tree: &mut Tree<S>, pass: &Pass, lang: &Lang, writes: Vec<Wr
             Write::Tag { at, key, on, val } => {
                 let at = first_of_kind(tree, at, on);
                 tree.set_tag(at, key, val);
+            }
+            Write::Parse { at, frontend } => {
+                let tree = S::writable(tree).expect("a phase that parses runs on mutable trees");
+                tree.indexes.clear();
+                embed(tree, engine, at, frontend, budget);
             }
             Write::Build { template, at, syms } => {
                 let t = &pass.templates[usize::from(template)];
@@ -272,6 +367,73 @@ fn commit<S: Store>(tree: &mut Tree<S>, pass: &Pass, lang: &Lang, writes: Vec<Wr
         }
     }
     false
+}
+
+/// How deep regions nest: a parse under this many is skipped.
+const MAX_REGIONS: usize = 8;
+
+/// Parses node `at`'s text with the frontend `name` names and grafts its tree
+/// under the node, inside a region node tagged with the name.
+fn embed(tree: &mut Tree<Mutable>, engine: &Engine, at: u32, name: u32, budget: &Sentinel) {
+    let lang = &engine.lang;
+    let region = lang.tree_kinds().region;
+    let cursor = tree.cursor(at);
+    let depth = std::iter::once(cursor)
+        .chain(cursor.ancestors())
+        .filter(|c| c.kind() == region)
+        .count();
+    let Some(mounted) = engine.frontend_named(lang.syms.resolve(name)) else {
+        return;
+    };
+    if depth >= MAX_REGIONS {
+        return;
+    }
+    let target = tree.storage.id(at);
+    let base = *tree.node(target);
+    let text = tree.source[base.start as usize..base.end as usize].to_owned();
+    let label = tree.label.clone();
+    let Ok((sub, _)) = mounted
+        .frontend
+        .parse(&text, &label, lang, &engine.limits, budget)
+    else {
+        return;
+    };
+    let wrapper = tree.append(
+        target,
+        crate::tree::Node {
+            kind: region,
+            named: true,
+            sym: 0,
+            ..base
+        },
+    );
+    tree.set_tag(Tree::to_raw(wrapper), lang.syms.intern(REGION), name);
+    let root = tree.append(wrapper, shifted(*sub.node(sub.root), &base));
+    let mut stack = vec![(sub.root, root)];
+    while let Some((from, into)) = stack.pop() {
+        for child in from.children(&sub.storage.0) {
+            let id = tree.append(into, shifted(*sub.node(child), &base));
+            stack.push((child, id));
+        }
+    }
+}
+
+/// The tag a region node carries: the name of the frontend that built it.
+pub(super) const REGION: &str = "region";
+
+/// A node of a tree parsed from `base`'s text, placed in `base`'s file.
+fn shifted(mut node: crate::tree::Node, base: &crate::tree::Node) -> crate::tree::Node {
+    if node.start_row == 0 {
+        node.start_col += base.start_col;
+    }
+    if node.end_row == 0 {
+        node.end_col += base.start_col;
+    }
+    node.start += base.start;
+    node.end += base.start;
+    node.start_row += base.start_row;
+    node.end_row += base.start_row;
+    node
 }
 
 /// The captures of a template's case at `at`, slot 0 holding the node.

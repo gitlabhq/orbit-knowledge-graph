@@ -412,6 +412,9 @@ pub(super) fn stamp(epochs: &[u64], mut deps: u64) -> u64 {
 /// a tag on `at`, or on the first node of kind `on` under it; or a template
 /// built at `at` from the first symbol of each of its sets.
 pub enum Write {
+    /// Parses node `at`'s text with the frontend `frontend` names and
+    /// grafts the tree under it.
+    Parse { at: u32, frontend: u32 },
     Tag {
         at: u32,
         key: u32,

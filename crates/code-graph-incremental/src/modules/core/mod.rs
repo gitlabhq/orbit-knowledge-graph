@@ -126,6 +126,17 @@ static FUNCTIONS: &[Function<Core>] = &[
         }
         Vals::new()
     }),
+    function!(Effect, "parse", [set, set], |cx, a| {
+        if let Some(frontend) = first_sym(cx, &a[1]) {
+            for at in nodes(&a[0]) {
+                cx.write_tree(Write::Parse {
+                    at: at.node,
+                    frontend,
+                });
+            }
+        }
+        Vals::new()
+    }),
     function!(Effect, "build", [one, set, rest], |cx, a| {
         if let Some(at) = a[1].first().and_then(|v| v.loc()) {
             let syms = a[2..].iter().map(|v| first_sym(cx, v)).collect();

@@ -81,6 +81,21 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
         tree.append(id, node(lang.tree_kinds().anchor, anchor, start, end));
         ids.push(id);
     }
+    for fence in fences(source) {
+        let parent = sections
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.start <= fence.start && fence.end <= s.end)
+            .max_by_key(|(_, s)| s.start)
+            .map_or(tree.root, |(at, _)| ids[at]);
+        let (start, end) = (fence.start, fence.end);
+        let block = tree.append(parent, node(lang.intern_kind("code_block"), 0, start, end));
+        let info = lang.syms.intern(fence.info);
+        tree.append(
+            block,
+            node(lang.intern_kind("code_info"), info, start, start),
+        );
+    }
     let end = source.len();
     for target in targets {
         let link = tree.append(
@@ -105,4 +120,48 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
         }
     }
     tree
+}
+
+/// A fenced code block: its language, and the byte range of its contents.
+struct Fence<'a> {
+    info: &'a str,
+    start: usize,
+    end: usize,
+}
+
+/// Each fenced code block that names a language, in order. A fence is three
+/// or more backticks or tildes, indented less than four spaces, closed by a
+/// line of at least as many of the same character.
+fn fences(source: &str) -> Vec<Fence<'_>> {
+    let mut out = Vec::new();
+    let mut open: Option<(char, usize, &str, usize)> = None;
+    let mut at = 0;
+    for line in source.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+        let mark = trimmed.chars().next().filter(|c| matches!(c, '`' | '~'));
+        let count = mark.map_or(0, |c| trimmed.chars().take_while(|&x| x == c).count());
+        let rest = &trimmed[count..];
+        match open {
+            None if count >= 3 && indent < 4 => {
+                let info = rest.split_whitespace().next().unwrap_or("");
+                open = mark.map(|c| (c, count, info, at + line.len()));
+            }
+            Some((c, n, info, start))
+                if mark == Some(c) && count >= n && rest.trim().is_empty() =>
+            {
+                if !info.is_empty() {
+                    out.push(Fence {
+                        info,
+                        start,
+                        end: at,
+                    });
+                }
+                open = None;
+            }
+            _ => {}
+        }
+        at += line.len();
+    }
+    out
 }
