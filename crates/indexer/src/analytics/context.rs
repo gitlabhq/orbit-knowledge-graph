@@ -13,6 +13,8 @@ use orbit_server_config::AnalyticsConfig;
 
 use crate::observer::IndexingMode;
 
+const ENTITY_TYPE_MAX_LENGTH: usize = 64;
+
 /// What triggered an indexing run. The indexer can't tell a scheduled
 /// backfill from a manual one, so a campaign-correlated dispatch is treated
 /// as `Scheduled` and everything else as `Push`.
@@ -78,8 +80,7 @@ pub(crate) fn build_sdlc(inputs: SdlcInputs) -> Result<OrbitSdlcIndexingContext,
         orbit_sdlc_indexing::OrbitSdlcIndexing {
             namespace_id: inputs.namespace_id,
             root_namespace_id: inputs.root_namespace_id,
-            entity_type: inputs
-                .entity_type
+            entity_type: fit_entity_type_to_cap(&inputs.entity_type)
                 .parse()
                 .map_err(validation("entity_type"))?,
             indexing_mode: match inputs.indexing_mode {
@@ -182,4 +183,18 @@ pub(crate) fn build_code(inputs: CodeInputs) -> Result<OrbitCodeIndexingContext,
             duration_ms: saturating_i64(inputs.duration_ms),
         },
     ))
+}
+
+/// An over-cap name becomes a prefix plus a hash of the full name, so values stay unique.
+fn fit_entity_type_to_cap(entity_type: &str) -> String {
+    if entity_type.chars().count() <= ENTITY_TYPE_MAX_LENGTH {
+        return entity_type.to_owned();
+    }
+    let digest = format!(
+        "{:016x}",
+        twox_hash::XxHash3_64::oneshot(entity_type.as_bytes())
+    );
+    let prefix_length = ENTITY_TYPE_MAX_LENGTH - digest.len() - 1;
+    let prefix: String = entity_type.chars().take(prefix_length).collect();
+    format!("{prefix}_{digest}")
 }
