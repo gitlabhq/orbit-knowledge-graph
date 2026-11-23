@@ -53,21 +53,6 @@ where
         .inspect_err(|error| obs.record_error(error))
 }
 
-pub struct Passthrough;
-
-impl PipelineStage for Passthrough {
-    type Input = ();
-    type Output = ();
-
-    async fn execute(
-        &self,
-        _ctx: &mut QueryPipelineContext,
-        _obs: &mut dyn PipelineObserver,
-    ) -> Result<Self::Output, PipelineError> {
-        Ok(())
-    }
-}
-
 pub struct NoHydrationStage;
 
 impl PipelineStage for NoHydrationStage {

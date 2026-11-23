@@ -50,3 +50,18 @@ impl<X: QueryExecutor> QueryExecutor for RecordingExecutor<'_, X> {
         self.inner.run(query, ctx, obs).await
     }
 }
+
+pub(super) struct Passthrough;
+
+impl PipelineStage for Passthrough {
+    type Input = ();
+    type Output = ();
+
+    async fn execute(
+        &self,
+        _ctx: &mut QueryPipelineContext,
+        _obs: &mut dyn PipelineObserver,
+    ) -> Result<Self::Output, PipelineError> {
+        Ok(())
+    }
+}

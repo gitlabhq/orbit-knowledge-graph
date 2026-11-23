@@ -25,12 +25,12 @@ use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineRunner, QueryPipelineContext, TypeMap,
 };
 use query_engine::shared::content::ColumnResolverRegistry;
-use query_engine::shared::{Passthrough, PipelineOutput, RemoteStages, run_remote};
+use query_engine::shared::{PipelineOutput, RemoteStages, run_remote};
 use response::{
     assert_compilation, assert_output, assert_pagination, assert_repeated_response, repeat_count,
     validate_response,
 };
-use stages::MockAuthorizationStage;
+use stages::{MockAuthorizationStage, Passthrough};
 
 use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
