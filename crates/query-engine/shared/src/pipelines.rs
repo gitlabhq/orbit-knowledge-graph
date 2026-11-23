@@ -53,7 +53,7 @@ where
         .inspect_err(|error| obs.record_error(error))
 }
 
-pub struct NoHydrationStage;
+struct NoHydrationStage;
 
 impl PipelineStage for NoHydrationStage {
     type Input = ExtractionOutput;

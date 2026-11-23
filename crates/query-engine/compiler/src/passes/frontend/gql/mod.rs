@@ -101,7 +101,7 @@ pub fn parse_query(raw: &str) -> Result<ParsedQuery> {
     }
 }
 
-pub fn compile_query(
+fn compile_query(
     query: ParsedQuery,
     ontology: &Ontology,
     security_context: &SecurityContext,
@@ -109,18 +109,10 @@ pub fn compile_query(
     let ontology = Arc::new(ontology.clone());
     let data_model = crate::data_model::clickhouse(Arc::clone(&ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    compile_query_model(query, &data_model, security_context)
-}
-
-pub fn compile_query_model(
-    query: ParsedQuery,
-    data_model: &Arc<query_data_model::ClickHouseDataModel>,
-    security_context: &SecurityContext,
-) -> Result<CompiledQueryContext> {
     crate::compile_source(
         crate::CompileSource::Parsed(Box::new(query)),
         crate::Frontend::Gql,
-        data_model,
+        &data_model,
         security_context,
     )
 }
