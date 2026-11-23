@@ -149,8 +149,6 @@ impl QueryConfig {
             max_ast_depth: overrides.max_ast_depth.or(self.max_ast_depth),
             use_query_cache: overrides.use_query_cache.or(self.use_query_cache),
             query_cache_ttl: overrides.query_cache_ttl.or(self.query_cache_ttl),
-            // compiler_derived is never merged from YAML overrides — it's
-            // set by the compiler after merge() runs.
             compiler_derived: self.compiler_derived.clone(),
         }
     }

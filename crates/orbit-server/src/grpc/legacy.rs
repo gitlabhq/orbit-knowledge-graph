@@ -1,10 +1,3 @@
-//! Serves the pre-rename wire surface. Published clients built from the old
-//! proto still call /gkg.v1.KnowledgeGraphService/*; the messages are
-//! byte-identical to orbit.v1, so only the request path needs translation.
-//! Delete this module once the old paths show zero traffic for a milestone
-//! (knowledge-graph#1152, chain T10). Traffic is visible per service label in
-//! the labkit gRPC metrics, which run outside this facade.
-
 use tonic::codegen::http;
 use tonic::server::NamedService;
 use tower::Service;

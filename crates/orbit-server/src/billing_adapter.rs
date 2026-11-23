@@ -1,13 +1,3 @@
-//! The single claims-conversion seam between orbit-server and orbit-billing.
-//!
-//! Converts `auth::Claims` into `BillingInputs` and `QuotaCheckInputs`.
-//! Billing-related call sites use these conversions rather than mapping
-//! claims into the billing input structs themselves.
-//!
-//! This file, the orbit-billing crate, and the extended hook points form
-//! the SOX billing surface defined in ADR 020:
-//! `docs/pages/engineering/adr/020_billing_sox_scope.md`.
-
 use orbit_billing::{BillingInputs, QuotaCheckInputs};
 
 use crate::auth::Claims;

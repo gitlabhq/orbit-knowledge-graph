@@ -10,8 +10,6 @@ use orbit_observability::billing::quota::values::{
 
 pub(super) static QUOTA_METRICS: LazyLock<QuotaMetrics> = LazyLock::new(QuotaMetrics::new);
 
-// `cache.entries` gauge is registered inside `QuotaCache::new()` instead of here
-// because it needs a live reference to the moka `Cache` from that constructor.
 pub(super) struct QuotaMetrics {
     pub decisions: Counter<u64>,
     pub cdot_duration: Histogram<f64>,
@@ -27,14 +25,6 @@ impl QuotaMetrics {
     }
 }
 
-/// Pre-seed every labelled counter series at 0 so Prometheus never sees an absent
-/// series on the first scrape. OTel only exposes a series after it has been
-/// observed at least once.
-///
-/// `decisions{decision=fail_open|fail_closed, cache=hit}` is intentionally omitted:
-/// failed checks are never inserted into the cache, so that combination cannot occur.
-/// Histograms are not pre-seeded — `record(0.0)` would be a real observation that
-/// skews `_count` and `_sum`; they appear on the first genuine CDot call.
 pub fn register() {
     let metered_types = [
         "mcp",
@@ -59,7 +49,6 @@ pub fn register() {
             }
         }
     }
-    // fail_open, fail_closed, and skipped are only ever observed on cache=miss (never cached).
     for decision in [FAIL_OPEN, FAIL_CLOSED, SKIPPED] {
         for source_type in metered_types {
             QUOTA_METRICS.decisions.add(

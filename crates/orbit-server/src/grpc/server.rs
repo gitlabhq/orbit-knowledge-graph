@@ -85,7 +85,6 @@ impl GrpcServer {
 
         let service = Arc::new(self.service);
         let gc = &self.grpc_config;
-        // Tonic ignores the builder's TCP settings for a pre-bound listener.
         let incoming = TcpIncoming::from(listener)
             .with_nodelay(Some(true))
             .with_keepalive(Some(Duration::from_secs(gc.tcp_keepalive_secs)));
