@@ -652,11 +652,7 @@ impl ResponseView {
 
     /// Assert row values by position. Satisfies [`Requirement::AggregationSort`]
     /// when every row is listed.
-    pub fn assert_row_values(
-        &self,
-        expected: &[std::collections::BTreeMap<String, Value>],
-        label: &str,
-    ) {
+    pub fn assert_row_values(&self, expected: &[std::collections::BTreeMap<String, Value>]) {
         for (index, row) in expected.iter().enumerate() {
             for (column, value) in row {
                 match value {
@@ -665,7 +661,7 @@ impl ResponseView {
                     }
                     Value::String(text) => self.assert_row_value_str(index, column, text),
                     Value::Null => self.assert_row_value_null(index, column),
-                    _ => panic!("{label}: unsupported row_values type for {column}"),
+                    value => self.assert_row_value(index, column, value),
                 }
             }
         }
@@ -688,6 +684,19 @@ impl ResponseView {
         );
     }
 
+    pub fn assert_row_value(&self, row_index: usize, key: &str, expected: &Value) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        let row = self
+            .rows()
+            .get(row_index)
+            .unwrap_or_else(|| panic!("row {row_index} not found in {:?}", self.rows()));
+        assert_eq!(
+            row.get(key),
+            Some(expected),
+            "row {row_index} column '{key}' mismatch: {row:?}"
+        );
+    }
+
     pub fn assert_row_value_null(&self, row_index: usize, key: &str) {
         self.tracker.satisfy(Requirement::Aggregation);
         let row = self
@@ -695,7 +704,7 @@ impl ResponseView {
             .get(row_index)
             .unwrap_or_else(|| panic!("row {row_index} not found in {:?}", self.rows()));
         assert!(
-            row.get(key).is_none_or(Value::is_null),
+            row.get(key).is_some_and(Value::is_null),
             "row {row_index} column '{key}': expected null, got {row:?}"
         );
     }
@@ -1214,6 +1223,18 @@ pub(crate) mod tests {
             rows: None,
             pagination: None,
         }
+    }
+
+    #[test]
+    fn null_row_values_need_the_column() {
+        let mut response = sample_response();
+        response.rows = Some(vec![json!({"total": null}).as_object().unwrap().clone()]);
+        let view = ResponseView::new(response);
+        view.assert_row_value_null(0, "total");
+        let missing = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            view.assert_row_value_null(0, "mean")
+        }));
+        assert!(missing.is_err());
     }
 
     #[test]

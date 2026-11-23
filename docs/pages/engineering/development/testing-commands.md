@@ -6,7 +6,7 @@ This page lists where each test layer lives and the command that runs it. The pr
 | --- | --- | --- |
 | Build scripts | `build.rs` in each crate | `mise build` |
 | Unit tests | `#[cfg(test)]` modules next to the code | `mise test:fast` |
-| Compiler integration | `crates/integration-tests/tests/compiler/` (fixtures), `crates/integration-tests/tests/compiler_legacy/` (Rust tests) | `mise test:local` |
+| Compiler integration | `crates/integration-tests/tests/compiler/` (fixtures) | `mise test:local` |
 | Code-graph suites | `crates/integration-tests-codegraph/` | `mise test:integration:codegraph` |
 | CLI integration | `crates/integration-tests/tests/cli.rs` | `mise test:cli` |
 | Container tests | `crates/integration-tests/tests/` | `mise test:integration` |

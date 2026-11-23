@@ -1,5 +1,7 @@
 use compiler::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
-use compiler::input::{ColumnSelection, FilterOp, Input, InputFilter, OrderDirection};
+use compiler::input::{
+    ColumnSelection, DynamicColumnMode, FilterOp, Input, InputFilter, OrderDirection,
+};
 use compiler::passes::plan::QueryPlan;
 use compiler::passes::plan::graph::{
     ExecutionPlan, RelationGraph, RelationId, RelationNode, RelationRef,
@@ -12,6 +14,7 @@ use super::operator::Operator;
 use super::pattern::Expression as Tree;
 
 fn leaf(label: Operator, text: impl Into<String>) -> Tree {
+    assert!(!label.has_children(), "{label} always has children");
     Tree::node(label, text, vec![])
 }
 
@@ -94,7 +97,14 @@ pub fn logical(input: &Input) -> Tree {
             ),
         )
     }));
-    let mut tree = Tree::node(Operator::Input, input.query_type.to_string(), children);
+    let mut head = input.query_type.to_string();
+    if input.options.include_debug_sql {
+        head.push_str(" include_debug_sql");
+    }
+    if input.options.dynamic_columns == DynamicColumnMode::All {
+        head.push_str(" dynamic_columns=*");
+    }
+    let mut tree = Tree::node(Operator::Input, head, children);
     tree = filter(
         input
             .predicates
@@ -758,7 +768,7 @@ fn literal(value: &serde_json::Value) -> String {
     }
 }
 
-fn expression(value: &Expr) -> String {
+pub fn expression(value: &Expr) -> String {
     match value {
         Expr::EmptyTupleArray(fields) => format!("empty_tuple_array({fields:?})"),
         Expr::TextSearch { mode, value, query } => {

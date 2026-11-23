@@ -364,7 +364,6 @@ impl Context {
                     .join(", ")
             );
         }
-        // Rewrite `if(cond, then, else)` → `CASE WHEN cond THEN then ELSE else END`
         if name == Function::If && args.len() == 3 {
             let cond = self.emit_expr(&args[0]);
             let then = self.emit_expr(&args[1]);
@@ -372,14 +371,11 @@ impl Context {
             return format!("CASE WHEN {cond} THEN {then} ELSE {else_} END");
         }
 
-        // toString(x) → CAST(x AS VARCHAR)
         if name == Function::ToString && args.len() == 1 {
             let inner = self.emit_expr(&args[0]);
             return format!("CAST({inner} AS VARCHAR)");
         }
 
-        // toJSONString(x) → just emit x (the inner map() is already
-        // rewritten to json_object() which returns a JSON string).
         if name == Function::ToJson && args.len() == 1 {
             return format!("to_json({})", self.emit_expr(&args[0]));
         }

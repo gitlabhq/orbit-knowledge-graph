@@ -604,3 +604,12 @@ cases:
       clickhouse:
         rejected:
           contains: ["aggregation cannot return the path variable"]
+
+  - name: A schema call is not a query
+    query:
+      gql: |
+        CALL db.schema()
+    physical:
+      clickhouse:
+        rejected:
+          contains: ["schema calls are not graph queries"]

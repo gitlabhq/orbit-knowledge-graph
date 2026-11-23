@@ -221,3 +221,32 @@ macro_rules! run_subtests_shared {
         $crate::collect_subtest_results(_handles).await;
     }};
 }
+
+pub struct NamedQueryExample {
+    pub name: String,
+    pub json: String,
+    pub gql: String,
+}
+
+pub fn named_query_examples(
+    queries: &named_queries::NamedQueries,
+    current_user_id: u64,
+) -> Result<Vec<NamedQueryExample>, String> {
+    let values = named_queries::BindingValues { current_user_id };
+    queries
+        .iter()
+        .map(|query| {
+            let params = query.example_parameters();
+            let render = |language| {
+                query
+                    .render_language(language, &values, &params)
+                    .map_err(|error| format!("{}: {error}", query.name))
+            };
+            Ok(NamedQueryExample {
+                name: query.name.clone(),
+                json: render(named_queries::Language::Json)?,
+                gql: render(named_queries::Language::Gql)?,
+            })
+        })
+        .collect()
+}
