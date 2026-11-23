@@ -114,7 +114,7 @@ pub fn compile(
 
 pub enum CompileSource<'a> {
     Raw(&'a str),
-    Parsed(gql::ParsedQuery),
+    Parsed(Box<gql::ParsedQuery>),
 }
 
 impl CompileSource<'_> {

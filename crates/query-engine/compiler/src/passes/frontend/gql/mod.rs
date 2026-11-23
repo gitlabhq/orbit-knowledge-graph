@@ -118,7 +118,7 @@ pub fn compile_query_model(
     security_context: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     crate::compile_source(
-        crate::CompileSource::Parsed(query),
+        crate::CompileSource::Parsed(Box::new(query)),
         crate::Frontend::Gql,
         data_model,
         security_context,
