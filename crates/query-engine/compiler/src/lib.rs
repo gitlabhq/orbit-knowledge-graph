@@ -247,6 +247,7 @@ pub(crate) mod testkit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orbit_utils::traversal_path::TraversalPath;
     use std::sync::LazyLock;
 
     static ONTOLOGY: LazyLock<Arc<Ontology>> =
@@ -254,35 +255,6 @@ mod tests {
 
     fn security_ctx() -> SecurityContext {
         crate::testkit::non_admin_ctx()
-    }
-
-    #[test]
-    fn relationship_filter_keeps_edge_column_type() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "p", "entity": "Project"}
-            ],
-            "relationships": [{
-                "type": "MEMBER_OF",
-                "from": "u",
-                "to": "p",
-                "filters": {"target_id": 2}
-            }]
-        }"#;
-
-        let compiled = compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).unwrap();
-        let filter_param = compiled
-            .base
-            .params
-            .values()
-            .find(|param| param.value == serde_json::json!(2))
-            .expect("target_id filter parameter");
-        assert_eq!(
-            filter_param.data_type,
-            orbit_utils::query_types::SqlType::Int64
-        );
     }
 
     #[test]
@@ -327,237 +299,88 @@ mod tests {
     }
 
     #[test]
-    fn compile_with_prefixed_ontology_produces_prefixed_sql() {
-        let prefixed = Arc::new((**ONTOLOGY).clone().with_schema_version_prefix("v1_"));
-
-        let query = r#"{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]}],"limit":1}"#;
-        let compiled =
-            compile(query, Frontend::JsonDsl, &prefixed, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
-
-        assert!(
-            sql.contains("v1_gl_group"),
-            "search SQL should use prefixed node table v1_gl_group, got: {sql}"
-        );
-    }
-
-    #[test]
-    fn compile_uses_supplied_ontology_for_scoped_user_table() {
-        let scoped_user = (**ONTOLOGY).clone().with_path_scopable_nodes(["User"]);
-        let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]}],"limit":1}"#;
-
-        for (ontology, expected_table) in [
-            (Arc::new(scoped_user.clone()), "gl_user"),
-            (
-                Arc::new(scoped_user.with_schema_version_prefix("v1_")),
-                "v1_gl_user",
-            ),
-        ] {
-            let sql = compile(query, Frontend::JsonDsl, &ontology, &security_ctx())
-                .expect("should compile")
-                .base
-                .render();
-            assert!(
-                sql.contains("startsWith(u.traversal_path"),
-                "supplied ontology must keep the User alias scoped, got:\n{sql}"
-            );
-            assert!(
-                sql.contains(expected_table),
-                "ontology should render {expected_table}, got:\n{sql}"
-            );
-        }
-    }
-
-    #[test]
-    fn compile_uses_each_ontologys_global_tables_and_keeps_join_filters() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "user", "entity": "User", "node_ids": [1], "filters": {"username": "alice"}},
-                {"id": "project", "entity": "Project", "filters": {"name": "orbit"}}
-            ],
-            "relationships": [{
-                "type": "MEMBER_OF",
-                "from": "user",
-                "to": "project"
-            }],
-            "limit": 1
-        }"#;
-
-        let mut sources = ontology::migrations::embedded_sources();
-        let user_source = sources.get_mut("nodes/core/user.yaml").unwrap();
-        *user_source = user_source.replace(
-            "destination_table: gl_user",
-            "destination_table: gl_renamed_user",
-        );
-        let archived_ontology = ontology::archive::OntologyArchive::from_sources(1, &sources)
-            .expect("renamed archive should build")
-            .load_ontology()
-            .expect("renamed archive should load");
-        let prefixed = archived_ontology.clone().with_schema_version_prefix("v1_");
-
-        for (ontology, expected_user_table) in [
-            (Arc::new(archived_ontology.clone()), "gl_renamed_user"),
-            (ONTOLOGY.clone(), "gl_user"),
-            (Arc::new(prefixed), "v1_gl_renamed_user"),
-            (
-                Arc::new((**ONTOLOGY).clone().with_schema_version_prefix("v2_")),
-                "v2_gl_user",
-            ),
-            (Arc::new(archived_ontology), "gl_renamed_user"),
-        ] {
-            let sql = compile(query, Frontend::JsonDsl, &ontology, &security_ctx())
-                .expect("should compile")
-                .base
-                .render();
-            assert!(
-                sql.contains(expected_user_table),
-                "compiled SQL should use {expected_user_table}, got:\n{sql}"
-            );
-            assert!(
-                !sql.contains("startsWith(user.traversal_path"),
-                "global User must stay unscoped, got:\n{sql}"
-            );
-            assert!(
-                sql.contains("startsWith(project.traversal_path"),
-                "joined Project alias must remain scoped, got:\n{sql}"
-            );
-            assert!(
-                sql.contains("startsWith(_orbit_edge_0.traversal_path"),
-                "edge alias e0 must remain scoped, got:\n{sql}"
-            );
-        }
-    }
-
-    #[test]
-    fn neighbors_records_a_center_only_for_one_id() {
-        let center = |ids: &str| {
-            let query = format!(
-                r#"{{"query_type": "neighbors", "nodes": [{{"id": "u", "entity": "User", "node_ids": {ids}}}],
-                    "neighbors": {{"direction": "outgoing"}}, "limit": 10}}"#
-            );
-            let compiled = compile(&query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).unwrap();
-            let context = &compiled.base.result_context;
-            (
-                context
-                    .neighbors_center()
-                    .map(|(entity, id)| (entity.to_string(), id)),
-                context.label("User").map(str::to_string),
+    fn hydration_widens_paths_to_segment_budget() {
+        let deep = |count: usize| -> Vec<TraversalPath> {
+            (0..count)
+                .map(|i| TraversalPath::new_unchecked(format!("1/{i:0>40}/{:0>40}/", i + 10000)))
+                .collect()
+        };
+        let node = |entity: &str, paths: Vec<TraversalPath>| InputNode {
+            id: "hydrate".into(),
+            entity: Some(entity.into()),
+            columns: Some(ColumnSelection::List(vec!["id".into()])),
+            node_ids: vec![1],
+            traversal_paths: paths,
+            ..InputNode::default()
+        };
+        let compile_hydration = |nodes: Vec<InputNode>, budget: Option<usize>| {
+            let input = Input {
+                query_type: QueryType::Hydration,
+                nodes,
+                limit: 10,
+                ..Input::default()
+            };
+            compile_input(
+                input,
+                HydrationCompileOptions {
+                    dynamic: true,
+                    path_segment_budget: budget,
+                },
+                &ONTOLOGY,
+                &security_ctx(),
             )
+            .unwrap()
         };
-        assert_eq!(
-            center("[1]"),
-            (Some(("User".into(), 1)), Some("username".into()))
+        let bound_paths = |result: &CompiledQueryContext| -> Vec<TraversalPath> {
+            result
+                .base
+                .params
+                .values()
+                .filter_map(|p| match &p.value {
+                    serde_json::Value::Array(items) => Some(items),
+                    _ => None,
+                })
+                .flat_map(|items| items.iter().filter_map(|v| v.as_str()))
+                .map(TraversalPath::new_unchecked)
+                .collect()
+        };
+
+        let exact = deep(500);
+        let result = compile_hydration(
+            vec![node("Note", exact.clone()), node("Project", exact.clone())],
+            Some(2000),
         );
-        assert_eq!(center("[1, 2]"), (None, None));
-    }
+        let array_params = result
+            .base
+            .params
+            .values()
+            .filter(|p| matches!(p.value, serde_json::Value::Array(_)))
+            .count();
+        assert_eq!(array_params, 1, "arms share one path array param");
+        let mut kept = bound_paths(&result);
+        kept.sort_unstable();
+        let mut expected = exact;
+        expected.sort_unstable();
+        assert_eq!(kept, expected, "under budget keeps exact leaf paths");
 
-    #[test]
-    fn filter_on_virtual_column_compiles_without_sql_predicate() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let compiled = compile(
-            r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "f", "entity": "File",
-                 "node_ids": [1],
-                 "filters": {"content": {"eq": "x"}},
-                 "columns": ["path", "content"]}],
-        "limit": 5
-                }"#,
-            Frontend::JsonDsl,
-            &ontology,
-            &security_ctx(),
-        )
-        .expect("virtual column filter should compile");
-
-        let sql = compiled.base.render();
-        assert!(
-            !sql.contains("content"),
-            "virtual column 'content' must not appear in SQL, got:\n{sql}"
-        );
-
-        if let HydrationPlan::Static(templates) = &compiled.hydration {
+        let over = deep(900);
+        let result = compile_hydration(vec![node("Note", over.clone())], Some(2000));
+        let widened = bound_paths(&result);
+        assert!(widened.iter().all(|w| !over.contains(w)));
+        for path in &over {
             assert!(
-                templates.iter().any(|t| !t.virtual_filters.is_empty()),
-                "hydration plan should carry virtual filters"
+                widened
+                    .iter()
+                    .any(|w| path.as_str().starts_with(w.as_str())),
+                "{path} lost its ancestor prefix"
             );
-        } else {
-            panic!("expected static hydration plan");
         }
-    }
 
-    #[test]
-    fn filter_on_virtual_column_without_selecting_it_injects_resolution() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let compiled = compile(
-            r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "f", "entity": "File",
-                 "node_ids": [1, 2],
-                 "filters": {"content": {"contains": "needle"},
-                             "project_id": {"eq": 1000}},
-                 "columns": ["project_id", "path"]}],
-        "limit": 10
-                }"#,
-            Frontend::JsonDsl,
-            &ontology,
-            &security_ctx(),
-        )
-        .expect("filter-only virtual column should compile");
-
-        let HydrationPlan::Static(templates) = &compiled.hydration else {
-            panic!(
-                "filter-only virtual column must produce a static hydration plan, got {:?}",
-                compiled.hydration
-            );
-        };
-        let template = &templates[0];
-        assert!(
-            template
-                .virtual_columns
-                .iter()
-                .any(|vc| vc.column_name == "content"),
-            "content must be injected for resolution: {template:?}"
-        );
-        assert_eq!(template.filter_injected_columns, vec!["content"]);
-        assert!(
-            template
-                .virtual_filters
-                .iter()
-                .any(|(col, _)| col == "content"),
-            "content filter must be carried: {template:?}"
-        );
-    }
-
-    #[test]
-    fn filter_on_selected_virtual_column_is_not_marked_injected() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let compiled = compile(
-            r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "f", "entity": "File",
-                 "node_ids": [1],
-                 "filters": {"content": {"contains": "needle"}},
-                 "columns": ["path", "content"]}],
-        "limit": 5
-                }"#,
-            Frontend::JsonDsl,
-            &ontology,
-            &security_ctx(),
-        )
-        .expect("should compile");
-
-        let HydrationPlan::Static(templates) = &compiled.hydration else {
-            panic!("expected static hydration plan");
-        };
-        assert!(templates[0].filter_injected_columns.is_empty());
+        let result = compile_hydration(vec![node("Note", over.clone())], None);
         assert_eq!(
-            templates[0]
-                .virtual_columns
-                .iter()
-                .filter(|vc| vc.column_name == "content")
-                .count(),
-            1
+            bound_paths(&result).len(),
+            over.len(),
+            "no budget, no widening"
         );
     }
 

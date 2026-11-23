@@ -113,3 +113,17 @@ cases:
           reason: schema
           contains:
             - "line 1, column 363: a node projects at most 50 properties"
+
+  - name: A query past the byte limit is rejected before parsing
+    generate: { kind: repeat, placeholder: LONG_NAME, repeat: x, count: 40000 }
+    query:
+      gql: |
+        MATCH (u:User {username: 'LONG_NAME'}) RETURN u
+    missing_frontends:
+      json: The JSON schema caps a filter value before the byte limit applies.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: limit
+          contains: [query must not exceed 32768 bytes]

@@ -37,6 +37,12 @@ cases:
       clickhouse:
         final_ast:
           expect: ["(Project _orbit_edge_0.source_id AS _orbit_u_id, 'User' AS _orbit_u_type, _orbit_edge_0.target_id AS _orbit_p_id, 'Project' AS _orbit_p_type, ... (...))"]
+        result_context:
+          query_type: traversal
+          nodes:
+            $exact:
+              u: { entity_type: User, id_column: _orbit_u_id, type_column: _orbit_u_type }
+              p: { entity_type: Project, id_column: _orbit_p_id, type_column: _orbit_p_type }
 
   - name: Aggregation adds identity columns only for the grouped node
     query:

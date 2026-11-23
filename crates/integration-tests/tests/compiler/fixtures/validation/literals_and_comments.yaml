@@ -46,3 +46,159 @@ cases:
         MATCH (u:User) WHERE u.created_at >= date('2024-01-01') RETURN u
     logical:
       expect: ["(Filter u.created_at >= '2024-01-01' (NodeScan User AS u))"]
+
+  - name: DEBUG inside a string literal stays a bound value
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"DEBUG"}}]}
+      gql: |
+        MATCH (u:User {username: 'DEBUG'}) RETURN u
+    logical:
+      expect: ["(Input traversal (...))"]
+    physical:
+      clickhouse:
+        params: [{ value: DEBUG, data_type: String }]
+        parameterized_sql: { not_contains: [DEBUG] }
+
+  - name: An escaped quote cannot end a literal and turn on DEBUG
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"x' RETURN u DEBUG //"}}]}
+      gql: |
+        MATCH (u:User {username: 'x\' RETURN u DEBUG //'}) RETURN u
+    logical:
+      expect: ["(Input traversal (...))"]
+    physical:
+      clickhouse:
+        params: [{ value: "x' RETURN u DEBUG //", data_type: String }]
+        parameterized_sql: { not_contains: [DEBUG] }
+
+  - name: A unicode-escaped quote cannot end a literal and turn on DEBUG
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"' RETURN u DEBUG //"}}]}
+      gql: |
+        MATCH (u:User {username: '\u0027 RETURN u DEBUG //'}) RETURN u
+    logical:
+      expect: ["(Input traversal (...))"]
+    physical:
+      clickhouse:
+        params: [{ value: "' RETURN u DEBUG //", data_type: String }]
+        parameterized_sql: { not_contains: [DEBUG] }
+
+  - name: SQL inside a double-quoted literal stays a bound value
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"'; DROP TABLE gl_user; --"}}]}
+      gql: |
+        MATCH (u:User {username: "'; DROP TABLE gl_user; --"}) RETURN u
+    logical:
+      expect: ["(Input traversal (...))"]
+    physical:
+      clickhouse:
+        params: [{ value: "'; DROP TABLE gl_user; --", data_type: String }]
+        parameterized_sql: { not_contains: [DROP TABLE] }
+
+  - name: DEBUG inside a string literal followed by DEBUG in a block comment leaves debug SQL off
+    query:
+      gql: |
+        MATCH (u:User {username: 'DEBUG'}) RETURN u /* DEBUG */
+    missing_frontends:
+      json: JSON has no comments.
+    logical:
+      expect: ["(Input traversal (...))"]
+    physical:
+      clickhouse:
+        params: [{ value: DEBUG, data_type: String }]
+        parameterized_sql: { not_contains: [DEBUG] }
+
+  - name: DEBUG inside a string literal followed by DEBUG in a line comment leaves debug SQL off
+    query:
+      gql: |
+        MATCH (u:User {username: 'DEBUG'}) RETURN u // DEBUG
+    missing_frontends:
+      json: JSON has no comments.
+    logical:
+      expect: ["(Input traversal (...))"]
+    physical:
+      clickhouse:
+        params: [{ value: DEBUG, data_type: String }]
+        parameterized_sql: { not_contains: [DEBUG] }
+
+  - name: An escaped quote in a literal followed by DEBUG in a block comment leaves debug SQL off
+    query:
+      gql: |
+        MATCH (u:User {username: 'x\' RETURN u DEBUG //'}) RETURN u /* DEBUG */
+    missing_frontends:
+      json: JSON has no comments.
+    logical:
+      expect: ["(Input traversal (...))"]
+    physical:
+      clickhouse:
+        params: [{ value: "x' RETURN u DEBUG //", data_type: String }]
+        parameterized_sql: { not_contains: [DEBUG] }
+
+  - name: An escaped quote in a literal followed by DEBUG in a line comment leaves debug SQL off
+    query:
+      gql: |
+        MATCH (u:User {username: 'x\' RETURN u DEBUG //'}) RETURN u // DEBUG
+    missing_frontends:
+      json: JSON has no comments.
+    logical:
+      expect: ["(Input traversal (...))"]
+    physical:
+      clickhouse:
+        params: [{ value: "x' RETURN u DEBUG //", data_type: String }]
+        parameterized_sql: { not_contains: [DEBUG] }
+
+  - name: A unicode-escaped quote in a literal followed by DEBUG in a block comment leaves debug SQL off
+    query:
+      gql: |
+        MATCH (u:User {username: '\u0027 RETURN u DEBUG //'}) RETURN u /* DEBUG */
+    missing_frontends:
+      json: JSON has no comments.
+    logical:
+      expect: ["(Input traversal (...))"]
+    physical:
+      clickhouse:
+        params: [{ value: "' RETURN u DEBUG //", data_type: String }]
+        parameterized_sql: { not_contains: [DEBUG] }
+
+  - name: A unicode-escaped quote in a literal followed by DEBUG in a line comment leaves debug SQL off
+    query:
+      gql: |
+        MATCH (u:User {username: '\u0027 RETURN u DEBUG //'}) RETURN u // DEBUG
+    missing_frontends:
+      json: JSON has no comments.
+    logical:
+      expect: ["(Input traversal (...))"]
+    physical:
+      clickhouse:
+        params: [{ value: "' RETURN u DEBUG //", data_type: String }]
+        parameterized_sql: { not_contains: [DEBUG] }
+
+  - name: SQL in a double-quoted literal followed by DEBUG in a block comment leaves debug SQL off
+    query:
+      gql: |
+        MATCH (u:User {username: "'; DROP TABLE gl_user; --"}) RETURN u /* DEBUG */
+    missing_frontends:
+      json: JSON has no comments.
+    logical:
+      expect: ["(Input traversal (...))"]
+    physical:
+      clickhouse:
+        params: [{ value: "'; DROP TABLE gl_user; --", data_type: String }]
+        parameterized_sql: { not_contains: [DROP TABLE] }
+
+  - name: SQL in a double-quoted literal followed by DEBUG in a line comment leaves debug SQL off
+    query:
+      gql: |
+        MATCH (u:User {username: "'; DROP TABLE gl_user; --"}) RETURN u // DEBUG
+    missing_frontends:
+      json: JSON has no comments.
+    logical:
+      expect: ["(Input traversal (...))"]
+    physical:
+      clickhouse:
+        params: [{ value: "'; DROP TABLE gl_user; --", data_type: String }]
+        parameterized_sql: { not_contains: [DROP TABLE] }

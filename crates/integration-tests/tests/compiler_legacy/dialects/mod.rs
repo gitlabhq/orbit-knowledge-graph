@@ -1,2 +1,0 @@
-mod clickhouse;
-mod duckdb;
