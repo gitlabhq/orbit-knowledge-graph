@@ -228,7 +228,7 @@ These properties have a text index:
 | `Note` | `note` |
 | `Package` | `name` |
 | `PackageFile` | `file_name` |
-| `Pipeline` | `ref` |
+| `Pipeline` | `name`, `ref` |
 | `Project` | `description`, `name` |
 | `Runner` | `name` |
 | `Stage` | `name` |
