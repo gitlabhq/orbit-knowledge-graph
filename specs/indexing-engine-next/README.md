@@ -4,7 +4,7 @@
 
 This folder holds a TLA+ spec of the lease and dedupe protocol of ADR 023. TLC checks every order of events in the spec, with pod faults and NATS faults. It also checks that every acked submit ends done once faults stop. A second check proves that the Rust code has the same state graph as the spec in 4 small clusters. A third check runs the real runner in a seeded simulator. TLC confirms that each step of each run is a step of the spec.
 
-So far, TLC found 7 ways to break the rules and one gap in the recovery after a wipe. Four fixes close all but 2, and we keep those 2 open on purpose. The code matches the spec in 2.8 million states and 6 million steps.
+So far, TLC found 7 ways to break the rules and one gap in the recovery after a wipe. Four fixes close all but 2, and we keep those 2 open on purpose. The code matches the spec in 3.7 million states and 8.9 million steps.
 
 ## What we built
 
@@ -163,10 +163,10 @@ The liveness check adds 2 properties:
 
 | Liveness config | Faults before they stop | States |
 |---|---|---|
-| `Liveness` | 1 stall, 1 crash | 149,282 |
-| `Liveness_TwoTasks` | 2 tasks, 1 crash | 1,930,008 |
-| `Liveness_NatsWipe` | 1 stall, 1 crash, 1 wipe | 848,760 |
-| `Liveness_Duplicate` | 1 crash, 1 duplicate | 3,104,500 |
+| `Liveness` | 1 stall, 1 crash | 164,592 |
+| `Liveness_TwoTasks` | 2 tasks, 1 crash | 2,638,648 |
+| `Liveness_NatsWipe` | 1 stall, 1 crash, 1 wipe | 920,344 |
+| `Liveness_Duplicate` | 1 crash, 1 duplicate | 4,369,530 |
 
 ### Faults
 
@@ -188,10 +188,10 @@ All 4 clusters have 2 pods:
 
 | Cluster | Faults | States | Steps |
 |---|---|---|---|
-| `no_nats_faults` | 1 stall, 1 crash | 95,156 | 198,844 |
-| `two_tasks` | 2 tasks, 1 crash | 865,748 | 1,551,818 |
-| `nats_wipe` | 1 stall, 1 crash, 1 wipe | 829,510 | 2,019,408 |
-| `duplicate` | 1 stall, 1 crash, 1 duplicate | 1,023,506 | 2,250,220 |
+| `no_nats_faults` | 1 stall, 1 crash | 110,494 | 254,216 |
+| `two_tasks` | 2 tasks, 1 crash | 1,189,216 | 2,475,690 |
+| `nats_wipe` | 1 stall, 1 crash, 1 wipe | 934,822 | 2,366,246 |
+| `duplicate` | 1 stall, 1 crash, 1 duplicate | 1,487,114 | 3,800,252 |
 
 ### Counterexamples
 
@@ -212,10 +212,10 @@ Each config switches one fix off, or adds one fault, and must break a rule:
 
 | Command | What it does | Time on a laptop |
 |---|---|---|
-| `mise run spec:engine` | Model-checks the spec with both configs | about 3 min |
-| `mise run spec:engine:liveness` | Checks that every acked submit ends done | about 4 min |
-| `mise run spec:engine:counterexample` | Checks that each counterexample still breaks a rule | about 25 s |
-| `mise run spec:engine:code` | Compares the code and the spec in all 4 clusters | about 6 min |
+| `mise run spec:engine` | Model-checks the spec with both configs | about 7 min |
+| `mise run spec:engine:liveness` | Checks that every acked submit ends done | about 14 min |
+| `mise run spec:engine:counterexample` | Checks that each counterexample still breaks a rule | about 50 s |
+| `mise run spec:engine:code` | Compares the code and the spec in all 4 clusters | about 8 min |
 | `mise run spec:engine:trace` | Runs 600 seeds of the runner and checks each step with TLC | about 1 min |
 | `cargo test -p indexing-engine-next --test simulation` | Runs 1,200 seeds and checks the rules, the liveness and the coverage of each fault | about 10 s |
 | `cargo test -p indexing-engine-next --test protocol` | Runs the rule tests and the invariants of the first cluster | about 10 s |
