@@ -1,3 +1,29 @@
+## [1.9.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.8.0...v1.9.0) (2026-11-23)
+
+### Features
+
+* **ontology:** add a BLOCKS edge and keep RELATED_TO for relates-to links ([2bf87a9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2bf87a988116fb3961434616de0f2a8de53618c8)) by Bohdan Parkhomchuk
+* **site:** polish the home page and Orbit Next for phones ([bd50bca](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bd50bca3fe8b7b19e55649c1cabf6c05b872017d)) by Gabriel Engel
+
+### Fixes
+
+* **ci:** install protoc on darwin release builds ([c6ac8fb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c6ac8fb2268090c7ce9f26cd3239696538de7310)) by Dmitry Gruzd
+* **clickhouse:** read streamed results chunk by chunk to stop byte loss ([b2a6ecc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b2a6ecccf87fcfdfd15a9f03748a3a2cf12df731)) by Bohdan Parkhomchuk
+* **code-graph-incremental:** resolve Rust use crate:: imports of modules ([b61e246](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b61e24679b75e8f5e2320b5fcfe279633fd39dd1)) by ANBUCHELVAN GANESAN CSE
+* **duckdb-client:** pin DuckDB sessions to UTC and read Decimal128 values ([5f06278](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5f06278c79da156e008ce857dff039535ecf1a26)) by Michael Usachenko
+* **indexer:** tombstone moved and deleted namespace rows once, not on every run ([5469432](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5469432a1168de09ab578f26b52a9afeeefdd6e6)) by Bohdan Parkhomchuk
+* **ontology:** copy only immutable endpoint properties onto link-table edges ([9ee64c5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9ee64c5c665de34ce3303574e53f7d4917ba2496)) by Bohdan Parkhomchuk
+* **site:** add the trailing slash to section-page links ([91976e0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/91976e0cef2d1f099326386357e39d261a5330ba)) by Dmitry Gruzd
+
+### Other
+
+* add Dockerfile and Markdown to supported languages ([c47ea04](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c47ea044afafa850972676a9ac753b33689f6f80)) by Dmitry Gruzd
+* **compiler:** drop the OR rejection case now that GQL accepts OR ([fc597b8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fc597b82b9fe776d9973d7077bae1643ea889987)) by michaelusa
+* **compiler:** move contract tests to compiler fixtures and stop naming tables in errors ([827c74c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/827c74c29591765be2bdba0a7bf299bb55d260fc)) by Michael Usachenko
+* **config:** point the configuration reference at config.proto ([286de21](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/286de21a76b7f9861231f9ed0da5a77fd8104ab3)) by Luke Hollinda
+* **deps:** update url to 2.5.9 ([b909cda](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b909cda7591b91fb155e24aea37f5f1625b612b5)) by Victor Eberechi
+* link GitLab Orbit tier badges on entry pages to the separate-purchase note ([5813227](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/58132277cb4156cec7489382db5149c7c862d84a)) by Gabriel Engel
+
 ## [1.8.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.7.0...v1.8.0) (2026-11-20)
 
 ### Features
