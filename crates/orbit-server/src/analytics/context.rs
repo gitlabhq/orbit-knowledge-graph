@@ -485,11 +485,11 @@ mod tests {
     }
 
     #[test]
-    fn build_query_drops_oversized_token_type_but_keeps_the_event() {
+    fn build_query_fits_oversized_token_type_to_the_schema_limit() {
         let mut claims = claims_with_paths(vec![]);
         claims.token_type = Some("x".repeat(65));
         let data = query_data(&claims, "query_graph");
-        assert!(data.get("token_type").is_none());
+        assert_eq!(data["token_type"].as_str().unwrap().chars().count(), 64);
         assert_eq!(data["tool_name"], "query_graph");
     }
 
@@ -501,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn build_query_drops_oversized_coding_agent() {
+    fn build_query_fits_oversized_coding_agent_to_the_schema_limit() {
         let claims = claims_with_paths(vec![]);
         let query = build_query(
             &claims,
@@ -516,7 +516,14 @@ mod tests {
             Duration::ZERO,
         )
         .unwrap();
-        assert!(query.data().get("coding_agent").is_none());
+        assert_eq!(
+            query.data()["coding_agent"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count(),
+            64
+        );
     }
 
     #[test]
@@ -527,24 +534,22 @@ mod tests {
     }
 
     #[test]
-    fn build_common_rejects_oversized_instance_id() {
+    fn build_common_fits_oversized_instance_id_to_the_schema_limit() {
         let mut claims = claims_with_paths(vec![]);
         claims.instance_id = Some("x".repeat(256));
-        let err = build_common(
+        let common = build_common(
             &orbit_server_config::AppConfig::embedded_defaults().analytics,
             &claims,
             "33",
         )
-        .unwrap_err();
-        assert!(
-            matches!(
-                err,
-                LabkitError::Validation {
-                    field: "instance_id",
-                    ..
-                }
-            ),
-            "expected Validation(instance_id), got: {err:?}"
+        .unwrap();
+        assert_eq!(
+            common.data()["instance_id"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count(),
+            255
         );
     }
 

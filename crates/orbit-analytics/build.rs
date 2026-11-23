@@ -121,7 +121,13 @@ fn render_module(iglu_dir: &Path, schema_name: &str, type_name: &str) -> String 
     let body_tokens = type_space.to_stream();
     let body_file = syn::parse2::<syn::File>(body_tokens)
         .unwrap_or_else(|e| panic!("typify output is not valid Rust for {schema_name}: {e}"));
-    let body_pretty = prettyplease::unparse(&body_file);
+    let (body_pretty, fitted_checks) = fit_length_checks(&prettyplease::unparse(&body_file));
+    let max_length_constraints = count_max_length_constraints(&parsed);
+    assert_eq!(
+        fitted_checks, max_length_constraints,
+        "{schema_name}: rewrote {fitted_checks} typify length checks for {max_length_constraints} \
+         maxLength constraints; update fit_length_checks to match the typify output"
+    );
 
     let schema_uri = format!("iglu:{VENDOR}/{schema_name}/jsonschema/{version}");
 
@@ -144,6 +150,62 @@ fn render_module(iglu_dir: &Path, schema_name: &str, type_name: &str) -> String 
     ));
     out.push_str("}\n\n");
     out
+}
+
+/// Rewrite each typify `maxLength` rejection so `parse()` fits the value instead.
+fn fit_length_checks(body: &str) -> (String, usize) {
+    let mut rewritten = String::with_capacity(body.len());
+    let mut fitted_checks = 0;
+    let mut lines = body.lines();
+    while let Some(line) = lines.next() {
+        let Some(max_length) = parse_max_length_check(line) else {
+            rewritten.push_str(line);
+            rewritten.push('\n');
+            continue;
+        };
+        assert_eq!(
+            lines.next().map(str::trim),
+            Some(format!("return Err(\"longer than {max_length} characters\".into());").as_str()),
+            "unexpected typify output after a maxLength check"
+        );
+        assert_eq!(
+            lines.next().map(str::trim),
+            Some("}"),
+            "unexpected typify output after a maxLength check"
+        );
+        let indent = &line[..line.len() - line.trim_start().len()];
+        rewritten.push_str(&format!(
+            "{indent}const _: () = assert!({max_length} > super::FITTED_DIGEST_LENGTH + 1);\n"
+        ));
+        rewritten.push_str(&format!(
+            "{indent}let fitted = super::fit_to_length(value, {max_length});\n"
+        ));
+        rewritten.push_str(&format!("{indent}let value: &str = &fitted;\n"));
+        fitted_checks += 1;
+    }
+    (rewritten, fitted_checks)
+}
+
+fn parse_max_length_check(line: &str) -> Option<usize> {
+    line.trim()
+        .strip_prefix("if value.chars().count() > ")?
+        .strip_suffix("usize {")?
+        .parse()
+        .ok()
+}
+
+fn count_max_length_constraints(schema: &Value) -> usize {
+    match schema {
+        Value::Object(object) => {
+            usize::from(object.contains_key("maxLength"))
+                + object
+                    .values()
+                    .map(count_max_length_constraints)
+                    .sum::<usize>()
+        }
+        Value::Array(items) => items.iter().map(count_max_length_constraints).sum(),
+        _ => 0,
+    }
 }
 
 /// Inject property defaults that GKG needs for `derive(Default)` but that

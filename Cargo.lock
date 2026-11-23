@@ -3413,7 +3413,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
- "twox-hash",
  "uuid",
  "zstd 0.14.3",
 ]
@@ -4933,6 +4932,7 @@ dependencies = [
  "serde_json",
  "syn 2.0.118",
  "tokio",
+ "twox-hash",
  "typify",
 ]
 
