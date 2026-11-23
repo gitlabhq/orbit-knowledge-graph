@@ -111,7 +111,6 @@ impl DuckDbClient {
                 )
             })
             .unwrap_or_default();
-        // Bundled builds ship without ICU, so DuckDB has no TimeZone setting (it renders UTC).
         let has_time_zone: bool = conn.query_row(
             "SELECT count(*) > 0 FROM duckdb_settings() WHERE name = 'TimeZone'",
             [],
