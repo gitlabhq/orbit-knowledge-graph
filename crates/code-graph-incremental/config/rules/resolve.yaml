@@ -76,6 +76,9 @@ define:
     '_': 'visible($ROOT | returns, $ROOT)'
 
 resolve:
+  destructure:
+    - '(__destructure $S:__rhs $ROOT:__binding)':
+        calls: { to: 'aligned($S | source_class | components, $ROOT)', site: $ROOT }
   link:
     - '(__link $A:__anchor) when linked_section($ROOT, $A)':
         links: { from: 'file($ROOT)', to: 'linked_section($ROOT, $A)' }
