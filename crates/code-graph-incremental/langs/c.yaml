@@ -34,6 +34,14 @@ data:
   - [inttypes.h, imaxabs, imaxdiv, strtoimax, strtoumax, wcstoimax, wcstoumax]
   records: [struct_specifier, union_specifier]
 
+define:
+  exported(module, name):
+    '_ when module | regex_match("[.](h|hh|hpp|hxx)$")': >-
+      super(module, name)
+      or select(owned(minus(select(files, '(__source_file)' by $ROOT | stem, module | stem), module)), '(__def $N:__defname)', name)
+      or select(owned(select(files, '(__source_file)' by $ROOT | regex_replace("^(.*/)?([^/]*)[.](c|cc|cpp|cxx|m)$", "$2"), module | stem | split_last("/"))), '(__def $N:__defname)', name)
+    '_': 'super(module, name)'
+
 canonicalize:
   - stage: imports
     rewrite:

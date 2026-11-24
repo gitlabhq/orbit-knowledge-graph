@@ -25,6 +25,15 @@ enum Callee {
     Native(FnId),
 }
 
+/// The definition the running language calls by a shared definition's id.
+fn redefined<S: Store>(run: &Run<'_, S>, def: u16) -> u16 {
+    run.phase
+        .overrides
+        .get(run.input.rules)
+        .and_then(|o| o.get(&def).copied())
+        .unwrap_or(def)
+}
+
 /// A cached call whose body is running: what the fixpoint and the cache
 /// need once its value arrives.
 struct Pending {
@@ -385,12 +394,6 @@ impl<'e, S: Store> Vm<'e, S> {
     fn call<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [Def], callee: Callee, args: Args) {
         let (key, deps, callee) = match callee {
             Callee::Def(def) => {
-                let def = run
-                    .phase
-                    .overrides
-                    .get(run.input.rules)
-                    .and_then(|o| o.get(&def).copied())
-                    .unwrap_or(def);
                 let d = &fns[usize::from(def)];
                 (
                     (FnId(u16::MAX - def), d.key(&args)),
@@ -401,7 +404,7 @@ impl<'e, S: Store> Vm<'e, S> {
             Callee::Native(id) => {
                 let links = &run.phase.links;
                 if let Some(def) = links.defs[usize::from(id.0)] {
-                    return self.call(run, fns, Callee::Def(def), args);
+                    return self.call(run, fns, Callee::Def(redefined(run, def)), args);
                 }
                 let deps = links.deps[usize::from(id.0)];
                 let id = links.to[usize::from(id.0)];
@@ -730,7 +733,11 @@ impl<'e, S: Store> Vm<'e, S> {
         let (then, parts) = match expr {
             Expr::Union(parts) => (Task::Union(parts.len()), parts),
             Expr::Call(id, parts) => (Task::Call(Callee::Native(*id), parts.len()), parts),
-            Expr::Def(def, parts) => (Task::Call(Callee::Def(*def), parts.len()), parts),
+            Expr::Def(def, parts) => (
+                Task::Call(Callee::Def(redefined(run, *def)), parts.len()),
+                parts,
+            ),
+            Expr::Super(def, parts) => (Task::Call(Callee::Def(*def), parts.len()), parts),
             Expr::Or(a, b) => {
                 self.tasks.push(Task::Or(b, env));
                 self.tasks.push(Task::Eval(a, env));

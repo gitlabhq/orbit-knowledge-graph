@@ -29,6 +29,14 @@ data:
   - [cctype, isalnum, isalpha, isblank, iscntrl, isdigit, isgraph, islower, isprint, ispunct, isspace,
     isupper, isxdigit, tolower, toupper]
 
+define:
+  exported(module, name):
+    '_ when module | regex_match("[.](h|hh|hpp|hxx)$")': >-
+      super(module, name)
+      or select(owned(minus(select(files, '(__source_file)' by $ROOT | stem, module | stem), module)), '(__def $N:__defname)', name)
+      or select(owned(select(files, '(__source_file)' by $ROOT | regex_replace("^(.*/)?([^/]*)[.](c|cc|cpp|cxx|m)$", "$2"), module | stem | split_last("/"))), '(__def $N:__defname)', name)
+    '_': 'super(module, name)'
+
 canonicalize:
   - stage: imports
     rewrite:
@@ -63,6 +71,7 @@ canonicalize:
       - '(call_expression function: (template_function name: $N:identifier) arguments: $A)': '%call($N, $A)'
       - '(call_expression function: $F:identifier arguments: $A)': '%call($F, $A)'
       - '(new_expression type: $T:type_identifier arguments:? $A)': '%call($T, $A)'
+      - '(call_expression function: (parenthesized_expression) arguments: $A)': '(__call (__callee) $A)'
   - stage: classify
     rewrite:
       - '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: (parenthesized_declarator (ms_call_modifier) $N:identifier) parameters: $P) body: $B)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
