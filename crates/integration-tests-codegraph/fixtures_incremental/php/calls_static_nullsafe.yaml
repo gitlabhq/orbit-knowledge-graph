@@ -241,17 +241,14 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # KNOWN GAP: inline `(new Builder())->where()` does not resolve (needs
-  # constructor type-flow through the chain walker). The non-inline form
-  # `$b = new Builder(); $b->where()` for imported names DOES resolve.
-  - name: "Known gap: chained call on inline new (new Builder())->where()"
+  - name: "Chained call on inline new (new Builder())->where()"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\CallSites\chainedOnNew'
         AND callee.fqn = 'App\Query\Builder\where'
       RETURN caller.fqn AS c
     assert:
-      - { empty: true }
+      - { row_count: 1 }
 
   # ── Nullsafe (?->) calls (PHP 8.0) ─────────────────────────────
   - name: "Nullsafe call head: UserRepo.findSafe -> Builder.where"
