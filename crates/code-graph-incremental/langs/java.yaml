@@ -8,7 +8,7 @@ data:
     ArrayIndexOutOfBoundsException, ArrayStoreException, IllegalMonitorStateException, IllegalThreadStateException,
     InterruptedException, NegativeArraySizeException, NumberFormatException, ReflectiveOperationException,
     StringIndexOutOfBoundsException, StackTraceElement, ThreadGroup, ThreadLocal, InheritableThreadLocal,
-    ProcessBuilder, RuntimePermission]
+    ProcessBuilder, RuntimePermission, Override, Deprecated, FunctionalInterface, SuppressWarnings, SafeVarargs]
   stdlib: [javax, jdk, java/lang/Math, java/util/Objects]
   external: [java, java/lang]
   providers:
@@ -117,8 +117,8 @@ canonicalize:
       - '(method_declaration $M?:modifiers type: $RT:__member name: $N:identifier parameters: $P body:? $B)': '(__def (__defname @$N) (__method) (__ssa_return_type $RT) $M $P $B)'
       - '(method_declaration $M?:modifiers type: $RT:type_identifier name: $N:identifier parameters: $P body:? $B)': '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $M $P (__call (__callee @$RT $RT)) $B)'
       - '(method_declaration $M?:modifiers name: $N:identifier parameters: $P body:? $B)': '(__def (__defname @$N) (__method) $M $P $B)'
-      - '(constructor_declaration $M?:modifiers name: $N:identifier parameters: $P body: $B)': '(__def (__defname @$N) (__method) $M $P $B) #flavor=constructor'
-      - '(compact_constructor_declaration $M?:modifiers name: $N:identifier body: $B)': '(__def (__defname @$N) (__method) $M $B) #flavor=constructor'
+      - '(constructor_declaration $M?:modifiers name: $N:identifier parameters: $P body: $B)': '(__def (__defname @$N) (__method) $M $P $B) #constructor=true'
+      - '(compact_constructor_declaration $M?:modifiers name: $N:identifier body: $B)': '(__def (__defname @$N) (__method) $M $B) #constructor=true'
       - '(class_declaration $M?:modifiers name: $N:identifier $$$PRE superclass: $S:__supertype $$$ANN body: (class_body $$$B))': '(__def (__defname @$N) (__class) $M $$$PRE $S $$$ANN (__binding (__ivar "super") (__rhs (__call @$S->__callee))) $$$B)'
       - '(class_declaration $M?:modifiers name: $N:identifier $$$ANN body: (class_body $$$B))': '(__def (__defname @$N) (__class) $M $$$ANN $$$B)'
       - '(record_declaration $M?:modifiers name: $N:identifier parameters: (formal_parameters $$$P:__binding) $$$ANN body: (class_body $$$B))': '(__def (__defname @$N) (__class) $M $$$ANN (__positional $$$P) $$$B $$$P->record_component (record_component "equals") (record_component "hashCode") (record_component "toString")) #flavor=record'
@@ -127,14 +127,15 @@ canonicalize:
       - '(annotation_type_declaration $M?:modifiers name: $N:identifier body: $B)': '(__def (__defname @$N) (__interface) $M $B)'
   - stage: records
     rewrite:
-      - '(record_component "/^equals$/")': '(__def (__defname @$ROOT) (__method) (formal_parameters (__binding "o"))) unique (__def (__method))'
-      - '(record_component %record_overrides)': '(__def (__defname @$ROOT) (__method) (formal_parameters)) unique (__def (__method) (formal_parameters !(__binding)))'
-      - '(record_component $T:__ssa_typed)': '(__def (__defname @$ROOT) (__method) (__ssa_return_type @$T) (formal_parameters)) unique (__def (__method) (formal_parameters !(__binding))) #value=true'
-      - '(record_component)': '(__def (__defname @$ROOT) (__method) (formal_parameters)) unique (__def (__method) (formal_parameters !(__binding))) #value=true'
+      - '(record_component "/^equals$/")': '(__def (__defname @$ROOT) (__method) (formal_parameters (__binding "o"))) unique (__def $ROOT:__defname (__method) (formal_parameters (__binding)))'
+      - '(record_component %record_overrides)': '(__def (__defname @$ROOT) (__method) (formal_parameters)) unique (__def $ROOT:__defname (__method) (formal_parameters !(__binding)))'
+      - '(record_component $T:__ssa_typed)': '(__def (__defname @$ROOT) (__method) (__ssa_return_type @$T) (formal_parameters)) unique (__def $ROOT:__defname (__method) (formal_parameters !(__binding))) #value=true'
+      - '(record_component)': '(__def (__defname @$ROOT) (__method) (formal_parameters)) unique (__def $ROOT:__defname (__method) (formal_parameters !(__binding))) #value=true'
   - use: ssa_cleanup
   - stage: tag-defs
     rewrite:
       - '(block $$$B)': '(__scope $$$B)'
+      - '(__binding (__ivar "super"))': '#outer=true'
       - '(__def (__function))': '#callable=true #scoped=true'
       - '(__def (__method))': '#callable=true #scoped=true #definition_span=true'
       - use: type_def_tags
@@ -158,7 +159,7 @@ display:
   - use: def_types
   - stage: def_type_names
     rewrite:
-      - '(__def (__method))': '#def_type=$ROOT | tag("flavor") | map("constructor:Constructor") or "Method"'
+      - '(__def (__method))': '#def_type=$ROOT | tag("constructor") | map("true:Constructor") or "Method"'
       - '(__def (__class))': '#def_type=$ROOT | tag("flavor") | map("record:Record") or "Class"'
       - '(__def (__enum_variant))': '#def_type=EnumConstant'
   - stage: imports

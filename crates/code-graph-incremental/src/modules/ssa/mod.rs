@@ -45,7 +45,7 @@ type Undo = Vec<(u32, Option<(u32, usize)>)>;
 
 crate::roles!(Kinds: u16 {
     source_file, declaration, def, rhs, member, defname, binding, qualifier, alias, ssa_branch, import_type, call, ssa_arm, import, ssa_loop, ssa_hint, object, ivar, side_effect, scope, obj, name, lambda, impl_block, decorator, callee, args, trait_type, supertype, struct_type, source_path, interface, enum_type, dispatch, destructure, config_field, class, arr });
-crate::roles!(Tags: u32 { scoped, hoisted, lifted, implicit_self, type_only, weak });
+crate::roles!(Tags: u32 { scoped, hoisted, lifted, implicit_self, type_only, weak, outer });
 
 impl Kinds {
     fn class_like(self) -> [u16; 6] {
@@ -83,6 +83,8 @@ pub struct State {
     walked: bool,
     /// What each reference saw when the walk passed it.
     seen: FxHashMap<u32, Vals>,
+    /// References read before the walk entered their definition.
+    read_outside: FxHashSet<u32>,
     /// A deferred call's values, once the walk has seen every assignment.
     late: FxHashMap<u32, Vals>,
     /// The wildcard imports in force at each call.

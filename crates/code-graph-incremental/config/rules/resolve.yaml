@@ -4,7 +4,7 @@ data:
 define:
   file_at(path):
     '_ when path | regex_match("(^|/)[*]$")': >-
-      select(files, '(__source_file)' by $ROOT | regex_replace("^([^/]*)$", "./$1") | regex_replace("/?[^/]*$", ""), path | regex_replace("^[*]$", "./*") | regex_replace("/?[*]$", ""))
+      select(files, '(__source_file)' by $ROOT | regex_replace("[^/]*$", "."), path | regex_replace("(^|/)[*]$", "$1."))
       or select(files, '(__source_file $P:__package)' by package_path($P), path | regex_replace("/?[*]$", ""))
     '_': >-
       select(files, '(__source_file)' by $ROOT | stem, path)
@@ -75,6 +75,8 @@ define:
     '(__binding $R:__rhs)': '$R | tail | producing or $ROOT | type'
     '(__binding $T:__ssa_typed)': '$T | type'
     '_': '$ROOT | type'
+  annotated(ROOT):
+    '(__binding $T:__ssa_typed)': '$T | type | unique'
   dispatched(ROOT, contract, M):
     '_ when contract_impls($ROOT, contract)': 'declared(contract_impls($ROOT, contract), M, "callable") or declared(contract, M, "callable")'
   contract_impls(ROOT, contract): '$ROOT | other_parts | implements(contract)'
@@ -89,6 +91,9 @@ define:
     '_': 'visible($ROOT | returns, $ROOT | returns)'
 
 resolve:
+  destructure:
+    - '(__destructure $S:__rhs $ROOT:__binding)':
+        calls: { to: 'aligned($S | source_class | components, $ROOT)', site: $ROOT }
   link:
     - '(__link $A:__anchor) when linked_section($ROOT, $A)':
         links: { from: 'file($ROOT)', to: 'linked_section($ROOT, $A)' }
@@ -110,10 +115,14 @@ resolve:
         calls: { to: '$ROOT | follow(type_flow, site) | producing | member($M) or $O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee $M:(__member $O:(__object (__qualifier)))))':
         calls: { to: '$O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
+    - '(__call (__callee $M:(__member $O:(__object !(__call) !(__member) !(__object) !(__qualifier) !(__ivar)))))':
+        calls:
+          - { to: '$O | type | member($M) | elsewhere(file($ROOT)) or $O | type | member($M) | impl_member', site: $ROOT }
+          - { to: 'lub($ROOT, $ROOT | follow(type_flow, site) | producing) | member($M) or $ROOT | follow(type_flow, site) | producing | member($M) or $ROOT | follow(type_flow, site) | annotated | member($M)', site: $ROOT }
     - '(__call (__callee $M:(__member $O:__object)))':
         calls:
-          - { to: '$O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
-          - { to: '$ROOT | follow(type_flow, site) | producing | member($M)', site: $ROOT }
+          - { to: '$O | type | member($M) | elsewhere(file($ROOT)) or $O | type | member($M) | impl_member', site: $ROOT }
+          - { to: 'lub($ROOT, $ROOT | follow(type_flow, site) | producing) | member($M) or $ROOT | follow(type_flow, site) | producing | member($M)', site: $ROOT }
     - '(__call (__type) (__callee $I:__ivar))':
         calls: { to: '$I | ivar | type_node | type | callable | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee $I:__ivar))':
@@ -121,7 +130,9 @@ resolve:
     - '(__call #implicit_self (__callee "/./"))':
         calls: { to: 'targets($ROOT, true) | callable | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee "/./"))':
-        calls: { to: 'targets($ROOT, false) | callable | elsewhere(file($ROOT))', site: $ROOT }
+        calls:
+          - { to: 'targets($ROOT, false) | callable | elsewhere(file($ROOT))', site: $ROOT }
+          - { to: '$ROOT | impl_targets | callable', site: $ROOT }
 
   imported_receiver:
     - '(__call (__callee (__member $O:__object))) when receiver_imports($ROOT)':
@@ -141,7 +152,7 @@ resolve:
 
   decorator:
     - '$D:(__def $ROOT:__decorator)':
-        calls: { from: $D, to: '$ROOT | type | callable | elsewhere(file($ROOT))' }
+        calls: { from: $D, to: '$ROOT | type | is_def | elsewhere(file($ROOT))' }
 
   supertype:
     - '$D:(__def $ROOT:__supertype)':

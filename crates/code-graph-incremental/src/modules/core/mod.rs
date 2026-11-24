@@ -37,6 +37,23 @@ static FUNCTIONS: &[Function<Core>] = &[
     function!(Inline, "last", [set], |_, a| {
         a[0].last().map_or_else(Vals::new, |&v| one(v))
     }),
+    function!(Inline, "aligned", [set, set], |cx, a| {
+        let mut out = Vals::new();
+        for at in nodes(&a[1]) {
+            let node = cx.jump(at);
+            let Some(parent) = node.parent() else {
+                continue;
+            };
+            let ordinal = parent
+                .children()
+                .filter(|sibling| sibling.kind() == node.kind())
+                .position(|sibling| sibling.index() == node.index());
+            if let Some(counterpart) = ordinal.and_then(|n| nodes(&a[0]).nth(n)) {
+                push(&mut out, Val::Node(counterpart));
+            }
+        }
+        out
+    }),
     function!(Inline, "file", [set], |_, a| {
         set(nodes(&a[0]).map(|at| Val::Node(Loc { fi: at.fi, node: 0 })))
     }),
