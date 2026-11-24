@@ -142,8 +142,7 @@ tests:
       - { column_values: { field: callee, values: ["pick", "touch"] } }
 
   - name: "an awaited builder types the local by the IntoFuture output"
-    # Known gap: the awaited value takes the declared return type Builder, not the IntoFuture output Item, so item.touch() links Builder::touch.
-    skip: true
+    skip: false
     query: |
       MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
       WHERE caller.name = "await_builder" AND callee.name = "touch"

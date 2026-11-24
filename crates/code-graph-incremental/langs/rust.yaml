@@ -22,6 +22,13 @@ data:
   diverging_macros: [panic, unreachable, todo, unimplemented]
 
 define:
+  producing(ROOT):
+    '(__call #awaited)': 'awaited_output($ROOT | follow(calls, site) | returned) or super(ROOT)'
+    '_': 'super(ROOT)'
+  awaited_output(ROOT):
+    '(__def)': 'members($ROOT, "Output", "type") | aliased_type'
+  aliased_type(ROOT):
+    '(__def (__type_alias) $T:__ssa_typed)': '$T | type'
   impl_alias_source(ROOT): >-
     select(under(file($ROOT)), '(__import $ROOT:(__name (__alias)))' by $ROOT | child("__alias"), $ROOT | child("__defname"))
     | import_source
@@ -70,7 +77,7 @@ canonicalize:
       - '(unary_expression $OP $E)': '(__call (__callee (__member @$OP | kind_name | map("-:neg", "!:not", "*:deref") (__object @$E $E))))'
       - '(index_expression $E:_*_named $I:_*_named)': '(__call (__callee (__member "index" (__object @$E $E))) $I)'
       - '(try_expression $E:__call)': '$E #unwrapped=true'
-      - '(await_expression $E:__call)': '$E'
+      - '(await_expression $E:__call)': '$E #awaited=true'
       - '(try_expression $E)': '(__call (__callee (__member "branch" (__object @$E $E))))'
       - '(await_expression $E)': '(__call (__callee (__member "poll" (__object @$E $E))))'
       - '(struct_expression name: $N body: $B)': '%call($N, $B)'
