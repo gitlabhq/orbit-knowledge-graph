@@ -12,6 +12,10 @@ define:
       or select(files, '(__source_file)' by $ROOT | collapse_index(%index_files), path)
       or file(select(files, '(__source_file $P:__package (__def $ROOT:__defname))' by package_path($P) | concat("/", $ROOT), path))
       or file(select(files, '(__source_file (__def $ROOT:__defname))' by package_path($ROOT), path))
+  called(ROOT):
+    '(__def $K:__callable)': 'members(nodes($ROOT), $K, "callable")'
+    '(__def (__class))': none
+    '(__def)': '$ROOT | callable'
   receiver_imports(ROOT):
     '_': none
   package_path(ROOT): '$ROOT | regex_replace("[.]|::|[\\\\]", "/")'
@@ -75,7 +79,7 @@ define:
     '(__def (__ssa_return_type $A:__type_arg))': '$A | type'
   returned(ROOT):
     '_ when $ROOT | returns | is_class': '$ROOT | returns'
-    '_': 'visible($ROOT | returns, $ROOT)'
+    '_': 'visible($ROOT | returns, $ROOT | returns)'
 
 resolve:
   link:
@@ -115,6 +119,10 @@ resolve:
   imported_receiver:
     - '(__call (__callee (__member $O:__object))) when receiver_imports($ROOT)':
         calls: { to: 'receiver_imports($ROOT) | follow(imports, from) | callable | elsewhere(file($ROOT))', site: $ROOT }
+
+  produced_call:
+    - '(__call (__callee "/./")) when $ROOT | follow(type_flow, site) | producing':
+        calls: { to: '$ROOT | follow(type_flow, site) | producing | called', site: $ROOT }
 
   bound_import_call:
     - '(__call (__callee "/./")) when $ROOT | follow(type_flow, site) | follow(imports, site)':
