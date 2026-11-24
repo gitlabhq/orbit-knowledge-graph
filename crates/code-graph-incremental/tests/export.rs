@@ -11,12 +11,6 @@ struct Exported {
     tables: Vec<(String, RecordBatch)>,
 }
 
-fn index(engine: &Engine, root: &Path) -> code_graph_incremental::State {
-    driver::index(engine, &common::walk(root), &Sentinel::disabled())
-        .unwrap()
-        .0
-}
-
 fn export_with(
     engine: &Engine,
     repository: &orbit_utils::vfs::Vfs<()>,
@@ -24,14 +18,14 @@ fn export_with(
     config: &ExportConfig,
     envelope: Envelope,
 ) -> Result<Exported, Error> {
-    let (mut state, _) = driver::index(engine, repository, &Sentinel::disabled())?;
+    let (state, report) = driver::index(engine, repository, &Sentinel::disabled())?;
     let tables = tables::export(
         engine,
-        &mut state,
+        &state,
+        &report,
         &Tables::load(engine, ontology, config)?,
         &envelope,
         &Scope::all(),
-        &Sentinel::disabled(),
     )?;
     Ok(Exported { tables })
 }
@@ -647,16 +641,17 @@ fn exporting_deeply_nested_definitions_grows_linearly() {
             .build()
             .unwrap();
         let ontology = Ontology::load_embedded().unwrap();
-        let mut state = index(&engine, repo.path());
         let tables = Tables::load(&engine, &ontology, &ExportConfig::default()).unwrap();
         let started = Instant::now();
+        let (state, report) =
+            driver::index(&engine, &common::walk(repo.path()), &Sentinel::disabled()).unwrap();
         tables::export(
             &engine,
-            &mut state,
+            &state,
+            &report,
             &tables,
             &envelope(),
             &Scope::all(),
-            &Sentinel::disabled(),
         )
         .unwrap();
         started.elapsed().as_secs_f64() * 1000.0
@@ -687,16 +682,18 @@ fn exporting_some_trees_matches_the_full_export_of_those_files() {
         .unwrap();
     let ontology = Ontology::load_embedded().unwrap();
     let tables = Tables::load(&engine, &ontology, &ExportConfig::default()).unwrap();
-    let mut state = index(&engine, repo.path());
+    let (state, report) =
+        driver::index(&engine, &common::walk(repo.path()), &Sentinel::disabled()).unwrap();
     let main = state
         .trees
         .iter()
         .position(|tree| tree.label == "main.py")
         .unwrap() as u32;
-    let mut export = |only: Option<&rustc_hash::FxHashSet<u32>>| Exported {
+    let export = |only: Option<&rustc_hash::FxHashSet<u32>>| Exported {
         tables: tables::export(
             &engine,
-            &mut state,
+            &state,
+            &report,
             &tables,
             &envelope(),
             &Scope {
@@ -704,7 +701,6 @@ fn exporting_some_trees_matches_the_full_export_of_those_files() {
                 owns_file: &|_| true,
                 only,
             },
-            &Sentinel::disabled(),
         )
         .unwrap(),
     };

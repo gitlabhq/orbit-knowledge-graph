@@ -8,8 +8,49 @@ pub enum Step<R> {
     Out(R),
 }
 
+/// The trees a walk reaches by file index: a family's files, then its
+/// project tree, if the walk reads it, at index `files.len()`.
+pub struct Trees<'a, S: Storage = Mutable> {
+    pub files: &'a [Tree<S>],
+    pub project: Option<&'a Tree<S>>,
+}
+
+impl<S: Storage> Copy for Trees<'_, S> {}
+impl<S: Storage> Clone for Trees<'_, S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a, S: Storage> Trees<'a, S> {
+    pub fn of(files: &'a [Tree<S>]) -> Self {
+        Self {
+            files,
+            project: None,
+        }
+    }
+
+    pub fn get(self, fi: u32) -> &'a Tree<S> {
+        match self.files.get(fi as usize) {
+            Some(tree) => tree,
+            None => self
+                .project
+                .expect("a file index names a file or the project tree"),
+        }
+    }
+
+    pub fn files(self) -> u32 {
+        self.files.len() as u32
+    }
+
+    /// The project tree's file index, if the walk reads it.
+    pub fn project_fi(self) -> Option<u32> {
+        self.project.map(|_| self.files())
+    }
+}
+
 pub struct Cursor<'a, S: Storage = Mutable> {
-    trees: &'a [Tree<S>],
+    trees: Trees<'a, S>,
     fi: u32,
     id: u32,
 }
@@ -22,11 +63,11 @@ impl<S: Storage> Clone for Cursor<'_, S> {
 }
 
 impl<'a, S: Storage> Cursor<'a, S> {
-    pub fn new(trees: &'a [Tree<S>], fi: u32, id: u32) -> Self {
+    pub fn new(trees: Trees<'a, S>, fi: u32, id: u32) -> Self {
         Self { trees, fi, id }
     }
     pub(crate) fn tree(self) -> &'a Tree<S> {
-        &self.trees[self.fi as usize]
+        self.trees.get(self.fi)
     }
     pub fn node(self) -> &'a S::Node {
         self.tree().storage.node(self.id)
@@ -192,7 +233,7 @@ impl<'a, S: Storage> Walk<'a, S> {
 
 impl<S: Storage> Tree<S> {
     pub fn cursor(&self, id: u32) -> Cursor<'_, S> {
-        Cursor::new(std::slice::from_ref(self), 0, id)
+        Cursor::new(Trees::of(std::slice::from_ref(self)), 0, id)
     }
     pub fn root(&self) -> Cursor<'_, S> {
         self.cursor(S::index(self.root))

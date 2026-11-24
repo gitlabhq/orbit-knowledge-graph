@@ -23,10 +23,11 @@ pub use host::{
 pub use program::{Def, Part, Phase, Pipeline, RowShape};
 pub use run::{Indexed, Run, WHOLE, Write};
 use run::{Input, Key, MAX_FIXPOINT_ROUNDS, Memo, SLOTS};
-pub use walk::{run_family, run_tree, run_trees, scope_budget};
+pub use walk::{Ran, run_shared, run_tree, scope_budget};
 
 pub type Tree<S = Compact> = crate::tree::Tree<S>;
 pub type Cursor<'a, S = Compact> = crate::tree::Cursor<'a, S>;
+pub type Trees<'a, S = Compact> = crate::tree::Trees<'a, S>;
 
 /// A tree storage the engine runs over. Each module function is compiled
 /// once per storage, so a call dispatches statically.

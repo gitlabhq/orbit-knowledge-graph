@@ -12,23 +12,23 @@ use super::graph::End;
 use super::pattern::{self, Cap, Pat};
 use super::program::{Pass, Phase, Scratch, Template, order};
 use super::{
-    Compact, Cursor, Graph, Indexed, Input, Loc, Outputs, Run, Store, Tree, WHOLE, Write, vm,
+    Cursor, Graph, Indexed, Input, Loc, Outputs, Run, Store, Tree, Trees, WHOLE, Write, vm,
 };
 use crate::engine::Engine;
 use crate::intern::Lang;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Edge, Mutable, Storage};
 
-/// Runs a phase on one tree with the rules at `rules`, or the tree's own;
-/// returns the edges it wrote and its backends' outputs. `fi` is the tree's
-/// file in `graph`.
+/// Runs a phase on one tree it writes, with the rules at `rules` or the
+/// tree's own, reading `project` besides and the graph with the tree as its
+/// file there; returns the edges it wrote and its backends' outputs.
 pub fn run_tree<S: Store>(
     phase: &Phase,
     tree: &mut Tree<S>,
-    fi: u32,
+    project: Option<&Tree<S>>,
     rules: Option<usize>,
     engine: &Engine,
-    graph: Option<&Graph>,
+    graph: Option<(&Graph, u32)>,
     budget: &Sentinel,
 ) -> Result<(Vec<Edge>, Outputs), Killed> {
     let file = tree_budget(phase, engine, &tree.label);
@@ -68,7 +68,7 @@ pub fn run_tree<S: Store>(
                     region,
                     engine,
                     graph,
-                    fi,
+                    project,
                     budget,
                     file: &file,
                 };
@@ -141,23 +141,31 @@ fn region_nodes<S: Store>(
         .collect()
 }
 
-/// Runs a phase on a family's files, the project tree last in `trees`, with
-/// the graph so far; an `until: stable` phase reruns with its own edges in
-/// the graph until they stop changing. A rerun walks only the files that
+/// What a shared phase wrote: its edges, its backends' outputs, and the
+/// reason it stopped early, if it did.
+#[derive(Default)]
+pub struct Ran {
+    pub edges: Vec<Edge>,
+    pub outputs: Outputs,
+    pub stopped: Option<Killed>,
+}
+
+/// Runs a shared phase on the trees at `walk`, each walk reading every tree
+/// and the graph so far; an `until: stable` phase reruns with its own edges
+/// in the graph until they stop changing. A rerun walks only the trees that
 /// read an end of an edge the last round added or dropped; the others would
-/// write what they wrote. The edges it adds, and the reason it stopped early,
-/// if it did.
-pub fn run_family(
+/// write what they wrote.
+pub fn run_shared(
     phase: &Phase,
-    trees: &[Tree<Compact>],
+    trees: Trees<'_>,
+    walk: &[u32],
     base: &[Edge],
     engine: &Engine,
     budget: &Sentinel,
-) -> Result<(Vec<Edge>, Option<Killed>), Killed> {
-    let project = trees.len() as u32 - 1;
+) -> Result<Ran, Killed> {
     let known: FxHashSet<Edge> = base.iter().copied().collect();
-    let mut runs: Vec<Option<FileRun>> = (0..project).map(|_| None).collect();
-    let mut walk: Vec<usize> = (0..project as usize).collect();
+    let mut runs: Vec<Option<FileRun>> = walk.iter().map(|_| None).collect();
+    let mut pending: Vec<usize> = (0..walk.len()).collect();
     let (mut last, mut stopped): (Vec<Edge>, _) = (Vec::new(), None);
     let found_in = |runs: &[Option<FileRun>]| {
         let mut seen = FxHashSet::default();
@@ -169,7 +177,8 @@ pub fn run_family(
     };
     settle(|| {
         let graph = Graph::new(base.iter().chain(&last));
-        let done = match run_files(phase, trees, &walk, Some(project), &graph, engine, budget) {
+        let at: Vec<u32> = pending.iter().map(|&i| walk[i]).collect();
+        let done = match run_files(phase, trees, &at, &graph, engine, budget) {
             Ok(done) => done,
             Err(killed) if !killed.cancelled => {
                 stopped = Some(killed);
@@ -177,8 +186,8 @@ pub fn run_family(
             }
             Err(killed) => return Err(killed),
         };
-        for (&fi, run) in walk.iter().zip(done) {
-            runs[fi] = Some(run);
+        for (&i, run) in pending.iter().zip(done) {
+            runs[i] = Some(run);
         }
         let found = found_in(&runs);
         let (now, before): (FxHashSet<Edge>, FxHashSet<Edge>) = (
@@ -190,16 +199,25 @@ pub fn run_family(
             .flat_map(super::graph::ends)
             .collect();
         last = found;
-        walk = (0..project as usize)
-            .filter(|&fi| {
-                runs[fi]
+        pending = (0..walk.len())
+            .filter(|&i| {
+                runs[i]
                     .as_ref()
                     .is_some_and(|run| !run.reads.is_disjoint(&changed))
             })
             .collect();
-        Ok(phase.until_stable && !walk.is_empty())
+        Ok(phase.until_stable && !pending.is_empty())
     })?;
-    Ok((found_in(&runs), stopped))
+    let edges = found_in(&runs);
+    let mut outputs = Outputs::default();
+    for run in runs.into_iter().flatten() {
+        outputs.merge(run.outputs);
+    }
+    Ok(Ran {
+        edges,
+        outputs,
+        stopped,
+    })
 }
 
 /// Runs `round` until it reports no change, or the fixpoint bound.
@@ -212,28 +230,6 @@ fn settle<E>(mut round: impl FnMut() -> Result<bool, E>) -> Result<(), E> {
     Ok(())
 }
 
-/// Runs a phase on the first `walk` trees of a family in parallel, over all
-/// its trees and the graph so far; returns the edges it wrote and its
-/// backends' outputs. `project` is the project tree's file, if the family has
-/// one.
-pub fn run_trees(
-    phase: &Phase,
-    trees: &[Tree<Compact>],
-    walk: usize,
-    project: Option<u32>,
-    graph: &Graph,
-    engine: &Engine,
-    budget: &Sentinel,
-) -> Result<(Vec<Edge>, Outputs), Killed> {
-    let files: Vec<usize> = (0..walk).collect();
-    let (mut edges, mut outputs) = (Vec::new(), Outputs::default());
-    for run in run_files(phase, trees, &files, project, graph, engine, budget)? {
-        edges.extend(run.edges);
-        outputs.merge(run.outputs);
-    }
-    Ok((edges, outputs))
-}
-
 /// What one file's run of a phase wrote, and the graph ends it read.
 struct FileRun {
     edges: Vec<Edge>,
@@ -241,23 +237,21 @@ struct FileRun {
     reads: FxHashSet<End>,
 }
 
-/// Runs a phase on the given files of a family in parallel, each region of a
-/// file under its own rules.
+/// Runs a phase on the trees at `walk` in parallel, each region of a tree
+/// under its own rules.
 fn run_files(
     phase: &Phase,
-    trees: &[Tree<Compact>],
-    walk: &[usize],
-    project: Option<u32>,
+    trees: Trees<'_>,
+    walk: &[u32],
     graph: &Graph,
     engine: &Engine,
     budget: &Sentinel,
 ) -> Result<Vec<FileRun>, Killed> {
     let scope = scope_budget(phase, engine, budget);
-    let files = project.unwrap_or(trees.len() as u32);
-    let indexed = Indexed::new(phase, trees, files as usize, engine, &scope);
+    let indexed = Indexed::new(phase, trees, engine, &scope);
     walk.par_iter()
         .map(|&fi| {
-            let tree = &trees[fi];
+            let tree = trees.get(fi);
             let file = tree_budget(phase, engine, &tree.label);
             let own = engine.rules_index(&tree.label);
             let regions = regions(tree, engine, own);
@@ -277,13 +271,11 @@ fn run_files(
                     }
                     let input = Input {
                         trees,
-                        fi: fi as u32,
+                        fi,
                         rules,
                         graph: Some(graph),
-                        graph_fi: fi as u32,
+                        graph_fi: fi,
                         indexed: Some(&indexed),
-                        files,
-                        project,
                         budget: &scope,
                         file: &file,
                     };
@@ -305,23 +297,24 @@ fn run_files(
 }
 
 /// What a walk over one tree reads besides the tree.
-struct On<'a> {
+struct On<'a, S: Store> {
     phase: &'a Phase,
     rules: usize,
     /// The region the walk covers: the tree's root or a region node.
     region: u32,
     engine: &'a Engine,
-    graph: Option<&'a Graph>,
-    fi: u32,
+    /// The graph, and the walked tree's file in it.
+    graph: Option<(&'a Graph, u32)>,
+    project: Option<&'a Tree<S>>,
     budget: &'a Sentinel,
     file: &'a Sentinel,
 }
 
-impl On<'_> {
+impl<S: Store> On<'_, S> {
     /// One walk of a pass over the tree; whether it replaced a node. A run
     /// reads the tree until a node writes it; the writes commit, and a new
     /// run goes on from the next node.
-    fn walk<S: Store>(
+    fn walk(
         &self,
         pass: &Pass,
         tree: &mut Tree<S>,
@@ -333,17 +326,18 @@ impl On<'_> {
         let (mut at, mut replaced) = (0, false);
         while at < nodes.len() {
             let writes = {
-                let trees = std::slice::from_ref(&*tree);
-                let indexed = Indexed::new(self.phase, trees, 1, self.engine, self.budget);
+                let trees = Trees {
+                    files: std::slice::from_ref(&*tree),
+                    project: self.project,
+                };
+                let indexed = Indexed::new(self.phase, trees, self.engine, self.budget);
                 let input = Input {
                     trees,
                     fi: 0,
                     rules: self.rules,
-                    graph: self.graph,
-                    graph_fi: self.fi,
+                    graph: self.graph.map(|(graph, _)| graph),
+                    graph_fi: self.graph.map_or(0, |(_, fi)| fi),
                     indexed: Some(&indexed),
-                    files: 1,
-                    project: None,
                     budget: self.budget,
                     file: self.file,
                 };
@@ -375,7 +369,7 @@ fn fire_from<'t, S: Store>(
         if !run.step() {
             return nodes.len();
         }
-        let tree = &run.input.trees[run.input.fi as usize];
+        let tree = run.input.trees.get(run.input.fi);
         if tree.storage.is_removed(tree.storage.id(node))
             || !pass.cases.tries(tree.storage.node(node).kind)
         {

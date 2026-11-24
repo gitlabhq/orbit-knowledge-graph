@@ -16,8 +16,7 @@ pub const WHOLE: u32 = u32::MAX;
 /// family-wide directory of each index, merged from the files' pieces.
 pub struct Indexed<'t, S: Store> {
     pub(super) phase: &'t Phase,
-    pub(super) trees: &'t [Tree<S>],
-    pub(super) files: usize,
+    pub(super) trees: Trees<'t, S>,
     pub(super) engine: &'t Engine,
     pub(super) budget: &'t Sentinel,
     pub(super) family: Box<[std::sync::OnceLock<FxHashMap<u32, Vec<Loc>>>]>,
@@ -26,15 +25,13 @@ pub struct Indexed<'t, S: Store> {
 impl<'t, S: Store> Indexed<'t, S> {
     pub(super) fn new(
         phase: &'t Phase,
-        trees: &'t [Tree<S>],
-        files: usize,
+        trees: Trees<'t, S>,
         engine: &'t Engine,
         budget: &'t Sentinel,
     ) -> Self {
         Self {
             phase,
             trees,
-            files,
             engine,
             budget,
             family: (0..phase.index_count)
@@ -45,18 +42,17 @@ impl<'t, S: Store> Indexed<'t, S> {
 
     pub(super) fn piece(&self, fi: u32, id: u32) -> &'t crate::tree::Piece {
         let (trees, engine, phase, budget) = (self.trees, self.engine, self.phase, self.budget);
-        trees[fi as usize]
+        trees
+            .get(fi)
             .indexes
             .piece(phase.index_count, id as usize, || {
                 let input = Input {
                     trees,
                     fi,
-                    rules: engine.rules_index(&trees[fi as usize].label),
+                    rules: engine.rules_index(&trees.get(fi).label),
                     graph: None,
                     graph_fi: 0,
                     indexed: None,
-                    files: trees.len() as u32,
-                    project: None,
                     budget,
                     file: budget,
                 };
@@ -68,7 +64,7 @@ impl<'t, S: Store> Indexed<'t, S> {
     pub(super) fn family(&self, id: u32) -> &FxHashMap<u32, Vec<Loc>> {
         self.family[id as usize].get_or_init(|| {
             let mut map: FxHashMap<u32, Vec<Loc>> = FxHashMap::default();
-            for fi in 0..self.files as u32 {
+            for fi in 0..self.trees.files() {
                 for (&(anchor, key), nodes) in self.piece(fi, id) {
                     if anchor == WHOLE {
                         map.entry(key)
@@ -114,7 +110,7 @@ pub(super) struct Table {
 
 /// What a run reads besides its phase and engine.
 pub(super) struct Input<'t, S: Store> {
-    pub(super) trees: &'t [Tree<S>],
+    pub(super) trees: Trees<'t, S>,
     /// The tree the run walks.
     pub(super) fi: u32,
     /// The rule set the run's tree runs.
@@ -123,9 +119,6 @@ pub(super) struct Input<'t, S: Store> {
     /// The run's tree's file index in the graph.
     pub(super) graph_fi: u32,
     pub(super) indexed: Option<&'t Indexed<'t, S>>,
-    /// How many files the run covers.
-    pub(super) files: u32,
-    pub(super) project: Option<u32>,
     pub(super) budget: &'t Sentinel,
     pub(super) file: &'t Sentinel,
 }
@@ -200,7 +193,7 @@ impl<'t, S: Store> Run<'t, S> {
             cap if self.edges.len() <= cap => Ok(()),
             cap => Err(Killed::limit(
                 "edges",
-                &self.input.trees[self.input.fi as usize].label,
+                &self.input.trees.get(self.input.fi).label,
                 self.edges.len(),
                 cap,
             )),
@@ -218,7 +211,7 @@ impl<'t, S: Store> Run<'t, S> {
     }
 
     pub(crate) fn sym_at(&self, loc: Loc) -> u32 {
-        self.input.trees[loc.fi as usize].sym_at(loc.node, self.lang())
+        self.input.trees.get(loc.fi).sym_at(loc.node, self.lang())
     }
 
     pub(super) fn step(&mut self) -> bool {

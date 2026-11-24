@@ -108,7 +108,7 @@ pub(super) struct Collect {
 pub struct Outputs(pub(super) Vec<(&'static str, Collect, Output)>);
 
 impl Outputs {
-    pub(super) fn merge(&mut self, from: Outputs) {
+    pub fn merge(&mut self, from: Outputs) {
         for (name, collect, output) in from.0 {
             match self.0.iter_mut().find(|(n, _, _)| *n == name) {
                 Some((_, collect, into)) => (collect.merge)(into, output),
@@ -117,17 +117,16 @@ impl Outputs {
         }
     }
 
-    /// Backend `B`'s merged output; empty if the phase wrote none.
-    pub fn take<B: Backend>(&mut self) -> B::Output {
-        match self.0.iter().position(|(n, _, _)| *n == B::NAME) {
-            Some(at) => *self
-                .0
-                .swap_remove(at)
-                .2
-                .downcast::<B::Output>()
-                .expect("a backend's output has its type"),
-            None => B::Output::default(),
-        }
+    /// Backend `B`'s merged output, if the run wrote any.
+    pub fn get<B: Backend>(&self) -> Option<&B::Output> {
+        self.0
+            .iter()
+            .find(|(n, _, _)| *n == B::NAME)
+            .map(|(_, _, output)| {
+                output
+                    .downcast_ref::<B::Output>()
+                    .expect("a backend's output has its type")
+            })
     }
 }
 
@@ -440,7 +439,7 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
     }
 
     pub fn tree(&self) -> &'t Tree<S> {
-        &self.run.input.trees[self.run.input.fi as usize]
+        self.run.input.trees.get(self.run.input.fi)
     }
 
     pub fn at(&self, node: u32) -> Cursor<'t, S> {
@@ -533,15 +532,13 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
 
     /// How many files the run covers; file indexes are `0..files()`.
     pub fn files(&self) -> u32 {
-        self.run.input.files
+        self.run.input.trees.files()
     }
 
-    /// The project tree's root, in a family run.
+    /// The project tree's root, when the phase reads it.
     pub fn project(&self) -> Option<Cursor<'t, S>> {
-        self.run
-            .input
-            .project
-            .map(|fi| Cursor::new(self.run.input.trees, fi, 0))
+        let trees = self.run.input.trees;
+        trees.project_fi().map(|fi| Cursor::new(trees, fi, 0))
     }
 
     pub fn state(&mut self) -> &mut M::State {

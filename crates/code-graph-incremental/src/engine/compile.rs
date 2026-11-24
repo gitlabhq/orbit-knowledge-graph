@@ -12,7 +12,7 @@ use super::lang::{DataSpec, DefBody, DefSpec, Pair, RuleFiles, StageSpec, TableS
 use super::pattern::{self, Slots, Tpl};
 use super::program::{
     BudgetSpec, Cases, Def, DefImpl, Indexer, Match, Part, Pass, Phase, Pipeline, Roles, RowShape,
-    Template,
+    Template, TreeSets,
 };
 use super::{FnId, Kind, Registration, Registry, Val, Vals};
 use crate::error::LoadError;
@@ -34,7 +34,9 @@ struct PipelineSpec {
 #[serde(deny_unknown_fields)]
 struct PhaseSpec {
     name: String,
-    over: String,
+    walks: Vec<String>,
+    #[serde(default)]
+    reads: Vec<String>,
     /// `children_first` walks each tree's children before their parent.
     #[serde(default)]
     order: Option<String>,
@@ -96,7 +98,6 @@ impl Pipeline {
             .iter()
             .map(|p| {
                 let mut phase = compile_phase(&loader, p, &files, &defs, &overrides)?;
-                phase.rows = rows.clone();
                 phase.data = values.clone();
                 phase.enclosing = enclosing.clone();
                 phase.roles = roles.clone();
@@ -111,11 +112,20 @@ impl Pipeline {
             phase.indexers = indexers.clone();
         }
         let settings = merged_data(&files);
-        Ok(Self {
+        let pipeline = Self {
             registry,
             phases,
+            rows,
             settings,
-        })
+        };
+        let (_, rest) = pipeline.split();
+        if let Some(late) = rest.iter().find(|p| p.walks.files && p.builds()) {
+            return Err(LoadError(format!(
+                "phase {} builds files after a phase that reads more than one tree",
+                late.name
+            )));
+        }
+        Ok(pipeline)
     }
 }
 
@@ -247,10 +257,46 @@ fn walk_of(spec: &PhaseSpec) -> Result<(bool, bool), LoadError> {
         Some("stable") => true,
         Some(other) => return Err(err("until", other)),
     };
-    if !matches!(spec.over.as_str(), "tree" | "project" | "family" | "graph") {
-        return Err(err("over", &spec.over));
-    }
     Ok((post, stable))
+}
+
+/// The tree sets a phase's `walks:` or `reads:` names.
+fn tree_sets(spec: &PhaseSpec, names: &[String]) -> Result<TreeSets, LoadError> {
+    let mut sets = TreeSets::default();
+    for name in names {
+        match name.as_str() {
+            "files" => sets.files = true,
+            "project" => sets.project = true,
+            other => {
+                return Err(LoadError(format!(
+                    "phase {}: unknown tree set: {other}",
+                    spec.name
+                )));
+            }
+        }
+    }
+    Ok(sets)
+}
+
+/// Fails when a phase writes trees that other walks of it read, or walks
+/// files and the project tree while writing them.
+fn check_walks(phase: &Phase) -> Result<(), LoadError> {
+    let err = |why: &str| Err(LoadError(format!("phase {}: {why}", phase.name)));
+    if phase.walks == TreeSets::default() {
+        return err("walks no trees");
+    }
+    let writes = phase.builds() || phase.passes.iter().any(|p| !p.tag_keys.is_empty());
+    match (phase.shared(), writes) {
+        (true, true) => err("writes trees that its other walks read"),
+        (true, false) => Ok(()),
+        (false, _) if phase.walks.files && phase.walks.project => {
+            err("writes trees, so it walks files or the project tree, not both")
+        }
+        (false, _) if phase.reads.files => {
+            err("writes trees, so it reads only the project tree besides its own")
+        }
+        (false, _) => Ok(()),
+    }
 }
 
 fn compile_phase(
@@ -331,7 +377,8 @@ fn compile_phase(
         name: spec.name.clone(),
         label: Box::leak(label.into_boxed_str()),
         budget: spec.budget.clone(),
-        scope: spec.over.clone(),
+        walks: tree_sets(spec, &spec.walks)?,
+        reads: tree_sets(spec, &spec.reads)?,
         until_stable,
         modules: used,
         links,
@@ -342,12 +389,12 @@ fn compile_phase(
         index_count: 0,
         enclosing: Vec::new(),
         roles: Vec::new(),
-        rows: Vec::new(),
         indexers: Vec::new().into(),
         passes,
         by_lang,
         region_by_lang,
     })
+    .and_then(|phase| check_walks(&phase).map(|()| phase))
 }
 
 /// Each definition's dependencies under a phase's binds: the states of every

@@ -1,4 +1,5 @@
 define:
+  inherited_tag(ROOT, key): '$ROOT | tag(key) or $ROOT | ancestor_tag(key)'
   name(ROOT): 'minus(read($ROOT), opaque)'
   ivar(ROOT): "first(select_all(scope(ROOT) | class, '(__binding $I:__ivar)', $ROOT), b => typed_field(b)) | producer"
   typed_field(ROOT):

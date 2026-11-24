@@ -86,13 +86,15 @@ pub fn repository<E: std::fmt::Display>(
             let mut tables =
                 crate::backend::tables::Tables::load(&engine, ontology, export_config)?;
             tables.batch_bytes = options.batch_bytes;
+            let mut report = Report::default();
+            super::finish(&engine, &mut state, &run, &mut report)?;
             emit(crate::backend::tables::export(
                 &engine,
-                &mut state,
+                &state,
+                &report,
                 &tables,
                 envelope,
                 &crate::backend::tables::Scope::all(),
-                &run,
             )?)
         })?;
         return Ok(result);
@@ -134,8 +136,7 @@ pub fn repository<E: std::fmt::Display>(
                             let (report, batches) = {
                                 let engine = Engine::family(language).limits(limits).build()?;
                                 phase_started(family, "index", file_count);
-                                let (mut graph, mut report) =
-                                    super::index(&engine, repository, run)?;
+                                let (graph, mut report) = super::index(&engine, repository, run)?;
                                 report.unread_files.retain(|path| owns(family, path));
                                 run.check()?;
                                 let mut tables = crate::backend::tables::Tables::load(
@@ -151,7 +152,7 @@ pub fn repository<E: std::fmt::Display>(
                                     only: None,
                                 };
                                 let batches = crate::backend::tables::export(
-                                    &engine, &mut graph, &tables, envelope, &scope, run,
+                                    &engine, &graph, &report, &tables, envelope, &scope,
                                 )?;
                                 (report, batches)
                             };

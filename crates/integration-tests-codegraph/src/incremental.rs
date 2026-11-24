@@ -182,7 +182,7 @@ fn index_and_check(yaml: &str) {
 /// graph comes back for the next step.
 fn check(
     engine: &Engine,
-    (mut state, report): (State, Report),
+    (state, report): (State, Report),
     ontology: &Arc<Ontology>,
     tests: &[TestCase],
     skipped: &[SkippedFile],
@@ -197,15 +197,8 @@ fn check(
     ]);
     let db = create_test_db().expect("in-memory DuckDB");
     let plan = Tables::load(engine, ontology, &Default::default()).expect("export rules");
-    let tables = tables::export(
-        engine,
-        &mut state,
-        &plan,
-        &envelope,
-        &Scope::all(),
-        &Sentinel::disabled(),
-    )
-    .expect("export");
+    let tables =
+        tables::export(engine, &state, &report, &plan, &envelope, &Scope::all()).expect("export");
     for (table, batch) in tables {
         db.insert_batch(&table, &batch).expect("insert into DuckDB");
     }

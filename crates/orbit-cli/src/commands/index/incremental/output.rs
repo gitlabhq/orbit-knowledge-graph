@@ -64,17 +64,17 @@ impl<'a> Exporter<'a> {
         &mut self,
         family: SupportLang,
         engine: &Engine,
-        state: &mut State,
+        state: &State,
         report: &Report,
         stats: bool,
     ) -> Result<FamilyOutput> {
         let tables = code_graph_incremental::backend::tables::export(
             engine,
             state,
+            report,
             &Tables::load(engine, self.ontology, &Default::default())?,
             &envelope(self.git),
             &Scope::all(),
-            &code_graph_incremental::Sentinel::disabled(),
         )?;
         self.insert(tables)?;
         Ok(family_output(family, state.trees.len(), report, stats))
@@ -179,7 +179,8 @@ pub(super) fn replacement(
     git: &GitInfo,
     ontology: &ontology::Ontology,
     engine: &Engine,
-    state: &mut State,
+    state: &State,
+    report: &Report,
     files: &FxHashSet<String>,
 ) -> Result<Replacement> {
     let envelope = envelope(git);
@@ -205,12 +206,7 @@ pub(super) fn replacement(
         only: Some(&only),
     };
     for (table, batch) in code_graph_incremental::backend::tables::export(
-        engine,
-        state,
-        &tables,
-        &envelope,
-        &scope,
-        &code_graph_incremental::Sentinel::disabled(),
+        engine, state, report, &tables, &envelope, &scope,
     )? {
         if table == edge_table {
             edges.push(batch);

@@ -9,7 +9,7 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 pub use crate::edge::{Edge, EdgeKind};
-pub use cursor::{Cursor, Step, Walk};
+pub use cursor::{Cursor, Step, Trees, Walk};
 pub use node::{Node, Tag};
 #[cfg(feature = "pretty-print")]
 pub use print::pretty_print;

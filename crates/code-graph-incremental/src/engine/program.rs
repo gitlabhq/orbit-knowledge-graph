@@ -213,7 +213,9 @@ pub struct Phase {
     pub name: String,
     pub label: &'static str,
     pub budget: BudgetSpec,
-    pub scope: String,
+    /// The trees the phase walks, and the trees each walk reads besides its own.
+    pub walks: TreeSets,
+    pub reads: TreeSets,
     /// Reruns over the family until its edges stop changing.
     pub until_stable: bool,
     pub(super) modules: Vec<u8>,
@@ -228,7 +230,6 @@ pub struct Phase {
     pub(super) index_count: usize,
     pub(super) enclosing: Vec<u16>,
     pub(super) roles: Vec<Roles>,
-    pub rows: Vec<RowShape>,
     pub(super) indexers: std::sync::Arc<[Indexer]>,
     pub(super) passes: Vec<Pass>,
     /// Per language: its passes, in order.
@@ -238,7 +239,37 @@ pub struct Phase {
     pub(super) region_by_lang: Vec<Vec<u16>>,
 }
 
+/// A family's tree sets: its files, and its project tree.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct TreeSets {
+    pub files: bool,
+    pub project: bool,
+}
+
+impl TreeSets {
+    fn meets(self, other: TreeSets) -> bool {
+        (self.files && other.files) || (self.project && other.project)
+    }
+}
+
 impl Phase {
+    /// Whether each walk reads trees the phase also walks. Its trees are then
+    /// read only, it writes edges and rows, and they land when it ends.
+    pub fn shared(&self) -> bool {
+        self.walks.meets(self.reads)
+    }
+
+    /// Whether the phase walks each file alone, so it can run as the file
+    /// is parsed.
+    pub fn per_file(&self) -> bool {
+        self.walks
+            == TreeSets {
+                files: true,
+                project: false,
+            }
+            && self.reads == TreeSets::default()
+    }
+
     pub(super) fn passes(&self, rules: usize) -> impl Iterator<Item = &Pass> {
         self.by_lang
             .get(rules)
@@ -263,18 +294,13 @@ impl Phase {
     pub fn has_rules(&self, rules: usize) -> bool {
         self.passes(rules).any(|p| !p.cases.items.is_empty())
     }
-
-    /// Every tag key the phase can set, for the rules at `rules`.
-    pub fn tag_keys(&self, rules: usize) -> Vec<u32> {
-        self.passes(rules)
-            .flat_map(|p| p.tag_keys.iter().copied())
-            .collect()
-    }
 }
 
 pub struct Pipeline {
     pub registry: super::Registry,
     pub phases: Vec<Phase>,
+    /// The row shapes of `tables:`, by the index rules name them with.
+    pub rows: Vec<RowShape>,
     pub(super) settings: Vec<BTreeMap<String, DataSpec>>,
 }
 
@@ -284,12 +310,14 @@ impl Pipeline {
         self.settings.get(rules)?.get(name)
     }
 
-    /// The phase that runs over `scope`: the project tree, or the graph.
-    pub fn phase_over(&self, scope: &str) -> &Phase {
-        self.phases
+    /// The leading phases that walk each file alone, and the rest.
+    pub fn split(&self) -> (&[Phase], &[Phase]) {
+        let at = self
+            .phases
             .iter()
-            .find(|p| p.scope == scope)
-            .unwrap_or_else(|| panic!("no phase over {scope} in pipeline.yaml"))
+            .position(|p| !p.per_file())
+            .unwrap_or(self.phases.len());
+        self.phases.split_at(at)
     }
 
     /// The skip reason a file gets when the phase with this budget label stops it.

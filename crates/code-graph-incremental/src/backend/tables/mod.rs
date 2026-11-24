@@ -9,14 +9,14 @@ use ontology::{DataType, Ontology};
 use orbit_arrow::{BatchBuilder, ColumnSpec, ColumnType};
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
-use crate::driver::State;
+use crate::driver::{Report, State};
 use crate::engine::Engine;
 use crate::engine::lang::DataSpec;
-use crate::engine::{Cx, Function, Loc, Module, Part, Phase, RowShape, Store, Val, Vals};
+use crate::engine::{Cx, Function, Loc, Module, Part, RowShape, Store, Trees, Val, Vals};
 use crate::error::{Error, LoadError};
 use crate::modules::function;
 use crate::sentinel::Sentinel;
-use crate::tree::{Compact, Tree};
+use crate::tree::Tree;
 
 /// A row a rule wrote at `at`: the values of its shape's columns, then the
 /// values only its id reads.
@@ -343,15 +343,14 @@ impl Tables {
                 table.specs = schema.clone();
             }
         }
-        let phase = engine.pipeline.phase_over("graph");
+        let rows = &engine.pipeline.rows;
         let index = |name: &str| {
             tables
                 .iter()
                 .position(|t| t.name == name)
                 .ok_or_else(|| LoadError::new(format!("export rule names unknown table '{name}'")))
         };
-        let shapes = phase
-            .rows
+        let shapes = rows
             .iter()
             .map(|shape| {
                 let at = index(&shape.table)?;
@@ -364,8 +363,7 @@ impl Tables {
             .collect::<Result<Vec<_>, LoadError>>()?;
         let mut envelope: Vec<String> = Vec::new();
         for (at, table) in tables.iter().enumerate() {
-            let rows: Vec<&RowShape> = phase
-                .rows
+            let rows: Vec<&RowShape> = rows
                 .iter()
                 .zip(&shapes)
                 .filter_map(|(shape, &t)| (t == at).then_some(shape))
@@ -408,44 +406,28 @@ impl Tables {
     }
 }
 
-/// One `(table, batch)` per table, the edge table last.
+/// The rows the last run of `state` wrote, as `(table, batch)` per table,
+/// the edge table last.
 pub fn export(
     engine: &Engine,
-    state: &mut State,
+    state: &State,
+    report: &Report,
     tables: &Tables,
     envelope: &Envelope,
     scope: &Scope,
-    run: &Sentinel,
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
     envelope.check(tables)?;
-    run.check()?;
-    let phase = engine.pipeline.phase_over("graph");
-    let project = state.trees.len() as u32;
-    state.trees.push(state.project_compact(engine));
-    let graph = crate::engine::Graph::new(&state.edges);
-    let walk = state.trees.len();
-    let rows = crate::engine::run_trees(
-        phase,
-        &state.trees,
-        walk,
-        Some(project),
-        &graph,
+    let trees = Trees {
+        files: &state.trees,
+        project: state.project.as_ref(),
+    };
+    Sink {
         engine,
-        run,
-    )
-    .map(|(_, mut outputs)| outputs.take::<Rows>());
-    let written = rows.map_err(Error::from).and_then(|rows| {
-        Sink {
-            engine,
-            trees: &state.trees,
-            phase,
-            tables,
-            envelope,
-        }
-        .write(scope, rows)
-    });
-    state.trees.pop();
-    written
+        trees,
+        tables,
+        envelope,
+    }
+    .write(scope, report.outputs.get::<Rows>().map_or(&[], |rows| rows))
 }
 
 /// The directories that hold `paths`, and the edges between them.
@@ -461,26 +443,20 @@ pub fn export_directories(
         .iter()
         .map(|path| Tree::unparsed(&engine.lang, path, 0, "").into())
         .collect();
+    let mut report = Report::default();
+    crate::driver::finish(&engine, &mut state, &Sentinel::disabled(), &mut report)?;
     let none = FxHashSet::default();
     let scope = Scope {
         include_directories: true,
         owns_file: &|_| false,
         only: Some(&none),
     };
-    export(
-        &engine,
-        &mut state,
-        &tables,
-        envelope,
-        &scope,
-        &Sentinel::disabled(),
-    )
+    export(&engine, &state, &report, &tables, envelope, &scope)
 }
 
 struct Sink<'a> {
     engine: &'a Engine,
-    trees: &'a [Tree<Compact>],
-    phase: &'a Phase,
+    trees: Trees<'a>,
     tables: &'a Tables,
     envelope: &'a Envelope<'a>,
 }
@@ -493,9 +469,9 @@ impl Sink<'_> {
         let lang = &self.engine.lang;
         Cow::Borrowed(match value {
             Some(Val::Sym(s)) => lang.syms.resolve(s),
-            Some(Val::Node(l) | Val::Type(l)) => lang
-                .syms
-                .resolve(self.trees[l.fi as usize].sym_at(l.node, lang)),
+            Some(Val::Node(l) | Val::Type(l)) => {
+                lang.syms.resolve(self.trees.get(l.fi).sym_at(l.node, lang))
+            }
             Some(Val::Kind(k)) => lang.kind_name(k),
             Some(Val::Bool(true)) => "true",
             Some(Val::Bool(false)) => "false",
@@ -503,7 +479,7 @@ impl Sink<'_> {
         })
     }
 
-    fn write(&self, scope: &Scope, rows: Vec<Row>) -> Result<Vec<(String, RecordBatch)>, Error> {
+    fn write(&self, scope: &Scope, rows: &[Row]) -> Result<Vec<(String, RecordBatch)>, Error> {
         let tables = &self.tables.tables;
         let mut builders = tables
             .iter()
@@ -512,10 +488,10 @@ impl Sink<'_> {
         let mut out = Vec::new();
         let (entities, edges): (Vec<&Row>, Vec<&Row>) = rows
             .iter()
-            .partition(|r| self.phase.rows[usize::from(r.shape)].id.is_some());
+            .partition(|r| self.engine.pipeline.rows[usize::from(r.shape)].id.is_some());
         let mut ids = Ids::default();
         for row in entities {
-            let shape = &self.phase.rows[usize::from(row.shape)];
+            let shape = &self.engine.pipeline.rows[usize::from(row.shape)];
             let at = self.tables.shapes[usize::from(row.shape)];
             let (seed, parts) = shape.id.as_ref().expect("entity rows have ids");
             let parts: Vec<String> = parts
@@ -525,7 +501,7 @@ impl Sink<'_> {
                 })
                 .collect();
             let id = self.envelope.id(&self.tables.id_prefix, seed, &parts);
-            let label = &self.trees[row.at.fi as usize].label;
+            let label = &self.trees.get(row.at.fi).label;
             let written = scope.writes(&tables[at].entity, row.at.fi, label);
             ids.insert(row.at, (id, at, written));
             if written {
@@ -537,7 +513,7 @@ impl Sink<'_> {
         }
         let mut seen = FxHashSet::default();
         for row in edges {
-            let shape = &self.phase.rows[usize::from(row.shape)];
+            let shape = &self.engine.pipeline.rows[usize::from(row.shape)];
             let at = self.tables.shapes[usize::from(row.shape)];
             let Some(nodes) = self.endpoints(&tables[at], shape, row, &ids) else {
                 continue;
