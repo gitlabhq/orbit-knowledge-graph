@@ -27,11 +27,12 @@ tests:
       - { row: { callee: "Box.len", kind: "Property" } }
 
   - name: a call of a property that is not of function type targets the extension function of its name
-    # Known gap: the engine keeps the property for every callable-tagged property, so the call also reaches the property.
-    skip: true
+    skip: false
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'useSize'
       RETURN t.fqn AS callee, t.definition_type AS kind
     assert:
-      - { column_values: { field: kind, values: ["Function"] } }
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["Box", "size"] } }
+      - { column_values: { field: kind, values: ["Class", "Function"] } }

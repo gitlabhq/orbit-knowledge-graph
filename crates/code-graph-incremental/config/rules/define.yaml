@@ -32,7 +32,8 @@ define:
   tree_dir(ROOT): 'tree_path($ROOT) | regex_replace("^([^/]*)$", "./$1") | regex_replace("/[^/]*$", "")'
   inherited_tag(ROOT, key): '$ROOT | tag(key) or $ROOT | tag_up(key)'
   name(ROOT): 'minus(read($ROOT), opaque)'
-  ivar(ROOT): "first(select(under(scope(ROOT) | class), '(__binding $I:__ivar)', $ROOT), b => typed_field(b)) | producer"
+  ivar(ROOT): "ivar_in($ROOT, scope(ROOT) | class) or ivar_in($ROOT, scope(ROOT) | class | supers | lineage)"
+  ivar_in(ROOT, owner): "first(select(under(owner), '(__binding $I:__ivar)', $ROOT), b => typed_field(b)) | producer"
   typed_field(ROOT):
     '_ when typed($ROOT)': '$ROOT'
   resolution(ROOT, site):
@@ -170,8 +171,18 @@ define:
   labelled(ROOT):
     '(_ #labelled)': '$ROOT'
   targets(ROOT, implicit):
+    '(__call $K:(__callee "/./")) when read_member($K)': 'read_member($K) | member_for($ROOT)'
     '(__call $K:(__callee "/./")) when read($K)': 'read($K) | read_target(implicit) | member_for($ROOT)'
     '(__call $K:(__callee "/./")) when implicit': 'members(scope($ROOT) | class, $K, cursor_role($ROOT))'
+  read_member(ROOT):
+    '_ when read($ROOT) | named_value': none
+    '_ when read($ROOT)': 'declared_member($ROOT)'
+  declared_member(ROOT):
+    '_ when declared_in(@$ROOT, $ROOT) | class_owned': 'unshadowed_member($ROOT)'
+  unshadowed_member(ROOT):
+    '_ when bound_as($ROOT) | class_owned': 'declared_in(@$ROOT, $ROOT) | class_owned'
+  class_owned(ROOT):
+    '_ when belongs($ROOT, class($ROOT))': '$ROOT'
   read_target(ROOT, implicit):
     '_ when implicit': 'named_value($ROOT)'
     '(_)': '$ROOT'
@@ -210,6 +221,8 @@ define:
     '(__def) when keeps($ROOT, cursor_role(site))': '$ROOT'
     '(__def #constructor)': 'first(ancestors($ROOT), a => is_class(a))'
     '(__def $N:__defname)': 'class_member($ROOT, $N, cursor_role(site), site) or $ROOT'
+    '(__binding "/./") when in(cursor_role(site), "value")': '$ROOT'
+    '(__binding "/./")': 'class_member($ROOT, @$ROOT, cursor_role(site), site) or $ROOT'
     '_': '$ROOT'
   keeps(ROOT, role):
     '_ when both_callable($ROOT, role)': none
@@ -222,7 +235,12 @@ define:
     | first_member(name, role) | distinct_from($ROOT)
   belongs_or_declares(ROOT, def, name, site):
     '_ when belongs(def, $ROOT)': '$ROOT'
+    '_ when implicit_member(def, site)': '$ROOT'
     '_ when first(ancestors(site), up => declares(up, def, name))': '$ROOT'
+  implicit_member(ROOT, site):
+    '_ when stored($ROOT)': 'implicit_call(site)'
+  implicit_call(ROOT):
+    '(__call #implicit_self)': '$ROOT'
   declares(ROOT, def, name):
     '_ when same($ROOT, def)': '$ROOT'
     '(__binding (__declaration)) when in($ROOT, name)': '$ROOT'

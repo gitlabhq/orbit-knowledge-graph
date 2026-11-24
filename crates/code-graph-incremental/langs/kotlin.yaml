@@ -1,7 +1,6 @@
 import: [canonical, display, roots, shapes, statements]
 
 data:
-  callable_kinds: [__function, __method, __class, __lambda, __enum_variant, __property]
   kotlin_symbols: [require, requireNotNull, check, checkNotNull, error, TODO, lazy, run, with, repeat,
     arrayOf, assert, arrayOfNulls, booleanArrayOf, byteArrayOf, charArrayOf, doubleArrayOf, floatArrayOf,
     intArrayOf, longArrayOf, shortArrayOf, runCatching, synchronized, Pair, Triple, Result, Unit, Any,
@@ -25,6 +24,11 @@ data:
   params: [class_parameter, parameter]
   loops: [for_statement, while_statement, do_while_statement]
   impl_calls: ['true']
+
+define:
+  callable(ROOT):
+    '(__def (__property))': 'plain($ROOT)'
+    '_': 'super($ROOT)'
 
 canonicalize:
   - stage: imports
@@ -59,6 +63,7 @@ canonicalize:
       - '(delegation_specifier $T:type_identifier)': '(__supertype @$T)'
       - '(class_parameter (binding_pattern_kind) $N:simple_identifier $T:__member)': '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee $T))))) (__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T)))))'
       - '(class_parameter (binding_pattern_kind) $N:simple_identifier $T:type_identifier)': '(kt_prop (__def (__defname @$N $N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
+      - '(class_parameter (binding_pattern_kind) $N:simple_identifier (function_type))': '(__def (__defname @$N) (__property)) #callable=true'
       - '(class_parameter (binding_pattern_kind) $N:simple_identifier)': '(__def (__defname @$N) (__property))'
       - '(%params $N:simple_identifier $T:__member)': '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
       - '(class_parameter $N:simple_identifier $T:type_identifier)': '%typed_param($N, $T)'
@@ -87,6 +92,7 @@ canonicalize:
       - '(property_declaration (binding_pattern_kind) $R:type_identifier (variable_declaration $N:simple_identifier) $$$V)': '(__def (__defname @$R) (__impl) (__def (__defname @$N) (__property) $$$V))'
       - '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:__member) $G:getter)': '(__def (__defname @$N) (__property) (__ssa_return_type $T) $G)'
       - '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T?:type_identifier) $G:getter)': '(__def (__defname @$N) (__property) (__ssa_return_type? @$T) $G)'
+      - '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier (function_type)) $$$V)': '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs $$$V))) #callable@__def=true'
       - '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:__member) $$$V)': '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee $T))))) (__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__type) (__callee $T)))) $$$V)'
       - '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:type_identifier) $V:__call)': '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T))))) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)))'
       - '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:type_identifier))': '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T))))) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
@@ -125,7 +131,7 @@ canonicalize:
     rewrite:
       - '(__def (__class) (modifiers (class_modifier "data")))': '#flavor=data'
       - '(__binding (__ivar "super"))': '#outer=true'
-      - '(__def (__property))': '#callable=true #value=true #scoped=true'
+      - '(__def (__property))': '#value=true #scoped=true'
       - use: function_def_tags
       - use: type_def_tags
       - use: interface_def_tags

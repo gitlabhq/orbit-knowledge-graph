@@ -149,6 +149,12 @@ resolve:
           - { to: 'targets($ROOT, false) | callable | elsewhere(file($ROOT))', site: $ROOT }
           - { to: '$ROOT | impl_targets | callable', site: $ROOT }
 
+  member:
+    - '(__callee $ROOT:__member)': none
+    - '(__member (__object $ROOT:__member))': none
+    - '(__member "/./" $O:(__object !(__call) !(__member) !(__object) !(__qualifier) !(__ivar)))':
+        calls: { to: '$ROOT | follow(type_flow, site) | producing | member($ROOT) | elsewhere(file($ROOT))', resolution: reference }
+
   imported_receiver:
     - '(__call (__callee (__member $O:__object))) when receiver_imports($ROOT)':
         calls: { to: 'receiver_imports($ROOT) | follow(imports, from) | callable | elsewhere(file($ROOT))', site: $ROOT }

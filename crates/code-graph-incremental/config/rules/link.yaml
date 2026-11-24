@@ -85,7 +85,7 @@ link:
           - { to: '$O | type | member($ROOT)', resolution: reference }
           - { to: '$O | type | unmatched($ROOT) | callable', resolution: reference }
         imports: { to: '$O | type | unmatched($ROOT) | imported', site: '$ROOT | binding_site', resolution: reference }
-        type_flow: { to: '$O | type | unmatched($ROOT) | produced', resolution: reference }
+        type_flow: { to: '$O | type | unmatched($ROOT) | produced', site: $ROOT, resolution: reference }
 
   bare:
     - '(__binding $B:(__rhs !$ANY)) when $B | name | imported':

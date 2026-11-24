@@ -109,8 +109,6 @@ tests:
       - { not: true, row: { callee: "Box.local.cb" } }
 
   - name: a call of a function-typed property targets the property
-    # Known gap: a call of a function-typed property is not linked, on main too.
-    skip: true
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'other'

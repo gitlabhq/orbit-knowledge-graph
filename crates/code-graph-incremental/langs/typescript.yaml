@@ -37,6 +37,8 @@ data:
   loops: [for_statement, for_in_statement, while_statement, do_statement]
 
 define:
+  single_role(ROOT):
+    '(__def (__property))': '$ROOT'
   written(ROOT):
     '(__name "default" #cjs_require)': '"%require"'
     '_': 'super(ROOT)'
