@@ -76,7 +76,10 @@ tables:
 
 define:
   dangling(ROOT):
-    '_ when $ROOT | follow(imports, from)': none
+    '_ when $ROOT | follow(imports, from) | settled': none
+    '_': '$ROOT'
+  settled(ROOT):
+    '(__def #unproven)': none
     '_': '$ROOT'
   measured(ROOT):
     '(__def #definition_span)': '$ROOT'

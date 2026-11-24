@@ -157,6 +157,7 @@ canonicalize:
   - stage: tag-defs
     rewrite:
       - '(__def (__variable) (number))': '#non_callable=true'
+      - '(__def (__variable) (__call))': '#unproven=true'
       - '(__def (__function))': '#callable=true #scoped=function'
       - '(__def (__method))': '#callable=true #scoped=function'
       - use: class_lambda_def_tags
