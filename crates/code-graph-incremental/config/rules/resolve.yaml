@@ -120,7 +120,7 @@ resolve:
 
   decorator:
     - '$D:(__def $ROOT:__decorator)':
-        calls: { from: $D, to: '$ROOT | type | callable | elsewhere(file($ROOT))' }
+        calls: { from: $D, to: '$ROOT | type | is_def | elsewhere(file($ROOT))' }
 
   supertype:
     - '$D:(__def $ROOT:__supertype)':
