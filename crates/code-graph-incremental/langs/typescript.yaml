@@ -47,6 +47,9 @@ define:
       or select(owned(module), '(__module_export (__default_export))' by $ROOT | child("__default_export"), "default") | target_of
     '_': 'super(module, name)'
 
+  non_callable_import(ROOT):
+    '_ when $ROOT | follow(imports, from) | tag("non_callable")': '$ROOT'
+
   modules(ROOT):
     '(_ (__source_path "^."))': 'aliased($ROOT) or file_at($ROOT | tag("resolved_source"))'
     '_': 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
@@ -56,6 +59,9 @@ define:
     '_ when $ROOT | follow(imports, from)': '$ROOT'
 
 resolve:
+  member_on_import:
+    - '(__call (__callee (__member $O:__object)))':
+        fallbacks: { to: '$ROOT | follow(imports, site) | non_callable_import', site: $ROOT }
   missing_export:
     - '(__call (__callee "/./"))':
         fallbacks: { to: '$ROOT | follow(imports, site) | missing_export', site: $ROOT }
