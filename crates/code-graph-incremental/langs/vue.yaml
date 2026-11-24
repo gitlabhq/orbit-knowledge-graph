@@ -20,7 +20,7 @@ canonicalize:
     before: regions
     rewrite:
       - '(export_statement $$$P value: (object $$$A (pair key: (property_identifier "name") value: (string $S:string_fragment)) $$$B))': '(export_statement $$$P (class_declaration name: (type_identifier @$S) body: (class_body $$$A $$$B)))'
-      - '(export_statement $$$P value: (object $$$A))': '(export_statement $$$P (class_declaration name: (type_identifier @$ROOT | tree_root | regex_replace("^.*/", "") | regex_replace("[.].*$", "")) body: (class_body $$$A)))'
+      - '(export_statement $$$P value: (object $$$A))': '(export_statement $$$P (class_declaration name: (type_identifier @$ROOT | file | regex_replace("^.*/", "") | regex_replace("[.].*$", "")) body: (class_body $$$A)))'
   - stage: options-this
     before: regions
     rewrite:

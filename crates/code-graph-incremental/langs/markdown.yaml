@@ -19,7 +19,7 @@ display:
   - stage: fqn
     rewrite:
       - '$M:__source_file': '#entity=File #fqn=@$M | stem | split_last("/") | replace("\", "\\") | replace("#", "\#") #file_path=@$M #language=markdown'
-      - '(__def)': '#entity=Definition #fqn=$ROOT | ancestor_tag("fqn") | concat("#", $ROOT | child_sym("__fqn_segment")) #file_path=$ROOT | ancestor_tag("file_path")'
+      - '(__def)': '#entity=Definition #fqn=$ROOT | tag_up("fqn") | concat("#", $ROOT | child_sym("__fqn_segment")) #file_path=$ROOT | tag_up("file_path")'
   - stage: def_type
     rewrite:
       - '(__def (__section))': '#def_type=Section'

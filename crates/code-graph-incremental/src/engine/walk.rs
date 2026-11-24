@@ -526,7 +526,7 @@ fn captures(
 ) -> Vec<Cap<NodeId>> {
     let mut caps = Vec::new();
     if let Some(m) = &pass.cases.items[usize::from(t.case)].0 {
-        m.capture(lang, tree.cursor(at), &mut caps);
+        m.capture(lang, tree.cursor(at), &mut caps, &[]);
     }
     if caps.is_empty() {
         caps.push(SmallVec::new());
@@ -614,7 +614,7 @@ fn taken(
             .children(&tree.storage.0)
             .filter(|&c| c != target)
             .any(|c| {
-                pattern::matches(tree, lang, c, None, pat, &mut caps)
+                pattern::matches(tree, lang, c, None, pat, &mut caps, &[])
                     && tree.cursor(Tree::to_raw(c)).child_sym_of_kind(*kind) == key
             })
     })
@@ -637,7 +637,7 @@ pub(super) fn piece<'t, S: Store>(
             .iter()
             .filter(|i| i.at.kinds.iter().any(|&k| k == 0 || k == c.kind()))
         {
-            if !w.matches(run, &indexer.at, c) {
+            if !w.matches(run, &indexer.at, c, &[]) {
                 continue;
             }
             let owner = c

@@ -11,4 +11,4 @@ display:
       - '$M:__source_file': '#entity=File #file_path=@$M #language=graphql'
   - stage: fqn
     rewrite:
-      - '(__def)': '#entity=Definition #definition_span=true #def_type=Variable #fqn=$ROOT | ancestor_tag("file_path") | concat("::", "default") #file_path=$ROOT | ancestor_tag("file_path")'
+      - '(__def)': '#entity=Definition #definition_span=true #def_type=Variable #fqn=$ROOT | tag_up("file_path") | concat("::", "default") #file_path=$ROOT | tag_up("file_path")'

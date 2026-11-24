@@ -3,7 +3,6 @@ use std::cell::RefCell;
 
 use regex::Regex;
 use rustc_hash::FxHashMap;
-use smallvec::SmallVec;
 
 use crate::engine::{Cursor, Cx, Function, Module, Store, Val, Vals, one, yes};
 use crate::intern::Lang;
@@ -137,9 +136,7 @@ static FUNCTIONS: &[Function<Text>] = &[
     on_node!("field", [one, one], field),
     on_node!("child_sym", [one, one], child_sym),
     on_node!("ancestor_sym", [one, one], ancestor_sym),
-    on_node!("ancestor_tag", [one, one], ancestor_tag),
     on_node!("tag", [one, one], tag),
-    on_node!("tree_path", [one, one], tree_path),
     on_node!("sibling_index", [one], sibling_index),
     on_node!("tree_node_id", [one], tree_node_id),
     on_node!("kind_name", [one], kind_name),
@@ -153,9 +150,6 @@ static FUNCTIONS: &[Function<Text>] = &[
         o,
         &format!("{}:{}", c.start(), c.end())
     )),
-    on_node!("tree_root", [one], |c, _| Some(Val::Node(
-        c.jump(c.fi(), 0).into()
-    ))),
     function!(Pure, "file_dir", [one, tree_set], |cx, a| file_dir(cx, a)),
 ];
 
@@ -450,23 +444,8 @@ fn ancestor_sym<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<V
     text_sym(found, o.lang)
 }
 
-fn ancestor_tag<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
-    let key = o.key(1);
-    c.ancestors().find_map(|a| a.tag(key)).map(Val::Sym)
-}
-
 fn tag<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
     c.tag(o.key(1)).map(Val::Sym)
-}
-
-fn tree_path<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
-    let mut segments: SmallVec<[&str; 8]> = std::iter::once(c)
-        .chain(c.ancestors())
-        .filter(|a| a.parent().is_some())
-        .map(|a| a.tree().text_at(a.index(), o.lang))
-        .collect();
-    segments.reverse();
-    Some(Val::Sym(o.lang.syms.intern(&segments.join(o.lit(1)))))
 }
 
 fn sibling_index<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
@@ -663,9 +642,7 @@ mod tests {
         assert_eq!(call(child_sym, &["path"]), "p");
         assert_eq!(call(child_sym, &["leaf"]), "None");
         assert_eq!(call(ancestor_sym, &["name"]), "Klass");
-        assert_eq!(call(ancestor_tag, &["fqn"]), "pkg.C");
         assert_eq!(call(tag, &["fqn"]), "pkg.C.m");
-        assert_eq!(call(tree_path, &["/"]), "C/B/m");
         assert_eq!(call(sibling_index, &[]), "1");
         assert_eq!(call(tree_node_id, &[]), Tree::to_raw(target).to_string());
         assert_eq!(call(kind_name, &[]), "method");

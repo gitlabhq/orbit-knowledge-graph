@@ -78,7 +78,7 @@ impl T {
     fn matches(&self, src: &str, at: NodeId) -> Option<Vec<Cap<NodeId>>> {
         let (p, slots) = pat(&self.lang, src);
         let mut c = caps(&slots);
-        matches(&self.tree, &self.lang, at, None, &p, &mut c).then_some(c)
+        matches(&self.tree, &self.lang, at, None, &p, &mut c, &[]).then_some(c)
     }
 
     fn show(&self, id: NodeId) -> String {
@@ -159,7 +159,7 @@ fn data_lists_as_kinds_text_and_filters() {
     assert!(t.matches("(%loops (identifier %names))", r).is_some());
     let (p, slots) = pat(&t.lang, "(%loops $$$X:!%loops)");
     let mut c = caps(&slots);
-    assert!(matches(&t.tree, &t.lang, r, None, &p, &mut c));
+    assert!(matches(&t.tree, &t.lang, r, None, &p, &mut c, &[]));
     assert_eq!(c[1].len(), 2);
     assert!(slots.filter(1).negate);
     assert!(anchor(&p).is_none());
@@ -237,12 +237,12 @@ fn anchored_patterns_pin_root() {
     let kind = t.lang.intern_kind("__decorator");
     assert_eq!(anchor(&p), Some((1, kind)));
     let mut c = caps(&slots);
-    assert!(matches(&t.tree, &t.lang, r, Some(d2), &p, &mut c));
+    assert!(matches(&t.tree, &t.lang, r, Some(d2), &p, &mut c, &[]));
     assert_eq!(c[0].as_slice(), [d2]);
     assert_eq!(c[1].as_slice(), [r]);
-    assert!(matches(&t.tree, &t.lang, r, Some(d1), &p, &mut c));
+    assert!(matches(&t.tree, &t.lang, r, Some(d1), &p, &mut c, &[]));
     assert_eq!(c[0].as_slice(), [d1]);
-    assert!(!matches(&t.tree, &t.lang, d1, Some(d1), &p, &mut c));
+    assert!(!matches(&t.tree, &t.lang, d1, Some(d1), &p, &mut c, &[]));
     let (p, _) = pat(&t.lang, "(__destructure $ROOT:(__binding))");
     assert_eq!(anchor(&p), Some((1, t.lang.intern_kind("__binding"))));
     let (p, _) = pat(&t.lang, "(__call $C)");
@@ -261,7 +261,7 @@ fn matches_a_parsed_python_tree() {
     );
     let mut c = caps(&slots);
     let id = tree.storage.id(class.index());
-    assert!(matches(&tree, &lang, id, None, &p, &mut c));
+    assert!(matches(&tree, &lang, id, None, &p, &mut c, &[]));
     assert_eq!(tree.text(c[1][0], &lang), "A");
     let names: Vec<_> = c[2].iter().map(|&s| tree.text(s, &lang)).collect();
     assert_eq!(names, ["B", "C"]);
@@ -269,7 +269,7 @@ fn matches_a_parsed_python_tree() {
         &lang,
         r#"(class_definition name: (identifier "A") **/(integer "1"))"#,
     );
-    assert!(matches(&tree, &lang, id, None, &p, &mut caps(&slots)));
+    assert!(matches(&tree, &lang, id, None, &p, &mut caps(&slots), &[]));
 }
 
 #[test]
@@ -280,7 +280,7 @@ fn templates_build_text_fields_and_labels() {
     let a = t.add(r, "arg", "1");
     let (p, slots) = pat(&t.lang, "(call method: $M $A $E?:missing)");
     let mut c = caps(&slots);
-    assert!(matches(&t.tree, &t.lang, r, None, &p, &mut c));
+    assert!(matches(&t.tree, &t.lang, r, None, &p, &mut c, &[]));
     let tp = tpl(
         &t.lang,
         &slots,
@@ -317,7 +317,7 @@ fn templates_move_once_used_captures_and_copy_the_rest() {
         t.add(body, "stmt", "s");
         let (p, slots) = pat(&t.lang, "(def $N $B:(block $S))");
         let mut c = caps(&slots);
-        assert!(matches(&t.tree, &t.lang, target, None, &p, &mut c));
+        assert!(matches(&t.tree, &t.lang, target, None, &p, &mut c, &[]));
         let tp = tpl(&t.lang, &slots, src);
         let built = t.build(&tp, &c, Some(target));
         let parent = |id: NodeId| id.parent(&t.tree.storage.0) == Some(target);
@@ -356,7 +356,7 @@ fn templates_rekind_leaf_and_spread() {
     t.add(r, "body", "");
     let (p, slots) = pat(&t.lang, "(class $N $$$S:superclass|\",\" $B:body)");
     let mut c = caps(&slots);
-    assert!(matches(&t.tree, &t.lang, r, None, &p, &mut c));
+    assert!(matches(&t.tree, &t.lang, r, None, &p, &mut c, &[]));
     let tp = tpl(
         &t.lang,
         &slots,

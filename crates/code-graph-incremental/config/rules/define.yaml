@@ -1,5 +1,10 @@
 define:
-  inherited_tag(ROOT, key): '$ROOT | tag(key) or $ROOT | ancestor_tag(key)'
+  tag_up(ROOT, key):
+    '$P:(_ $ROOT)': '$P | tag(key) or tag_up($P, key)'
+  tree_path(ROOT):
+    '(__root $ROOT)': '$ROOT'
+    '$P:(_ $ROOT)': 'concat(tree_path($P), "/", $ROOT)'
+  inherited_tag(ROOT, key): '$ROOT | tag(key) or $ROOT | tag_up(key)'
   name(ROOT): 'minus(read($ROOT), opaque)'
   ivar(ROOT): "first(select(under(scope(ROOT) | class), '(__binding $I:__ivar)', $ROOT), b => typed_field(b)) | producer"
   typed_field(ROOT):

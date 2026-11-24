@@ -10,6 +10,7 @@ pub fn matches<S: Storage<Node = Node>>(
     anchor: Option<S::Id>,
     p: &Pat,
     caps: &mut [Cap<S::Id>],
+    bound: &[(u16, u16)],
 ) -> bool {
     caps.iter_mut().for_each(Cap::clear);
     let root = anchor.unwrap_or(id);
@@ -26,6 +27,7 @@ pub fn matches<S: Storage<Node = Node>>(
         lang,
         root: S::index(root),
         path,
+        bound,
     };
     if !m.at(S::index(id), p, caps) {
         return false;
@@ -71,6 +73,8 @@ struct Matcher<'a, S: Storage> {
     /// The anchor and its ancestors below the matched node: a kid pattern
     /// that holds `$ROOT` can only match the one of these under its parent.
     path: smallvec::SmallVec<[u32; 8]>,
+    /// The kinds each definition parameter is bound to, as (slot, kind).
+    bound: &'a [(u16, u16)],
 }
 
 impl<S: Storage<Node = Node>> Matcher<'_, S> {
@@ -79,6 +83,7 @@ impl<S: Storage<Node = Node>> Matcher<'_, S> {
         match p {
             Pat::Node {
                 kind,
+                param,
                 field,
                 text,
                 tags,
@@ -94,6 +99,7 @@ impl<S: Storage<Node = Node>> Matcher<'_, S> {
                 });
                 flagged
                     && kind.admits(n.kind)
+                    && param.is_none_or(|slot| self.bound.contains(&(slot, n.kind)))
                     && (*field == 0 || *field == n.field)
                     && self.text(raw, n, text)
                     && self.tagged(raw, tags)
@@ -258,5 +264,15 @@ fn clear<I>(p: &Pat, caps: &mut [Cap<I>]) {
         Pat::Var { slot, .. } => caps[*slot as usize].clear(),
         Pat::Node { kids, .. } => kids.iter().for_each(|kid| clear(kid, caps)),
         Pat::Not(inner) | Pat::Desc(inner, _) => clear(inner, caps),
+    }
+}
+
+/// Whether a pattern takes a node kind from a definition parameter.
+pub fn binds_kinds(p: &Pat) -> bool {
+    match p {
+        Pat::Node { param, kids, .. } => param.is_some() || kids.iter().any(binds_kinds),
+        Pat::Cap { guard, .. } => guard.as_deref().is_some_and(binds_kinds),
+        Pat::Not(p) | Pat::Desc(p, _) => binds_kinds(p),
+        Pat::Var { .. } => false,
     }
 }

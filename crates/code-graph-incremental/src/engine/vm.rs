@@ -47,6 +47,8 @@ struct Trying<'e, S: Store> {
     cases: &'e Cases,
     at: usize,
     args: Args,
+    /// The kinds the call binds each parameter to, as (slot, kind).
+    bound: SmallVec<[(u16, u16); 2]>,
     w: Scratch<S>,
     env: usize,
     step: Step,
@@ -500,12 +502,30 @@ impl<'e, S: Store> Vm<'e, S> {
             .unwrap_or(&cases.any);
         let mut w = self.scratch.pop().unwrap_or_else(|| Scratch::new(0));
         w.reset(slots.max(args.len()));
+        let lang = run.lang();
+        let bound = args
+            .iter()
+            .filter(|_| cases.binds_kinds)
+            .enumerate()
+            .skip(1)
+            .flat_map(|(slot, vals)| {
+                vals.iter().filter_map(move |&v| match v {
+                    Val::Kind(kind) => Some((slot as u16, kind)),
+                    Val::Sym(sym) => match lang.lookup_kind(lang.syms.resolve(sym)) {
+                        0 => None,
+                        kind => Some((slot as u16, kind)),
+                    },
+                    _ => None,
+                })
+            })
+            .collect();
         self.frame(Frame::Cases(Trying {
             list,
             cases,
             at: 0,
             w,
             args,
+            bound,
             env: 0,
             step: Step::Next,
             fired: SmallVec::new(),
@@ -604,7 +624,7 @@ impl<'e, S: Store> Vm<'e, S> {
             t.matched = None;
             let matched = match (pat, t.args[0].first().and_then(|v| v.loc())) {
                 (Some(m), Some(h)) => {
-                    t.w.matches(run, m, Cursor::new(run.input.trees, h.fi, h.node))
+                    t.w.matches(run, m, Cursor::new(run.input.trees, h.fi, h.node), &t.bound)
                         && m.edge.is_none_or(|(kind, lacking)| {
                             !edge_targets(run, kind, lacking, &t.w.vals[0]).is_empty()
                         })

@@ -210,14 +210,14 @@ canonicalize:
   - stage: resolve-paths
     rewrite:
       - '(__import)': '#resolved_source=$ROOT | child_sym("__source_path")'
-      - '(__import (__source_path "/^(self|super)(/|$)/"))': '#resolved_source=$ROOT | ancestor_tag("mod_self") | concat("/", $ROOT | tag("source_rel")) | regex_replace("(^|/)\./", "$1") | regex_loop("[^/]+/\.\./", "") | regex_replace("/$", "") | regex_replace("^/", "")'
+      - '(__import (__source_path "/^(self|super)(/|$)/"))': '#resolved_source=$ROOT | tag_up("mod_self") | concat("/", $ROOT | tag("source_rel")) | regex_replace("(^|/)\./", "$1") | regex_loop("[^/]+/\.\./", "") | regex_replace("/$", "") | regex_replace("^/", "")'
 
 project:
   - stage: crate_roots
     rewrite:
       - '(__dir (__file "Cargo.toml"))': '+ (__crate_root)'
       - '(__dir (__file "Cargo.toml" (__obj (__field "package" (__obj $$$B (__field "name" $N:__str))))))': '#crate=@$N | replace("-", "_")'
-      - '(__dir (__file "Cargo.toml" (__obj (__field "package" (__obj $$$B (__field "name" $N:__str))))))': '+ (__alias @$N | replace("-", "_") (__str @$ROOT | tree_path("/") | regex_replace("$", "/src") | regex_replace("^/", "")))'
+      - '(__dir (__file "Cargo.toml" (__obj (__field "package" (__obj $$$B (__field "name" $N:__str))))))': '+ (__alias @$N | replace("-", "_") (__str @$ROOT | tree_path | regex_replace("$", "/src") | regex_replace("^/", "")))'
       - '(__dir (__file "lib.rs"))': '+ (__source_root)'
       - '(__dir (__file "main.rs"))': '+ (__source_root)'
 

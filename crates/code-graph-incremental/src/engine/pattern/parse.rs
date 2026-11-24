@@ -247,6 +247,7 @@ impl PatParser<'_, '_> {
 
     fn node(&mut self, field: u16) -> R<Pat> {
         self.s.ws();
+        let mut param = None;
         let kind = match self.s.peek() {
             Some(b'"') => KindFilter::one(self.lang.intern_kind(self.s.quoted()?)),
             Some(b'%') => {
@@ -260,6 +261,10 @@ impl PatParser<'_, '_> {
             }
             _ => match self.s.ident()? {
                 "_" => KindFilter::any(),
+                name if is_param(name) && self.slots.get(name).is_some() => {
+                    param = self.slots.get(name);
+                    KindFilter::any()
+                }
                 kind => KindFilter::one(self.lang.intern_kind(kind)),
             },
         };
@@ -313,6 +318,7 @@ impl PatParser<'_, '_> {
         }
         Ok(Pat::Node {
             kind,
+            param,
             field,
             text,
             tags: tags.into(),
@@ -515,4 +521,10 @@ impl<T> TplParser<'_, '_, T> {
             _ => Err(self.s.err("unclosed `(`")),
         }
     }
+}
+
+/// Whether a kind name is a definition parameter: written in capitals.
+fn is_param(name: &str) -> bool {
+    name.bytes()
+        .all(|b| b.is_ascii_uppercase() || b == b'_' || b.is_ascii_digit())
 }

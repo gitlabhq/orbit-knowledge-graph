@@ -72,7 +72,7 @@ display:
   - stage: fqn
     rewrite:
       - '$M:__source_file': '#entity=File #file_path=@$M #language=@$M | split_last(".") | map("lua:lua")'
-      - '(__def (__impl))': '#fqn=$ROOT | ancestor_tag("fqn") | concat(".", $ROOT | child_sym("__defname")) | keep_last(".", 64, 4096)'
+      - '(__def (__impl))': '#fqn=$ROOT | tag_up("fqn") | concat(".", $ROOT | child_sym("__defname")) | keep_last(".", 64, 4096)'
       - use: def_fqn_dotted_except_impl
   - use: def_types
   - use: display_wildcard_imports

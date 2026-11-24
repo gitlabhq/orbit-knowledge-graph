@@ -34,6 +34,9 @@ static FUNCTIONS: &[Function<Core>] = &[
     function!(Inline, "nodes", [set], |_, a| set(
         nodes(&a[0]).map(Val::Node)
     )),
+    function!(Inline, "count", [set], |cx, a| {
+        one(Val::Sym(cx.lang().syms.intern(&a[0].len().to_string())))
+    }),
     function!(Inline, "last", [set], |_, a| {
         a[0].last().map_or_else(Vals::new, |&v| one(v))
     }),
@@ -59,7 +62,9 @@ static FUNCTIONS: &[Function<Core>] = &[
         out
     }),
     function!(Inline, "ancestors", [set], |cx, a| {
-        set(nodes(&a[0]).flat_map(|at| cx.jump(at).ancestors().map(|c| Val::Node(c.into()))))
+        nodes(&a[0])
+            .flat_map(|at| cx.jump(at).ancestors().map(|c| Val::Node(c.into())))
+            .collect()
     }),
     function!(Inline, "follow", [set, edge, edge_key], |cx, a| {
         let (kind, key) = (edge_kind(&a[1]), number(&a[2]) as usize);

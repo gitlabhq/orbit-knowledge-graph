@@ -132,7 +132,7 @@ canonicalize:
   - stage: resolve-paths
     rewrite:
       - '(__import)': '#resolved_source=$ROOT | tag("source_rel")'
-      - '(__import (__source_path "^."))': '#resolved_source=$ROOT | ancestor_tag("file_dir") | concat("/", $ROOT | tag("source_rel")) | regex_replace("(^|/)\./", "$1") | regex_loop("[^/]+/\.\./", "") | regex_replace("/$", "") | regex_replace("^/", "")'
+      - '(__import (__source_path "^."))': '#resolved_source=$ROOT | tag_up("file_dir") | concat("/", $ROOT | tag("source_rel")) | regex_replace("(^|/)\./", "$1") | regex_loop("[^/]+/\.\./", "") | regex_replace("/$", "") | regex_replace("^/", "")'
 
 project:
   - stage: packages
@@ -157,7 +157,7 @@ display:
       - use: type_def_types
   - stage: imports
     rewrite:
-      - '(__import)': '#entity=ImportedSymbol #file_path=$ROOT | ancestor_tag("file_path") #source_path=$ROOT | tag("resolved_source") | replace("/", ".")'
+      - '(__import)': '#entity=ImportedSymbol #file_path=$ROOT | tag_up("file_path") #source_path=$ROOT | tag("resolved_source") | replace("/", ".")'
       - '(__name "*")': '#import_type=WildcardImport'
       - use: aliased_import_type
       - '(__import $S:__source $$$A $N:__name $$$B) when @$N | eq(@$S)': '#import_type@__name=Import'

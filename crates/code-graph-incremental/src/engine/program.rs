@@ -41,6 +41,7 @@ impl Match {
         lang: &Lang,
         c: Cursor<'_, S>,
         caps: &mut Vec<Cap<S::Id>>,
+        bound: &[(u16, u16)],
     ) -> bool {
         let n = self.slots.len();
         if caps.len() < n {
@@ -50,12 +51,12 @@ impl Match {
         let tree = c.tree();
         let id = tree.storage.id(c.index());
         match self.depth {
-            0 => pattern::matches(tree, lang, id, None, &self.pat, caps),
+            0 => pattern::matches(tree, lang, id, None, &self.pat, caps, bound),
             depth => (0..depth)
                 .try_fold(c, |node, _| node.parent())
                 .is_some_and(|top| {
                     let top = tree.storage.id(top.index());
-                    pattern::matches(tree, lang, top, Some(id), &self.pat, caps)
+                    pattern::matches(tree, lang, top, Some(id), &self.pat, caps, bound)
                 }),
         }
     }
@@ -75,6 +76,8 @@ pub(super) struct Cases {
     pub(super) stops: Vec<bool>,
     pub(super) by_kind: HashMap<u16, Vec<u16>>,
     pub(super) any: Vec<u16>,
+    /// Whether a case's pattern takes a kind from a parameter.
+    pub(super) binds_kinds: bool,
 }
 
 impl Cases {
@@ -93,7 +96,11 @@ impl Cases {
             list.sort_unstable();
             list.dedup();
         }
+        let binds_kinds = items
+            .iter()
+            .any(|(m, _, _)| m.as_ref().is_some_and(|m| pattern::binds_kinds(&m.pat)));
         Self {
+            binds_kinds,
             width: groups.iter().max().map_or(0, |&g| usize::from(g) + 1),
             stops,
             items,
@@ -351,9 +358,15 @@ impl<S: Store> Scratch<S> {
 
     /// Whether `at` matches at `c`; slot 0 holds `c`, and each capture slot
     /// the captured nodes its kind test admits.
-    pub(super) fn matches(&mut self, run: &Run<S>, at: &Match, c: Cursor<'_, S>) -> bool {
+    pub(super) fn matches(
+        &mut self,
+        run: &Run<S>,
+        at: &Match,
+        c: Cursor<'_, S>,
+        bound: &[(u16, u16)],
+    ) -> bool {
         if at.lang.is_some_and(|l| usize::from(l) != run.input.rules)
-            || !at.capture(run.lang(), c, &mut self.caps)
+            || !at.capture(run.lang(), c, &mut self.caps, bound)
         {
             return false;
         }

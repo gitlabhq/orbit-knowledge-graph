@@ -170,9 +170,9 @@ canonicalize:
       - '(__import (__source_path "/^[^./:][^:]*$/"))': '#alias_scope=bare_import'
       - '(__import_type (__source_path "/^[^./:][^:]*$/"))': '#alias_scope=bare_import'
       - '(__import)': '#resolved_source=$ROOT | child_sym("__source_path")'
-      - '(__import (__source_path "^."))': '#resolved_source=$ROOT | ancestor_tag("file_dir") | concat("/", $ROOT | child_sym("__source_path")) | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1") | regex_replace("/$", "") | regex_replace("^/", "")'
+      - '(__import (__source_path "^."))': '#resolved_source=$ROOT | tag_up("file_dir") | concat("/", $ROOT | child_sym("__source_path")) | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1") | regex_replace("/$", "") | regex_replace("^/", "")'
       - '(__import_type)': '#resolved_source=$ROOT | child_sym("__source_path")'
-      - '(__import_type (__source_path "^."))': '#resolved_source=$ROOT | ancestor_tag("file_dir") | concat("/", $ROOT | child_sym("__source_path")) | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1") | regex_replace("/$", "") | regex_replace("^/", "")'
+      - '(__import_type (__source_path "^."))': '#resolved_source=$ROOT | tag_up("file_dir") | concat("/", $ROOT | child_sym("__source_path")) | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1") | regex_replace("/$", "") | regex_replace("^/", "")'
 
 project:
   - stage: config
@@ -182,7 +182,7 @@ project:
       - '(__file "/^(ts|js)config\.json$/" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" $V:__str) $$$REST))) $$$OUTER)': '(__file @$ROOT (__source_root @$V | strip("./") $V (__scope "bare_import")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
   - stage: aliases
     rewrite:
-      - '(__alias $V:__str)': '(__alias @$ROOT (__str @$ROOT | tree_path("/") | regex_replace("(^|/)webpack\.config\.js/.*$", "") | concat("/", $ROOT | child_sym("__str")) | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1") | regex_replace("^/", "")))'
+      - '(__alias $V:__str)': '(__alias @$ROOT (__str @$ROOT | tree_path | regex_replace("(^|/)webpack\.config\.js/.*$", "") | concat("/", $ROOT | child_sym("__str")) | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1") | regex_replace("^/", "")))'
       - '(path_alias (__arr $V:__str $$$REST))': '(__alias @$ROOT (__str @$V | strip("./") $V))'
   - stage: packages
     rewrite:
@@ -190,7 +190,7 @@ project:
       - '(__dir (__file "package.json"))': '+ (__package_root)'
   - stage: package-entrypoints
     rewrite:
-      - '(__source_path)': '(__source_path @$ROOT | tree_path("/") | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1"))'
+      - '(__source_path)': '(__source_path @$ROOT | tree_path | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1"))'
   - stage: index_dirs
     rewrite:
       - '(__dir (__file "index.ts"))': '+ (__source_root)'
@@ -209,12 +209,12 @@ display:
       - use: type_def_types
   - stage: module_exports
     rewrite:
-      - '(__module_export)': '#file_path=$ROOT | ancestor_tag("file_path")'
-      - '(__def #module_default)': '#fqn=$ROOT | ancestor_tag("file_path") | concat("::", "default")'
+      - '(__module_export)': '#file_path=$ROOT | tag_up("file_path")'
+      - '(__def #module_default)': '#fqn=$ROOT | tag_up("file_path") | concat("::", "default")'
   - stage: imports
     rewrite:
       - use: import_entity
-      - '(__import_type)': '#entity=ImportedSymbol #file_path=$ROOT | ancestor_tag("file_path") #source_path=$ROOT | child_sym("__source")'
+      - '(__import_type)': '#entity=ImportedSymbol #file_path=$ROOT | tag_up("file_path") #source_path=$ROOT | child_sym("__source")'
       - '(__name)': '#import_type=$ROOT | tag("import_type") | default("NamedImport")'
       - '(__name "default")': '#import_type=$ROOT | tag("import_type") | default("DefaultImport")'
       - '(__name "*")': '#import_type=$ROOT | tag("import_type") | default("WildcardImport")'

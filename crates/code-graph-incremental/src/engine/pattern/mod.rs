@@ -9,7 +9,7 @@ use smallvec::SmallVec;
 
 use crate::tree::Node;
 
-pub use matching::{anchor, anchor_kinds, matches};
+pub use matching::{anchor, anchor_kinds, binds_kinds, matches};
 pub use parse::{parse_pattern, parse_template};
 pub use template::build;
 
@@ -146,6 +146,8 @@ pub const FLAGS: [&str; 4] = ["lifted", "labelled", "named", "synth"];
 pub enum Pat {
     Node {
         kind: KindFilter,
+        /// A definition parameter whose bound kinds the node must have.
+        param: Option<u16>,
         field: u16,
         text: Text,
         tags: Box<[(u32, bool)]>,

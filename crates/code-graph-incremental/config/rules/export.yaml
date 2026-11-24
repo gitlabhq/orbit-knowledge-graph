@@ -90,7 +90,7 @@ export:
   entity:
     - '(%dirs)': >-
         row(directory, $ROOT,
-          path: $ROOT | tree_path("/") | default("."),
+          path: $ROOT | tree_path | default("."),
           name: $ROOT | default("."),
           traversal_path: "")
     - '(__source_file)': >-
@@ -104,7 +104,7 @@ export:
           traversal_path: "")
     - '(__def)': >-
         row(definition, $ROOT,
-          file_path: $ROOT | ancestor_tag("file_path"),
+          file_path: $ROOT | tag_up("file_path"),
           fqn: $ROOT | tag("fqn"),
           name: $ROOT | child_sym("__defname"),
           definition_type: $ROOT | tag("def_type"),
@@ -132,8 +132,8 @@ export:
     - '(__module_export $ROOT:%imports)': none
     - '(%imports $ROOT:(__name "/./"))': >-
         row(imported_symbol, $ROOT,
-          file_path: $ROOT | import_of | ancestor_tag("file_path"),
-          import_type: $ROOT | tag("import_type") | default($ROOT | ancestor_tag("import_type")) | default("NamedImport"),
+          file_path: $ROOT | import_of | tag_up("file_path"),
+          import_type: $ROOT | tag("import_type") | default($ROOT | tag_up("import_type")) | default("NamedImport"),
           import_path: $ROOT | import_of | tag("source_path"),
           identifier_name: $ROOT,
           identifier_alias: $ROOT | ancestor_sym("__alias"),
@@ -147,8 +147,8 @@ export:
           span: $ROOT | import_of | span)
     - '(%imports !(__name "/./"))': >-
         row(imported_symbol, $ROOT,
-          file_path: $ROOT | import_of | ancestor_tag("file_path"),
-          import_type: $ROOT | tag("import_type") | default($ROOT | ancestor_tag("import_type")) | default("NamedImport"),
+          file_path: $ROOT | import_of | tag_up("file_path"),
+          import_type: $ROOT | tag("import_type") | default($ROOT | tag_up("import_type")) | default("NamedImport"),
           import_path: $ROOT | import_of | tag("source_path"),
           identifier_name: $ROOT,
           identifier_alias: $ROOT | ancestor_sym("__alias"),
@@ -168,15 +168,15 @@ export:
         row(contains, $ROOT, source_id: $ROOT | file_dir(project), source_kind: "Directory", relationship_kind: "CONTAINS",
           target_id: $ROOT, target_kind: "File", traversal_path: "")
     - '(__def)': >-
-        row(contains, $ROOT, source_id: $ROOT | tree_root, source_kind: "File", relationship_kind: "DEFINES",
+        row(contains, $ROOT, source_id: $ROOT | file, source_kind: "File", relationship_kind: "DEFINES",
           target_id: $ROOT, target_kind: "Definition", traversal_path: "")
     - '(__module_export (%imports $ROOT:__name))': none
     - '(__module_export $ROOT:%imports)': none
     - '(%imports $ROOT:(__name "/./"))': >-
-        row(contains, $ROOT, source_id: $ROOT | tree_root, source_kind: "File", relationship_kind: "IMPORTS",
+        row(contains, $ROOT, source_id: $ROOT | file, source_kind: "File", relationship_kind: "IMPORTS",
           target_id: $ROOT, target_kind: "ImportedSymbol", traversal_path: "")
     - '(%imports !(__name "/./"))': >-
-        row(contains, $ROOT, source_id: $ROOT | tree_root, source_kind: "File", relationship_kind: "IMPORTS",
+        row(contains, $ROOT, source_id: $ROOT | file, source_kind: "File", relationship_kind: "IMPORTS",
           target_id: $ROOT, target_kind: "ImportedSymbol", traversal_path: "")
   calls:
     - '(__def) --calls--> $T': >-

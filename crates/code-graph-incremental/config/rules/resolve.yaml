@@ -13,7 +13,7 @@ define:
       or file(select(files, '(__source_file (__def $ROOT:__defname))' by package_path($ROOT), path))
   package_path(ROOT): '$ROOT | regex_replace("[.]|::|[\\\\]", "/")'
   roots(at): >-
-    select(project, '(__dir $D:__source_root)') | tree_path("/")
+    select(project, '(__dir $D:__source_root)') | tree_path
   files(path): 'first(%search, place => locate(place, path))'
   locate(place, path):
     '_ when in(place, "external")': 'outside(path, %external)'
