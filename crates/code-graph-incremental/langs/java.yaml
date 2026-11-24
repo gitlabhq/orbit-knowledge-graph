@@ -89,7 +89,7 @@ canonicalize:
       - '(object_creation_expression type: $T:type_identifier arguments: $A $$$B:class_body)': '(__call (__callee @$T $T) $A $$$B)'
   - stage: classify
     rewrite:
-      - '(local_variable_declaration type: $T:__member declarator: (variable_declarator name: $N:identifier value:? $V))': '(java_local $V (__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__type) (__callee $T)))))'
+      - '(local_variable_declaration type: $T:__member declarator: (variable_declarator name: $N:identifier value:? $V))': '(java_local $V (__binding @$N (__declaration) (__ssa_typed $T)))'
       - '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__call))': '(__binding @$N (__declaration) (__rhs $V))'
       - '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__member))': '(__binding @$N (__declaration) (__rhs $V))'
       - '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__ssa_branch))': '(__binding @$N (__declaration) (__rhs $V))'
