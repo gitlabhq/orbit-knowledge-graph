@@ -230,13 +230,11 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
         }
 
         if let Some(groups) = &children {
-            for skipped in c
-                .children()
-                .filter(|k| !groups.iter().flatten().any(|&n| n == k.index()))
-            {
-                for n in std::iter::once(skipped).chain(skipped.descendants()) {
-                    self.record(n);
-                }
+            let visited = |n: Cursor<'t, S>| groups.iter().flatten().any(|&g| g == n.index());
+            let mut skipped: Vec<_> = c.children().filter(|&k| !visited(k)).collect();
+            while let Some(n) = skipped.pop() {
+                self.record(n);
+                skipped.extend(n.children().filter(|&k| !visited(k)));
             }
         }
         stack.extend(exits.into_iter().rev().map(Step::Do));

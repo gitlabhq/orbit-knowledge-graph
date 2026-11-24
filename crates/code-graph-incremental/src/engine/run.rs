@@ -136,6 +136,8 @@ pub struct Run<'t, S: Store = Compact> {
     pub(super) epochs: Box<[u64]>,
     pub(super) written: u64,
     pub(super) reading: u64,
+    /// The state slots the innermost unfinished call has read; its result's dependencies.
+    pub(super) used: u64,
     pub(super) memo: Table,
     /// The unfinished calls that results of the current cycle read.
     pub(super) cycle_reads: FxHashSet<Key>,
@@ -164,6 +166,7 @@ impl<'t, S: Store> Run<'t, S> {
             epochs: vec![0; registry.modules.len()].into(),
             written: 0,
             reading: u64::MAX,
+            used: 0,
             memo: Table::default(),
             cycle_reads: FxHashSet::default(),
             reinvoking: FxHashSet::default(),

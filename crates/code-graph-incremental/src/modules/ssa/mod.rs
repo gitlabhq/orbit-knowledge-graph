@@ -130,6 +130,12 @@ static FUNCTIONS: &[Function<Ssa>] = &[
     function!(required Flow, "source", [one]),
     function!(Flow, "flow", [one], |cx, a| {
         let c = node(cx, a, 0);
+        if c.sym_opt().is_none() {
+            return Vals::new();
+        }
+        if let Some(seen) = cx.settled().seen.get(&c.index()) {
+            return seen.clone();
+        }
         match cx.state().walking {
             true => cx.read(c),
             false => {
