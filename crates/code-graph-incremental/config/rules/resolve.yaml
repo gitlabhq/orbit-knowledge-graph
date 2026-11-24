@@ -46,7 +46,13 @@ define:
   producing(ROOT):
     '(__call)': '$ROOT | follow(calls, site) | returned or $ROOT | type'
     '(__binding $R:__rhs)': '$R | tail | producing or $ROOT | type'
+    '(__binding $T:__ssa_typed)': '$T | type'
     '_': '$ROOT | type'
+  dispatched(ROOT, contract, M):
+    '_ when contract_impls($ROOT, contract)': 'declared(contract_impls($ROOT, contract), M, "callable") or declared(contract, M, "callable")'
+  contract_impls(ROOT, contract): '$ROOT | other_parts | implements(contract)'
+  implements(ROOT, contract):
+    '_ when same(supertypes($ROOT), contract)': '$ROOT'
   linked_file(ROOT): "select(files, '(__source_file)' by $ROOT, @ROOT)"
   linked_section(ROOT, anchor): "select(under(linked_file($ROOT)), '(__def $N:__anchor)', @anchor)"
   returned(ROOT):
@@ -69,6 +75,12 @@ resolve:
   call:
     - '(__call (__callee $M:(__member $O:__object))) when $O | read | is_file':
         calls: { to: '$O | read | is_file | offered($M) | callable | elsewhere(file($ROOT))', site: $ROOT }
+    - '(__call (__callee $M:(__member $O:__object $D:(__dispatch !(__object)))))':
+        calls: { to: '$O | type | dispatched($D | type, $M)', site: $ROOT }
+    - '(__call (__callee $M:(__member $O:__object (__dispatch (__object))))) when $O | type | is_contract':
+        calls: { to: '$ROOT | follow(type_flow, site) | producing | member($M) or $O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
+    - '(__call (__callee $M:(__member $O:(__object (__qualifier)))))':
+        calls: { to: '$O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee $M:(__member $O:__object)))':
         calls:
           - { to: '$O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
@@ -77,6 +89,14 @@ resolve:
         calls: { to: 'lookup(@$I, $ROOT, scope($ROOT) | class) | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee "/./"))':
         calls: { to: 'targets($ROOT, false) | callable | elsewhere(file($ROOT))', site: $ROOT }
+
+  bound_import_call:
+    - '(__call (__callee "/./")) when $ROOT | follow(type_flow, site) | follow(imports, site)':
+        calls: { to: '$ROOT | follow(type_flow, site) | follow(imports, site) | follow(imports, from) | callable | elsewhere(file($ROOT))', site: $ROOT }
+
+  bound_import:
+    - '(__binding (__rhs !$ANY)) when $ROOT | follow(imports, site)':
+        calls: { to: '$ROOT | follow(imports, site) | follow(imports, from) | initialized | elsewhere(file($ROOT))', site: $ROOT }
 
   decorator:
     - '$D:(__def $ROOT:__decorator)':

@@ -71,7 +71,7 @@ canonicalize:
       - '(type_parameter name: $T bounds: (trait_bounds **/$B:type_identifier))': '(__binding @$T (__qualifier) (__ssa_typed @$B))'
   - stage: imports
     rewrite:
-      - '(mod_item name: $N !(declaration_list))': '(__import (__source @$N) (__source_path "self") (__name @$N)) #import_type=ModDeclaration'
+      - '(mod_item name: $N !(declaration_list))': '(__import (__source @$N) (__source_path @$N | prepend("self/")) (__name @$N)) #import_type=ModDeclaration'
       - '(extern_crate_declaration name: $N alias: $A)': '(__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$A))) #import_type=AliasedExternCrate'
       - '(extern_crate_declaration name: $N)': '(__import (__source @$N) (__source_path @$N) (__name @$N)) #import_type=ExternCrate'
       - '(use_declaration (__visibility !(crate)) argument: (use_wildcard $P))': '(__import (__source @$P $P) (__source_path @$P | replace("::", "/") | regex_replace("^crate(/|$)", "")) (__name "*")) #import_type=ReExportGlob'
