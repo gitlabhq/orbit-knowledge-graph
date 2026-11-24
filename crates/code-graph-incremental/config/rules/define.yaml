@@ -171,6 +171,8 @@ define:
   read_target(ROOT, implicit):
     '_ when implicit': 'named_value($ROOT)'
     '(_)': '$ROOT'
+  impl_member(ROOT):
+    '_ when boundary($ROOT) | is_impl': '$ROOT'
   unbound(ROOT):
     '(_ "/./") when read($ROOT)': none
     '(_ "/./") when in(@$ROOT, %builtins)': none

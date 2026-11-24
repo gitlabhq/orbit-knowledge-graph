@@ -99,11 +99,11 @@ resolve:
         calls: { to: '$O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee $M:(__member $O:(__object !(__call) !(__member) !(__object) !(__qualifier) !(__ivar)))))':
         calls:
-          - { to: '$O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
+          - { to: '$O | type | member($M) | elsewhere(file($ROOT)) or $O | type | member($M) | impl_member', site: $ROOT }
           - { to: '$ROOT | follow(type_flow, site) | producing | member($M) or $ROOT | follow(type_flow, site) | annotated | member($M)', site: $ROOT }
     - '(__call (__callee $M:(__member $O:__object)))':
         calls:
-          - { to: '$O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
+          - { to: '$O | type | member($M) | elsewhere(file($ROOT)) or $O | type | member($M) | impl_member', site: $ROOT }
           - { to: '$ROOT | follow(type_flow, site) | producing | member($M)', site: $ROOT }
     - '(__call (__callee $I:__ivar))':
         calls: { to: 'lookup(@$I, $ROOT, scope($ROOT) | class) | elsewhere(file($ROOT))', site: $ROOT }
