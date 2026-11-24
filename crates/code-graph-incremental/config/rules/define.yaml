@@ -187,6 +187,7 @@ define:
   member_for(ROOT, site):
     '_ when instances($ROOT)': '$ROOT'
     '(__def) when keeps($ROOT, cursor_role(site))': '$ROOT'
+    '(__def #constructor)': 'first(ancestors($ROOT), a => is_class(a))'
     '(__def $N:__defname)': 'class_member($ROOT, $N, cursor_role(site), site) or $ROOT'
     '_': '$ROOT'
   keeps(ROOT, role):
