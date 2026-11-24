@@ -118,11 +118,11 @@ canonicalize:
       - '(method_declaration $M?:modifiers type: $RT:__member name: $N:identifier parameters: $P body:? $B)': '(__def (__defname @$N) (__method) (__ssa_return_type $RT) $M $P $B)'
       - '(method_declaration $M?:modifiers type: $RT:type_identifier name: $N:identifier parameters: $P body:? $B)': '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $M $P (__call (__callee @$RT $RT)) $B)'
       - '(method_declaration $M?:modifiers name: $N:identifier parameters: $P body:? $B)': '(__def (__defname @$N) (__method) $M $P $B)'
-      - '(constructor_declaration $M?:modifiers name: $N:identifier parameters: $P body: $B)': '(__def (__defname @$N) (__method) $M $P $B)'
-      - '(compact_constructor_declaration $M?:modifiers name: $N:identifier body: $B)': '(__def (__defname @$N) (__method) $M $B)'
+      - '(constructor_declaration $M?:modifiers name: $N:identifier parameters: $P body: $B)': '(__def (__defname @$N) (__method) $M $P $B) #flavor=constructor'
+      - '(compact_constructor_declaration $M?:modifiers name: $N:identifier body: $B)': '(__def (__defname @$N) (__method) $M $B) #flavor=constructor'
       - '(class_declaration $M?:modifiers name: $N:identifier $$$PRE superclass: $S:__supertype $$$ANN body: (class_body $$$B))': '(__def (__defname @$N) (__class) $M $$$PRE $S $$$ANN (__binding (__ivar "super") (__rhs (__call @$S->__callee))) $$$B)'
       - '(class_declaration $M?:modifiers name: $N:identifier $$$ANN body: (class_body $$$B))': '(__def (__defname @$N) (__class) $M $$$ANN $$$B)'
-      - '(record_declaration $M?:modifiers name: $N:identifier parameters: (formal_parameters $$$P:__binding) $$$ANN body: (class_body $$$B))': '(__def (__defname @$N) (__class) $M $$$ANN (__positional $$$P) $$$B $$$P->record_component (record_component "equals") (record_component "hashCode") (record_component "toString"))'
+      - '(record_declaration $M?:modifiers name: $N:identifier parameters: (formal_parameters $$$P:__binding) $$$ANN body: (class_body $$$B))': '(__def (__defname @$N) (__class) $M $$$ANN (__positional $$$P) $$$B $$$P->record_component (record_component "equals") (record_component "hashCode") (record_component "toString")) #flavor=record'
       - '(interface_declaration $M?:modifiers name: $N:identifier $$$ANN body: (interface_body $$$B))': '(__def (__defname @$N) (__interface) $M $$$ANN $$$B)'
       - '(enum_declaration $M?:modifiers name: $N:identifier $$$ANN body: (enum_body $$$B))': '(__def (__defname @$N) (__enum) $M $$$ANN $$$B)'
       - '(annotation_type_declaration $M?:modifiers name: $N:identifier body: $B)': '(__def (__defname @$N) (__interface) $M $B)'
@@ -157,6 +157,11 @@ display:
       - '$M:__source_file': '#entity=File #fqn=$M | child("__package") #file_path=@$M #language=@$M | split_last(".") | map("java:java")'
       - use: def_fqn_dotted
   - use: def_types
+  - stage: def_type_names
+    rewrite:
+      - '(__def (__method))': '#def_type=$ROOT | tag("flavor") | map("constructor:Constructor") or "Method"'
+      - '(__def (__class))': '#def_type=$ROOT | tag("flavor") | map("record:Record") or "Class"'
+      - '(__def (__enum_variant))': '#def_type=EnumConstant'
   - stage: imports
     rewrite:
       - use: import_entity

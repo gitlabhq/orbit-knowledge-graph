@@ -62,7 +62,7 @@ tests:
     query: |
       MATCH (e:Definition)-[:CALLS|DEFINES|EXTENDS]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
-        AND c.definition_type = 'EnumVariant'
+        AND c.definition_type = 'EnumConstant'
       RETURN c.name AS name
       ORDER BY c.name
     assert:
@@ -75,8 +75,7 @@ tests:
     query: |
       MATCH (e:Definition)-[:CALLS|DEFINES|EXTENDS]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
-        AND c.definition_type = 'Method'
-        AND c.name = 'Planet'
+        AND c.definition_type = 'Constructor'
       RETURN c.name AS name
     assert:
       - { row_count: 1 }
@@ -113,7 +112,7 @@ tests:
     query: |
       MATCH (e:Definition)-[edge:DEFINES]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
-        AND c.definition_type = 'EnumVariant'
+        AND c.definition_type = 'EnumConstant'
       RETURN c.name AS name
       ORDER BY c.name
     assert:

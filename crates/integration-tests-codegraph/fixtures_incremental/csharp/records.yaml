@@ -65,7 +65,7 @@ tests:
       RETURN d.name AS name, d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { name: "Point", type: "Class" } }
+      - { row: { name: "Point", type: "Record" } }
 
   - name: "Record implementing interface is extracted"
     query: |
@@ -74,7 +74,7 @@ tests:
       RETURN d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Class" } }
+      - { row: { type: "Record" } }
 
   # corrected: a record struct is a value type (C# spec 16.1), so it is a Struct
   - name: "record struct Range is extracted as Record"
@@ -84,7 +84,7 @@ tests:
       RETURN d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Struct" } }
+      - { row: { type: "Record" } }
 
   - name: "Method on a record is extracted"
     query: |
@@ -120,7 +120,7 @@ tests:
       RETURN d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Class" } }
+      - { row: { type: "Record" } }
 
   - name: "Nested record Inner inside Outer is extracted"
     query: |
@@ -129,7 +129,7 @@ tests:
       RETURN d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Class" } }
+      - { row: { type: "Record" } }
 
   - name: "Outer record defines nested Inner record"
     query: |

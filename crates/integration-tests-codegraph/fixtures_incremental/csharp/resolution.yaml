@@ -127,7 +127,8 @@ tests:
         AND d.fqn STARTS WITH 'MyApp.'
       RETURN d.fqn AS fqn, d.definition_type AS type
     assert:
-      - { row_count: 8 }
+      # corrected: the two constructors are Constructor definitions, leaving six methods
+      - { row_count: 6 }
       - { unique: fqn }
       - { no_nulls: fqn }
       - { row: { fqn: MyApp.Controllers.UserController.GetUser, type: Method } }
@@ -150,7 +151,7 @@ tests:
   - name: "Enum members with correct FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumVariant'
+      WHERE d.definition_type = 'EnumMember'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }

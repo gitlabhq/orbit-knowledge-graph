@@ -137,7 +137,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Geo.Models.Point.Point'
-        AND d.definition_type = 'Method'
+        AND d.definition_type = 'Constructor'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
