@@ -1,0 +1,26 @@
+name: "C: a header pairs with a same-named source in another directory"
+
+fixtures:
+  - path: include/util.h
+    content: |
+      int scale(int x);
+
+  - path: src/util.c
+    content: |
+      #include "../include/util.h"
+      int scale(int x) { return x * 2; }
+
+  - path: src/main.c
+    content: |
+      #include "../include/util.h"
+      int run(void) { return scale(3); }
+
+tests:
+  - name: "a call through include/util.h links to src/util.c"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: scale, file: src/util.c } }
