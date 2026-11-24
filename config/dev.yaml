@@ -9,7 +9,7 @@
 #
 # ClickHouse and NATS are reached through the port-forwards `mise run dev:connect` opens on these
 # addresses. The gRPC listener binds all interfaces because GitLab Rails calls it from inside the
-# Caproni VM through the repointed gkg-webserver Service; 127.0.0.1 would be unreachable from there.
+# Caproni VM through the repointed orbit-webserver Service; 127.0.0.1 would be unreachable from there.
 
 grpc_bind_address: "0.0.0.0:50054"
 
@@ -28,7 +28,7 @@ datalake:
     max_query_size: "10485760"
 
 graph:
-  database: "gkg"
+  database: "orbit"
   username: "gitlab-dev-stack"
   insert_settings:
     async_insert: "1"

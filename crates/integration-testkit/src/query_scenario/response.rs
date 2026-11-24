@@ -1,11 +1,14 @@
 use std::sync::{Arc, LazyLock};
 
-use query_engine::compiler::{CompiledQueryContext, Frontend, Input, QueryType};
+use query_engine::compiler::{CompiledQueryContext, Input, QueryType};
 use query_engine::formatters::{GraphFormatter, GraphResponse, ResultFormatter};
+use query_engine::pipeline::PipelineError;
 use query_engine::shared::PipelineOutput;
+use regex::Regex;
 use serde_json::Value;
 
-use super::{QueryExpect, assert_gql_table, assert_response, format::CompileErrorExpect};
+use super::output_format::assert_format;
+use super::{QueryExpect, assert_response};
 
 static RESPONSE_SCHEMA: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(include_str!(concat!(
@@ -66,69 +69,78 @@ pub(super) fn assert_repeated_response(
     );
 }
 
-pub(super) fn assert_compilation(
-    compiled: Result<Arc<CompiledQueryContext>, impl std::fmt::Display>,
-    expect: &QueryExpect,
-    frontend: &str,
-    label: &str,
-) -> Option<Arc<CompiledQueryContext>> {
-    let contains = expect.compile_error_contains.for_frontend(frontend);
-    let not_contains = expect.compile_error_not_contains.for_frontend(frontend);
-    let substring = expect
-        .compile_error
-        .as_ref()
-        .and_then(|error| error.substring_for(frontend));
-    let expects_error = !matches!(
-        expect.compile_error,
-        None | Some(CompileErrorExpect::Flag(false))
-    ) || !contains.is_empty();
-    assert!(
-        expects_error || not_contains.is_empty(),
-        "{label}: compile_error_not_contains requires an expected compile error"
-    );
-    let compiled = match compiled {
-        Ok(compiled) => {
-            assert!(
-                !expects_error,
-                "{label}: expected compile error but got success"
-            );
-            compiled
-        }
-        Err(error) => {
-            assert!(expects_error, "{label}: unexpected compile error: {error}");
-            let message = error.to_string();
-            for fragment in substring
-                .into_iter()
-                .chain(contains.iter().map(String::as_str))
-            {
-                assert!(
-                    message.contains(fragment),
-                    "{label}: compile error '{message}' does not contain '{fragment}'"
-                );
-            }
-            for fragment in not_contains {
-                assert!(
-                    !message.contains(fragment),
-                    "{label}: compile error must not contain '{fragment}'\nerror: {message}"
-                );
-            }
-            return None;
-        }
-    };
-    Some(compiled)
+static NEVER_IN_COMPILE_ERRORS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
+    [
+        ("a traversal path", r"(^|[^/\w])(\d+/)+($|\W)"),
+        ("an email address", r"[\w.+-]+@[\w-]+\.\w+"),
+        ("a physical table name", r"\b(v\d+_)?gl_[a-z_]+"),
+        ("a private fixture literal", r"private-[a-z-]+-literal"),
+        ("a private fixture type", r"[A-Z_]*PRIVATE[A-Z_]*"),
+    ]
+    .into_iter()
+    .map(|(name, pattern)| (name, Regex::new(pattern).unwrap()))
+    .collect()
+});
+
+pub(crate) fn shown_private_detail(message: &str) -> Option<&'static str> {
+    NEVER_IN_COMPILE_ERRORS
+        .iter()
+        .find(|(_, pattern)| pattern.is_match(message))
+        .map(|(name, _)| *name)
 }
 
-pub(super) fn assert_output(
-    output: &PipelineOutput,
-    frontend: Frontend,
-    expect: &QueryExpect,
-    label: &str,
-) -> Value {
-    assert_pagination(output, label);
-    if frontend == Frontend::Gql {
-        assert_gql_table(output, expect, label);
+pub(super) fn assert_no_private_details(message: &str, label: &str) {
+    if let Some(detail) = shown_private_detail(message) {
+        panic!("{label}: compile error shows {detail}: {message}");
     }
+}
+
+pub(super) fn assert_compilation(
+    compiled: Result<Arc<CompiledQueryContext>, PipelineError>,
+    expect: &QueryExpect,
+    (backend, frontend): (&str, &str),
+    label: &str,
+) -> Option<Arc<CompiledQueryContext>> {
+    let expected = expect
+        .compile_error
+        .as_ref()
+        .map(|error| <&str>::from(error.reason_for(backend, frontend)));
+    assert!(
+        expected.is_some() || expect.compile_error_not_contains.is_empty(),
+        "{label}: compile_error_not_contains requires compile_error"
+    );
+    match (compiled, expected) {
+        (Ok(compiled), None) => Some(compiled),
+        (Ok(_), Some(reason)) => {
+            panic!("{label}: expected a {reason} rejection but the query compiled")
+        }
+        (Err(error), None) => panic!("{label}: unexpected compile error: {error}"),
+        (Err(error), Some(reason)) => {
+            let actual = error.failure_reason().as_str();
+            assert!(
+                actual == reason,
+                "{label}: rejected as {actual}, expected {reason}: {error}"
+            );
+            let message = error.to_string();
+            assert_no_private_details(&message, label);
+            for pattern in &expect.compile_error_not_contains {
+                assert!(
+                    !pattern.0.is_match(&message),
+                    "{label}: compile error shows /{}/: {message}",
+                    pattern.0
+                );
+            }
+            None
+        }
+    }
+}
+
+pub(super) fn assert_output(output: &PipelineOutput, expect: &QueryExpect, label: &str) -> Value {
+    assert_pagination(output, label);
     let response = GraphFormatter.format(output);
+    for (format, expected) in &expect.format {
+        assert_format(output, &response, *format, expected, label);
+    }
     assert_response(&output.compiled.input, response.clone(), expect, label);
     response
 }

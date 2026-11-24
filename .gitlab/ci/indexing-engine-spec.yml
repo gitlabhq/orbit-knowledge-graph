@@ -1,0 +1,60 @@
+.indexing-engine-spec:
+  stage: test
+  extends:
+    - .job-template
+    - .sccache-template
+  needs: []
+
+.indexing-engine-spec-changes: &indexing-engine-spec-changes
+  - specs/indexing-engine-next/**/*
+
+.indexing-engine-code-changes: &indexing-engine-code-changes
+  - specs/indexing-engine-next/**/*
+  - crates/indexing-engine-next/src/protocol/**/*
+  - crates/indexing-engine-next/src/testkit/simulator/**/*
+  - crates/indexing-engine-next/tests/protocol/**/*
+
+engine-spec-model-check:
+  extends: .indexing-engine-spec
+  tags:
+    - ${RUNNER_LARGE}
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes: *indexing-engine-spec-changes
+  script:
+    - mise run spec:engine
+
+engine-spec-liveness:
+  extends: .indexing-engine-spec
+  tags:
+    - ${RUNNER_LARGE}
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes: *indexing-engine-spec-changes
+  script:
+    - mise run spec:engine:liveness
+
+engine-spec-counterexamples:
+  extends: .indexing-engine-spec
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes: *indexing-engine-spec-changes
+  script:
+    - mise run spec:engine:counterexample
+
+engine-spec-code-graph:
+  extends: .indexing-engine-spec
+  tags:
+    - ${RUNNER_LARGE}
+  parallel:
+    matrix:
+      - ENGINE_SPEC_CLUSTER: [no_nats_faults, two_tasks, nats_wipe, duplicate]
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes: *indexing-engine-code-changes
+  script:
+    - mise run spec:engine:code

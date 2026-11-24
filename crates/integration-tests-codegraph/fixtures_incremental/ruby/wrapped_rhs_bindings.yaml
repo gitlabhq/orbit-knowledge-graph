@@ -1,0 +1,152 @@
+name: "Ruby: begin and parenthesized right-hand sides"
+
+fixtures:
+  - path: lib/client.rb
+    content: |
+      class Client
+        def get; end
+      end
+
+  - path: lib/other.rb
+    content: |
+      class Other
+        def get; end
+      end
+
+  - path: local_begin.rb
+    content: |
+      class LocalBegin
+        def log; end
+
+        def run
+          c = begin
+            log
+            Other.new
+            Client.new
+          end
+          c.get
+        end
+      end
+
+  - path: local_parens.rb
+    content: |
+      class LocalParens
+        def run
+          c = (Other.new; Client.new)
+          c.get
+        end
+      end
+
+  - path: ivar_begin.rb
+    content: |
+      class IvarBegin
+        def initialize
+          @client = begin
+            Other.new.get
+            Client.new
+          end
+        end
+
+        def run
+          @client.get
+        end
+      end
+
+  - path: ivar_parens.rb
+    content: |
+      class IvarParens
+        def initialize
+          @client = (Other.new; Client.new)
+        end
+
+        def run
+          @client.get
+        end
+      end
+
+  - path: begin_rescue.rb
+    content: |
+      class BeginRescue
+        def run
+          c = begin
+            Client.new
+          rescue StandardError
+            Other.new
+          end
+          c.get
+        end
+      end
+
+  - path: begin_ensure.rb
+    content: |
+      class BeginEnsure
+        def initialize
+          @c = begin
+            Client.new
+          ensure
+            Other.new
+          end
+        end
+
+        def run
+          c = begin
+            Client.new
+          ensure
+            Other.new
+          end
+          c.get
+        end
+
+        def run_ivar
+          @c.get
+        end
+      end
+
+tests:
+  - name: "A local assigned from begin or parentheses takes the last expression's type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN ['local_begin.rb', 'local_parens.rb'] AND callee.name = 'get'
+      RETURN caller.file_path AS file, callee.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { file: local_begin.rb, target: Client::get } }
+      - { row: { file: local_parens.rb, target: Client::get } }
+
+  - name: "An instance variable assigned from begin or parentheses takes the last expression's type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN ['ivar_begin.rb', 'ivar_parens.rb'] AND caller.name = 'run' AND callee.name = 'get'
+      RETURN caller.file_path AS file, callee.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { file: ivar_begin.rb, target: Client::get } }
+      - { row: { file: ivar_parens.rb, target: Client::get } }
+
+  - name: "Calls inside the begin body keep their edges"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'LocalBegin::run' AND callee.fqn = 'LocalBegin::log'
+      RETURN callee.fqn AS target
+    assert:
+      - { row_count: 1 }
+
+  - name: "Control: begin with rescue still takes both arms"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'begin_rescue.rb' AND callee.name = 'get'
+      RETURN callee.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { target: Client::get } }
+      - { row: { target: Other::get } }
+
+  - name: "begin ... ensure is typed from the body, not the ensure clause"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'begin_ensure.rb' AND callee.name = 'get'
+      RETURN caller.name AS caller, callee.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: run, target: Client::get } }
+      - { row: { caller: run_ivar, target: Client::get } }

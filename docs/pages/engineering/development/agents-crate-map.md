@@ -2,7 +2,7 @@
 
 Every `[workspace]` member needs a row here; `crates/xtask/build.rs` enforces this.
 
-Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, HealthCheck, ClickhouseSetup via `--mode`).
+Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, HealthCheck, ClickhouseSetup via `--mode`), plus a `check-config` subcommand that validates a configuration file.
 
 | Crate | Role |
 |---|---|
@@ -22,6 +22,7 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `orbit-log-fields` | Names of every log and span field, split into `safe` (always written; the server's expanded logs allowlist) and `expanded` (written only on expanded log lines), and the log macros that name fields with `safe(NAME)` and `expanded(NAME)` |
 | `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/`, schema version tracking (`schema/version.rs`), migration orchestrator (`schema/migration.rs`), migration completion detection and dead-version GC (`orchestrator/scheduled/migration_completion.rs`). **See `crates/indexer/AGENTS.md` (reuse-infra checklist) before adding a handler.** |
 | `indexer/duckdb` | DuckDB SQL projection for `data_fusion` SDLC plans, injected into `indexer::run` |
+| `indexing-engine-next` | ADR 023 engine library: planner, worker and reconciler traits, `EngineBuilder` checks, and the in-memory `testkit`. No domain terms (ast-grep rule `indexing-engine-next-no-domain-terms`) |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
 | `query-data-model` | Derives shared graph and access-path contracts, backend catalogs, and authorization catalogs; the ClickHouse implementation owns storage definitions used by its DDL and migration consumers |
 | `code-graph` | Code parsing and linking pipeline under `src/v2/` (`pipeline`, `registry`, `config`, `types`, `linker`, `dsl`, `langs/{generic,custom}`); the old `src/legacy/` parser and linker have been removed. Shared `Range`/`Position`/`IntervalTree` live at `src/utils.rs`. |
@@ -37,13 +38,14 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `circuit-breaker` | Generic circuit breaker (`CircuitBreaker`, `CircuitBreakableError`) with observer hooks and per-circuit config |
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
 | `gitaly-protos` | Gitaly protobuf types for gRPC repository operations |
+| `gitalisk-core` | Git repository access (status, branch, commit, worktree, workspace discovery), vendored from `gitlab-org/rust/gitalisk` v0.9.0 |
 | `health-check` | Networked aggregate health for configured Kubernetes workloads and ClickHouse, plus NATS code work queue depth for autoscaling code indexer pods |
 | `orbit-cli` | Local `orbit workspace index`, `orbit workspace sql`, and `orbit workspace schema` commands; writes the property graph to DuckDB and exposes it as raw SQL (no DSL); workspace management (`Workspace`, `GitInfo`, manifest in DuckDB). Release artifacts include glibc 2.28 Linux builds plus fully static musl Linux builds for Alpine, scratch, and distroless environments. |
 | `orbit-search` | Store-agnostic grep helpers: OR-alternative parsing and the kind filter (`grep`), and the shared corpus policy (source extensions, test/vendor exclusions) in `corpus` |
 | `duckdb-client` | DuckDB client with read-write retry backoff, read-only concurrent access, ontology-driven graph converter, shared SQL-literal/Arrow-column helpers |
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
 | `orbit-cli/graphql` | Typed GitLab GraphQL queries, checked at compile time against the vendored GitLab schema |
-| `integration-testkit` | Shared ClickHouse service helpers, `MockRedactionService`, `ResponseView` assertion framework, YAML query scenario runner (`query_scenario` module: `QueryScenario` format, preset system, assertion enforcement), indexer scenario runner (`scenario`), plan-shape runner (`plan_shape`), `GKG_TEST_ONTOLOGY_OVERLAY` loader, CLI test harness (`cli` module) |
+| `integration-testkit` | Shared ClickHouse service helpers, `MockRedactionService`, `ResponseView` assertion framework, YAML query scenario runner (`query_scenario` module: `QueryScenario` format, preset system, assertion enforcement), indexer scenario runner (`scenario`), compiler fixture runner (`compiler`), `GKG_TEST_ONTOLOGY_OVERLAY` loader, CLI test harness (`cli` module) |
 | `integration-tests` | Test binaries: `local` (compiler, plan shape), `server_containers`, `indexer_containers`, `cli`, and `billing_boundary`. See [Testing](../testing/README.md) |
 | `integration-tests-codegraph` | YAML suites for `code-graph` (`fixtures/`) and `code-graph-incremental` (`fixtures_incremental/`); `build.rs` generates one test per suite |
 | `fuzz` | Bolero fuzz targets for the JSON and GQL query frontends, code parsers, and indexer messages |

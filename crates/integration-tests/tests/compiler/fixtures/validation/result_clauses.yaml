@@ -1,0 +1,130 @@
+missing_frontends:
+  json: The source test checks how GQL reads its optional trailing clauses.
+
+physical:
+  clickhouse: {}
+
+cases:
+  - name: A query with unsorted, no SKIP, no LIMIT, no DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u
+    logical:
+      expect: ["(Input traversal (...))", "(Limit 30 (_))"]
+      reject: ["(Sort ... (_))", "(Offset ... (_))"]
+
+  - name: A query with unsorted, no SKIP, no LIMIT, DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u DEBUG
+    logical:
+      expect: ["(Input traversal include_debug_sql (...))", "(Limit 30 (_))"]
+      reject: ["(Sort ... (_))", "(Offset ... (_))"]
+
+  - name: A query with unsorted, no SKIP, LIMIT 7, no DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u LIMIT 7
+    logical:
+      expect: ["(Input traversal (...))", "(Limit 7 (_))"]
+      reject: ["(Sort ... (_))", "(Offset ... (_))"]
+
+  - name: A query with unsorted, no SKIP, LIMIT 7, DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u LIMIT 7 DEBUG
+    logical:
+      expect: ["(Input traversal include_debug_sql (...))", "(Limit 7 (_))"]
+      reject: ["(Sort ... (_))", "(Offset ... (_))"]
+
+  - name: A query with unsorted, SKIP 7, no LIMIT, no DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u SKIP 7
+    logical:
+      expect: ["(Input traversal (...))", "(Offset 7 (_))", "(Limit 30 (_))"]
+      reject: ["(Sort ... (_))"]
+
+  - name: A query with unsorted, SKIP 7, no LIMIT, DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u SKIP 7 DEBUG
+    logical:
+      expect: ["(Input traversal include_debug_sql (...))", "(Offset 7 (_))", "(Limit 30 (_))"]
+      reject: ["(Sort ... (_))"]
+
+  - name: A query with unsorted, SKIP 7, LIMIT 3, no DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u SKIP 7 LIMIT 3
+    logical:
+      expect: ["(Input traversal (...))", "(Offset 7 (_))", "(Limit 3 (_))"]
+      reject: ["(Sort ... (_))"]
+
+  - name: A query with unsorted, SKIP 7, LIMIT 3, DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u SKIP 7 LIMIT 3 DEBUG
+    logical:
+      expect: ["(Input traversal include_debug_sql (...))", "(Offset 7 (_))", "(Limit 3 (_))"]
+      reject: ["(Sort ... (_))"]
+
+  - name: A query with sorted, no SKIP, no LIMIT, no DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u ORDER BY u.id
+    logical:
+      expect: ["(Input traversal (...))", "(Sort u.id (_))", "(Limit 30 (_))"]
+      reject: ["(Offset ... (_))"]
+
+  - name: A query with sorted, no SKIP, no LIMIT, DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u ORDER BY u.id DEBUG
+    logical:
+      expect: ["(Input traversal include_debug_sql (...))", "(Sort u.id (_))", "(Limit 30 (_))"]
+      reject: ["(Offset ... (_))"]
+
+  - name: A query with sorted, no SKIP, LIMIT 7, no DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u ORDER BY u.id LIMIT 7
+    logical:
+      expect: ["(Input traversal (...))", "(Sort u.id (_))", "(Limit 7 (_))"]
+      reject: ["(Offset ... (_))"]
+
+  - name: A query with sorted, no SKIP, LIMIT 7, DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u ORDER BY u.id LIMIT 7 DEBUG
+    logical:
+      expect: ["(Input traversal include_debug_sql (...))", "(Sort u.id (_))", "(Limit 7 (_))"]
+      reject: ["(Offset ... (_))"]
+
+  - name: A query with sorted, SKIP 7, no LIMIT, no DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u ORDER BY u.id SKIP 7
+    logical:
+      expect: ["(Input traversal (...))", "(Sort u.id (_))", "(Offset 7 (_))", "(Limit 30 (_))"]
+
+  - name: A query with sorted, SKIP 7, no LIMIT, DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u ORDER BY u.id SKIP 7 DEBUG
+    logical:
+      expect: ["(Input traversal include_debug_sql (...))", "(Sort u.id (_))", "(Offset 7 (_))", "(Limit 30 (_))"]
+
+  - name: A query with sorted, SKIP 7, LIMIT 3, no DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u ORDER BY u.id SKIP 7 LIMIT 3
+    logical:
+      expect: ["(Input traversal (...))", "(Sort u.id (_))", "(Offset 7 (_))", "(Limit 3 (_))"]
+
+  - name: A query with sorted, SKIP 7, LIMIT 3, DEBUG keeps those clauses
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u ORDER BY u.id SKIP 7 LIMIT 3 DEBUG
+    logical:
+      expect: ["(Input traversal include_debug_sql (...))", "(Sort u.id (_))", "(Offset 7 (_))", "(Limit 3 (_))"]

@@ -1,10 +1,16 @@
 # Contributing to Orbit
 
-Thanks for contributing to [GitLab Orbit](https://docs.gitlab.com/orbit/), the service
-that turns GitLab SDLC data and source code into a queryable property graph.
+[GitLab Orbit](https://docs.gitlab.com/orbit/) turns GitLab SDLC data and source
+code into a property graph that you can query.
 
-Community contributions go through the [community fork](https://gitlab.com/gitlab-community/gitlab-org/orbit/knowledge-graph).
-GitLab team members contribute directly to this repository.
+Community members contribute through the
+[community fork](https://gitlab.com/gitlab-community/gitlab-org/orbit/knowledge-graph).
+GitLab team members contribute to this repository. To start, look at the
+[open issues](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues).
+
+This repository is public. Do not put customer names, tenant names, incident
+details, credentials, or other sensitive data in code, commits, MRs, or public
+issues. Put them only in a confidential issue or an internal note.
 
 ## Quickstart
 
@@ -17,97 +23,62 @@ mise install
 mise build
 ```
 
-Core tasks:
+Run `mise tasks ls` for all tasks. The common tasks are in [AGENTS.md](AGENTS.md).
+`mise test` needs no Docker. `mise test:integration` runs container tests. On
+macOS, start Docker with `colima start gkg --memory 12`.
 
-| Task | Command |
-|---|---|
-| Build | `mise build` |
-| Unit tests (no Docker) | `mise test:fast` |
-| Lint | `mise lint:code` |
-| Apply lint fixes | `mise lint:code:fix` |
-| Validate doc changes | `mise lint:docs` |
+For the full local stack, see [Local development](docs/pages/engineering/development/local-development.md).
+For test layers and CI jobs, see [Testing](docs/pages/engineering/testing/README.md).
 
-For the full local setup (Caproni cluster with GitLab, ClickHouse, NATS, and Siphon), see [Local development](docs/pages/engineering/development/local-development.md).
+## Code
 
-## Testing
+- Default to no code comments. Write a comment only for a business requirement that the code cannot make clear.
+  The rule covers doc comments (`///`, `//!`): delete one that only restates the name or signature,
+  or cut it to one sentence on that requirement.
+- Rust doc examples compile in `mise test:fast`, and `ignore` blocks fail it. Use a plain or `no_run` block with hidden setup lines starting with `#`, or `text` for pseudo-code.
+- Reuse infrastructure before you add new infrastructure.
+- Declare each crates.io or Git dependency once, in `[workspace.dependencies]` in
+  the root `Cargo.toml`. In the crate, inherit it with `name = { workspace = true }`,
+  and add `optional = true` or `features` there when the crate needs them.
+  `mise lint:deps`, CI, and a pre-commit hook run
+  `scripts/checks/check_workspace_deps.py` to find crate-local declarations.
+  If a crate must pin its own version, add the dependency with a reason to the
+  crate's `Cargo.toml`:
 
-`mise test:fast` runs the unit tests with no Docker. `mise test:integration` runs the container tests. On macOS, start Docker for them with `colima start gkg --memory 12`.
+  ```toml
+  [package.metadata.workspace-deps.allow]
+  some-crate = "why this crate pins its own version"
+  ```
 
-For all test layers, the CI jobs, and where to add a test, see [Testing](docs/pages/engineering/testing/README.md).
+- Before you change an area, read its design document and the crate `AGENTS.md`, if present.
+- The ontology is the single source of truth for graph-shape facts.
+- Read the [SOX billing boundary](docs/pages/engineering/development/sox-billing-boundary.md) page before you change billing.
 
-## Linting
+## Docs
 
-```shell
-mise lint:code        # Clippy with warnings as errors
-mise lint:code:fix    # Apply auto-fixable Clippy suggestions
-mise lint:docs        # markdownlint + rumdl + Vale + lychee link checks
-```
+- Do not change docs in an MR that changes code. The exception is a docs change
+  that a CI or build check needs. The `docs-in-code-mr-check` job enforces this rule.
+  When a check needs the change, add the `docs-in-code-mr` label and retry the job.
+- Rewrite or remove stale text. Do not keep history.
+- Keep `README.md` a front page. Put each list only in the page that owns it,
+  and link to that page with a relative path.
+- When you add, move, or remove an owning guide, update `AGENTS.md`.
+- Do not add a `CLAUDE.md` or `CLAUDE.local.md`. Either one stops Claude Code
+  from reading `AGENTS.md`.
+- Use the terms in [CONTEXT.md](CONTEXT.md). Add a term only when a new concept
+  could confuse a new contributor.
+- For user docs, follow the GitLab documentation principles in
+  `.ai/principles/distilled/`. `mise lint:docs` does not check them.
 
-Run `mise lint:docs` before pushing any documentation changes.
+## Issues and MRs
 
-## Engineering conventions
-
-- Comments explain why. Do not narrate what the code shows.
-- Reuse existing infrastructure before adding new infrastructure.
-- Before changing an area, read its design document and the crate-local `AGENTS.md`, if present.
-- Treat the ontology as the single source of truth for graph-shape facts.
-- Read `docs/pages/engineering/development/sox-billing-boundary.md` before changing billing.
-
-## Documentation conventions
-
-- Do not change any file under `docs/` in an MR that changes code. Change it
-  only when a CI or build check fails without it.
-  The `docs-in-code-mr-check` CI job enforces this rule. When a check needs the
-  change, add the `docs-in-code-mr` label and retry the job.
-- Rewrite or remove stale text instead of preserving history.
-- Keep `README.md` a front page: what GitLab Orbit is, the quickstart, and links.
-  Put lists such as languages, entity types, and commands only in the page that
-  owns them, and link to that page. Link to repository files by relative path, so
-  the `check_docs_markdown` CI job checks each link.
-- When you add, move, or remove an owning guide, update its pointers in
-  `AGENTS.md`.
-- Claude Code reads `AGENTS.md` from v2.1.277. Do not add a `CLAUDE.md` or
-  `CLAUDE.local.md`: either one stops Claude Code from reading `AGENTS.md`.
-- Use the canonical terms in `CONTEXT.md`. Add a term only when a new domain
-  concept could confuse a new contributor.
-- Follow the GitLab documentation principles in `.ai/principles/distilled/` when
-  writing pages under `docs/docs-gitlab-com/`. A green `mise lint:docs` run does not mean
-  a page follows them.
-
-## Issue conventions
-
-- A person creates each issue and epic. An agent that runs the create call
-  needs the author's approval of the draft first. The request to do the work
-  is not that approval.
-- Agents may draft content. The author keeps every section above the Agent
-  context block in their own words. Put generated content in that block.
-
-## MR conventions
-
-MR titles must follow [Conventional Commits](https://www.conventionalcommits.org/) format:
-
-```plaintext
-type(scope): short description
-```
-
-Examples: `fix(compiler): correct aggregation undercount`, `docs: add CONTRIBUTING.md`.
-
-- Non-trivial MRs (features, refactors, architectural changes) must reference an issue:
-  `Closes #N` or `Relates to #N`.
-- Trivial MRs (typos, minor dependency bumps, or formatting-only changes) do not need an issue.
-- Keep each MR focused on one concern.
-- Use the MR and issue templates under [`.gitlab/`](.gitlab/).
-- Read each template's `TEMPLATE CONVENTION` block before you write.
-- Load the `/orbit-planning` skill before you draft or label an issue, epic, or MR.
-
-Keep the reviewer summary to two or three plain sentences. Describe the symptom and fix without implementation names.
-
-Put mechanics, alternatives, and file details in the Agent context block. In comments, lead with the verdict and collapse long reasoning when it helps.
-
-## Where to start
-
-- [Open issues](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues) — the
-  `orbit::hackathon` label marks good entry points.
-- [AGENTS.md](AGENTS.md) — tooling entry point and map to the owning guides.
-- [CONTEXT.md](CONTEXT.md) — domain glossary. Use the canonical terms when writing code,
-  docs, or MR descriptions.
+- A person creates each issue and epic. An agent needs the author's approval of
+  the draft before it creates one. A request to do the work is not approval.
+- The author writes the sections above the Agent context block. Generated
+  content goes in that block.
+- MR titles follow [Conventional Commits](https://www.conventionalcommits.org/),
+  for example, `fix(compiler): correct aggregation undercount`.
+- A non-trivial MR references an issue with `Closes #N` or `Relates to #N`.
+- Keep each MR on one concern.
+- Use the issue and MR templates, and read each `TEMPLATE CONVENTION` block.
+  Load the `orbit-planning` skill before you draft or label an issue, epic, or MR.

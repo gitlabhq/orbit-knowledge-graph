@@ -37,7 +37,7 @@ pub fn run_remote(
 
     for dictionary in &schema.dictionaries {
         let prefixed = dictionary.clone().with_schema_version_prefix(&prefix);
-        generated.push(format!("{};\n", prefixed.to_create_sql(&credentials)));
+        generated.push(format!("{};\n", prefixed.to_create_sql(&credentials, None)));
     }
 
     let all_table_names: Vec<String> = schema

@@ -291,6 +291,7 @@ define_languages! {
         names: ["hcl", "terraform"],
     },
     Dockerfile => {
+        support_lang: Dockerfile,
         extensions: ["dockerfile", "containerfile"],
         separator: ".",
         names: ["dockerfile", "containerfile", "docker"],

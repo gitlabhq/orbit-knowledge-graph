@@ -6,7 +6,7 @@ This page lists where each test layer lives and the command that runs it. The pr
 | --- | --- | --- |
 | Build scripts | `build.rs` in each crate | `mise build` |
 | Unit tests | `#[cfg(test)]` modules next to the code | `mise test:fast` |
-| Compiler integration | `crates/integration-tests/tests/compiler/` | `mise test:local` |
+| Compiler integration | `crates/integration-tests/tests/compiler/` (fixtures) | `mise test:local` |
 | Code-graph suites | `crates/integration-tests-codegraph/` | `mise test:integration:codegraph` |
 | CLI integration | `crates/integration-tests/tests/cli.rs` | `mise test:cli` |
 | Container tests | `crates/integration-tests/tests/` | `mise test:integration` |
@@ -17,7 +17,7 @@ This page lists where each test layer lives and the command that runs it. The pr
 
 Other commands:
 
-- `mise test:plan-shape` runs the plan-shape fixtures.
+- `mise test:compiler` runs the compiler fixtures.
 - `mise bench:run` measures code indexing on real repositories, and `mise bench:smoke` runs one indexing pass for each repository.
 - `mise query:diff` compares two query profiles.
 - `bash scripts/ci/orbit-perf.sh` runs the [load test](../testing/performance/load-test.md) on your machine with the small synthetic profile. It deploys the Orbit image tag from the Caproni values. Set `GKG_IMAGE` and `GKG_IMAGE_TAG` to test another published image, and `SYNTH_CONFIG` or `ROUNDS` to change the size or the length of the run.
@@ -48,7 +48,7 @@ mise test:integration
 | Harness | Reference |
 | --- | --- |
 | Test binaries, CI jobs, lanes, and Rust-only data tests | [`integration-tests/README.md`](../../../../crates/integration-tests/README.md) |
-| Plan-shape fixtures | [`plan_shape/README.md`](../../../../crates/integration-tests/tests/compiler/plan_shape/README.md) |
+| Compiler fixtures | [`compiler/README.md`](../../../../crates/integration-tests/tests/compiler/README.md) |
 | Code-graph suites | [`integration-tests-codegraph/README.md`](../../../../crates/integration-tests-codegraph/README.md) |
 | Container harness and scenario format | [`integration-testkit/README.md`](../../../../crates/integration-testkit/README.md) |
 | Indexer scenario schema | [`indexer_scenario.schema.json`](../../../../config/schemas/indexer_scenario.schema.json) |

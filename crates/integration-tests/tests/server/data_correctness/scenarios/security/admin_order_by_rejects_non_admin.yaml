@@ -12,5 +12,4 @@ query:
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.is_admin DESC LIMIT 10
 
 expect:
-  compile_error: true
-  compile_error_contains: [is_admin, order_by, administrator]
+  compile_error: restrict

@@ -2,29 +2,31 @@
 //!
 //! # Example
 //!
-//! ```ignore
-//! use etl_engine::engine::EngineBuilder;
-//! use etl_engine::engine::handler::HandlerRegistry;
-//! use etl_engine::nats::{NatsBroker, NatsConfiguration, NatsServicesImpl};
-//! use etl_engine::configuration::EngineConfiguration;
+//! ```no_run
 //! use std::sync::Arc;
 //!
-//! let app_config = AppConfig::load(None)?;
-//! let config = app_config.nats;
-//! let broker = Arc::new(NatsBroker::connect(&config).await?);
+//! use indexer::engine::EngineBuilder;
+//! use indexer::handler::{Handler, HandlerRegistry};
+//! use indexer::nats::{NatsBroker, NatsServicesImpl};
+//! use indexer::IndexerConfig;
+//!
+//! # async fn run(config: IndexerConfig, my_handler: Box<dyn Handler>) -> Result<(), Box<dyn std::error::Error>> {
+//! let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
 //! let nats_services = Arc::new(NatsServicesImpl::new(broker.clone()));
 //!
 //! let registry = Arc::new(HandlerRegistry::default());
-//! registry.register_handler(Box::new(my_handler));
+//! registry.register_handler(my_handler);
 //!
 //! let engine = EngineBuilder::new(broker, registry)
 //!     .nats_services(nats_services)
 //!     .build();
 //!
-//! engine.run(&app_config.engine).await?;
+//! engine.run(&config.engine).await?;
 //!
 //! // From another task:
 //! engine.stop();
+//! # Ok(())
+//! # }
 //! ```
 
 pub mod dead_letter;
@@ -73,11 +75,17 @@ pub enum EngineError {
 ///
 /// # Example
 ///
-/// ```ignore
-/// use etl_engine::engine::EngineBuilder;
+/// ```
 /// use std::sync::Arc;
 ///
+/// use indexer::engine::EngineBuilder;
+/// use indexer::handler::HandlerRegistry;
+/// use indexer::nats::NatsBroker;
+///
+/// # fn build(broker: Arc<NatsBroker>) {
+/// let registry = Arc::new(HandlerRegistry::default());
 /// let engine = EngineBuilder::new(broker, registry).build();
+/// # }
 /// ```
 pub struct EngineBuilder {
     broker: Arc<NatsBroker>,
@@ -139,8 +147,14 @@ impl EngineBuilder {
 ///
 /// Use [`EngineBuilder`]:
 ///
-/// ```ignore
+/// ```
+/// # use std::sync::Arc;
+/// # use indexer::engine::EngineBuilder;
+/// # use indexer::handler::HandlerRegistry;
+/// # use indexer::nats::NatsBroker;
+/// # fn build(broker: Arc<NatsBroker>, registry: Arc<HandlerRegistry>) {
 /// let engine = EngineBuilder::new(broker, registry).build();
+/// # }
 /// ```
 ///
 /// # Lifecycle

@@ -278,12 +278,15 @@ impl<'r, D: Doc> Node<'r, D> {
 
     /// Find the first node along `axis` whose kind satisfies `criterion`.
     ///
-    /// ```ignore
-    /// use treesitter_visit::{Axis::*, Match::*};
-    /// node.find(Child, Kind("identifier"))
-    /// node.find(Ancestor, AnyKind(&["class_definition", "module"]))
-    /// node.find(Descendant, Kind("type_identifier"))
-    /// node.find(Field("name"), Kind("identifier"))
+    /// ```
+    /// use treesitter_visit::{Axis::*, Doc, Match::*, Node};
+    ///
+    /// # fn find_examples<D: Doc>(node: &Node<'_, D>) {
+    /// node.find(Child, Kind("identifier"));
+    /// node.find(Ancestor, AnyKind(&["class_definition", "module"]));
+    /// node.find(Descendant, Kind("type_identifier"));
+    /// node.find(Field("name"), Kind("identifier"));
+    /// # }
     /// ```
     #[must_use]
     pub fn find(&self, axis: Axis<'_>, criterion: Match<'_>) -> Option<Self> {

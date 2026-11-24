@@ -92,6 +92,7 @@ mod tests {
             instance_version: None,
             license_checksum: None,
             is_gitlab_team_member: false,
+            orbit_quota_exempt: false,
         }
     }
 

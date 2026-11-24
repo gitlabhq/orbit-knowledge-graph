@@ -1,6 +1,6 @@
 ---
-source_checksum: 1d8a64da1ff294d3
-distilled_at_sha: b0b7e1628f9fb689a18cee2ec91c621c6a26dd2d
+source_checksum: 52156bafd2e2b1fc
+distilled_at_sha: cf64a3d8f7ef3e3137b983ecedac825dcf82a0b3
 ---
 <!-- Auto-generated from docs.gitlab.com by gitlab-ai-principles-distiller — do not edit manually -->
 
@@ -18,6 +18,7 @@ distilled_at_sha: b0b7e1628f9fb689a18cee2ec91c621c6a26dd2d
 - DO NOT use possessives (`'s`) for product or organization names (e.g., use "the Docker CLI", not "Docker's CLI").
 - DO NOT copy and paste content from other sources unless it is a limited quotation with the source cited; rephrase or link to the source instead.
 - DO NOT attribute human qualities such as perception, intent, or awareness to software, systems, or data; describe what the system does mechanically (e.g., "before the response reaches the agent", not "before the agent sees the response"; checked by the `Anthropomorphism.yml` Vale rule).
+- Use "requires" or "must", not "needs", when a system or component has a fixed requirement such as a version, setting, or file location (e.g., "The runner requires a registration token").
 
 ### Language and Grammar
 
@@ -28,6 +29,7 @@ distilled_at_sha: b0b7e1628f9fb689a18cee2ec91c621c6a26dd2d
 - Use `month day, year` format for dates and `AM`/`PM` for times.
 - DO NOT use semicolons (`;`), en dashes (`–`), or em dashes (`—`); use separate sentences or commas instead.
 - DO NOT use typographer's ("curly") quotation marks; use straight quotes (checked by the `NonStandardQuotes.yml` Vale rule).
+- Use straight double quotation marks; use single quotation marks only for a quotation inside another quotation; put commas and periods inside the closing quotation mark and other punctuation outside unless it is part of the quoted text.
 - DO NOT use non-breaking spaces or tabs for indentation; use standard spaces (enforced by `lint-doc.sh`).
 - Use one space between sentences (checked by the `SentenceSpacing.yml` Vale rule).
 - Use serial (Oxford) commas before the final "and" or "or" in lists of three or more items (checked by the `OxfordComma.yml` Vale rule).

@@ -1,10 +1,14 @@
 use std::path::Path;
 
-use orbit_utils::markdown::{FQN_SEPARATOR, LineIndex, sections, segment_path};
+use orbit_utils::markdown::{
+    FQN_SEPARATOR, FRONT_MATTER_NAME, LineIndex, escape_segment, parse, segment_path,
+};
 
 use crate::v2::config::Language;
 use crate::v2::dsl::types::*;
-use crate::v2::types::{CanonicalDefinition, CanonicalImport, DefKind, Fqn, Position, Range};
+use crate::v2::types::{
+    CanonicalDefinition, DefKind, DefinitionMetadata, FileLinks, Fqn, Position, Range,
+};
 
 #[derive(Default)]
 pub struct MarkdownDsl;
@@ -19,44 +23,77 @@ impl DslLanguage for MarkdownDsl {
     }
 
     fn parser() -> LanguageParser {
-        LanguageParser::Custom(parse_markdown)
+        LanguageParser::Custom(|source, file_path, _| Ok(parse_markdown(source, file_path)))
     }
 }
 
-fn parse_markdown(
-    source: &str,
-    file_path: &str,
-) -> (Vec<CanonicalDefinition>, Vec<CanonicalImport>) {
-    let stem = Path::new(file_path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(file_path);
+fn parse_markdown(source: &str, file_path: &str) -> CustomParse {
+    let stem = escape_segment(
+        Path::new(file_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(file_path),
+    );
     let lines = LineIndex::new(source);
-    let position = |(line, column)| Position::new(line, column);
-    let sections = sections(source);
-    let definitions = sections
-        .iter()
-        .enumerate()
-        .map(|(index, section)| {
-            let parts: Vec<&str> = std::iter::once(stem)
-                .chain(segment_path(&sections, index))
-                .collect();
-            CanonicalDefinition {
-                definition_type: "Section",
-                kind: DefKind::Module,
-                name: section.name.clone(),
-                fqn: Fqn::from_segments(&parts, FQN_SEPARATOR),
-                range: Range::new(
-                    position(lines.position(section.start)),
-                    position(lines.end_position(source, section.end)),
-                    (section.start, section.end),
-                ),
-                is_top_level: section.parent.is_none(),
-                metadata: None,
-            }
-        })
-        .collect();
-    (definitions, Vec::new())
+    let range = |start: usize, end: usize| {
+        let position = |(line, column)| Position::new(line, column);
+        Range::new(
+            position(lines.position(start)),
+            position(lines.end_position(source, end)),
+            (start, end),
+        )
+    };
+    let document = parse(source);
+    let sections = document.sections;
+    let mut definitions = Vec::with_capacity(sections.len() + 1);
+    if let Some(front_matter) = document.front_matter {
+        definitions.push(CanonicalDefinition {
+            definition_type: "FrontMatter",
+            kind: DefKind::Other,
+            name: FRONT_MATTER_NAME.to_string(),
+            fqn: Fqn::from_segments(&[stem.as_str(), FRONT_MATTER_NAME], FQN_SEPARATOR),
+            range: range(front_matter.start, front_matter.end),
+            is_top_level: true,
+            metadata: Some(Box::new(DefinitionMetadata {
+                front_matter: Some(Box::new(front_matter.values)),
+                ..Default::default()
+            })),
+        });
+    }
+    let first_section = definitions.len();
+    let mut anchors = Vec::with_capacity(sections.len());
+    for (index, section) in sections.iter().enumerate() {
+        let parts: Vec<&str> = std::iter::once(stem.as_str())
+            .chain(segment_path(&sections, index))
+            .collect();
+        anchors.push((definitions.len(), section.anchor.clone()));
+        definitions.push(CanonicalDefinition {
+            definition_type: "Section",
+            kind: DefKind::Module,
+            name: section.name.clone(),
+            fqn: Fqn::from_segments(&parts, FQN_SEPARATOR),
+            range: range(section.start, section.end),
+            is_top_level: section.parent.is_none(),
+            metadata: None,
+        });
+    }
+    let links = FileLinks {
+        targets: document
+            .links
+            .iter()
+            .filter_map(|link| {
+                let section = link.section.map(|index| first_section + index);
+                link.target(file_path).map(|target| (section, target))
+            })
+            .collect(),
+        anchors,
+    };
+    CustomParse {
+        definitions,
+        imports: Vec::new(),
+        refs: Vec::new(),
+        links,
+    }
 }
 
 #[cfg(test)]
@@ -155,12 +192,45 @@ mod tests {
     }
 
     #[test]
-    fn front_matter_does_not_become_a_section() {
-        let result =
-            parse("---\ntitle: \"ADR 000\"\nauthors: [ \"@x\" ]\n---\n\n# Real Heading\n\nBody.\n")
-                .unwrap();
-        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
-        assert_eq!(names, vec!["Real Heading"]);
+    fn front_matter_becomes_one_definition_covering_the_whole_block() {
+        let src = "---\ntitle: \"ADR 000\"\nauthors:\n  - \"@x\"\n---\n\n# Real Heading\n\nBody.\n";
+        let result = parse(src).unwrap();
+        let rows: Vec<(&str, &str, String, &str, bool)> = result
+            .definitions
+            .iter()
+            .map(|d| {
+                let (start, end) = d.range.byte_offset;
+                (
+                    d.definition_type,
+                    d.name.as_str(),
+                    d.fqn.to_string(),
+                    &src[start..end],
+                    d.is_top_level,
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "FrontMatter",
+                    "front_matter",
+                    "guide#front_matter".to_string(),
+                    "---\ntitle: \"ADR 000\"\nauthors:\n  - \"@x\"\n---\n",
+                    true,
+                ),
+                (
+                    "Section",
+                    "Real Heading",
+                    "guide#Real Heading".to_string(),
+                    "# Real Heading\n\nBody.\n",
+                    true,
+                ),
+            ]
+        );
+        let block = &result.definitions[0];
+        assert_eq!(block.kind, DefKind::Other);
+        assert_eq!((block.range.start.line, block.range.end.line), (0, 4));
     }
 
     #[test]
@@ -183,6 +253,46 @@ mod tests {
     }
 
     #[test]
+    fn anchors_index_the_section_definitions_they_name() {
+        let parsed = super::parse_markdown(
+            "# Setup\n\n## Install\n\n> ## Install\n\n## Install\n",
+            "g.md",
+        );
+        let named: Vec<(&str, &str)> = parsed
+            .links
+            .anchors
+            .iter()
+            .map(|(index, anchor)| (parsed.definitions[*index].name.as_str(), anchor.as_str()))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("Setup", "setup"),
+                ("Install", "install"),
+                ("Install", "install-2")
+            ]
+        );
+    }
+
+    #[test]
+    fn link_targets_carry_the_definition_of_their_innermost_section() {
+        let parsed = super::parse_markdown(
+            "---\ntitle: x\n---\n[a](a.md)\n\n# One\n\n## Two\n\n[b](b.md)\n",
+            "g.md",
+        );
+        let sourced: Vec<(Option<&str>, &str)> = parsed
+            .links
+            .targets
+            .iter()
+            .map(|(section, target)| {
+                let name = section.map(|index| parsed.definitions[index].name.as_str());
+                (name, target.path.as_str())
+            })
+            .collect();
+        assert_eq!(sourced, [(None, "a.md"), (Some("Two"), "b.md")]);
+    }
+
+    #[test]
     fn every_range_is_in_bounds_and_on_char_boundaries() {
         let cases = [
             "> > > *em* `c`\n> > ## Quoted \u{e9}h\n",
@@ -192,9 +302,10 @@ mod tests {
             "Setext \u{e9}\n===\n\ntext\n\nSub\n---\n",
             "\u{feff}# BOM lead\n",
             "# No trailing newline",
+            "\u{feff}---\r\nt\u{e9}: \u{4f60}\r\n---\r\n\r\n# H\n",
         ];
         for src in cases {
-            let (definitions, _) = super::parse_markdown(src, "g.md");
+            let definitions = super::parse_markdown(src, "g.md").definitions;
             for range in definitions.iter().map(|d| d.range) {
                 let (start, end) = range.byte_offset;
                 assert!(start <= end, "inverted range {range} in {src:?}");

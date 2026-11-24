@@ -1,10 +1,11 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
-use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
+use clickhouse_client::ArrowClickHouseClient;
+use futures::StreamExt;
 use orbit_server_config::{AppConfig, ClickHouseConfiguration};
 use query_engine::compiler::ParameterizedQuery;
 use testcontainers::core::{ContainerPort, ImageExt};
@@ -102,6 +103,23 @@ impl TestContext {
         query.fetch_arrow().await.map_err(|e| e.to_string())
     }
 
+    pub async fn explain_plan(&self, pq: &ParameterizedQuery) -> serde_json::Value {
+        self.explain_plan_with(pq, &[]).await
+    }
+
+    pub async fn explain_plan_with(
+        &self,
+        pq: &ParameterizedQuery,
+        settings: &[(&str, &str)],
+    ) -> serde_json::Value {
+        let text = self
+            .create_client()
+            .explain_plan_with(&pq.render(), settings)
+            .await
+            .expect("explain failed");
+        serde_json::from_str(&text).expect("explain output is JSON")
+    }
+
     /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see
     /// every inserted row.
     pub async fn optimize_all(&self) {
@@ -156,8 +174,7 @@ impl TestContext {
     }
 
     pub async fn create_table(&self, table: &str) {
-        let schema_refs: Vec<&str> = self.schema_sqls.iter().map(String::as_str).collect();
-        let statement = schema_statements(&self.config.database, &schema_refs)
+        let statement = schema_statements(&self.config.database, &self.schema_refs())
             .into_iter()
             .find(|statement| creates_table(statement, table))
             .unwrap_or_else(|| panic!("no CREATE TABLE statement for {table} in the schema SQL"));
@@ -166,19 +183,33 @@ impl TestContext {
 
     pub async fn fork(&self, name: &str) -> Self {
         let database = self.fork_database_name(name);
-        let schema_refs: Vec<&str> = self.schema_sqls.iter().map(String::as_str).collect();
         Self::clone_database(
             &self.config.url,
             &self.config.database,
             &database,
-            &schema_refs,
+            &self.schema_refs(),
         )
         .await;
+        self.with_database(database)
+    }
+
+    pub async fn empty_fork(&self, name: &str) -> Self {
+        let database = self.fork_database_name(name);
+        Self::create_database(&self.config.url, &database).await;
+        Self::run_schema_in(&self.config.url, &database, &self.schema_refs()).await;
+        self.with_database(database)
+    }
+
+    fn schema_refs(&self) -> Vec<&str> {
+        self.schema_sqls.iter().map(String::as_str).collect()
+    }
+
+    fn with_database(&self, database: String) -> Self {
         Self::from_database(
             self._container.clone(),
             self.config.url.clone(),
             database,
-            &schema_refs,
+            &self.schema_refs(),
         )
     }
 
@@ -277,7 +308,7 @@ impl TestContext {
         let config = test_configuration(&url, &database);
         Self {
             _container: container,
-            client: config.build_client("graph"),
+            client: test_client(&url, &database),
             config,
             schema_sqls: Arc::new(schema_sqls.iter().map(|sql| sql.to_string()).collect()),
         }
@@ -298,19 +329,29 @@ impl TestContext {
             .query_arrow(&query)
             .await
             .unwrap_or_else(|e| panic!("failed to list tables in {source}: {e}"));
-        for batch in &batches {
-            let names =
-                ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
-            for row in 0..batch.num_rows() {
-                let table = names.value(row);
-                client
-                    .execute(&format!(
-                        "CREATE TABLE `{target}`.`{table}` CLONE AS `{source}`.`{table}`"
-                    ))
-                    .await
-                    .unwrap_or_else(|e| panic!("failed to clone {source}.{table}: {e}"));
-            }
-        }
+        let tables: Vec<String> = batches
+            .iter()
+            .flat_map(|batch| {
+                let names = ArrowUtils::get_column_by_name::<StringArray>(batch, "name")
+                    .expect("name column");
+                (0..batch.num_rows())
+                    .map(|row| names.value(row).to_string())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        futures::stream::iter(&tables)
+            .for_each_concurrent(CLONE_CONCURRENCY, |table| {
+                let client = &client;
+                async move {
+                    client
+                        .execute(&format!(
+                            "CREATE TABLE `{target}`.`{table}` CLONE AS `{source}`.`{table}`"
+                        ))
+                        .await
+                        .unwrap_or_else(|e| panic!("failed to clone {source}.{table}: {e}"));
+                }
+            })
+            .await;
         let objects = schema_statements(target, schema_sqls)
             .into_iter()
             .filter(|statement| {
@@ -340,24 +381,51 @@ impl TestContext {
 }
 
 fn test_settings() -> HashMap<String, String> {
-    let mut settings = AppConfig::embedded_defaults().graph.session_settings;
+    let graph = AppConfig::embedded_defaults().graph;
+    let mut settings = graph.session_settings;
     settings.extend([
+        ("compatibility".to_string(), graph.compatibility),
         ("async_insert".to_string(), "0".to_string()),
         ("fsync_metadata".to_string(), "0".to_string()),
+        (
+            "async_insert_use_adaptive_busy_timeout".to_string(),
+            "0".to_string(),
+        ),
+        (
+            "async_insert_busy_timeout_min_ms".to_string(),
+            "1".to_string(),
+        ),
+        (
+            "async_insert_busy_timeout_max_ms".to_string(),
+            "1".to_string(),
+        ),
     ]);
     settings
 }
 
+// More concurrent clones per fork fail with TOO_MANY_SIMULTANEOUS_QUERIES on a 4-CPU runner.
+const CLONE_CONCURRENCY: usize = 8;
+
+static CLIENTS: LazyLock<Mutex<HashMap<String, ArrowClickHouseClient>>> =
+    LazyLock::new(Default::default);
+
 fn test_client(url: &str, database: &str) -> ArrowClickHouseClient {
-    ArrowClickHouseClient::new(
-        url,
-        database,
-        TEST_USERNAME,
-        Some(TEST_PASSWORD),
-        &test_settings(),
-        &HashMap::new(),
-        "graph",
-    )
+    CLIENTS
+        .lock()
+        .unwrap()
+        .entry(url.to_string())
+        .or_insert_with(|| {
+            ArrowClickHouseClient::new(
+                url,
+                "default",
+                TEST_USERNAME,
+                Some(TEST_PASSWORD),
+                &test_settings(),
+                &HashMap::new(),
+                "graph",
+            )
+        })
+        .with_database(database, "graph")
 }
 
 fn test_configuration(url: &str, database: &str) -> ClickHouseConfiguration {
@@ -366,6 +434,7 @@ fn test_configuration(url: &str, database: &str) -> ClickHouseConfiguration {
         url: url.to_string(),
         username: TEST_USERNAME.to_string(),
         password: Some(TEST_PASSWORD.to_string()),
+        compatibility: AppConfig::embedded_defaults().graph.compatibility,
         session_settings: test_settings(),
         replicated: false,
         insert_settings: HashMap::new(),

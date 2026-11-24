@@ -76,7 +76,6 @@ fn list_tests(filter: Option<&str>) -> Result<BTreeSet<String>> {
     command.args([
         "nextest",
         "list",
-        "--all-features",
         "--test",
         "server_containers",
         "--test",

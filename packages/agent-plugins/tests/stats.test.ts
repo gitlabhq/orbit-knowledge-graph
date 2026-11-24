@@ -176,6 +176,18 @@ test('a --file - query is read from the heredoc of its own command', () => {
   expect(queryOf(`orbit query --file - <<EOF\n${mrs}\n\tEOF`)).toBe('')
 })
 
+test('a --file - query is read from a bare cat heredoc piped into it, or from a here-string', () => {
+  const mrs = JSON.stringify({ query: 'MATCH (mr:MergeRequest) RETURN mr' })
+  expect(queryOf(`cat <<'EOF' | orbit query --file -\n${mrs}\nEOF`)).toBe('MATCH (mr:MergeRequest) RETURN mr')
+  expect(queryOf(`cat - <<EOF | glab orbit query --file -\n${mrs}\nEOF`)).toBe('MATCH (mr:MergeRequest) RETURN mr')
+  expect(queryOf(`orbit query --file - <<< '${mrs}'`)).toBe('MATCH (mr:MergeRequest) RETURN mr')
+  expect(queryOf(`cat notes.json <<'EOF' | orbit query --file -\n${mrs}\nEOF`)).toBe('')
+  expect(queryOf(`cat <<'EOF' | jq . | orbit query --file -\n${mrs}\nEOF`)).toBe('')
+  expect(queryOf(`cat <<'EOF' | orbit query --file - < q.json\n${mrs}\nEOF`)).toBe('')
+  expect(queryOf(`orbit query --file q.json <<< '${mrs}'`)).toBe('')
+  expect(queryOf(`orbit query --file - < '${mrs}'`)).toBe('')
+})
+
 test('a --file call with no readable envelope has no query', () => {
   expect(queryOf('orbit query --file -')).toBe('')
   expect(queryOf('cat q.json | orbit query --file -')).toBe('')

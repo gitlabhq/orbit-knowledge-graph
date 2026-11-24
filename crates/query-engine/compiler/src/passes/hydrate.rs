@@ -10,18 +10,48 @@ use crate::ast::Node;
 use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
 use crate::types::SecurityContext;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum HydrationPlan {
     None,
     /// One template per input node, with IDs to be filled at runtime.
-    Static(Vec<HydrationTemplate>),
+    Static(#[serde(serialize_with = "by_node_alias")] Vec<HydrationTemplate>),
     /// Column specs are pre-resolved for every ontology entity type so
     /// the server just looks up the matching spec — no ontology queries.
-    Dynamic(Vec<DynamicEntityColumns>),
+    Dynamic(#[serde(serialize_with = "by_entity_type")] Vec<DynamicEntityColumns>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, strum::IntoStaticStr)]
-#[serde(rename_all = "lowercase")]
+fn by_node_alias<S: serde::Serializer>(
+    templates: &[HydrationTemplate],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(
+        templates
+            .iter()
+            .map(|template| (&template.node_alias, template)),
+    )
+}
+
+fn by_entity_type<S: serde::Serializer>(
+    entities: &[DynamicEntityColumns],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(entities.iter().map(|entity| (&entity.entity_type, entity)))
+}
+
+fn by_property<S: serde::Serializer>(
+    filters: &[(String, crate::input::InputFilter)],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(filters.iter().map(|(property, filter)| {
+        (
+            property,
+            serde_json::json!({"op": filter.op.map(|op| op.as_ref().to_string()), "value": filter.value}),
+        )
+    }))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum HydrationKind {
     None,
@@ -39,7 +69,7 @@ impl HydrationPlan {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct HydrationTemplate {
     pub entity_type: String,
     /// Used to correlate hydration results back to the base query's
@@ -59,6 +89,7 @@ pub struct HydrationTemplate {
     pub has_traversal_path: bool,
     /// Filters on virtual columns to apply in-memory after hydration resolves
     /// their values.
+    #[serde(serialize_with = "by_property")]
     pub virtual_filters: Vec<(String, crate::input::InputFilter)>,
     /// Virtual columns resolved only because they are filtered, not selected.
     /// Stripped from result rows after the in-memory filter pass.
@@ -66,7 +97,7 @@ pub struct HydrationTemplate {
 }
 
 /// Pre-resolved column spec for an entity type in dynamic hydration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct DynamicEntityColumns {
     pub entity_type: String,
     pub destination_table: String,
@@ -78,7 +109,7 @@ pub struct DynamicEntityColumns {
 }
 
 /// A column that must be resolved from a remote service rather than ClickHouse.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct VirtualColumnRequest {
     pub column_name: String,
     pub service: String,

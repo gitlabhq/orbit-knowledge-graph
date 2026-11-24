@@ -1,4 +1,4 @@
-description: Issue links produce RELATED_TO edges
+description: Relates-to links produce RELATED_TO edges and blocking links produce BLOCKS edges
 scope: { namespace: 100 }
 
 seed:
@@ -14,4 +14,5 @@ seed:
 
 expect:
   edges:
-    - { kind: RELATED_TO, from: WorkItem, to: WorkItem, traversal_path: "1/100/", count: 2 }
+    - { kind: RELATED_TO, from: WorkItem, to: WorkItem, traversal_path: "1/100/", count: 1 }
+    - { kind: BLOCKS, from: WorkItem, to: WorkItem, traversal_path: "1/100/", count: 1 }
