@@ -17,7 +17,6 @@ data:
   - [Enum, 'all?', 'any?', at, chunk_by, chunk_every, concat, count, dedup, drop, each, 'empty?', fetch,
     fetch!, filter, find, find_index, flat_map, frequencies, group_by, into, join, map, max, min, reduce,
     reject, reverse, sort, sort_by, split, sum, take, to_list, uniq, uniq_by, unzip, with_index, zip]
-  lookup_from: [__source_root]
 
 canonicalize:
   - stage: imports

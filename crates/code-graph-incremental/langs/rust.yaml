@@ -17,11 +17,9 @@ data:
   - [core/mem, '%mem_symbols']
   - [std/cmp, max, max_by, max_by_key, min, min_by, min_by_key]
   - [std/iter, empty, from_fn, once, once_with, repeat, repeat_n, repeat_with, successors, zip]
-  lookup_from: [__source_root, __crate_root]
   parse_files:
   - [Cargo.toml, toml]
   diverging_macros: [panic, unreachable, todo, unimplemented]
-  call_wrappers: [try_expression, await_expression]
 
 canonicalize:
   - stage: normalize
@@ -54,7 +52,8 @@ canonicalize:
       - '(compound_assignment_expr left: $L operator: $OP right: $R)': '(__call (__callee (__member @$OP | kind_name | map("+=:add_assign", "-=:sub_assign", "*=:mul_assign", "/=:div_assign", "%=:rem_assign", "&=:bitand_assign", "|=:bitor_assign", "^=:bitxor_assign", "<<=:shl_assign", ">>=:shr_assign") (__object @$L $L))) $R)'
       - '(unary_expression $OP $E)': '(__call (__callee (__member @$OP | kind_name | map("-:neg", "!:not", "*:deref") (__object @$E $E))))'
       - '(index_expression $E:_*_named $I:_*_named)': '(__call (__callee (__member "index" (__object @$E $E))) $I)'
-      - '(%call_wrappers $E:__call)': '$E'
+      - '(try_expression $E:__call)': '$E #unwrapped=true'
+      - '(await_expression $E:__call)': '$E'
       - '(try_expression $E)': '(__call (__callee (__member "branch" (__object @$E $E))))'
       - '(await_expression $E)': '(__call (__callee (__member "poll" (__object @$E $E))))'
       - '(struct_expression name: $N body: $B)': '%call($N, $B)'
@@ -163,6 +162,9 @@ canonicalize:
       - '(impl_item trait: $T type: $TY body: $B)': '(__def (__defname @$TY $TY) (__impl) (__alias "Self") (__supertype @$T $T) $B)'
       - '(impl_item type: (generic_type type: $T) body: $B)': '(__def (__defname @$T $T) (__impl) (__alias "Self") $B)'
       - '(impl_item type: $T body: $B)': '(__def (__defname @$T $T) (__impl) (__alias "Self") $B)'
+  - stage: return-type-args
+    rewrite:
+      - '(__ssa_return_type $G:(generic_type type_arguments: (type_arguments $A:_*_named $$$REST)))': '(__ssa_return_type @$ROOT $G (__type_arg @$A $A))'
   - stage: scoped-supertypes
     rewrite:
       - '(__object $T:scoped_type_identifier)': '(__object (__member @$T | field("name") $T (__object @$T | field("path"))))'
@@ -181,6 +183,7 @@ canonicalize:
   - stage: positional-fields
     rewrite:
       - '(tuple_value $F:__field $$$REST:__field)': '(__field @$ROOT | position("sibling") (__binding @$ROOT | position("id") | prepend("$value:") (__rhs (__obj $F $$$REST))))'
+      - '(tuple_value $I:__import $C:__callee $$$REST)': '(__field @$ROOT | position("sibling") (__binding @$ROOT | position("id") | prepend("$value:") (__rhs (__call $I $C $$$REST))))'
       - '(tuple_value $C:__callee $$$REST)': '(__field @$ROOT | position("sibling") (__binding @$ROOT | position("id") | prepend("$value:") (__rhs (__call $C $$$REST))))'
       - '(tuple_value $P:closure_parameters $$$REST)': '(__field @$ROOT | position("sibling") (__binding @$ROOT | position("id") | prepend("$value:") (__rhs (__lambda $P $$$REST))))'
       - '(tuple_value)': '(__field @$ROOT | position("sibling") (__binding @$ROOT | position("id") | prepend("$value:") (__rhs @$ROOT $ROOT)))'
@@ -229,6 +232,10 @@ display:
     rewrite:
       - '$M:__source_file': '#fqn=$M | file_dir | inherited_tag("crate") | concat("::", $M | tag("module_path")) | keep_last("::", 64, 4096)'
       - use: def_fqn_colons
+      - '(__def (__impl)) when impl_alias_source($ROOT)': '#fqn=$ROOT | impl_alias_source | regex_replace("^crate::", "")'
+  - stage: trait_collisions
+    rewrite:
+      - '(__def) when trait_clash($ROOT)': '#fqn=$ROOT | tag_up("fqn") | concat("::<", impl_trait($ROOT)) | concat(">::", $ROOT | child("__defname"))'
   - stage: def_type
     rewrite:
       - use: function_def_types

@@ -11,7 +11,6 @@ data:
   - [string, byte, char, dump, find, format, gmatch, gsub, len, lower, match, pack, packsize, rep, reverse,
     sub, unpack, upper]
   - [table, concat, insert, move, pack, remove, sort, unpack]
-  lookup_from: [__source_root]
   loops: [for_statement, while_statement, repeat_statement]
 
 canonicalize:

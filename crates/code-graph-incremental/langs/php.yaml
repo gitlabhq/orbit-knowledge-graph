@@ -16,7 +16,6 @@ data:
   - [Dom, HTMLDocument, XMLDocument]
   - [Random, Randomizer, RandomError, BrokenRandomEngineError]
   - [Random/Engine, Mt19937, PcgOneseq128XslRr64, Xoshiro256StarStar, Secure]
-  lookup_from: [__source_root]
   compound_types: [union_type, intersection_type, disjunctive_normal_form_type]
   params: [simple_parameter, variadic_parameter]
   member_accesses: [member_access_expression, nullsafe_member_access_expression]

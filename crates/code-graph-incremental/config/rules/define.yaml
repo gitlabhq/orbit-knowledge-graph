@@ -1,4 +1,19 @@
 define:
+  impl_alias_source(ROOT): >-
+    select(under(file($ROOT)), '(__import $ROOT:(__name (__alias)))' by $ROOT | child("__alias"), $ROOT | child("__defname"))
+    | import_source
+  import_source(ROOT):
+    '$I:(__import $ROOT:__name)': '$I | child("__source")'
+  impl_trait(ROOT): 'first(ancestors($ROOT), a => is_def(a)) | trait_of_impl'
+  trait_of_impl(ROOT):
+    '(__def (__impl) $T:__supertype)': '$T'
+  trait_clash(ROOT):
+    '_ when minus(fqn_twins($ROOT), fqn_twins($ROOT) | in_trait_impl)': none
+    '_ when impl_trait($ROOT)': 'fqn_twins($ROOT)'
+  fqn_twins(ROOT): "minus(select(under(file($ROOT)), '(__def)' by member_fqn($ROOT), member_fqn($ROOT)), $ROOT)"
+  member_fqn(ROOT): '$ROOT | tag_up("fqn") | concat("::", $ROOT | child("__defname"))'
+  in_trait_impl(ROOT):
+    '_ when impl_trait($ROOT)': '$ROOT'
   is_file(ROOT):
     '_ when same($ROOT, file($ROOT))': '$ROOT'
   elsewhere(ROOT, here):
@@ -16,11 +31,20 @@ define:
   up_child(ROOT, KIND):
     '(_ $C:(KIND "/(?s)./"))': '$C'
     '$P:(_ $ROOT)': 'up_child($P, KIND)'
+  parent(ROOT):
+    '$P:(_ $ROOT)': '$P'
   tag_up(ROOT, key):
     '$P:(_ $ROOT)': '$P | tag(key) or tag_up($P, key)'
   tree_path(ROOT):
     '(__root $ROOT)': '$ROOT'
     '$P:(_ $ROOT)': 'concat(tree_path($P), "/", $ROOT)'
+  join_path(base, rel): >-
+    concat(base, "/", rel) | regex_loop("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1")
+    | regex_replace("/$", "") | regex_replace("^/", "")
+  join_inside(base, rel):
+    '_ when join_path("", rel) | regex_match("^\.\.(/|$)")': none
+    '_': 'join_path(base, rel)'
+  tree_dir(ROOT): 'tree_path($ROOT) | regex_replace("^([^/]*)$", "./$1") | regex_replace("/[^/]*$", "")'
   inherited_tag(ROOT, key): '$ROOT | tag(key) or $ROOT | tag_up(key)'
   name(ROOT): 'minus(read($ROOT), opaque)'
   ivar(ROOT): "first(select(under(scope(ROOT) | class), '(__binding $I:__ivar)', $ROOT), b => typed_field(b)) | producer"
@@ -296,7 +320,7 @@ define:
     '_ when $ROOT | read': '$ROOT | name | meaning($ROOT) or $ROOT | ivar | meaning($ROOT)'
     '_': '$ROOT | ivar | meaning($ROOT)'
   member(ROOT, M):
-    '(__def (__type_alias) $T:__ssa_typed)': '$T | type | member($M)'
+    '(__def (__type_alias) $T:__ssa_typed)': 'minus($T | type, $ROOT) | member($M) or visible(@$T, boundary($ROOT)) | member($M)'
     '(__def)': 'lookup($M, $M, $ROOT)'
     '(__name)': 'none'
     '_': '$ROOT | type_node | type | member($M)'

@@ -12,7 +12,6 @@ data:
   - [scala/math, abs, acos, asin, atan, atan2, cbrt, ceil, cos, cosh, exp, expm1, floor, hypot, log, log10,
     log1p, max, min, pow, random, rint, round, signum, sin, sinh, sqrt, tan, tanh, toDegrees, toRadians,
     ulp]
-  lookup_from: [__source_root]
   value_defs: [val_definition, var_definition]
   loops: [for_expression, while_expression]
   classes: [class_definition, object_definition]
