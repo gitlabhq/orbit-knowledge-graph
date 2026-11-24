@@ -40,7 +40,8 @@ struct Pending {
     key: Key,
     callee: Callee,
     args: Args,
-    deps: u64,
+    /// The outer call's state reads so far; this call's own reads start empty.
+    used: u64,
     written: u64,
     outer: FxHashSet<Key>,
     reading: u64,
@@ -439,6 +440,7 @@ impl<'e, S: Store> Vm<'e, S> {
                     p.hit(key.0, true);
                 }
                 run.cycle_reads.insert(key);
+                run.used |= deps;
                 self.values.push(partial);
                 return;
             }
@@ -454,6 +456,7 @@ impl<'e, S: Store> Vm<'e, S> {
                 if let Some(p) = &mut run.profile {
                     p.hit(key.0, false);
                 }
+                run.used |= *deps;
                 if let Some((_, read)) = within {
                     let read = read.clone();
                     run.cycle_reads.extend(read);
@@ -472,7 +475,7 @@ impl<'e, S: Store> Vm<'e, S> {
             written: run.written,
             outer: std::mem::take(&mut run.cycle_reads),
             reading: std::mem::replace(&mut run.reading, deps),
-            deps,
+            used: std::mem::take(&mut run.used),
             key,
             callee,
             args,
@@ -585,19 +588,20 @@ impl<'e, S: Store> Vm<'e, S> {
         if p.written != run.written {
             run.memo.entries.remove(&p.key);
         } else {
-            let stamp = run.stamp(p.deps);
+            let stamp = run.stamp(run.used);
             let within = (!read.is_empty()).then(|| (run.round, read));
             run.memo.entries.insert(
                 p.key,
                 Memo::Done {
                     vals: found.clone(),
-                    deps: p.deps,
+                    deps: run.used,
                     stamp,
                     within,
                 },
             );
         }
         run.reading = p.reading;
+        run.used |= p.used;
         self.values.push(found);
     }
 

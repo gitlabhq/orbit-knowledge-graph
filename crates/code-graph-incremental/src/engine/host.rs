@@ -518,10 +518,18 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
             "{} state read by a function whose uses do not reach it",
             M::NAME
         );
+        self.run.used |= 1u64 << self.slot;
+        self.slot_state()
+    }
+
+    /// The state, read only for facts that never change once set; such a
+    /// read leaves the caller's result valid across later writes.
+    pub fn settled(&mut self) -> &M::State {
         self.slot_state()
     }
 
     pub fn write(&mut self) -> &mut M::State {
+        self.run.used |= 1u64 << self.slot;
         self.run.epochs[usize::from(self.slot)] += 1;
         self.run.written += 1;
         self.slot_state()

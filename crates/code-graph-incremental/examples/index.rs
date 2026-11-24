@@ -64,6 +64,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         },
     )?;
+    if std::env::var_os("CGI_PROFILE").is_some() {
+        eprintln!("{}", code_graph_incremental::engine::profile::report());
+    }
     let (counts, _) = written.into_inner().map_err(|error| error.to_string())?;
     println!(
         "{}",

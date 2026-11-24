@@ -13,6 +13,10 @@ pub static ON: LazyLock<bool> = LazyLock::new(|| std::env::var_os("CGI_PROFILE")
 
 static TOTAL: Mutex<Vec<(String, Stat)>> = Mutex::new(Vec::new());
 
+/// Calls and misses per (caller, callee) pair of cached calls, by name.
+static EDGES: LazyLock<Mutex<FxHashMap<(String, String), (u64, u64)>>> =
+    LazyLock::new(Mutex::default);
+
 #[derive(Default, Clone, Copy)]
 pub struct Stat {
     pub calls: u64,
@@ -44,11 +48,17 @@ pub struct Profile {
     pub stats: FxHashMap<FnId, Stat>,
     children: Vec<u64>,
     active: FxHashMap<FnId, u32>,
+    stack: Vec<FnId>,
+    edges: FxHashMap<(Option<FnId>, FnId), (u64, u64)>,
     rules: FxHashMap<usize, (Box<str>, Stat)>,
 }
 
 impl Profile {
     pub fn hit(&mut self, id: FnId, busy: bool) {
+        self.edges
+            .entry((self.stack.last().copied(), id))
+            .or_default()
+            .0 += 1;
         let s = self.stats.entry(id).or_default();
         s.calls += 1;
         match busy {
@@ -58,6 +68,13 @@ impl Profile {
     }
 
     pub fn enter(&mut self, id: FnId) -> Instant {
+        let edge = self
+            .edges
+            .entry((self.stack.last().copied(), id))
+            .or_default();
+        edge.0 += 1;
+        edge.1 += 1;
+        self.stack.push(id);
         *self.active.entry(id).or_default() += 1;
         self.children.push(0);
         Instant::now()
@@ -65,6 +82,7 @@ impl Profile {
 
     pub fn leave(&mut self, id: FnId, start: Instant, reruns: u32) {
         let total = start.elapsed().as_nanos() as u64;
+        self.stack.pop();
         let inner = self.children.pop().unwrap_or(0);
         if let Some(parent) = self.children.last_mut() {
             *parent += total;
@@ -101,6 +119,13 @@ impl Profile {
         }
         for (_, (src, stat)) in self.rules.drain() {
             add(&mut total, format!("rule {src}"), &stat);
+        }
+        let mut edges = EDGES.lock().unwrap_or_else(|e| e.into_inner());
+        for ((from, to), (calls, misses)) in self.edges.drain() {
+            let from = from.map_or_else(|| "(rule)".to_string(), &name);
+            let e = edges.entry((from, name(to))).or_default();
+            e.0 += calls;
+            e.1 += misses;
         }
     }
 }
@@ -153,6 +178,25 @@ pub fn report() -> String {
             s.reruns,
             s.entries,
             s.values
+        );
+    }
+    let mut edges: Vec<_> = EDGES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .map(|((from, to), &(calls, misses))| (from.clone(), to.clone(), calls, misses))
+        .collect();
+    edges.sort_by_key(|&(_, _, _, misses)| std::cmp::Reverse(misses));
+    let _ = writeln!(
+        out,
+        "\n{:<50} {:>10} {:>10}",
+        "caller -> callee", "calls", "misses"
+    );
+    for (from, to, calls, misses) in edges.into_iter().take(60) {
+        let _ = writeln!(
+            out,
+            "{:<50} {calls:>10} {misses:>10}",
+            format!("{from} -> {to}")
         );
     }
     out
