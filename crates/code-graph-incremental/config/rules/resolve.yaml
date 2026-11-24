@@ -42,8 +42,11 @@ define:
     or select(owned(module), '(__def $N:__default_export)', name)
     or select(owned(module), '(__module_export (__default_export))' by $ROOT | child("__default_export"), name) | target_of
     or select(under(module), '(__def #exports)' by $ROOT | tag("exports"), name)
+    or select(owned(module), '(%import_kinds $ROOT:(__name "*" $A:__alias))' by $A, name) | namespace_module
     or select(owned(module), '(%import_kinds $ROOT:__name)' by local_name($ROOT), name) | reexported(name) | is_def
     or select(owned(module), '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def
+  namespace_module(ROOT):
+    '$I:(%import_kinds $ROOT)': '$I | modules'
   offered(module, name): 'exported(module, name) or module'
   written(ROOT):
     '(_ (__ssa_hint "*"))': '"*"'
