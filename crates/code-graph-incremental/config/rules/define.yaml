@@ -294,6 +294,7 @@ define:
     '_ when $ROOT | read': '$ROOT | name | meaning($ROOT) or $ROOT | ivar | meaning($ROOT)'
     '_': '$ROOT | ivar | meaning($ROOT)'
   member(ROOT, M):
+    '(__def (__type_alias) $T:__ssa_typed)': '$T | type | member($M)'
     '(__def)': 'lookup($M, $M, $ROOT)'
     '(__name)': 'none'
     '_': '$ROOT | type_node | type | member($M)'
@@ -334,7 +335,10 @@ define:
     '(_ $K:__callee)': '$K | type or opaque'
     '_': 'opaque'
 
-  visible(name, at): 'declared_in(name, at) or imported_name(name, at)'
+  visible(name, at): 'declared_in(name, at) or alias_owner(name, at) or imported_name(name, at)'
+  alias_owner(name, at): 'first(ancestors(at), a => aliased_as(a, name))'
+  aliased_as(ROOT, name):
+    '(__def $A:__alias) when in($A, name)': '$ROOT'
   imported_name(name, at): >-
     select(under(file(at)), '(__import $ROOT:__name)' by local_name($ROOT), name) | target_of
     or select(under(file(at)), '(__import $ROOT:__name)' by $ROOT | written, "*") | follow(imports, from) | exported(name)
