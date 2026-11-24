@@ -231,3 +231,14 @@ fn nested_member_writes_in_many_functions_stay_within_the_link_budget() {
         Ok(())
     );
 }
+
+#[test]
+fn one_slow_rule_evaluation_stops_at_the_link_budget() {
+    let mut source = String::from(
+        "pub struct Node;\nimpl Node {\n    pub fn new() -> Node { Node }\n    pub fn next(&self) -> Node { Node }\n}\npub fn walk(c: bool) {\n    let mut n = Node::new();\n",
+    );
+    source += &"    if c {\n        n = n.next();\n    }\n".repeat(1_000);
+    source += "}\n";
+    let skipped = link_one(SupportLang::Rust, "lib.rs", source, 200).unwrap_err();
+    assert!(skipped.contains("lib.rs"), "{skipped}");
+}

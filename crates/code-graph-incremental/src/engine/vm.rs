@@ -109,6 +109,9 @@ enum Frame<'e, S: Store> {
     Cases(Trying<'e, S>),
 }
 
+/// Tasks between budget checks; a check reads the clock.
+const BUDGET_EVERY: u32 = 4096;
+
 /// The stacks of one evaluation; a run keeps one set and reuses it, and a
 /// call back into the rules from module code takes a fresh set.
 pub(super) struct Vm<'e, S: Store> {
@@ -178,7 +181,15 @@ impl<'e, S: Store> Vm<'e, S> {
         't: 'e,
     {
         let fns: &'e [Def] = &run.phase.defs;
+        let mut steps = 0u32;
         while let Some(task) = self.tasks.pop() {
+            steps = steps.wrapping_add(1);
+            if run.killed.is_some() || (steps % BUDGET_EVERY == 0 && !run.step()) {
+                self.tasks.clear();
+                self.frames.clear();
+                self.values.clear();
+                return Vals::new();
+            }
             self.step(run, fns, task);
         }
         self.values.pop().unwrap_or_default()
