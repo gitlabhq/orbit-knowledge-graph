@@ -32,7 +32,8 @@ define:
   tree_dir(ROOT): 'tree_path($ROOT) | regex_replace("^([^/]*)$", "./$1") | regex_replace("/[^/]*$", "")'
   inherited_tag(ROOT, key): '$ROOT | tag(key) or $ROOT | tag_up(key)'
   name(ROOT): 'minus(read($ROOT), opaque)'
-  ivar(ROOT): "first(select(under(scope(ROOT) | class), '(__binding $I:__ivar)', $ROOT), b => typed_field(b)) | producer"
+  ivar(ROOT): "ivar_in($ROOT, scope(ROOT) | class) or ivar_in($ROOT, scope(ROOT) | class | supers | lineage)"
+  ivar_in(ROOT, owner): "first(select(under(owner), '(__binding $I:__ivar)', $ROOT), b => typed_field(b)) | producer"
   typed_field(ROOT):
     '_ when typed($ROOT)': '$ROOT'
   resolution(ROOT, site):
