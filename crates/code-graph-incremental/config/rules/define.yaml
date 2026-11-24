@@ -356,9 +356,13 @@ define:
   local_name(ROOT): '$ROOT | child("__alias") or $ROOT | child("__ssa_hint") or $ROOT'
   declared_in(name, at): >-
     first(enclose(at), s => select(owned(s), '(__def $N:__defname)', name))
+  class_in(name, at): >-
+    first(enclose(at), s => select(owned(s), '(__def $N:__defname)', name) | is_class)
   target_of(ROOT): 'declared_in(@ROOT, ROOT) or $ROOT | follow(imports, from)'
   resolved(ROOT):
     '(__call (__type) $ROOT)': 'declared_in(@ROOT, ROOT) | is_class or imported_name(@ROOT, ROOT) or visible(@ROOT, ROOT)'
+    '(__ssa_typed)': 'class_in(@ROOT, ROOT) or visible(@ROOT, ROOT)'
+    '(__ssa_return_type)': 'class_in(@ROOT, ROOT) or visible(@ROOT, ROOT)'
     '_': 'visible(@ROOT, ROOT)'
   supertypes(ROOT):
     '(__def $$$S:__supertype)': '$S | type | is_def'
