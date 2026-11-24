@@ -45,7 +45,7 @@ define:
     or select(owned(module), '(__module_export $ROOT:__name)' by local_name($ROOT), name) | target_of
     or select(owned(module), '(%import_kinds $ROOT:(__name "*" $A:__alias))' by $A, name) | namespace_module
     or select(owned(module), '(%import_kinds $ROOT:__name)' by local_name($ROOT), name) | reexported(name) | is_def
-    or select(owned(module), '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def
+    or unique(select(owned(module), '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def)
   namespace_module(ROOT):
     '$I:(%import_kinds $ROOT)': '$I | modules'
   namespace_name(ROOT): >-
