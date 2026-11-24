@@ -176,8 +176,13 @@ canonicalize:
 project:
   - stage: manifests
     rewrite:
-      - '(__file "/^(ts|js)config\.json$/" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" $V:__str)))))': '#paths_base=$ROOT | tree_dir | join_path(@$V)'
-      - '(__file "/^(ts|js)config\.json$/" !(__obj (__field "compilerOptions" (__obj (__field "baseUrl")))))': '#paths_base=$ROOT | tree_dir'
+      - '(__file "/^(ts|js)config(\..+)?\.json$/" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" $V:__str)))))': '#paths_base=$ROOT | tree_dir | join_path(@$V)'
+      - '(__file "/^(ts|js)config(\..+)?\.json$/" !(__obj (__field "compilerOptions" (__obj (__field "baseUrl")))))': '#paths_base=$ROOT | tree_dir'
+      - '(__file "/^(ts|js)config(\..+)?\.json$/")': '#config_dir=$ROOT | tree_dir'
+      - '(__file "/^(ts|js)config(\..+)?\.json$/" (__obj (__field "extends" $E:__str)))': '+ (__extends @$ROOT | tree_dir | join_path(@$E) | regex_replace("^(.*?)(\.json)?$", "$1.json"))'
+      - '(__field "references" (__arr $$$R:__obj))': '(__field "references" (__arr $$$R->config_reference))'
+      - '(_ $F:(__file "tsconfig.json"))': '#ts_config=$F | tree_path'
+      - '(_ $F:(__file "jsconfig.json"))': '#ts_config=$F | tree_path'
       - '(__file "package.json" (__obj (__field "name" $N:__str)))': '#package=@$N'
       - '(__file "package.json" !(__obj (__field "name"))) when tree_path($ROOT) | regex_match("(^|/)node_modules/")': '#package=$ROOT | tree_path | regex_replace("^(.*/)?node_modules/", "") | regex_replace("/package\.json$", "")'
       - '(__file "/^webpack\.config\./" $$$F:__field)': '(__file @$ROOT $$$F->webpack_alias)'
@@ -185,11 +190,13 @@ project:
   - stage: aliases
     rewrite:
       - '(path_alias (__arr $$$T:__str))': '(path_alias @$ROOT $$$T=>path_target)'
-      - '(__file #paths_base (__obj (__field "compilerOptions" (__obj (__field "baseUrl")))))': '+ (__alias "*" (__str @$ROOT | tag("paths_base") | join_path("*")) (__scope "bare_import"))'
+      - '(config_reference (__field "path" $P:(__str "/\.json$/")))': '(__reference @$ROOT | tag_up("config_dir") | join_path(@$P))'
+      - '(config_reference (__field "path" $P:__str))': '(__reference @$ROOT | tag_up("config_dir") | join_path(@$P) | join_path("tsconfig.json"))'
+      - '(__file #paths_base (__obj (__field "compilerOptions" (__obj (__field "baseUrl")))))': '+ (__config_alias "*" (__str @$ROOT | tag("paths_base") | join_path("*")) (__scope "bare_import"))'
       - '(__file #package (__obj (__field "main" $M:__str))) when join_inside(tree_dir($ROOT), @$M)': '+ (__alias @$ROOT | tag("package") (__str @$ROOT | tree_dir | join_inside(@$M)))'
   - stage: targets
     rewrite:
-      - '(path_target)': '(__alias @$ROOT | parent (__str @$ROOT | tag_up("paths_base") | join_path(@$ROOT)))'
+      - '(path_target)': '(__config_alias @$ROOT | parent (__str @$ROOT | tag_up("paths_base") | join_path(@$ROOT)))'
       - '(webpack_alias $V:__str)': '(__alias @$ROOT (__str @$ROOT | parent | tree_dir | join_path(@$V)))'
       - '(__file #package)': '+ (__alias @$ROOT | tag("package") (__str @$ROOT | tree_dir)) + (__alias @$ROOT | tag("package") | concat("/", "*") (__str @$ROOT | tree_dir | join_path("*")))'
   - stage: index_dirs

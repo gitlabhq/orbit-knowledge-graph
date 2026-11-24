@@ -24,10 +24,17 @@ define:
     '_ when in(path | split_first("/"), names)': 'opaque'
   modules(ROOT): 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
   aliased(ROOT): >-
-    first(select(project, '(__alias)') | longest_first, a => alias_files(a, $ROOT))
+    first(union(governing($ROOT) | config_aliases, select(project, '(__alias)')) | longest_first,
+      a => alias_files(a, $ROOT))
+  governing(ROOT): 'config_file($ROOT | file_dir | inherited_tag("ts_config"))'
+  config_file(path): "select(project, '(__file)' by tree_path($ROOT), path)"
+  config_aliases(ROOT): >-
+    select(under($ROOT), '(__config_alias)')
+    or $ROOT | child("__extends") | config_file | config_aliases
+    or select(under($ROOT), '(__reference)') | config_file | config_aliases
   alias_files(ROOT, imp):
-    '(__alias $S:__scope) when in($S, $imp | tag("alias_scope"))': 'files($imp | child("__source_path") | map_prefix($ROOT, $ROOT | child("__str")))'
-    '(__alias !(__scope))': 'files($imp | child("__source_path") | map_prefix($ROOT, $ROOT | child("__str")))'
+    '(_ $S:__scope) when in($S, $imp | tag("alias_scope"))': 'files($imp | child("__source_path") | map_prefix($ROOT, $ROOT | child("__str")))'
+    '(_ !(__scope))': 'files($imp | child("__source_path") | map_prefix($ROOT, $ROOT | child("__str")))'
   submodule(ROOT, N): 'files($ROOT | tag("resolved_source") | concat("/", @$N))'
   exported(module, name): >-
     select(owned(module), '(__def $N:__defname)', name)

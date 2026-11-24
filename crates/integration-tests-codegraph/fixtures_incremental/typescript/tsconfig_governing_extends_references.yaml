@@ -1,0 +1,75 @@
+name: The nearest tsconfig governs a file, through extends and references
+
+fixtures:
+  - path: tsconfig.json
+    content: |
+      { "files": [], "references": [{ "path": "./tsconfig.app.json" }] }
+
+  - path: tsconfig.app.json
+    content: |
+      { "compilerOptions": { "paths": { "@app/*": ["./app/*"] } } }
+
+  - path: tsconfig.base.json
+    content: |
+      { "compilerOptions": { "baseUrl": ".", "paths": { "@shared/*": ["shared/*"] } } }
+
+  - path: packages/api/tsconfig.json
+    content: |
+      { "extends": "../../tsconfig.base" }
+
+  - path: packages/web/tsconfig.json
+    content: |
+      { "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }
+
+  - path: packages/admin/tsconfig.json
+    content: |
+      { "compilerOptions": { "paths": { "@/*": ["./lib/*"] } } }
+
+  - path: app/view.ts
+    content: |
+      export function view() {}
+
+  - path: main.ts
+    content: |
+      import { view } from '@app/view';
+      export function root() { view(); }
+
+  - path: shared/util.ts
+    content: |
+      export function util() {}
+
+  - path: packages/api/main.ts
+    content: |
+      import { util } from '@shared/util';
+      export function api() { util(); }
+
+  - path: packages/web/src/thing.ts
+    content: |
+      export function thing() {}
+
+  - path: packages/web/main.ts
+    content: |
+      import { thing } from '@/thing';
+      export function web() { thing(); }
+
+  - path: packages/admin/lib/thing.ts
+    content: |
+      export function thing() {}
+
+  - path: packages/admin/main.ts
+    content: |
+      import { thing } from '@/thing';
+      export function admin() { thing(); }
+
+tests:
+  - name: Each file reads the aliases of the config that governs it
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name IN ['root', 'api', 'web', 'admin']
+      RETURN caller.name AS caller, target.file_path AS file
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: root, file: app/view.ts } }
+      - { row: { caller: api, file: shared/util.ts } }
+      - { row: { caller: web, file: packages/web/src/thing.ts } }
+      - { row: { caller: admin, file: packages/admin/lib/thing.ts } }
