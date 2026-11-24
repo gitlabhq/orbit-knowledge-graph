@@ -105,7 +105,7 @@ tests:
   - name: "Enum with scoped constants"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumVariant'
+      WHERE d.definition_type = 'EnumConstant'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
@@ -117,11 +117,11 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'shapes::Shape'
-        AND d.definition_type = 'TypeAlias'
+        AND d.definition_type = 'Typedef'
       RETURN d.fqn AS fqn, d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: "shapes::Shape", type: TypeAlias } }
+      - { row: { fqn: "shapes::Shape", type: Typedef } }
 
   # ══════════════════════════════════════════════════════════════
   # INTRA-FILE CALLS (same .c file)

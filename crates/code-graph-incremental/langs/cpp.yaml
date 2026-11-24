@@ -105,11 +105,11 @@ canonicalize:
       - '(class_specifier name: $N:type_identifier $$$ANN body: $B)': '(__def (__defname @$N) (__class) $$$ANN $B)'
       - '(struct_specifier name: $N:type_identifier $$$ANN body: $B)': '(__def (__defname @$N) (__struct) $$$ANN $B)'
       - '(enum_specifier name: $N:type_identifier body: $B)': '(__def (__defname @$N) (__enum) $B)'
-      - '(union_specifier name: $N:type_identifier body: $B)': '(__def (__defname @$N) (__struct) $B)'
+      - '(union_specifier name: $N:type_identifier body: $B)': '(__def (__defname @$N) (__struct) $B) #flavor=union'
       - '(type_definition type: $T declarator: $N:type_identifier)': '(type_definition (__def (__defname @$N) (__type_alias)) $T)'
       - '(alias_declaration name: $N:type_identifier)': '(__def (__defname @$N) (__type_alias))'
-      - '(concept_definition name: $N:identifier)': '(__def (__defname @$N) (__interface))'
-      - '(namespace_definition name: $N body: $B)': '(__def (__defname @$N $N) (__class) $B)'
+      - '(concept_definition name: $N:identifier)': '(__def (__defname @$N) (__interface)) #flavor=concept'
+      - '(namespace_definition name: $N body: $B)': '(__def (__defname @$N $N) (__class) $B) #flavor=namespace'
   - stage: ssa-cleanup
     rewrite:
       - '(compound_statement $$$B)': '(__scope $$$B)'
@@ -138,4 +138,11 @@ display:
       - '(__def (__impl))': '#fqn=$ROOT | tag_up("fqn") | concat("::", $ROOT | child("__defname")) | keep_last("::", 64, 4096)'
       - use: def_fqn_colons_except_impl
   - use: def_types
+  - stage: def_type_names
+    rewrite:
+      - '(type_definition $ROOT:(__def (__type_alias)))': '#def_type=Typedef'
+      - '(__def (__enum_variant))': '#def_type=EnumConstant'
+      - '(__def (__struct))': '#def_type=$ROOT | tag("flavor") | map("union:Union") or "Struct"'
+      - '(__def (__interface))': '#def_type=$ROOT | tag("flavor") | map("concept:Concept") or "Interface"'
+      - '(__def (__class))': '#def_type=$ROOT | tag("flavor") | map("namespace:Namespace") or "Class"'
   - use: display_wildcard_imports
