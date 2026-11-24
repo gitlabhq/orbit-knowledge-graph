@@ -40,6 +40,15 @@ data:
   loops: [for_statement, while_statement]
   comprehensions: [list_comprehension, set_comprehension, dictionary_comprehension, generator_expression]
 
+define:
+  dangling(ROOT):
+    '(__name "*") when $ROOT | follow(imports, from) | is_def': none
+    '(__name "*")': '$ROOT'
+    '(__name (__ssa_hint)) when $ROOT | follow(imports, from)': none
+    '(__name (__alias)) when $ROOT | follow(imports, from)': none
+    '_ when $ROOT | follow(imports, from) | is_def': none
+    '_': '$ROOT'
+
 canonicalize:
   - stage: normalize
     rewrite:

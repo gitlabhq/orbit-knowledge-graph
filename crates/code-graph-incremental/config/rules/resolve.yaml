@@ -52,7 +52,14 @@ define:
     or select(under(module), '(__def #exports)' by $ROOT | tag("exports"), name)
     or select(owned(module), '(%import_kinds $ROOT:(__name "*" $A:__alias))' by $A, name) | namespace_module
     or select(owned(module), '(%import_kinds $ROOT:__name)' by local_name($ROOT), name) | reexported(name) | is_def
-    or select(owned(module), '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def
+    or unique(select(owned(module), '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | star_defined(name))
+    or unique(select(owned(module), '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def)
+  star_defined(ROOT, N):
+    '$I:(%import_kinds $ROOT:(__name "*"))': 'defined($I | modules, $N)'
+    '$I:(%import_kinds $ROOT:__name)': 'defined($I | modules, $N)'
+  defined(module, name): >-
+    select(owned(module), '(__def $N:__defname)', name) | is_def
+    or select(under(module), '(__def $N:__defname)', name) | is_def
   namespace_module(ROOT):
     '$I:(%import_kinds $ROOT)': '$I | modules'
   offered(module, name): 'exported(module, name) or module'
