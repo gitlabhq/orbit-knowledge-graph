@@ -1480,4 +1480,70 @@ mod tests {
         let same_value = stage(&[("(__name \"default\")", "#kind=x"), ("(__name)", "#kind=x")]);
         assert!(cancelled_tags(&same_value).is_ok());
     }
+
+    fn load_langs(langs: &[Option<&str>], family: &[usize]) -> Result<Pipeline, LoadError> {
+        Pipeline::load(
+            &Lang::default(),
+            &super::super::lang::Sources {
+                pipeline: crate::config::PIPELINE,
+                rules: crate::config::RULES,
+                libs: crate::config::LIBS,
+                langs,
+                family,
+            },
+            crate::modules::ALL,
+        )
+    }
+
+    fn load_error(langs: &[Option<&str>], family: &[usize]) -> String {
+        load_langs(langs, family)
+            .err()
+            .expect("the rules fail to load")
+            .0
+    }
+
+    const CALLS_LOCAL: &str = "
+define:
+  shout(ROOT): '$ROOT | file'
+  keyed(ROOT): \"select(project, '(__dir)' by shout($ROOT), $ROOT)\"
+canonicalize:
+  - stage: normalize
+    rewrite:
+      - '(source_file)': '(__name @$ROOT | shout)'
+";
+
+    #[test]
+    fn a_language_local_definition_is_callable_from_its_rules_and_select_keys() {
+        load_langs(&[Some(CALLS_LOCAL)], &[0]).expect("the local loads");
+    }
+
+    #[test]
+    fn another_languages_rules_cannot_call_a_local_definition() {
+        let other = "
+canonicalize:
+  - stage: normalize
+    rewrite:
+      - '(source_file)': '(__name @$ROOT | shout)'
+";
+        let error = load_error(&[Some(CALLS_LOCAL), Some(other)], &[0, 1]);
+        assert!(error.contains("no definition or function"), "{error}");
+    }
+
+    #[test]
+    fn two_family_members_defining_one_new_name_fail_to_load() {
+        let first = "define:\n  shout(ROOT): '$ROOT'\n";
+        let second = "define:\n  shout(ROOT): '$ROOT | read'\n";
+        let error = load_error(&[Some(first), Some(second)], &[0, 1]);
+        assert!(
+            error.contains("another family member defines it too"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_local_named_like_a_shared_definition_keeps_the_shared_arity() {
+        let redefinition = "define:\n  parent(ROOT, EXTRA): '$ROOT'\n";
+        let error = load_error(&[Some(redefinition)], &[0]);
+        assert!(error.contains("parent takes 1 parameters"), "{error}");
+    }
 }
