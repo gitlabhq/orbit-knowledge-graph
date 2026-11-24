@@ -12,7 +12,8 @@ use smallvec::SmallVec;
 use super::expr::Expr;
 use super::program::{Cases, Def, DefImpl, Scratch};
 use super::{
-    Arg, Cursor, FnId, Key, Kind, Loc, MAX_FIXPOINT_ROUNDS, Memo, Run, Store, Val, Vals, truthy,
+    Arg, Cursor, Distinct, FnId, Key, Kind, Loc, MAX_FIXPOINT_ROUNDS, Memo, Run, Store, Val, Vals,
+    truthy,
 };
 use crate::constants::{RED_ZONE, STACK_SEGMENT};
 
@@ -112,8 +113,7 @@ enum Frame<'e, S: Store> {
         at: usize,
         list: Vals,
         next: usize,
-        out: Vals,
-        seen: Option<FxHashSet<Val>>,
+        out: Distinct,
     },
     Finish(Pending),
     Cases(Trying<'e, S>),
@@ -320,7 +320,7 @@ impl<'e, S: Store> Vm<'e, S> {
     }
 
     /// Makes the next of a spread call's calls, after adding the last one's
-    /// values; a large union keeps a set to stay linear.
+    /// values.
     fn resume_each<'t>(&mut self, run: &mut Run<'t, S>, fns: &'e [Def]) {
         let Some(Frame::Each {
             callee,
@@ -329,27 +329,15 @@ impl<'e, S: Store> Vm<'e, S> {
             list,
             next,
             out,
-            seen,
         }) = self.frames.last_mut()
         else {
             return;
         };
         if *next > 0 {
-            for found in self.values.pop().unwrap_or_default() {
-                let new = match seen {
-                    Some(seen) => seen.insert(found),
-                    None => !out.contains(&found),
-                };
-                if new {
-                    out.push(found);
-                    if seen.is_none() && out.len() > 16 {
-                        *seen = Some(out.iter().copied().collect());
-                    }
-                }
-            }
+            out.extend(self.values.pop().unwrap_or_default());
         }
         let Some(&val) = list.get(*next) else {
-            let out = std::mem::take(out);
+            let out = std::mem::take(out).into_vals();
             self.frames.pop();
             self.values.push(out);
             return;
@@ -385,8 +373,7 @@ impl<'e, S: Store> Vm<'e, S> {
             at,
             list,
             next: 0,
-            out: Vals::new(),
-            seen: None,
+            out: Distinct::default(),
         });
     }
 
@@ -625,11 +612,11 @@ impl<'e, S: Store> Vm<'e, S> {
                 attempted(run, &t, true);
                 match t.out.is_empty() {
                     true => t.out = found,
-                    false => found.into_iter().for_each(|v| {
-                        if !t.out.contains(&v) {
-                            t.out.push(v);
-                        }
-                    }),
+                    false => {
+                        let mut out = Distinct::of(std::mem::take(&mut t.out));
+                        out.extend(found);
+                        t.out = out.into_vals();
+                    }
                 }
                 let at = t.list[t.at];
                 t.fired.push(t.cases.group(at));

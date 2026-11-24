@@ -2,7 +2,9 @@
 //! and declared indexes, and the writes a rule makes. Literal arguments
 //! (edge kinds, index, row shape and template ids) arrive as numbers.
 
-use crate::engine::{Cx, Function, Loc, Module, SETS, Store, Val, Vals, WHOLE, Write, one};
+use crate::engine::{
+    Cx, Distinct, Function, Loc, Module, SETS, Store, Val, Vals, WHOLE, Write, one,
+};
 use crate::modules::function;
 use crate::tree::{Edge, EdgeKind};
 
@@ -22,7 +24,8 @@ impl Module for Core {
 
 static FUNCTIONS: &[Function<Core>] = &[
     function!(Inline, "minus", [set, set], |_, a| {
-        set(a[0].iter().copied().filter(|v| !a[1].contains(v)))
+        let drop: Distinct = a[1].iter().copied().collect();
+        set(a[0].iter().copied().filter(|v| !drop.contains(v)))
     }),
     function!(Inline, "unique", [set], |_, a| match a[0].as_slice() {
         [v] => one(*v),
@@ -38,7 +41,7 @@ static FUNCTIONS: &[Function<Core>] = &[
         a[0].last().map_or_else(Vals::new, |&v| one(v))
     }),
     function!(Inline, "aligned", [set, set], |cx, a| {
-        let mut out = Vals::new();
+        let mut out = Distinct::default();
         for at in nodes(&a[1]) {
             let node = cx.jump(at);
             let Some(parent) = node.parent() else {
@@ -49,31 +52,31 @@ static FUNCTIONS: &[Function<Core>] = &[
                 .filter(|sibling| sibling.kind() == node.kind())
                 .position(|sibling| sibling.index() == node.index());
             if let Some(counterpart) = ordinal.and_then(|n| nodes(&a[0]).nth(n)) {
-                push(&mut out, Val::Node(counterpart));
+                out.push(Val::Node(counterpart));
             }
         }
-        out
+        out.into_vals()
     }),
     function!(Inline, "file", [set], |_, a| {
         set(nodes(&a[0]).map(|at| Val::Node(Loc { fi: at.fi, node: 0 })))
     }),
     function!(Inline, "scope", [set], |cx, a| {
-        let mut out = Vals::new();
+        let mut out = Distinct::default();
         for at in nodes(&a[0]) {
-            push(&mut out, Val::Node(cx.scope_above(at).unwrap_or(at)));
+            out.push(Val::Node(cx.scope_above(at).unwrap_or(at)));
         }
-        out
+        out.into_vals()
     }),
     function!(Inline, "enclose", [set], |cx, a| {
-        let mut out = Vals::new();
+        let mut out = Distinct::default();
         for at in nodes(&a[0]) {
             let mut next = cx.scope_above(at);
             while let Some(scope) = next {
-                push(&mut out, Val::Node(scope));
+                out.push(Val::Node(scope));
                 next = cx.scope_above(scope);
             }
         }
-        out
+        out.into_vals()
     }),
     function!(Inline, "ancestors", [set], |cx, a| {
         nodes(&a[0])
@@ -82,20 +85,20 @@ static FUNCTIONS: &[Function<Core>] = &[
     }),
     function!(Inline, "follow", [set, edge, edge_key], |cx, a| {
         let (kind, key) = (edge_kind(&a[1]), number(&a[2]) as usize);
-        let mut out = Vals::new();
+        let mut out = Distinct::default();
         for at in nodes(&a[0]) {
             match key {
                 0 => cx
                     .targets(kind, at)
                     .iter()
-                    .for_each(|&to| push(&mut out, Val::Node(to))),
+                    .for_each(|&to| out.push(Val::Node(to))),
                 key => cx
                     .by_attribute(key - 1, kind, at)
                     .iter()
-                    .for_each(|&(_, to)| push(&mut out, Val::Node(to))),
+                    .for_each(|&(_, to)| out.push(Val::Node(to))),
             }
         }
-        out
+        out.into_vals()
     }),
     function!(Inline, "select", [region, pattern, set], |cx, a| select(
         cx, a
@@ -171,7 +174,7 @@ static FUNCTIONS: &[Function<Core>] = &[
 /// under one, or in the trees of a set the walk reads, as region `a[1]` says.
 fn select<S: Store>(cx: &mut Cx<'_, '_, Core, S>, a: &[Vals]) -> Vals {
     let (region, id) = (number(&a[1]), number(&a[2]));
-    let mut out = Vals::new();
+    let mut out = Distinct::default();
     if let Some(set) = region.checked_sub(SETS) {
         for key in a[3].iter().filter_map(|&k| cx.text(k)) {
             for &found in cx
@@ -180,15 +183,15 @@ fn select<S: Store>(cx: &mut Cx<'_, '_, Core, S>, a: &[Vals]) -> Vals {
                 .into_iter()
                 .flatten()
             {
-                push(&mut out, Val::Node(found));
+                out.push(Val::Node(found));
             }
         }
-        return out;
+        return out.into_vals();
     }
     for at in nodes(&a[0]) {
         let anchor = if region == UNDER { WHOLE } else { at.node };
         let Some(piece) = cx.piece(at.fi, id) else {
-            return out;
+            return out.into_vals();
         };
         for key in a[3].iter().filter_map(|&k| cx.text(k)) {
             for &node in piece.get(&(anchor, key)).into_iter().flatten() {
@@ -199,12 +202,12 @@ fn select<S: Store>(cx: &mut Cx<'_, '_, Core, S>, a: &[Vals]) -> Vals {
                         .ancestors()
                         .any(|a| a.index() == at.node);
                 if inside {
-                    push(&mut out, Val::Node(Loc { fi: at.fi, node }));
+                    out.push(Val::Node(Loc { fi: at.fi, node }));
                 }
             }
         }
     }
-    out
+    out.into_vals()
 }
 
 const UNDER: u32 = 1;
@@ -213,16 +216,8 @@ fn nodes(vals: &Vals) -> impl Iterator<Item = Loc> + '_ {
     vals.iter().filter_map(|v| v.loc())
 }
 
-fn push(out: &mut Vals, v: Val) {
-    if !out.contains(&v) {
-        out.push(v);
-    }
-}
-
 fn set(vals: impl IntoIterator<Item = Val>) -> Vals {
-    let mut out = Vals::new();
-    vals.into_iter().for_each(|v| push(&mut out, v));
-    out
+    vals.into_iter().collect::<Distinct>().into_vals()
 }
 
 fn number(vals: &Vals) -> u32 {

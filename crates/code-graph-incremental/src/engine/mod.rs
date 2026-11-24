@@ -127,6 +127,65 @@ impl Val {
     }
 }
 
+/// Distinct values in first-seen order; past a few it keeps a hash set, so
+/// building a large set stays linear.
+#[derive(Default)]
+pub struct Distinct {
+    vals: Vals,
+    seen: Option<rustc_hash::FxHashSet<Val>>,
+}
+
+impl Distinct {
+    /// Starts from `vals`, which must hold no repeats.
+    pub fn of(vals: Vals) -> Self {
+        let mut d = Self { vals, seen: None };
+        d.index();
+        d
+    }
+
+    pub fn push(&mut self, v: Val) {
+        let new = match &mut self.seen {
+            Some(seen) => seen.insert(v),
+            None => !self.vals.contains(&v),
+        };
+        if new {
+            self.vals.push(v);
+            self.index();
+        }
+    }
+
+    pub fn contains(&self, v: &Val) -> bool {
+        match &self.seen {
+            Some(seen) => seen.contains(v),
+            None => self.vals.contains(v),
+        }
+    }
+
+    pub fn into_vals(self) -> Vals {
+        self.vals
+    }
+
+    fn index(&mut self) {
+        if self.seen.is_none() && self.vals.len() > 16 {
+            self.seen = Some(self.vals.iter().copied().collect());
+        }
+    }
+}
+
+impl Extend<Val> for Distinct {
+    fn extend<I: IntoIterator<Item = Val>>(&mut self, vals: I) {
+        vals.into_iter().for_each(|v| self.push(v));
+    }
+}
+
+impl FromIterator<Val> for Distinct {
+    fn from_iter<I: IntoIterator<Item = Val>>(vals: I) -> Self {
+        let mut d = Self::default();
+        d.extend(vals);
+        d
+    }
+}
+
 pub fn truthy(vals: &[Val]) -> bool {
     vals.iter().any(|v| *v != Val::Bool(false))
 }
