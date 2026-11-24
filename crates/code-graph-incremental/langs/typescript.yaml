@@ -37,6 +37,27 @@ data:
   loops: [for_statement, for_in_statement, while_statement, do_statement]
 
 define:
+  written(ROOT):
+    '(__name "default" #cjs_require)': '"%require"'
+    '_': 'super(ROOT)'
+
+  exported(module, name):
+    '_ when in(name, "%require")': >-
+      select(owned(module), '(__def $N:__default_export)', "default")
+      or select(owned(module), '(__module_export (__default_export))' by $ROOT | child("__default_export"), "default") | target_of
+    '_': 'super(module, name)'
+
+  declared_in(name, at): >-
+    first(enclose(at), s => select(owned(s), '(__def $N:__defname)', name)
+      or select(owned(s), '(__binding (__declaration))' by $ROOT, name))
+
+  object_field(ROOT, M):
+    '(__def (__variable) $B:__binding)': >-
+      select(under($B), '(__field)' by $ROOT, M) | child("__binding") | child("__rhs") | resolved
+
+  non_callable_import(ROOT):
+    '_ when $ROOT | follow(imports, from) | tag("non_callable")': '$ROOT'
+
   modules(ROOT):
     '(_ (__source_path "^."))': 'aliased($ROOT) or file_at($ROOT | tag("resolved_source"))'
     '_': 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
@@ -46,6 +67,12 @@ define:
     '_ when $ROOT | follow(imports, from)': '$ROOT'
 
 resolve:
+  object_member:
+    - '(__call (__callee $M:(__member $O:__object)))':
+        calls: { to: '$O | type | object_field($M) | callable | elsewhere(file($ROOT))', site: $ROOT }
+  member_on_import:
+    - '(__call (__callee (__member $O:__object)))':
+        fallbacks: { to: '$ROOT | follow(imports, site) | non_callable_import', site: $ROOT }
   missing_export:
     - '(__call (__callee "/./"))':
         fallbacks: { to: '$ROOT | follow(imports, site) | missing_export', site: $ROOT }
@@ -74,6 +101,8 @@ canonicalize:
       - '(export_specifier name: $N)': '(export_specifier @$N)'
   - stage: retag-refs
     rewrite:
+      - '(pair key: $N value: $V)': '(__field @$N (__binding @$ROOT | position("id") | prepend("$value:") (__rhs @$V $V)))'
+      - '(shorthand_property_identifier)': '(__field @$ROOT (__binding @$ROOT | position("id") | prepend("$value:") (__rhs @$ROOT)))'
       - '(object $$$V)': '(__obj $$$V)'
       - '(member_expression object: $O:call_expression property: $M)': '%member($M, $O)'
       - '(member_expression object: $O:__ivar property: $M)': '%member($M, $O)'
@@ -100,7 +129,7 @@ canonicalize:
       - '(import_statement (import_clause (namespace_import $N:identifier)) source: (string $S:string_fragment))': '(__import (__source @$S) (__source_path @$S) (__name "*" (__alias @$N)))'
       - '(import_statement (import_clause $N:identifier) source: (string $S:string_fragment))': '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
       - '(variable_declarator name: (object_pattern $$$E:shorthand_property_identifier_pattern|pair_pattern) value: (__call (__callee "require") (arguments (string $S:string_fragment))))': '(__import (__source @$S) (__source_path @$S) $$$E->cjs_entry)'
-      - '(variable_declarator name: $N:identifier value: (__call (__callee "require") (arguments (string $S:string_fragment))))': '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N))) #import_type@__name=CjsRequire'
+      - '(variable_declarator name: $N:identifier value: (__call (__callee "require") (arguments (string $S:string_fragment))))': '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N))) #import_type@__name=CjsRequire #cjs_require@__name=true'
       - '(expression_statement (assignment_expression left: $P:__member **/(__object "exports") right: (function_expression name: $N body: $B)))': '(__def (__defname @$N) (__function) $B) #exports=@$P'
       - '(expression_statement (assignment_expression left: $P:__member **/(__object "module.exports") right: (function_expression name: $N body: $B)))': '(__def (__defname @$N) (__function) $B) #exports=@$P'
       - '(expression_statement (assignment_expression left: $P:__member **/(__object "exports") right: (function_expression body: $B)))': '(__def (__defname @$P $P) (__function) $B) #exports=@$P'
@@ -161,7 +190,7 @@ canonicalize:
   - stage: exports
     rewrite:
       - '(export_statement **/(default) (__def $$$CHILDREN))': '(export_statement (__def (__default_export "default") $$$CHILDREN))'
-      - '(export_statement (variable_owner $B:__binding))': '(export_statement (__def (__defname @$B $B) (__variable)))'
+      - '(export_statement (variable_owner $B:__binding))': '(export_statement (__def (__defname @$B $B) (__variable) $B))'
   - use: ssa_cleanup
   - stage: tag-defs
     rewrite:
