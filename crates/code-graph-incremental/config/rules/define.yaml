@@ -88,7 +88,6 @@ define:
     '_ when value(tail($ROOT))': none
     '_ when minus(read(tail($ROOT)), opaque)': '$ROOT'
   arm_leaf(ROOT):
-    '(__ssa_branch)': none
     '_': 'value($ROOT)'
   ends_flow(ROOT):
     '(__ssa_branch !(__ssa_arm))': '$ROOT'
