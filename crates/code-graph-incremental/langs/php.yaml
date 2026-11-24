@@ -146,6 +146,9 @@ display:
       - '(__def (__enum))': '#class_fqn=$ROOT | tag("fqn")'
       - '(__def (__property))': '#fqn=$ROOT | tag_up("class_fqn") | concat("\", $ROOT | child("__defname")) | keep_last("\", 64, 4096)'
   - use: def_types
+  - stage: def_type_names
+    rewrite:
+      - '(__def (__enum_variant))': '#def_type=EnumCase'
   - stage: imports
     rewrite:
       - use: import_entity

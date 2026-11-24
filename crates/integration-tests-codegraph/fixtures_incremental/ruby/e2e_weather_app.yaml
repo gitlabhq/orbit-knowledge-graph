@@ -102,7 +102,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp'
-        AND d.definition_type = 'Class'
+        AND d.definition_type = 'Module'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }
@@ -128,7 +128,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # corrected: instance and singleton run share the canonical Method FQN
   - name: "Instance method run uses :: separator"
     query: |
       MATCH (d:Definition)
@@ -136,17 +135,16 @@ tests:
         AND d.definition_type = 'Method'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
 
-  # corrected: instance and singleton run share the canonical Method FQN
   - name: "Singleton method uses :: separator"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp::CLI::run'
-        AND d.definition_type = 'Method'
+        AND d.definition_type = 'SingletonMethod'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
 
   # ── Containment edges ─────────────────────────────────────────
   - name: "Module defines Class"
@@ -189,7 +187,7 @@ tests:
   - name: "attr_reader generates Attribute definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Property'
+      WHERE d.definition_type = 'Attribute'
         AND d.fqn IN ['WeatherApp::Forecast::city',
                        'WeatherApp::Forecast::temperature_c',
                        'WeatherApp::Forecast::condition',

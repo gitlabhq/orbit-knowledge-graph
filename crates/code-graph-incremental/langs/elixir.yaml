@@ -87,4 +87,7 @@ display:
       - '$M:__source_file': '#entity=File #file_path=@$M #language=@$M | split_last(".") | map("ex:elixir", "exs:elixir")'
       - use: def_fqn_dotted_except_impl
   - use: def_types
+  - stage: def_type_names
+    rewrite:
+      - '(__def (__class))': '#def_type=Module'
   - use: display_imports

@@ -55,7 +55,7 @@ canonicalize:
       - '(call receiver: !$RECEIVER method: (identifier %plural_associations) arguments: (argument_list $S:simple_symbol))': '(rb_synth (rb_method @$S))'
       - '(call receiver: !$RECEIVER method: (identifier "has_one") arguments: (argument_list $S:simple_symbol))': '(rb_synth (rb_method @$S))'
       - '(call receiver: !$RECEIVER method: (identifier "belongs_to") arguments: (argument_list $S:simple_symbol))': '(rb_synth (rb_method @$S))'
-      - '(call receiver: !$RECEIVER method: (identifier "scope") arguments: (argument_list $S:simple_symbol $$$L))': '(rb_synth (rb_method @$S $$$L))'
+      - '(call receiver: !$RECEIVER method: (identifier "scope") arguments: (argument_list $S:simple_symbol $$$L))': '(rb_synth (rb_scope @$S $$$L))'
       - '(call receiver:? $R method: $M:(identifier %send_methods) arguments: (argument_list $N:_*_named $$$A) block:? $B)': '(rb_send receiver: $R method: $M (rb_send_name $N) arguments: (argument_list $$$A) block: $B)'
   - stage: synth
     rewrite:
@@ -64,8 +64,9 @@ canonicalize:
       - '(rb_include)': '(rb_synth (__supertype @$ROOT | split_last("::")) (__import (__source @$ROOT | regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT | strip("::") | replace("::", "/") | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$ROOT | split_last("::")))) #import_type@__import=Include'
       - '(rb_extend)': '(rb_synth (__supertype @$ROOT | split_last("::")) (__import (__source @$ROOT | regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT | strip("::") | replace("::", "/") | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$ROOT | split_last("::")))) #import_type@__import=Extend'
       - '(rb_prepend)': '(rb_synth (__supertype @$ROOT | split_last("::")) (__import (__source @$ROOT | regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT | strip("::") | replace("::", "/") | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$ROOT | split_last("::")))) #import_type@__import=Prepend'
-      - '(rb_attr)': '(__def (__defname @$ROOT | strip(":")) (__property))'
+      - '(rb_attr)': '(__def (__defname @$ROOT | strip(":")) (__property)) #flavor=attribute'
       - '(rb_method $$$B)': '(__def (__defname @$ROOT | strip(":")) (__method) $$$B)'
+      - '(rb_scope $$$B)': '(__def (__defname @$ROOT | strip(":")) (__method) $$$B) #flavor=static'
   - stage: literal-dispatch
     rewrite:
       - '(rb_send receiver:? $R method: $M $N:rb_literal_method arguments: $A block:? $B)': '(call receiver: $R method: (identifier @$N) arguments: $A block: $B)'
@@ -103,6 +104,9 @@ canonicalize:
       - '(call receiver: $R:identifier method: $M:identifier arguments:? $A block:? $B)': '(__call (__callee (__member @$M (__object @$R))) $A $B)'
       - '(call receiver: $R method: $M:identifier arguments:? $A block:? $B)': '(__call (__callee %member_text($M, $R)) $A $B)'
       - '(call method: $M:identifier arguments:? $A block:? $B)': '(__call (__callee @$M) $A $B) #implicit_self=true'
+  - stage: namespace_flavor
+    rewrite:
+      - '(module)': '#flavor=module'
   - stage: classify
     rewrite:
       - '(assignment left: $L:instance_variable right: $R:__call)': '(__binding (__ivar @$L | strip("@")) (__rhs $R))'
@@ -132,10 +136,10 @@ canonicalize:
       - '(body_statement $$$BODY $R:rescue $$$ALTS)': '(body_statement (__ssa_branch (__ssa_arm $$$BODY) (__ssa_arm $R) $$$ALTS->__ssa_arm))'
       - '(%loops body: $B)': '%loop($B)'
       - '(method name: $N parameters:? $P body:? $B)': '(__def (__defname @$N) (__method) $P $B)'
-      - '(singleton_method object: (self) name: $N parameters:? $P body:? $B)': '(__def (__defname @$N) (__method) $P $B)'
+      - '(singleton_method object: (self) name: $N parameters:? $P body:? $B)': '(__def (__defname @$N) (__method) $P $B) #flavor=singleton'
       - '(singleton_class value: (self) body: $B)': '(rb_singleton $B)'
       - '(class name: $N superclass: (rb_super $S:__supertype $I:__import) body:? $B)': '(__def (__defname @$N | strip("::") $N) (__class) $S $I (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
-      - '(%namespaces name: $N body:? $B)': '(__def (__defname @$N | strip("::")) (__class) $B)'
+      - '(%namespaces name: $N body:? $B)': '(__def (__defname @$N | strip("::")) (__class) $B) #flavor=$ROOT | tag("flavor")'
   - stage: refs
     rewrite:
       - '(identifier)': '(__call (__callee @$ROOT)) #implicit_self=true'
@@ -187,4 +191,9 @@ display:
       - '$M:__source_file': '#entity=File #file_path=@$M #language=@$M | split_last(".") | map("rb:ruby")'
       - use: def_fqn_colons
   - use: def_types
+  - stage: def_type_names
+    rewrite:
+      - '(__def (__class))': '#def_type=$ROOT | tag("flavor") | map("module:Module") or "Class"'
+      - '(__def (__method))': '#def_type=$ROOT | tag("flavor") | map("singleton:SingletonMethod", "static:StaticMethod") or "Method"'
+      - '(__def (__property))': '#def_type=$ROOT | tag("flavor") | map("attribute:Attribute") or "Property"'
   - use: display_imports

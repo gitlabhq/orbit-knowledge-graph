@@ -34,7 +34,7 @@ tests:
       RETURN d.definition_type AS kind
     assert:
       - { row_count: 2 }
-      - { row: { kind: "Class" } }
+      - { row: { kind: "Module" } }
       - { row: { kind: "Impl" } }
 
   - name: the defimpl function calls the module function
