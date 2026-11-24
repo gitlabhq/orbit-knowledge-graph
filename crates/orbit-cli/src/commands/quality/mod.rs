@@ -111,11 +111,11 @@ pub(crate) fn run(options: Options) -> Result<()> {
         Some(config)
             if !config.forbid.is_empty() && (rules.contains(&Rule::Layers) || options.gate) =>
         {
+            let mut uses = used_symbols(&graph)?;
+            uses.extend(inline_symbol_uses(&git.repo_path, &git.commit_sha, config)?);
             Some(layers::check_symbols(
                 &config.forbid,
-                used_symbols(&graph)?
-                    .iter()
-                    .map(|(f, s, l)| (f.as_str(), s.as_str(), *l)),
+                uses.iter().map(|(f, s, l)| (f.as_str(), s.as_str(), *l)),
             ))
         }
         _ => None,
@@ -879,7 +879,7 @@ fn refers_to(text: &str, fqn: &str) -> bool {
             .any(|line| mentions(line, owner) && mentions(line, name))
 }
 
-fn mentions(text: &str, name: &str) -> bool {
+pub(crate) fn mentions(text: &str, name: &str) -> bool {
     let name = name.trim_start_matches("::");
     if name.is_empty() {
         return false;
@@ -993,6 +993,30 @@ fn base_blob(repo: &Path, commit: &str, path: &str) -> Option<String> {
         &["show", "--end-of-options", &format!("{commit}:{path}")],
     )
     .ok()
+}
+
+/// Qualified symbols used inline, without an import, in the commit's Rust
+/// files. Imports already come from the graph.
+fn inline_symbol_uses(
+    repo: &Path,
+    commit: &str,
+    config: &layers::Config,
+) -> Result<Vec<(String, String, i64)>> {
+    let qualified = config.qualified_symbols();
+    if qualified.is_empty() {
+        return Ok(Vec::new());
+    }
+    let files = commit_files(repo, commit)?;
+    let mut out = Vec::new();
+    for (path, text) in &files {
+        if !path.ends_with(".rs") || !qualified.iter().any(|symbol| text.contains(symbol)) {
+            continue;
+        }
+        for (symbol, line) in layers::inline_uses(text, &qualified) {
+            out.push((path.clone(), symbol.to_string(), line));
+        }
+    }
+    Ok(out)
 }
 
 fn used_symbols(graph: &Graph) -> Result<Vec<(String, String, i64)>> {

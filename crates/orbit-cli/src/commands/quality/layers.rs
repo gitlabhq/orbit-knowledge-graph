@@ -98,6 +98,52 @@ impl Forbid {
     }
 }
 
+impl Config {
+    /// Every configured symbol written as a path (`a::b`, `A.b`), the form a
+    /// file can use inline without importing it.
+    pub(crate) fn qualified_symbols(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = self
+            .forbid
+            .iter()
+            .flat_map(|rule| rule.names.iter().map(String::as_str))
+            .map(|name| name.trim_end_matches('*').trim_end_matches(':'))
+            .filter(|name| name.contains("::") || name.contains('.') || name.contains('_'))
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+}
+
+/// Inline uses of qualified symbols in source text, one per symbol and line.
+pub(crate) fn inline_uses<'a>(text: &str, qualified: &[&'a str]) -> Vec<(&'a str, i64)> {
+    let mut out = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        let code = line.split("//").next().unwrap_or(line);
+        if code.trim_start().starts_with("use ") {
+            continue;
+        }
+        for symbol in qualified {
+            let used = match symbol.contains("::") || symbol.contains('.') {
+                true => crate::commands::quality::mentions(code, symbol),
+                false => crate_path_used(code, symbol),
+            };
+            if used {
+                out.push((*symbol, n as i64 + 1));
+            }
+        }
+    }
+    out
+}
+
+fn crate_path_used(code: &str, name: &str) -> bool {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    code.match_indices(name).any(|(at, _)| {
+        !code[..at].chars().next_back().is_some_and(word)
+            && code[at + name.len()..].starts_with("::")
+    })
+}
+
 pub(crate) fn check_symbols<'a>(
     rules: &[Forbid],
     uses: impl IntoIterator<Item = (&'a str, &'a str, i64)>,
@@ -339,6 +385,22 @@ forbid:
         );
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].file, "a.rb");
+    }
+
+    #[test]
+    fn inline_paths_are_found_outside_use_lines_and_comments() {
+        let text = "use orbit_migrations::execute::drop_all_version_entities;\nfn f() {\n    orbit_migrations::execute::drop_all_version_entities(a, b);\n    // orbit_migrations::execute::create_all_versioned_tables(x)\n    let y = orbit_migrations::execute::drop_all_version_entities_v2();\n}\n";
+        let found = inline_uses(
+            text,
+            &[
+                "orbit_migrations::execute::drop_all_version_entities",
+                "orbit_migrations::execute::create_all_versioned_tables",
+            ],
+        );
+        assert_eq!(
+            found,
+            vec![("orbit_migrations::execute::drop_all_version_entities", 3)]
+        );
     }
 
     #[test]
