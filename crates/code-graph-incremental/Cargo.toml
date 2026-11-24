@@ -17,6 +17,7 @@ pretty-print = []
 arrow = { workspace = true }
 cpu-time = { workspace = true }
 either = { workspace = true }
+globset = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 indextree = { workspace = true }
 itertools = { workspace = true }
