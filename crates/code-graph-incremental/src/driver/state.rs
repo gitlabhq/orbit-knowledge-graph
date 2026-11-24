@@ -29,6 +29,9 @@ impl From<(String, String)> for SourceFile {
 pub struct State {
     pub trees: Vec<Tree<Compact>>,
     pub edges: Vec<Edge>,
+    /// Where the edges of the phases after the per-file ones start; each run
+    /// writes those again, so a reindex drops them first.
+    pub linked_from: usize,
     /// Manifest files (`parse_files`) the resolver reads for module roots.
     pub configs: Vec<SourceFile>,
     /// Per tree set, the trees of the last run's whole sets; rebuilt by every
@@ -41,6 +44,7 @@ impl State {
         Self {
             trees: Vec::new(),
             edges: Vec::new(),
+            linked_from: 0,
             configs: Vec::new(),
             sets: Vec::new(),
         }
@@ -76,6 +80,7 @@ impl State {
             }));
         }
         self.trees.retain(|tree| keep(&tree.label));
+        self.edges.truncate(self.linked_from);
         self.edges = std::mem::take(&mut self.edges)
             .into_iter()
             .filter_map(|e| {
@@ -86,6 +91,7 @@ impl State {
                 })
             })
             .collect();
+        self.linked_from = self.edges.len();
         self.configs.retain(|c| keep(&c.path));
     }
 }
@@ -279,6 +285,7 @@ impl From<TreeSnapshot> for Tree<Compact> {
 struct StoredFile {
     tree: TreeSnapshot,
     edges: Vec<Edge>,
+    linked: Vec<Edge>,
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -304,7 +311,7 @@ struct Shared {
 
 /// Bump when any snapshot struct changes shape; an older file then fails
 /// with a clear message instead of a decode error.
-pub const SNAPSHOT_VERSION: u32 = 21;
+pub const SNAPSHOT_VERSION: u32 = 22;
 
 const FILES_PER_BLOCK: usize = 64;
 
@@ -521,15 +528,21 @@ impl State {
         let mut files = files.to_vec();
         files.sort_unstable_by(|a, b| label(a).cmp(label(b)));
         let members: FxHashSet<u32> = files.iter().copied().collect();
-        let mut edges: FxHashMap<u32, Vec<Edge>> = FxHashMap::default();
-        for edge in self.edges.iter().filter(|e| members.contains(&e.from_tree)) {
-            edges.entry(edge.from_tree).or_default().push(*edge);
-        }
+        let by_file = |edges: &[Edge]| {
+            let mut out: FxHashMap<u32, Vec<Edge>> = FxHashMap::default();
+            for edge in edges.iter().filter(|e| members.contains(&e.from_tree)) {
+                out.entry(edge.from_tree).or_default().push(*edge);
+            }
+            out
+        };
+        let (own, linked) = self.edges.split_at(self.linked_from);
+        let (mut own, mut linked) = (by_file(own), by_file(linked));
         let mut stored: Vec<StoredFile> = files
             .iter()
             .map(|&fi| StoredFile {
                 tree: TreeSnapshot::from(&self.trees[fi as usize]),
-                edges: edges.remove(&fi).unwrap_or_default(),
+                edges: own.remove(&fi).unwrap_or_default(),
+                linked: linked.remove(&fi).unwrap_or_default(),
             })
             .collect();
         let mut paths: Vec<u32> = files
@@ -624,13 +637,17 @@ impl State {
             })
             .collect::<io::Result<_>>()?;
         let mut trees = Vec::with_capacity(files.len());
-        let mut edges = Vec::new();
+        let (mut edges, mut linked) = (Vec::new(), Vec::new());
         for file in files {
             trees.push(file.tree.into());
             edges.extend(file.edges);
+            linked.extend(file.linked);
         }
+        let linked_from = edges.len();
+        edges.extend(linked);
         let state = State {
             trees,
+            linked_from,
             edges,
             configs: shared.configs.into_iter().map(Into::into).collect(),
             sets: Vec::new(),
@@ -672,13 +689,16 @@ fn read_block(path: &Path) -> io::Result<Block> {
 
 /// Every file `file` refers to.
 fn references(file: &StoredFile) -> impl Iterator<Item = u32> + '_ {
-    file.edges.iter().flat_map(|e| [e.from_tree, e.to_tree])
+    file.edges
+        .iter()
+        .chain(&file.linked)
+        .flat_map(|e| [e.from_tree, e.to_tree])
 }
 
 /// Rewrites every file reference in `file` through `to`.
 /// `None` when `to` has no number for one of them.
 fn renumber(file: &mut StoredFile, to: impl Fn(u32) -> Option<u32>) -> Option<()> {
-    for edge in &mut file.edges {
+    for edge in file.edges.iter_mut().chain(&mut file.linked) {
         edge.from_tree = to(edge.from_tree)?;
         edge.to_tree = to(edge.to_tree)?;
     }
