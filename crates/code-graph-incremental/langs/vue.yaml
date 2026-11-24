@@ -33,6 +33,11 @@ canonicalize:
     before: regions
     rewrite:
       - '(variable_declarator name: $N value: (this)) when $ROOT | up_child("type_identifier")': '(variable_declarator name: $N value: (identifier @$ROOT | up_child("type_identifier")))'
+  - stage: options-collide
+    before: regions
+    rewrite:
+      - '(program $$$A (export_statement (class_declaration name: $N)) $$$B (export_statement (default) $ROOT:(class_declaration name: $M body: $C))) when in(@$N, @$M)': '(__def (__defname @$M) (__class) $C) #fqn_scope=<vue>'
+      - '(program $$$A (export_statement (default) $ROOT:(class_declaration name: $M body: $C)) $$$B (export_statement (class_declaration name: $N))) when in(@$N, @$M)': '(__def (__defname @$M) (__class) $C) #fqn_scope=<vue>'
 
 display:
   - stage: fqn

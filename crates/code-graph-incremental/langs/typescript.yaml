@@ -200,7 +200,7 @@ canonicalize:
       - '(cjs_entry)': '(__name @$ROOT) #import_type=CjsRequire'
   - stage: exports
     rewrite:
-      - '(export_statement **/(default) (__def $$$CHILDREN))': '(export_statement (__def (__default_export "default") $$$CHILDREN))'
+      - '(export_statement **/(default) $ROOT:(__def))': '+ (__default_export "default")'
       - '(export_statement (variable_owner $B:__binding))': '(export_statement (__def (__defname @$B $B) (__variable) $B))'
   - use: ssa_cleanup
   - stage: tag-defs
@@ -264,6 +264,7 @@ display:
     rewrite:
       - '$M:__source_file': '#entity=File #file_path=@$M #language=@$M | split_last(".") | map("ts:typescript", "tsx:tsx", "js:javascript", "jsx:javascript", "mjs:javascript", "cjs:javascript")'
       - use: def_fqn_colons
+      - '(__def #fqn_scope)': '#fqn=$ROOT | tag("fqn_scope") | concat("::", $ROOT | child("__defname"))'
   - stage: def_type
     rewrite:
       - '(__def)': '#definition_span=true'
