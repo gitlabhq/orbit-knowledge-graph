@@ -13,11 +13,8 @@ use crate::workspace;
 
 mod layers;
 
-const ENTRYPOINT_NAMES: &[&str] = &["main", "init", "new", "default", "drop", "fmt", "from"];
-const ENTRYPOINT_PREFIXES: &[&str] = &["Test", "Benchmark", "Example", "Fuzz"];
-const CONTAINER_KINDS: &[&str] = &["Impl", "Module", "Namespace"];
-const TEST_MODULE_REGEX: &str = r"(^|::|\.)(tests?|[a-z_]+_tests)(::|\.)";
 const GATE_FAILED_EXIT_CODE: i32 = 3;
+const MAX_SCAN_BYTES: u64 = 2 * 1024 * 1024;
 const REPO_LOCAL_GIT_ENV: &[&str] = &[
     "GIT_DIR",
     "GIT_WORK_TREE",
@@ -28,7 +25,6 @@ const REPO_LOCAL_GIT_ENV: &[&str] = &[
     "GIT_NAMESPACE",
     "GIT_PREFIX",
 ];
-const MAX_SCAN_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
 pub(crate) enum Rule {
@@ -84,11 +80,21 @@ pub(crate) fn run(options: Options) -> Result<()> {
     };
     let changed_ids: HashSet<i64> = changed.unwrap_or_default();
     let base = match (&options.diff, options.gate) {
-        (Some(base), true) => Some(BaseView::read(&git.repo_path, base)?),
+        (Some(base), true) => Some(BaseGraph::index(&git.repo_path, base)?),
         _ => None,
     };
 
     let layer_rules = layers::load(&git.repo_path)?;
+    if let Some(config) = &layer_rules {
+        for pattern in &config.test_symbols {
+            regex::Regex::new(pattern)
+                .with_context(|| format!("invalid test_symbols pattern `{pattern}`"))?;
+        }
+        let _ = TEST_CODE.set(TestCode {
+            paths: config.test_paths.clone(),
+            symbols: config.test_symbols.clone(),
+        });
+    }
     anyhow::ensure!(
         layer_rules.is_some() || !(options.rules.contains(&Rule::Layers)),
         "the layers rule needs {} in the repository; see `{} quality --help`",
@@ -111,8 +117,7 @@ pub(crate) fn run(options: Options) -> Result<()> {
         Some(config)
             if !config.forbid.is_empty() && (rules.contains(&Rule::Layers) || options.gate) =>
         {
-            let mut uses = used_symbols(&graph)?;
-            uses.extend(inline_symbol_uses(&git.repo_path, &git.commit_sha, config)?);
+            let uses = used_symbols(&graph)?;
             Some(layers::check_symbols(
                 &config.forbid,
                 uses.iter().map(|(f, s, l)| (f.as_str(), s.as_str(), *l)),
@@ -125,41 +130,81 @@ pub(crate) fn run(options: Options) -> Result<()> {
         true => Some(hotspots(&graph, &git.repo_path, options.limit)?),
         false => None,
     };
+    let no_config = layers::Config::default();
+    let config = layer_rules.as_ref().unwrap_or(&no_config);
     let dead = match (rules.contains(&Rule::Dead), options.gate) {
-        (true, _) => Some(dead_functions(&graph, &git.repo_path, None)?),
-        (false, true) => Some(dead_functions(&graph, &git.repo_path, Some(&changed_ids))?),
+        (true, _) => Some(dead_functions(
+            &graph,
+            &git.repo_path,
+            &config.dead,
+            DeadScope::All,
+        )?),
+        (false, true) => Some(dead_functions(
+            &graph,
+            &git.repo_path,
+            &config.dead,
+            DeadScope::Ids(&changed_ids),
+        )?),
         (false, false) => None,
     };
 
     let violations = match (&base, &deps) {
-        (Some(base), Some(deps)) => {
-            let new_edge = |from: &str, to: &str| {
-                deps.files
-                    .get(&(from.to_string(), to.to_string()))
-                    .is_some_and(|edge| base.is_new(from, &edge.targets))
+        (Some(base), Some(_)) => {
+            let reader = base.open()?;
+            let base_graph = Graph {
+                client: &reader,
+                params: [base.project_id.into(), base.commit_sha.clone().into()],
             };
-            let base_modules: HashSet<(String, String)> = deps
+            let renames = Renames::between(&git.repo_path, &base.commit_sha, &git.commit_sha)?;
+            let base_files: HashSet<(String, String)> = dependencies(&base_graph, options.depth)?
                 .files
+                .into_keys()
+                .map(|(from, to)| (renames.file(&from), renames.file(&to)))
+                .collect();
+            let base_modules: HashSet<(String, String)> = base_files
                 .iter()
-                .filter(|((from, _), edge)| !base.is_new(from, &edge.targets))
-                .map(|((from, to), _)| {
-                    (module_of(from, options.depth), module_of(to, options.depth))
-                })
+                .map(|(from, to)| (module_of(from, options.depth), module_of(to, options.depth)))
                 .filter(|(from, to)| from != to)
                 .collect();
+            let base_uses: HashSet<(String, String, String)> = match symbol_uses {
+                Some(_) => layers::check_symbols(
+                    &config.forbid,
+                    used_symbols(&base_graph)?
+                        .iter()
+                        .map(|(f, s, l)| (f.as_str(), s.as_str(), *l)),
+                )
+                .into_iter()
+                .map(|u| (u.rule, renames.file(&u.file), u.matched))
+                .collect(),
+                None => HashSet::new(),
+            };
+            let head_dead = dead.as_deref().unwrap_or_default();
+            let names: HashSet<String> = head_dead.iter().map(|f| f.name.clone()).collect();
+            let base_dead: HashSet<(String, String)> = match names.is_empty() {
+                true => HashSet::new(),
+                false => dead_functions(
+                    &base_graph,
+                    &git.repo_path,
+                    &config.dead,
+                    DeadScope::Names(&names),
+                )?
+                .into_iter()
+                .map(|f| (renames.file(&f.file), f.name))
+                .collect(),
+            };
             let mut found = gate_violations(
                 cycles.as_deref().unwrap_or_default(),
                 &base_modules,
-                dead.as_deref().unwrap_or_default(),
+                head_dead,
                 &changed_ids,
-                base,
+                &base_dead,
             );
             found.extend(
                 layer_violations
                     .as_deref()
                     .unwrap_or_default()
                     .iter()
-                    .filter(|v| new_edge(&v.from, &v.to))
+                    .filter(|v| !base_files.contains(&(v.from.clone(), v.to.clone())))
                     .map(|v| {
                         format!(
                             "the change adds {} -> {}, which breaks layer `{}`: {}",
@@ -172,7 +217,9 @@ pub(crate) fn run(options: Options) -> Result<()> {
                     .as_deref()
                     .unwrap_or_default()
                     .iter()
-                    .filter(|u| base.is_new_symbol(&u.file, &u.matched))
+                    .filter(|u| {
+                        !base_uses.contains(&(u.rule.clone(), u.file.clone(), u.matched.clone()))
+                    })
                     .map(|u| {
                         format!(
                             "the change uses {} in {}:{}, which breaks `{}`",
@@ -214,27 +261,39 @@ struct Graph<'a> {
     params: [Value; 2],
 }
 
-const RUST_CRATE_MACRO: &str = "CREATE OR REPLACE TEMP MACRO rust_crate(path) AS
-  regexp_replace(path, '(^|/)(src|tests|benches|examples)/.*$', '')";
-
 impl Graph<'_> {
     fn query(&self, sql: &str) -> Result<Vec<arrow::array::RecordBatch>> {
-        self.client
-            .execute(RUST_CRATE_MACRO, &[])
-            .context("failed to define the rust_crate macro")?;
         self.client
             .query_arrow_json(sql, &self.params)
             .with_context(|| format!("quality query failed: {}", sql.lines().next().unwrap_or("")))
     }
 }
 
+/// Test and vendored code: the shared search corpus policy by path, plus the
+/// repository's `test_paths` globs and `test_symbols` patterns on the fqn.
 fn test_code(path: &str, fqn: &str) -> String {
+    let Some(TestCode { paths, symbols }) = TEST_CODE.get() else {
+        return format!("COALESCE({}, FALSE)", excluded_path_predicate(path));
+    };
+    let paths = paths
+        .iter()
+        .map(|glob| format!(" OR {path} GLOB {}", sql_lit(glob)));
+    let symbols = symbols
+        .iter()
+        .map(|re| format!(" OR regexp_matches({fqn}, {})", sql_lit(re)));
     format!(
-        "(COALESCE({}, FALSE) OR regexp_matches({fqn}, {}))",
+        "(COALESCE({}, FALSE){})",
         excluded_path_predicate(path),
-        sql_lit(TEST_MODULE_REGEX)
+        paths.chain(symbols).collect::<String>()
     )
 }
+
+struct TestCode {
+    paths: Vec<String>,
+    symbols: Vec<String>,
+}
+
+static TEST_CODE: std::sync::OnceLock<TestCode> = std::sync::OnceLock::new();
 
 const DEFINITIONS_CTE: &str = "d AS (
   SELECT id, fqn, name, definition_type, file_path, start_line, end_line
@@ -247,28 +306,11 @@ const CALLS_CTE: &str = "imp AS (
   JOIN gl_imported_symbol i ON i.id = e.source_id AND i.project_id = ?1 AND i.commit_sha = ?2
   JOIN d t ON t.id = e.target_id
   WHERE e.relationship_kind = 'IMPORTS'
-    AND (i.file_path NOT LIKE '%.rs'
-      OR (rust_crate(i.file_path) = rust_crate(t.file_path) AND (
-        i.import_path NOT LIKE '%::%'
-        OR split_part(i.import_path, '::', 1) IN ('crate', 'self', 'super')
-        OR position('::' || split_part(i.import_path, '::', 1) || '::' IN '::' || t.fqn) > 0))
-      OR (rust_crate(i.file_path) <> rust_crate(t.file_path)
-        AND split_part(i.import_path, '::', 1) = split_part(t.fqn, '::', 1)))
-),
-file_deps AS (
-  SELECT DISTINCT imp.file_path, split_part(t.fqn, '::', 1) AS r FROM imp JOIN d t ON t.id = imp.target_id
-  UNION
-  SELECT DISTINCT i.file_path, split_part(i.import_path, '::', 1)
-  FROM gl_imported_symbol i
-  WHERE i.project_id = ?1 AND i.commit_sha = ?2 AND i.file_path LIKE '%.rs'
 ),
 c AS (
   SELECT e.source_id, e.target_id FROM gl_edge e
   JOIN d s ON s.id = e.source_id JOIN d t ON t.id = e.target_id
-  WHERE e.relationship_kind = 'CALLS' AND e.source_kind = 'Definition' AND e.target_kind = 'Definition'
-    AND (s.file_path NOT LIKE '%.rs'
-      OR rust_crate(s.file_path) = rust_crate(t.file_path)
-      OR EXISTS (SELECT 1 FROM file_deps f WHERE f.file_path = s.file_path AND f.r = split_part(t.fqn, '::', 1)))
+  WHERE e.relationship_kind IN ('CALLS', 'EXTENDS') AND e.source_kind = 'Definition' AND e.target_kind = 'Definition'
   UNION
   SELECT e.source_id, imp.target_id FROM gl_edge e JOIN imp ON imp.imp_id = e.target_id
   WHERE e.relationship_kind = 'CALLS' AND e.source_kind = 'Definition' AND e.target_kind = 'ImportedSymbol'
@@ -308,7 +350,6 @@ struct Dependencies {
 struct FileEdge {
     refs: usize,
     example: String,
-    targets: BTreeSet<String>,
 }
 
 fn dependencies(graph: &Graph, depth: Option<usize>) -> Result<Dependencies> {
@@ -320,12 +361,19 @@ dep AS (
   UNION ALL
   SELECT imp.file_path, '', imp.start_line, t.file_path, t.fqn
   FROM imp JOIN d t ON t.id = imp.target_id
+  WHERE NOT EXISTS (
+    SELECT 1 FROM d m
+    WHERE m.file_path = imp.file_path
+      AND imp.start_line BETWEEN m.start_line AND m.end_line
+      AND {in_test}
+  )
 )
 SELECT sf, sname, CAST(sl AS BIGINT) AS sl, tf, tname
 FROM dep WHERE sf <> tf AND NOT {} AND NOT {}
 ORDER BY sf, sl, tf, tname",
         test_code("sf", "sname"),
-        test_code("tf", "tname")
+        test_code("tf", "tname"),
+        in_test = test_code("m.file_path", "m.fqn")
     );
     let batches = graph.query(&sql)?;
     let sfs = string_column(&batches, "sf");
@@ -346,13 +394,11 @@ ORDER BY sf, sl, tf, tname",
             .or_insert_with(|| FileEdge {
                 refs: 0,
                 example: example(),
-                targets: BTreeSet::new(),
             });
         let file_edge = files
             .get_mut(&(sfs[i].clone(), tfs[i].clone()))
             .expect("just inserted");
         file_edge.refs += 1;
-        file_edge.targets.insert(tnames[i].clone());
         let from = module_of(&sfs[i], depth);
         let to = module_of(&tfs[i], depth);
         if from == to {
@@ -539,27 +585,44 @@ struct Dead {
     loc: String,
 }
 
-fn is_entrypoint(name: &str) -> bool {
-    ENTRYPOINT_NAMES.contains(&name)
-        || name.starts_with("test_")
-        || ENTRYPOINT_PREFIXES.iter().any(|prefix| {
-            name.strip_prefix(prefix)
-                .is_some_and(|rest| rest.is_empty() || !rest.starts_with(char::is_lowercase))
-        })
+enum DeadScope<'a> {
+    All,
+    Ids(&'a HashSet<i64>),
+    Names(&'a HashSet<String>),
 }
 
-fn dead_functions(graph: &Graph, repo: &Path, only: Option<&HashSet<i64>>) -> Result<Vec<Dead>> {
-    if only.is_some_and(HashSet::is_empty) {
-        return Ok(Vec::new());
-    }
-    let only_ids = only.map_or(String::new(), |ids| {
-        let list = ids
-            .iter()
-            .map(i64::to_string)
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("AND d.id IN ({list})")
-    });
+/// Functions nothing refers to. A function counts as referenced when the
+/// graph has a call, import, or extension edge to it, or when its name
+/// appears anywhere else in the commit's tracked files. Only `Function`
+/// definitions are checked: a call through a receiver or an interface often
+/// has no edge to its method. Test code (by path) and the repository's
+/// `dead.ignore` names and paths are left out.
+fn dead_functions(
+    graph: &Graph,
+    repo: &Path,
+    config: &layers::DeadConfig,
+    scope: DeadScope,
+) -> Result<Vec<Dead>> {
+    let filter = match scope {
+        DeadScope::All => String::new(),
+        DeadScope::Ids(ids) if ids.is_empty() => return Ok(Vec::new()),
+        DeadScope::Ids(ids) => format!(
+            "AND d.id IN ({})",
+            ids.iter()
+                .map(i64::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        DeadScope::Names(names) if names.is_empty() => return Ok(Vec::new()),
+        DeadScope::Names(names) => format!(
+            "AND d.name IN ({})",
+            names
+                .iter()
+                .map(|n| sql_lit(n))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
     let commit = graph.params[1].as_str().unwrap_or("HEAD").to_string();
     let sql = format!(
         "WITH {DEFINITIONS_CTE}, {CALLS_CTE},
@@ -568,19 +631,12 @@ referenced AS (
   UNION SELECT target_id FROM gl_edge
   WHERE target_kind = 'Definition' AND relationship_kind IN ('CALLS', 'IMPORTS', 'EXTENDS')
 ),
-names AS (SELECT name, CAST(count(*) AS BIGINT) AS defs FROM d GROUP BY name),
-owner AS (
-  SELECT e.target_id AS id, min(p.start_line) AS impl_line FROM gl_edge e
-  JOIN d p ON p.id = e.source_id AND p.definition_type = 'Impl'
-  WHERE e.relationship_kind = 'DEFINES' AND e.source_kind = 'Definition'
-  GROUP BY e.target_id
-)
-SELECT d.id, d.fqn, d.name, d.file_path AS file, CAST(d.start_line AS BIGINT) AS line, n.defs,
-       CAST(COALESCE(o.impl_line, 0) AS BIGINT) AS impl_line
-FROM d JOIN names n ON n.name = d.name LEFT JOIN owner o ON o.id = d.id
+names AS (SELECT name, CAST(count(*) AS BIGINT) AS defs FROM d GROUP BY name)
+SELECT d.id, d.fqn, d.name, d.file_path AS file, CAST(d.start_line AS BIGINT) AS line, n.defs
+FROM d JOIN names n ON n.name = d.name
 WHERE d.definition_type = 'Function'
   AND d.id NOT IN (SELECT id FROM referenced)
-  {only_ids}
+  {filter}
   AND NOT {}
 ORDER BY d.file_path, d.start_line",
         test_code("d.file_path", "d.fqn")
@@ -592,34 +648,17 @@ ORDER BY d.file_path, d.start_line",
     let files = string_column(&batches, "file");
     let lines = i64_column(&batches, "line");
     let defs = i64_column(&batches, "defs");
-    let impl_lines = i64_column(&batches, "impl_line");
     let candidates: Vec<usize> = (0..ids.len())
-        .filter(|&i| !is_entrypoint(&names[i]))
+        .filter(|&i| !config.ignores(&names[i], &files[i]))
         .collect();
-    let wanted: HashSet<&str> = candidates.iter().map(|&i| names[i].as_str()).collect();
     if candidates.is_empty() {
         return Ok(Vec::new());
     }
-    let committed = commit_files(repo, &commit)?;
-    let mentions = count_identifiers(&committed, &wanted);
-    let mut sources: HashMap<&str, Option<Vec<String>>> = HashMap::new();
+    let wanted: HashSet<&str> = candidates.iter().map(|&i| names[i].as_str()).collect();
+    let mentions = count_identifiers(&commit_files(repo, &commit)?, &wanted);
     Ok(candidates
         .into_iter()
         .filter(|&i| mentions.get(names[i].as_str()).copied().unwrap_or(0) <= defs[i] as usize)
-        .filter(|&i| {
-            let source = sources.entry(files[i].as_str()).or_insert_with(|| {
-                committed
-                    .get(&files[i])
-                    .map(|text| text.lines().map(String::from).collect())
-            });
-            !source.as_deref().is_some_and(|source| {
-                has_test_attribute(source, lines_index(lines[i]))
-                    || (impl_lines[i] > 0
-                        && source
-                            .get(lines_index(impl_lines[i]))
-                            .is_some_and(|line| is_trait_impl(line)))
-            })
-        })
         .map(|i| Dead {
             id: ids[i],
             fqn: fqns[i].clone(),
@@ -628,31 +667,6 @@ ORDER BY d.file_path, d.start_line",
             loc: format!("{}:{}", files[i], lines[i]),
         })
         .collect())
-}
-
-fn lines_index(start_line: i64) -> usize {
-    usize::try_from(start_line).unwrap_or(1).saturating_sub(1)
-}
-
-fn is_trait_impl(line: &str) -> bool {
-    let line = line.trim_start();
-    line.starts_with("impl") && line.split_whitespace().any(|word| word == "for")
-}
-
-fn has_test_attribute(lines: &[String], start: usize) -> bool {
-    lines[..start.min(lines.len())]
-        .iter()
-        .rev()
-        .take(4)
-        .map(|line| line.trim())
-        .take_while(|line| {
-            line.starts_with("#[") || line.starts_with("@") || line.starts_with("//")
-        })
-        .any(|line| {
-            line.starts_with("#[") && line.contains("test")
-                || line.starts_with("@pytest")
-                || line == "@Test"
-        })
 }
 
 fn commit_files(repo: &Path, commit: &str) -> Result<HashMap<String, String>> {
@@ -826,17 +840,11 @@ fn changed_definitions(
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let containers = CONTAINER_KINDS
-        .iter()
-        .map(|kind| sql_lit(kind))
-        .collect::<Vec<_>>()
-        .join(", ");
     let sql = format!(
         "WITH {DEFINITIONS_CTE}, hunks(file, hs, he) AS (VALUES {values}),
 hit AS (
   SELECT DISTINCT h.file, h.hs, h.he, d.* FROM hunks h
   JOIN d ON d.file_path = h.file AND d.start_line <= h.he AND d.end_line >= h.hs
-  WHERE d.definition_type NOT IN ({containers})
 )
 SELECT DISTINCT o.id, o.fqn, o.definition_type AS kind, o.file_path AS file, CAST(o.start_line AS BIGINT) AS line
 FROM hit o
@@ -852,62 +860,92 @@ ORDER BY file, line"
     Ok(i64_column(&batches, "id").into_iter().collect())
 }
 
-/// Whether source text refers to the definition `fqn`. A bare name such as
-/// `read` or `new` appears in most files, so the name has to come with its
-/// owner (`manifest::read`, `Manifest.read`, `Foo#read`), or be imported or
-/// qualified on its own line together with the owner.
-fn refers_to(text: &str, fqn: &str) -> bool {
-    let parts: Vec<&str> = fqn
-        .split([':', '.', '#'])
-        .filter(|part| !part.is_empty())
-        .collect();
-    let Some((name, owners)) = parts.split_last() else {
-        return false;
-    };
-    let Some(owner) = owners.last() else {
-        return mentions(text, name);
-    };
-    [
-        format!("{owner}::{name}"),
-        format!("{owner}.{name}"),
-        format!("{owner}#{name}"),
-    ]
-    .iter()
-    .any(|qualified| mentions(text, qualified))
-        || text
-            .lines()
-            .any(|line| mentions(line, owner) && mentions(line, name))
+struct BaseGraph {
+    repo: PathBuf,
+    scratch: tempfile::TempDir,
+    checkout: PathBuf,
+    project_id: i64,
+    commit_sha: String,
 }
 
-pub(crate) fn mentions(text: &str, name: &str) -> bool {
-    let name = name.trim_start_matches("::");
-    if name.is_empty() {
-        return false;
+impl BaseGraph {
+    fn index(repo: &Path, base: &str) -> Result<Self> {
+        let commit_sha = resolve_commit(repo, base)?;
+        let merge_base = git(
+            repo,
+            &["merge-base", "--end-of-options", &commit_sha, "HEAD"],
+        )
+        .with_context(|| format!("{base} and HEAD share no history"))?
+        .trim()
+        .to_string();
+        let scratch = tempfile::Builder::new()
+            .prefix("orbit-quality-")
+            .tempdir()?;
+        let checkout = scratch.path().join("base");
+        git(
+            repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                &checkout.to_string_lossy(),
+                &merge_base,
+            ],
+        )?;
+        let mut base = Self {
+            repo: repo.to_path_buf(),
+            checkout: dunce::canonicalize(&checkout)?,
+            project_id: 0,
+            commit_sha: merge_base,
+            scratch,
+        };
+        let status = without_repo_git_env(&mut Command::new(std::env::current_exe()?))
+            .args(["workspace", "index", "--db"])
+            .arg(base.db_path())
+            .arg(&base.checkout)
+            .env("ORBIT_DATA_DIR", base.scratch.path().join("data"))
+            .env("ORBIT_TELEMETRY_ENABLED", "false")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::inherit())
+            .status()
+            .context("failed to index the base commit")?;
+        anyhow::ensure!(
+            status.success(),
+            "indexing the base commit {} failed",
+            base.commit_sha
+        );
+        base.project_id = workspace::git_info(&base.checkout)?.project_id;
+        Ok(base)
     }
-    let word = |c: char| c.is_alphanumeric() || c == '_';
-    text.match_indices(name).any(|(at, _)| {
-        let before = text[..at].chars().next_back();
-        let after = text[at + name.len()..].chars().next();
-        !before.is_some_and(word) && !after.is_some_and(word)
-    })
+
+    fn db_path(&self) -> PathBuf {
+        self.scratch.path().join("base.duckdb")
+    }
+
+    fn open(&self) -> Result<crate::database::GraphReader> {
+        crate::database::GraphReader::open(Some(self.db_path()))
+    }
 }
 
-/// The base of a change, read from git without indexing it: the files the
-/// change touched, keyed by their path at HEAD, with their content at the
-/// base (`None` for files the change added). Every other file is the same
-/// at the base as at HEAD, so the HEAD graph stands in for it.
-struct BaseView {
-    touched: HashMap<String, Option<String>>,
+impl Drop for BaseGraph {
+    fn drop(&mut self) {
+        let checkout = self.checkout.to_string_lossy();
+        if git(&self.repo, &["worktree", "remove", "--force", &checkout]).is_err() {
+            let _ = std::fs::remove_dir_all(&self.checkout);
+            let _ = git(&self.repo, &["worktree", "prune"]);
+        }
+    }
 }
 
-impl BaseView {
-    fn read(repo: &Path, base: &str) -> Result<Self> {
-        let commit = resolve_commit(repo, base)?;
-        let merge_base = git(repo, &["merge-base", "--end-of-options", &commit, "HEAD"])
-            .with_context(|| format!("{base} and HEAD share no history"))?
-            .trim()
-            .to_string();
-        let status = git(
+/// Files git saw renamed between the base and HEAD, old path to new.
+struct Renames {
+    files: HashMap<String, String>,
+}
+
+impl Renames {
+    fn between(repo: &Path, base: &str, head: &str) -> Result<Self> {
+        let output = git(
             repo,
             &[
                 "diff",
@@ -916,116 +954,57 @@ impl BaseView {
                 "-z",
                 "--no-ext-diff",
                 "--end-of-options",
-                &merge_base,
-                "HEAD",
+                base,
+                head,
             ],
         )?;
-        Ok(Self {
-            touched: Self::parse_status(&status, |old| base_blob(repo, &merge_base, old)),
-        })
+        Ok(Self::parse(&output))
     }
 
-    fn parse_status(
-        status: &str,
-        mut content: impl FnMut(&str) -> Option<String>,
-    ) -> HashMap<String, Option<String>> {
-        let mut touched = HashMap::new();
-        let mut fields = status.split('\0').filter(|field| !field.is_empty());
-        while let Some(code) = fields.next() {
-            match code.chars().next() {
-                Some('R') | Some('C') => {
-                    let (Some(old), Some(new)) = (fields.next(), fields.next()) else {
-                        break;
-                    };
-                    let base = match code.starts_with('R') {
-                        true => content(old),
-                        false => None,
-                    };
-                    touched.insert(new.to_string(), base);
+    fn parse(output: &str) -> Self {
+        let mut files = HashMap::new();
+        let mut fields = output.split('\0').filter(|field| !field.is_empty());
+        while let Some(status) = fields.next() {
+            if status.starts_with('R') || status.starts_with('C') {
+                let (Some(old), Some(new)) = (fields.next(), fields.next()) else {
+                    break;
+                };
+                if status.starts_with('R') {
+                    files.insert(old.to_string(), new.to_string());
                 }
-                Some('A') => {
-                    if let Some(path) = fields.next() {
-                        touched.insert(path.to_string(), None);
-                    }
-                }
-                Some('D') => {
-                    fields.next();
-                }
-                _ => {
-                    if let Some(path) = fields.next() {
-                        let base = content(path);
-                        touched.insert(path.to_string(), base);
-                    }
-                }
+            } else {
+                fields.next();
             }
         }
-        touched
+        Self { files }
     }
 
-    /// Whether an edge from `file` to definitions with these names is new:
-    /// the file was touched and its base content names none of them.
-    /// Whether an edge from `file` to these definitions is new: the file was
-    /// touched and its base content does not refer to any of them.
-    fn is_new(&self, file: &str, targets: &BTreeSet<String>) -> bool {
-        match self.touched.get(file) {
-            None => false,
-            Some(None) => true,
-            Some(Some(text)) => !targets.iter().any(|fqn| refers_to(text, fqn)),
-        }
-    }
-
-    fn is_new_name(&self, file: &str, name: &str) -> bool {
-        self.is_new(file, &BTreeSet::from([name.to_string()]))
-    }
-
-    fn is_new_symbol(&self, file: &str, symbol: &str) -> bool {
-        match self.touched.get(file) {
-            None => false,
-            Some(None) => true,
-            Some(Some(text)) => !mentions(text, symbol.trim_end_matches('*')),
-        }
+    fn file(&self, path: &str) -> String {
+        self.files
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| path.to_string())
     }
 }
 
-fn base_blob(repo: &Path, commit: &str, path: &str) -> Option<String> {
-    git(
-        repo,
-        &["show", "--end-of-options", &format!("{commit}:{path}")],
-    )
-    .ok()
-}
-
-/// Qualified symbols used inline, without an import, in the commit's Rust
-/// files. Imports already come from the graph.
-fn inline_symbol_uses(
-    repo: &Path,
-    commit: &str,
-    config: &layers::Config,
-) -> Result<Vec<(String, String, i64)>> {
-    let qualified = config.qualified_symbols();
-    if qualified.is_empty() {
-        return Ok(Vec::new());
-    }
-    let files = commit_files(repo, commit)?;
-    let mut out = Vec::new();
-    for (path, text) in &files {
-        if !path.ends_with(".rs") || !qualified.iter().any(|symbol| text.contains(symbol)) {
-            continue;
-        }
-        for (symbol, line) in layers::inline_uses(text, &qualified) {
-            out.push((path.clone(), symbol.to_string(), line));
-        }
-    }
-    Ok(out)
-}
-
+/// Symbols each file uses, from the graph: the paths it imports, and the
+/// definitions its code calls or extends wherever the graph resolved them.
 fn used_symbols(graph: &Graph) -> Result<Vec<(String, String, i64)>> {
-    let sql = "SELECT i.file_path AS file, i.import_path AS symbol, CAST(min(i.start_line) AS BIGINT) AS line
+    let sql = format!(
+        "WITH {DEFINITIONS_CTE}
+SELECT i.file_path AS file, i.import_path AS symbol, CAST(min(i.start_line) AS BIGINT) AS line
 FROM gl_imported_symbol i
 WHERE i.project_id = ?1 AND i.commit_sha = ?2 AND i.import_path <> ''
 GROUP BY i.file_path, i.import_path
-ORDER BY i.file_path, line";
-    let batches = graph.query(sql)?;
+UNION ALL
+SELECT s.file_path, t.fqn, CAST(min(s.start_line) AS BIGINT)
+FROM gl_edge e JOIN d s ON s.id = e.source_id JOIN d t ON t.id = e.target_id
+WHERE e.relationship_kind IN ('CALLS', 'EXTENDS') AND e.source_kind = 'Definition' AND e.target_kind = 'Definition'
+  AND s.file_path <> t.file_path
+GROUP BY s.file_path, t.fqn
+ORDER BY file, line"
+    );
+    let batches = graph.query(&sql)?;
     let files = string_column(&batches, "file");
     let symbols = string_column(&batches, "symbol");
     let lines = i64_column(&batches, "line");
@@ -1047,7 +1026,7 @@ fn gate_violations(
     base_modules: &HashSet<(String, String)>,
     dead: &[Dead],
     changed: &HashSet<i64>,
-    base: &BaseView,
+    base_dead: &HashSet<(String, String)>,
 ) -> Vec<String> {
     let mut violations = Vec::new();
     for cycle in cycles {
@@ -1064,7 +1043,9 @@ fn gate_violations(
         }
     }
     for function in dead {
-        if changed.contains(&function.id) && base.is_new_name(&function.file, &function.name) {
+        if changed.contains(&function.id)
+            && !base_dead.contains(&(function.file.clone(), function.name.clone()))
+        {
             violations.push(format!(
                 "the change adds {} ({}), which nothing references",
                 function.fqn, function.loc
@@ -1327,36 +1308,6 @@ mod tests {
         assert_eq!(ranges["x.rs"], vec![(4, 5), (12, 12)]);
     }
 
-    #[test]
-    fn entrypoints_are_not_dead() {
-        assert!(is_entrypoint("main"));
-        assert!(is_entrypoint("TestParse"));
-        assert!(is_entrypoint("Test"));
-        assert!(is_entrypoint("test_parse"));
-        assert!(!is_entrypoint("parse"));
-        assert!(!is_entrypoint("Tester"));
-    }
-
-    #[test]
-    fn test_attributes_above_a_function_mark_it_as_a_test() {
-        let lines: Vec<String> = [
-            "#[tokio::test(flavor = \"multi_thread\")]",
-            "async fn a() {}",
-            "",
-            "#[inline]",
-            "fn b() {}",
-            "#[test]",
-            "}",
-            "fn c() {}",
-        ]
-        .map(String::from)
-        .to_vec();
-        assert!(has_test_attribute(&lines, 1));
-        assert!(!has_test_attribute(&lines, 4));
-        assert!(!has_test_attribute(&lines, 7));
-        assert!(!has_test_attribute(&lines, 0));
-    }
-
     fn cycle(edges: &[(&str, &str)]) -> Cycle {
         Cycle {
             modules: edges
@@ -1385,119 +1336,31 @@ mod tests {
         }
     }
 
-    fn view(files: &[(&str, Option<&str>)]) -> BaseView {
-        BaseView {
-            touched: files
-                .iter()
-                .map(|(path, text)| (path.to_string(), text.map(String::from)))
-                .collect(),
-        }
-    }
-
-    fn pairs(list: &[(&str, &str)]) -> HashSet<(String, String)> {
-        list.iter()
-            .map(|(a, b)| (a.to_string(), b.to_string()))
-            .collect()
-    }
-
     #[test]
     fn gate_reports_only_what_the_base_did_not_have() {
         let head = [
             cycle(&[("a", "b"), ("b", "a")]),
             cycle(&[("c", "d"), ("d", "c")]),
         ];
-        let base_modules = pairs(&[("a", "b"), ("b", "a"), ("c", "d")]);
+        let base_modules: HashSet<(String, String)> = [("a", "b"), ("b", "a"), ("c", "d")]
+            .iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect();
         let head_dead = [dead(1, "old"), dead(2, "new"), dead(3, "untouched")];
         let changed: HashSet<i64> = [1, 2].into();
-        let base = view(&[("m.rs", Some("fn old() {}\n"))]);
-        let violations = gate_violations(&head, &base_modules, &head_dead, &changed, &base);
+        let base_dead: HashSet<(String, String)> = [("m.rs".to_string(), "old".to_string())].into();
+        let violations = gate_violations(&head, &base_modules, &head_dead, &changed, &base_dead);
         assert_eq!(violations.len(), 2, "{violations:#?}");
         assert!(violations[0].contains("d -> c"));
         assert!(violations[1].contains("adds m::new"));
     }
 
     #[test]
-    fn untouched_files_and_names_already_in_the_base_are_not_new() {
-        let base = view(&[
-            (
-                "edited.rb",
-                Some("class A\n  def run = Net::HTTP.get(uri)\nend\n"),
-            ),
-            ("added.rb", None),
-        ]);
-        let names = |list: &[&str]| list.iter().map(|n| n.to_string()).collect::<BTreeSet<_>>();
-        assert!(!base.is_new("untouched.rb", &names(&["Anything"])));
-        assert!(!base.is_new_symbol("edited.rb", "Net::HTTP"));
-        assert!(base.is_new_symbol("edited.rb", "Open3"));
-        assert!(!base.is_new_symbol("edited.rb", "::Net::HTTP"));
-        assert!(base.is_new("added.rb", &names(&["Whatever"])));
-        assert!(base.is_new("edited.rb", &names(&["Helper::call"])));
-        assert!(!base.is_new("edited.rb", &names(&["Helper::call", "Net::HTTP.get"])));
-        assert!(base.is_new_symbol("edited.rb", "HTTP2"));
-        let rust = view(&[(
-            "server.rs",
-            Some("use orbit_billing::{BillingTracker, QuotaService};\n"),
-        )]);
-        assert!(!rust.is_new_symbol("server.rs", "orbit_billing"));
-        assert!(rust.is_new_symbol("server.rs", "orbit_billing::BillingTracker"));
-    }
-
-    #[test]
-    fn a_bare_method_name_is_not_a_reference_to_it() {
-        let text = "fn run_query() {\n    let body = std::fs::read(path);\n}\n";
-        assert!(!refers_to(text, "orbit_cli::database::manifest::read"));
-        assert!(refers_to(
-            "use crate::database::manifest;\nmanifest::read(p, q);\n",
-            "orbit_cli::database::manifest::read"
-        ));
-        assert!(refers_to(
-            "use crate::database::manifest::{read, write};\n",
-            "orbit_cli::database::manifest::read"
-        ));
-        assert!(refers_to(
-            "x = Manifest.read(path)\n",
-            "Gitlab::Manifest.read"
-        ));
-        assert!(refers_to("helper()\n", "helper"));
-    }
-
-    #[test]
-    fn mentions_respects_identifier_boundaries() {
-        assert!(mentions("x = Net::HTTP.new", "Net::HTTP"));
-        assert!(!mentions("x = Net::HTTPS.new", "Net::HTTP"));
-        assert!(!mentions("helper_run()", "run"));
-        assert!(mentions("self.run()", "run"));
-        assert!(!mentions("anything", ""));
-    }
-
-    #[test]
-    fn status_keys_touched_files_by_their_head_path() {
-        let status =
-            "M\0a.rb\0A\0new.rb\0D\0gone.rb\0R090\0old/b.rb\0new/b.rb\0C100\0c.rb\0copy.rb\0";
-        let touched = BaseView::parse_status(status, |path| Some(format!("base of {path}")));
-        assert_eq!(touched.len(), 4);
-        assert_eq!(touched["a.rb"].as_deref(), Some("base of a.rb"));
-        assert_eq!(touched["new.rb"], None);
-        assert_eq!(touched["new/b.rb"].as_deref(), Some("base of old/b.rb"));
-        assert_eq!(touched["copy.rb"], None);
-        assert!(!touched.contains_key("gone.rb"));
-    }
-
-    #[test]
-    fn trait_impls_are_told_apart_from_inherent_impls() {
-        assert!(is_trait_impl("impl clap::ValueEnum for DdlTarget {"));
-        assert!(is_trait_impl("    impl<T: Clone> From<T> for Wrapper<T> {"));
-        assert!(!is_trait_impl("impl NatsBroker {"));
-        assert!(!is_trait_impl("impl Formatter {"));
-    }
-
-    #[test]
-    fn test_modules_match_rust_and_dotted_names() {
-        let re = regex::Regex::new(TEST_MODULE_REGEX).unwrap();
-        assert!(re.is_match("crate::tests::helper"));
-        assert!(re.is_match("crate::resolver::alias_tests::case"));
-        assert!(re.is_match("pkg.test.helper"));
-        assert!(!re.is_match("crate::attestation::verify"));
-        assert!(!re.is_match("crate::contests::run"));
+    fn renames_map_old_paths_to_new_ones() {
+        let renames =
+            Renames::parse("R100\0src/b/y.rs\0src/d/y.rs\0M\0src/lib.rs\0C100\0a.rs\0b.rs\0");
+        assert_eq!(renames.file("src/b/y.rs"), "src/d/y.rs");
+        assert_eq!(renames.file("src/lib.rs"), "src/lib.rs");
+        assert_eq!(renames.file("a.rs"), "a.rs");
     }
 }

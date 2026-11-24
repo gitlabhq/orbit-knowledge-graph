@@ -13,6 +13,35 @@ struct ConfigFile {
     layers: Vec<RuleSpec>,
     #[serde(default)]
     forbid: Vec<ForbidSpec>,
+    #[serde(default)]
+    dead: DeadSpec,
+    #[serde(default)]
+    test_paths: Vec<String>,
+    #[serde(default)]
+    test_symbols: Vec<String>,
+}
+
+/// Names and paths the dead-code check leaves out, such as entry points and
+/// test helpers. Names match whole function names; `*` is a wildcard.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeadSpec {
+    #[serde(default)]
+    ignore_names: Vec<String>,
+    #[serde(default)]
+    ignore_paths: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct DeadConfig {
+    names: Vec<GlobMatcher>,
+    paths: Vec<GlobMatcher>,
+}
+
+impl DeadConfig {
+    pub(crate) fn ignores(&self, name: &str, path: &str) -> bool {
+        any(&self.names, name) || any(&self.paths, path)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,6 +68,9 @@ pub(crate) struct Forbid {
 pub(crate) struct Config {
     pub layers: Vec<Rule>,
     pub forbid: Vec<Forbid>,
+    pub dead: DeadConfig,
+    pub test_paths: Vec<String>,
+    pub test_symbols: Vec<String>,
 }
 
 impl Config {
@@ -96,52 +128,6 @@ impl Forbid {
             .position(|pattern| pattern.is_match(symbol))
             .map(|i| self.names[i].as_str())
     }
-}
-
-impl Config {
-    /// Every configured symbol written as a path (`a::b`, `A.b`), the form a
-    /// file can use inline without importing it.
-    pub(crate) fn qualified_symbols(&self) -> Vec<&str> {
-        let mut out: Vec<&str> = self
-            .forbid
-            .iter()
-            .flat_map(|rule| rule.names.iter().map(String::as_str))
-            .map(|name| name.trim_end_matches('*').trim_end_matches(':'))
-            .filter(|name| name.contains("::") || name.contains('.') || name.contains('_'))
-            .collect();
-        out.sort_unstable();
-        out.dedup();
-        out
-    }
-}
-
-/// Inline uses of qualified symbols in source text, one per symbol and line.
-pub(crate) fn inline_uses<'a>(text: &str, qualified: &[&'a str]) -> Vec<(&'a str, i64)> {
-    let mut out = Vec::new();
-    for (n, line) in text.lines().enumerate() {
-        let code = line.split("//").next().unwrap_or(line);
-        if code.trim_start().starts_with("use ") {
-            continue;
-        }
-        for symbol in qualified {
-            let used = match symbol.contains("::") || symbol.contains('.') {
-                true => crate::commands::quality::mentions(code, symbol),
-                false => crate_path_used(code, symbol),
-            };
-            if used {
-                out.push((*symbol, n as i64 + 1));
-            }
-        }
-    }
-    out
-}
-
-fn crate_path_used(code: &str, name: &str) -> bool {
-    let word = |c: char| c.is_alphanumeric() || c == '_';
-    code.match_indices(name).any(|(at, _)| {
-        !code[..at].chars().next_back().is_some_and(word)
-            && code[at + name.len()..].starts_with("::")
-    })
 }
 
 pub(crate) fn check_symbols<'a>(
@@ -267,6 +253,12 @@ pub(crate) fn parse_config(yaml: &str) -> Result<Config> {
             .into_iter()
             .map(Forbid::from_spec)
             .collect::<Result<_>>()?,
+        dead: DeadConfig {
+            names: matchers("ignore_names", "dead", &config.dead.ignore_names)?,
+            paths: matchers("ignore_paths", "dead", &config.dead.ignore_paths)?,
+        },
+        test_paths: config.test_paths,
+        test_symbols: config.test_symbols,
     })
 }
 
@@ -388,19 +380,16 @@ forbid:
     }
 
     #[test]
-    fn inline_paths_are_found_outside_use_lines_and_comments() {
-        let text = "use orbit_migrations::execute::drop_all_version_entities;\nfn f() {\n    orbit_migrations::execute::drop_all_version_entities(a, b);\n    // orbit_migrations::execute::create_all_versioned_tables(x)\n    let y = orbit_migrations::execute::drop_all_version_entities_v2();\n}\n";
-        let found = inline_uses(
-            text,
-            &[
-                "orbit_migrations::execute::drop_all_version_entities",
-                "orbit_migrations::execute::create_all_versioned_tables",
-            ],
-        );
-        assert_eq!(
-            found,
-            vec![("orbit_migrations::execute::drop_all_version_entities", 3)]
-        );
+    fn dead_ignores_match_whole_names_and_paths() {
+        let config = parse_config(
+            "dead:\n  ignore_names: [main, \"test_*\"]\n  ignore_paths: [\"benches/**\"]\n",
+        )
+        .unwrap();
+        assert!(config.dead.ignores("main", "src/a.rs"));
+        assert!(config.dead.ignores("test_parse", "src/a.rs"));
+        assert!(config.dead.ignores("run", "benches/x.rs"));
+        assert!(!config.dead.ignores("domain", "src/a.rs"));
+        assert!(!config.dead.ignores("attest_parse", "src/a.rs"));
     }
 
     #[test]
