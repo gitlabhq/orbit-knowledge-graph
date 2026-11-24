@@ -1,0 +1,54 @@
+import: [canonical, display, shapes]
+
+canonicalize:
+  - stage: normalize
+    rewrite:
+      - '(config_file $$$C)': '(__source_file @$ROOT $$$C (__module_export (__import (__source ".") (__source_path "./*") (__name "*"))))'
+      - '(string_lit $T:template_literal)': '(hcl_label @$T)'
+  - stage: retag-expressions
+    rewrite:
+      - '(expression (variable_expr (identifier "/^(count|each|self|path|terraform)$/")) $$$R)': '(hcl_ref $$$R)'
+      - '(expression (variable_expr (identifier "var")) (get_attr $N:identifier) $$$R)': '(hcl_ref (__call (__callee @$N)) $$$R)'
+      - '(expression (variable_expr (identifier "module")) (get_attr $N:identifier) $$$R)': '(hcl_ref (__call (__callee @$N)) $$$R)'
+      - '(expression (variable_expr (identifier "local")) (get_attr $N:identifier) $$$R)': '(hcl_ref (__call (__callee (__member @$N (__object "locals")))) $$$R)'
+      - '(expression (variable_expr (identifier "data")) (get_attr $T:identifier) (get_attr $N:identifier) $$$R)': '(hcl_ref (__call (__callee (__member @$N (__object @$T $T)))) $$$R)'
+      - '(expression (variable_expr $T:identifier) (get_attr $N:identifier) $$$R)': '(hcl_ref (__call (__callee (__member @$N (__object @$T $T)))) $$$R)'
+  - stage: classify
+    rewrite:
+      - '(block (identifier "resource") $A:hcl_label $B:hcl_label $BODY?:body)': '(__def (__defname @$A) (__impl) (hcl_kind "Resource") (__def (__defname @$B) (__class) (hcl_kind "Resource")) $BODY)'
+      - '(block (identifier "data") $A:hcl_label $B:hcl_label $BODY?:body)': '(__def (__defname @$A) (__impl) (hcl_kind "DataSource") (__def (__defname @$B) (__class) (hcl_kind "DataSource")) $BODY)'
+      - '(block (identifier "variable") $A:hcl_label $BODY?:body)': '(__def (__defname @$A) (__variable) (hcl_kind "Variable") $BODY)'
+      - '(block (identifier "output") $A:hcl_label $BODY?:body)': '(__def (__defname @$A) (__variable) (hcl_kind "Output") $BODY)'
+      - '(block (identifier "module") $A:hcl_label $BODY?:body)': '(__def (__defname @$A) (__variable) (hcl_kind "Module") $BODY)'
+      - '(block (identifier "provider") $A:hcl_label $BODY?:body)': '(__def (__defname @$A) (__variable) (hcl_kind "Provider") $BODY)'
+      - '(block (identifier "dynamic") $A:hcl_label $BODY?:body)': '(__def (__defname @$A) (__class) (hcl_kind "Dynamic") $BODY)'
+      - '(block (identifier "terraform") $BODY?:body)': '(__def (__defname "terraform") (__variable) (hcl_kind "Terraform") $BODY)'
+      - '(block (identifier "locals") (body $$$ATTRS:attribute))': '(__def (__defname "locals") (__impl) (hcl_kind "Locals") $$$ATTRS->hcl_local)'
+  - stage: locals
+    rewrite:
+      - '(hcl_local $N:identifier $E:expression)': '(hcl_local (__def (__defname @$N) (__variable) (hcl_kind "Local")) $E)'
+  - stage: tag-defs
+    rewrite:
+      - '(__source_file)': '#scoped=module'
+      - use: type_def_tags
+      - '(__def (__variable))': '#callable=true #value=true #scoped=true'
+      - '(__def (__impl))': '#callable=true #value=true'
+      - '(__def (hcl_kind "Resource"))': '#def_type=Resource'
+      - '(__def (hcl_kind "DataSource"))': '#def_type=DataSource'
+      - '(__def (hcl_kind "Variable"))': '#def_type=Variable #namespace=var'
+      - '(__def (hcl_kind "Output"))': '#def_type=Output'
+      - '(__def (hcl_kind "Module"))': '#def_type=Module #namespace=module'
+      - '(__def (hcl_kind "Provider"))': '#def_type=Provider'
+      - '(__def (hcl_kind "Dynamic"))': '#def_type=Dynamic'
+      - '(__def (hcl_kind "Terraform"))': '#def_type=Terraform'
+      - '(__def (hcl_kind "Locals"))': '#def_type=Locals'
+      - '(__def (hcl_kind "Local"))': '#def_type=Local'
+  - use: tag_file_dir
+  - use: resolve_paths
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #file_path=@$M #language=hcl'
+      - use: def_fqn_dotted
+      - '(__def #namespace)': '#fqn=$ROOT | tag("namespace") | concat(".", $ROOT | child("__defname"))'

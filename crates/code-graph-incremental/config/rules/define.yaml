@@ -347,7 +347,7 @@ define:
     '_': 'opaque'
 
   visible(name, at): 'declared_in(name, at) or alias_owner(name, at) or imported_name(name, at)'
-  alias_owner(name, at): 'first(ancestors(at), a => aliased_as(a, name))'
+  alias_owner(name, at): 'first(enclose(at), a => aliased_as(a, name))'
   aliased_as(ROOT, name):
     '(__def $A:__alias) when in($A, name)': '$ROOT'
   imported_name(name, at): >-

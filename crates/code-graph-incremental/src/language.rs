@@ -191,6 +191,10 @@ pub fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
             "langs/ocaml.yaml",
             include_str!("../langs/ocaml.yaml"),
         )),
+        SupportLang::Hcl => Some(crate::config::source(
+            "langs/hcl.yaml",
+            include_str!("../langs/hcl.yaml"),
+        )),
         SupportLang::Zig => Some(crate::config::source(
             "langs/zig.yaml",
             include_str!("../langs/zig.yaml"),
