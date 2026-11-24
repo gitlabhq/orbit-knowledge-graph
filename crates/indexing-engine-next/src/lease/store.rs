@@ -5,9 +5,9 @@ use async_trait::async_trait;
 
 use super::{Claim, Fence, Hold, HolderId, Lease, LeaseEntry, LeaseRules, Renewal, Revision};
 use crate::clock::Clock;
-use crate::event::{ProtocolEvent, ProtocolLog};
-use crate::ports::{Ports, warn_port_failure};
-use crate::task::{InFlight, TaskId, WorkerKey};
+use crate::event::{Failure, Observer, TaskStep};
+use crate::ports::Ports;
+use crate::task::{InFlight, TaskMessage, WorkerKey};
 
 #[async_trait]
 pub(crate) trait LeaseStore: Send + Sync {
@@ -28,7 +28,7 @@ pub(crate) enum LeaseWrite {
 pub(crate) struct Leases {
     store: Arc<dyn LeaseStore>,
     clock: Arc<dyn Clock>,
-    log: Arc<dyn ProtocolLog>,
+    observer: Arc<dyn Observer>,
     holder: HolderId,
     rules: LeaseRules,
 }
@@ -38,7 +38,7 @@ impl Leases {
         Self {
             store: Arc::clone(&ports.leases),
             clock: Arc::clone(&ports.clock),
-            log: Arc::clone(&ports.log),
+            observer: Arc::clone(&ports.observer),
             holder,
             rules,
         }
@@ -46,24 +46,25 @@ impl Leases {
 
     pub(crate) async fn acquire_or_give_back(
         &self,
-        key: &WorkerKey,
-        task: TaskId,
+        message: &TaskMessage,
         in_flight: &dyn InFlight,
     ) -> anyhow::Result<Option<Hold>> {
         let now = self.clock.now().await;
-        let claim = Claim::new(self.holder.clone(), task);
-        match self.take_if_free(claim, key, now).await? {
+        let claim = Claim::new(self.holder.clone(), message.task);
+        match self.take_if_free(claim, &message.worker_key(), now).await? {
             Some(hold) => {
-                self.log
-                    .record(now, ProtocolEvent::LeaseAcquired(hold.clone()));
+                let acquired = TaskStep::LeaseAcquired(hold.clone());
+                self.observer.observe(&message.build_event(now, acquired));
                 Ok(Some(hold))
             }
             None => {
                 let delay = self.rules.renew_every;
                 if let Err(error) = in_flight.nack(delay).await {
-                    warn_port_failure("nack_failed", &error);
+                    let failed = TaskStep::PortCallFailed(Failure::new("nack_failed", error));
+                    self.observer.observe(&message.build_event(now, failed));
                 }
-                self.log.record(now, ProtocolEvent::GivenBack(task));
+                let given_back = TaskStep::GivenBack { delay };
+                self.observer.observe(&message.build_event(now, given_back));
                 Ok(None)
             }
         }
@@ -72,31 +73,35 @@ impl Leases {
     pub(crate) async fn renew_while_running(
         &self,
         hold: &mut Hold,
-        key: &WorkerKey,
+        message: &TaskMessage,
         in_flight: &dyn InFlight,
         started_at: SystemTime,
     ) {
+        let key = message.worker_key();
         let mut now = started_at;
         loop {
             let wait = hold.renew_at().duration_since(now).unwrap_or_default();
             self.clock.sleep(wait).await;
             now = self.clock.now().await;
-            match self.extend_if_ours(hold, key, now).await {
+            match self.extend_if_ours(hold, &key, now).await {
                 Ok(true) => {
                     if let Err(error) = in_flight.ack_progress().await {
-                        warn_port_failure("ack_progress_failed", &error);
+                        let failure = Failure::new("ack_progress_failed", error);
+                        let failed = TaskStep::PortCallFailed(failure);
+                        self.observer.observe(&message.build_event(now, failed));
                     }
-                    self.log.record(now, ProtocolEvent::Renewed(hold.clone()));
+                    let renewed = TaskStep::Renewed(hold.clone());
+                    self.observer.observe(&message.build_event(now, renewed));
                 }
                 Ok(false) => {
-                    self.log
-                        .record(now, ProtocolEvent::RenewalLost(hold.task()));
+                    let lost = TaskStep::RenewalLost;
+                    self.observer.observe(&message.build_event(now, lost));
                     return;
                 }
                 Err(error) => {
-                    warn_port_failure("lease_renewal_failed", &error);
-                    self.log
-                        .record(now, ProtocolEvent::RenewalFailed(hold.task()));
+                    let failure = Failure::new("lease_renewal_failed", error);
+                    let failed = TaskStep::RenewalFailed(failure);
+                    self.observer.observe(&message.build_event(now, failed));
                     return;
                 }
             }

@@ -9,7 +9,7 @@ use tokio::sync::Notify;
 use tokio::time::Instant;
 
 use super::{DatabaseWrite, FaultBudget, SimulatedBroker, SimulatedDatabase, SimulatedKeyValue};
-use crate::event::ProtocolEvent;
+use crate::event::{TaskEvent, TaskStep};
 use crate::lease::{Fence, Generation, HolderId, Lease, Revision};
 use crate::task::{TaskId, TaskMessage};
 
@@ -288,25 +288,16 @@ impl World {
                 .all(|task| self.lost_in_wipe.contains(task) || self.broker.is_done(*task))
     }
 
-    pub(super) fn apply_protocol_event(
-        &mut self,
-        actor: Actor,
-        at: SystemTime,
-        event: ProtocolEvent,
-    ) {
-        if at != self.local_time(actor) {
+    pub(super) fn apply_task_event(&mut self, actor: Actor, event: &TaskEvent) {
+        if event.at != self.local_time(actor) {
             self.break_rule(format!(
-                "{actor:?} logged {at:?}, which is not the time of its step"
+                "{actor:?} logged {:?}, which is not the time of its step",
+                event.at
             ));
         }
-        match (actor, event) {
-            (
-                Actor::Planner,
-                ProtocolEvent::Submitted {
-                    task,
-                    found_pending,
-                },
-            ) => {
+        let task = event.task.id;
+        match (actor, &event.step) {
+            (Actor::Planner, TaskStep::Submitted { found_pending }) => {
                 if !found_pending {
                     self.ids.push(task);
                 }
@@ -314,19 +305,19 @@ impl World {
                 let id = self.find_spec_id(task);
                 self.record_step("Submit", format!(", task {id}"));
             }
-            (Actor::Planner, ProtocolEvent::Published(task)) => {
+            (Actor::Planner, TaskStep::Published) => {
                 self.publishing = None;
                 self.covers.push(task);
                 let id = self.find_spec_id(task);
                 self.record_step("Publish", format!(", task {id}"));
             }
-            (Actor::Process { index, .. }, ProtocolEvent::Delivered(task)) => {
+            (Actor::Process { index, .. }, TaskStep::Delivered) => {
                 self.processes[index].phase = Phase::Leasing;
                 let copy = self.processes[index].held.map_or(0, |copy| copy + 1);
                 let id = self.find_spec_id(task);
                 self.record_step("Deliver", format!("(p{}, {copy}), task {id}", index + 1));
             }
-            (Actor::Process { index, .. }, ProtocolEvent::LeaseAcquired(hold)) => {
+            (Actor::Process { index, .. }, TaskStep::LeaseAcquired(hold)) => {
                 let process = &mut self.processes[index];
                 process.phase = Phase::Leased;
                 process.token = hold.fence();
@@ -335,41 +326,42 @@ impl World {
                 process.renew_at = ticks_at(hold.renew_at());
                 self.record_step("AcquireLease", format!("(p{})", index + 1));
             }
-            (Actor::Process { index, .. }, ProtocolEvent::GivenBack(_)) => {
+            (Actor::Process { index, .. }, TaskStep::GivenBack { .. }) => {
                 self.drop_run(index);
                 self.record_step("GiveBack", format!("(p{})", index + 1));
             }
-            (Actor::Process { index, .. }, ProtocolEvent::Started { task, .. }) => {
+            (Actor::Process { index, .. }, TaskStep::Started { .. }) => {
                 self.started.insert(task);
                 self.processes[index].phase = Phase::Running;
                 self.record_step("StartTask", format!("(p{})", index + 1));
             }
-            (Actor::Process { index, .. }, ProtocolEvent::Renewed(hold)) => {
+            (Actor::Process { index, .. }, TaskStep::Renewed(hold)) => {
                 let process = &mut self.processes[index];
                 process.seen = hold.seen_revision();
                 process.expiry = ticks_at(hold.expires_at());
                 process.renew_at = ticks_at(hold.renew_at());
                 self.record_step("Renew", format!("(p{})", index + 1));
             }
-            (Actor::Process { index, .. }, ProtocolEvent::RenewalLost(_)) => {
+            (Actor::Process { index, .. }, TaskStep::RenewalLost) => {
                 self.drop_run(index);
                 self.record_step("Renew", format!("(p{}), lost", index + 1));
             }
-            (Actor::Process { index, .. }, ProtocolEvent::RenewalFailed(_)) => {
+            (Actor::Process { index, .. }, TaskStep::RenewalFailed(_)) => {
                 self.drop_run(index);
                 self.record_step("RenewFails", format!("(p{})", index + 1));
             }
-            (Actor::Process { index, .. }, ProtocolEvent::Finished { .. }) => {
+            (Actor::Process { index, .. }, TaskStep::Finished { .. }) => {
                 self.drop_run(index);
                 self.record_step("Finish", format!("(p{})", index + 1));
             }
-            (Actor::Process { index, .. }, ProtocolEvent::Abandoned(_)) => {
+            (Actor::Process { index, .. }, TaskStep::Abandoned(_)) => {
                 self.drop_run(index);
                 self.record_step("Abandon", format!("(p{})", index + 1));
             }
-            (actor, event) => {
+            (_, TaskStep::PortCallFailed(_)) => {}
+            (actor, step) => {
                 self.break_rule(format!(
-                    "{actor:?} logged {event:?}, which only the other actor sends"
+                    "{actor:?} logged {step:?}, which only the other actor sends"
                 ));
             }
         }
