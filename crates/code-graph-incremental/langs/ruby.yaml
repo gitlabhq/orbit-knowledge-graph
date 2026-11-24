@@ -32,6 +32,8 @@ data:
   blocks: [block, do_block]
 
 define:
+  modules(ROOT):
+    '(__import)': 'super(ROOT) or file(select(files, ''(__source_file (__def $N:__defname))'' by $N | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase, $ROOT | tag("resolved_source") | split_first("/")))'
   receiver_imports(ROOT):
     '(__call)': '$ROOT | follow(imports, site)'
   unbound_receiver(ROOT):
@@ -150,6 +152,7 @@ canonicalize:
     rewrite:
       - '(identifier)': '(__call (__callee @$ROOT)) #implicit_self=true'
       - '(constant)': '(__call (__callee @$ROOT))'
+      - '(scope_resolution) when @$ROOT | regex_match("^(::)?[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*::[A-Z][A-Z0-9_]*$")': '(rb_ref (__import (__source @$ROOT | regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT | regex_replace("::[^:]+$", "") | strip("::") | replace("::", "/") | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$ROOT | split_last("::"))) (__call (__callee @$ROOT | split_last("::")))) #import_type@__import=Autoload'
       - '(scope_resolution)': '(__call (__callee (__member @$ROOT | split_last("::") (__object @$ROOT | strip("::") | regex_replace("::[^:]+$", "")))))'
   - stage: ssa-cleanup
     rewrite:
@@ -167,7 +170,7 @@ canonicalize:
       - '(__def (__enum_variant))': '#callable=true #value=true'
       - '(__def (__struct))': '#value=true #declares_type=true #scoped=true'
       - use: trait_def_tags
-      - '(__def (__constant))': '#value=true'
+      - '(__def (__constant))': '#value=true #unproven=true #exports=$ROOT | child("__defname")'
   - use: tag_file_dir
   - use: resolve_paths
   - stage: weak-imports
