@@ -117,3 +117,14 @@ forbid:
   - name: "the query compiler does not open a store connection; it only renders SQL (architecture/querying/query-engine.md)"
     symbols: ["clickhouse_client", "duckdb_client", "duckdb::"]
     paths: ["crates/query-engine/compiler/src/**"]
+
+# Functions the dead-code check leaves out: entry points and test helpers,
+# which nothing in the code calls.
+dead:
+  ignore_names: ["main", "Test*", "Benchmark*", "Fuzz*", "test_*"]
+  ignore_paths: ["crates/fuzz/**", "crates/xtask/**", "**/benches/**", "**/build.rs"]
+
+# Test code beyond the shared defaults (tests/, *_test.*, and so on): by
+# path, and by definition name for test modules inside source files.
+test_paths: ["**/tests.rs", "**/testkit/**", "**/test_helpers.rs", "**/test_util*.rs", "crates/integration-testkit/**"]
+test_symbols: ["::tests?::", "::[a-z_]+_tests::", "::fencing::", "::regression::", "::build_validations::"]
