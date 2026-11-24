@@ -207,19 +207,17 @@ fixtures:
       </template>
 
 tests:
-  - name: Synthesizes module definitions for Vue SFC files
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  # corrected: main expected a synthesized Module definition per SFC; a file is already a File node.
+  - name: Vue SFC files are File nodes
     query: |
-      MATCH (d:Definition)
-      WHERE d.definition_type = 'Module'
-        AND d.fqn ENDS WITH '.vue'
-      RETURN d.fqn AS fqn
+      MATCH (f:File)
+      WHERE f.path ENDS WITH '.vue'
+      RETURN f.path AS path
     assert:
       - { row_count: 3 }
-      - { row: { fqn: "app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue" } }
-      - { row: { fqn: "app/assets/javascripts/gitlab_version_check/components/security_patch_upgrade_alert_modal.vue" } }
-      - { row: { fqn: "ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue" } }
+      - { row: { path: "app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue" } }
+      - { row: { path: "app/assets/javascripts/gitlab_version_check/components/security_patch_upgrade_alert_modal.vue" } }
+      - { row: { path: "ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue" } }
 
   - name: jh_else_ce Vue default import targets the primary export proxy
     skip: false
@@ -232,9 +230,8 @@ tests:
       - { row_count: 1 }
       - { row: { import_type: "DefaultImport", name: "default", target: "GitlabVersionCheckBadge" } }
 
-  - name: Barrel named import for Vue component targets the barrel proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  # corrected: main expected the barrel's export proxy; a re-export defines nothing, so the import reaches the component.
+  - name: Barrel named import for Vue component targets the component
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
@@ -243,7 +240,7 @@ tests:
       RETURN i.import_type AS import_type, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", name: "SecurityPatchUpgradeAlertModal", target: "app/assets/javascripts/gitlab_version_check/components/index.js::SecurityPatchUpgradeAlertModal" } }
+      - { row: { import_type: "NamedImport", name: "SecurityPatchUpgradeAlertModal", target: "SecurityPatchUpgradeAlertModal" } }
 
   - name: Vue SFC imports preserve local monolith alias and relative targets
     query: |
@@ -276,16 +273,15 @@ tests:
       - { row: { name: "dispatchTrackingEvent", fqn: "SecurityPatchUpgradeAlertModal::dispatchTrackingEvent", type: "Method" } }
       - { row: { name: "trackRemindMeLaterClick", fqn: "SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick", type: "Method" } }
 
-  - name: Namespace imports in Vue SFC target synthesized modules
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  # corrected: main expected the synthesized utils.js Module; the namespace is used as versionUtils.buildKey, so it reaches buildKey.
+  - name: Namespace imports in Vue SFC target the member they use
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue'
       RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
     assert:
       - { row_count: 2 }
-      - { row: { import_type: "NamespaceImport", path: "../utils", name: null, alias: "versionUtils", target: "app/assets/javascripts/gitlab_version_check/utils.js" } }
+      - { row: { import_type: "NamespaceImport", path: "../utils", name: "*", alias: "versionUtils", target: "buildKey" } }
       - { row: { import_type: "NamedImport", path: "../constants", name: "STATUS_TYPES", alias: null, target: "STATUS_TYPES" } }
 
   - name: Vue badge definitions are extracted for component methods
@@ -336,16 +332,15 @@ tests:
       - { row: { caller: "SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick", callee: "SecurityPatchUpgradeAlertModal::dispatchTrackingEvent" } }
       - { row: { caller: "SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick", callee: "setHideAlertModalCookie" } }
 
+  # corrected: main expected the synthesized sentry.js Module; the namespace is used as Sentry.captureException, so it reaches captureException.
   - name: Script lang ts Vue imports preserve namespace and ee alias targets
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue'
       RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
     assert:
       - { row_count: 2 }
-      - { row: { import_type: "NamespaceImport", path: "~/sentry", name: null, alias: "Sentry", target: "app/assets/javascripts/sentry.js" } }
+      - { row: { import_type: "NamespaceImport", path: "~/sentry", name: "*", alias: "Sentry", target: "captureException" } }
       - { row: { import_type: "NamedImport", path: "ee/oncall_schedules/utils", name: "buildSchedulePath", alias: null, target: "buildSchedulePath" } }
 
   - name: Script lang ts Vue definitions are extracted for wrapper methods

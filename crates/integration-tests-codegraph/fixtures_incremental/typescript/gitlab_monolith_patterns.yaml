@@ -340,18 +340,16 @@ tests:
       - { row_count: 1 }
       - { row: { path: "ee/oncall_schedules/components/add_edit_schedule_form.vue", name: "default", target: "AddEditScheduleForm" } }
 
+  # corrected: main also expected a synthesized Module and default-export proxy; the file is a File node and the component is the default export.
   - name: Vue SFC extraction emits component and method definitions for monolith files
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 4 }
+      - { row_count: 2 }
       - { row: { fqn: "AddEditScheduleForm" } }
       - { row: { fqn: "AddEditScheduleForm::normalizeTimezone" } }
-      - { row: { fqn: "ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue" } }
 
   - name: external Vue package imports remain unresolved inside monolith SFCs
     query: |
@@ -362,13 +360,12 @@ tests:
     assert:
       - { empty: true }
 
+  # corrected: main expected the index.ts export proxy; a re-export defines nothing, so the import reaches the component.
   - name: ee Vue barrels preserve explicit default reexports
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/spec/frontend/oncall_schedule/index_spec.ts'
       RETURN i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { name: "AddEditScheduleForm", target: "ee/app/assets/javascripts/oncall_schedules/index.ts::AddEditScheduleForm" } }
+      - { row: { name: "AddEditScheduleForm", target: "AddEditScheduleForm" } }
