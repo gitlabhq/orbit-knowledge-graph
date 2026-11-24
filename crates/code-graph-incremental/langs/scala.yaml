@@ -56,6 +56,9 @@ canonicalize:
       - '(call_expression function: $F arguments: $A)': '%call($F, $A)'
       - '(instance_expression $T:type_identifier $A:arguments)': '%call($T, $A)'
       - '(instance_expression $T:type_identifier)': '(__call (__callee @$T $T))'
+  - stage: class_flavor
+    rewrite:
+      - '(class_definition ("case") $$$X)': '#flavor=case'
   - stage: classify
     rewrite:
       - '(postfix_expression $N:identifier (identifier "_"))': '(identifier @$N)'
@@ -73,10 +76,10 @@ canonicalize:
       - '(function_definition $M?:modifiers name: $N:identifier $TP?:type_parameters parameters: $P return_type:? $RT:type_identifier body: $B)': '(__def (__defname @$N $N) (__function) (__ssa_return_type? @$RT) $M $P $B)'
       - '(function_definition $M?:modifiers name: $N:identifier $TP?:type_parameters return_type:? $RT:type_identifier body: $B)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M $B)'
       - '(function_declaration $M?:modifiers name: $N:identifier parameters:? $P return_type:? $RT:type_identifier)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M $P)'
-      - '(%classes $M?:modifiers name: $N:identifier $$$PRE (extends_clause $S:__supertype $$$W:__supertype) $B?:template_body)': '(__def (__defname @$N) (__class) $M $$$PRE $S $$$W (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
-      - '(class_definition $M?:modifiers name: $N:identifier $$$PRE $B?:template_body)': '(__def (__defname @$N) (__class) $M $$$PRE $B)'
+      - '(%classes $M?:modifiers name: $N:identifier $$$PRE (extends_clause $S:__supertype $$$W:__supertype) $B?:template_body)': '(__def (__defname @$N) (__class) $M $$$PRE $S $$$W (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B) #flavor=$ROOT | tag("flavor")'
+      - '(class_definition $M?:modifiers name: $N:identifier $$$PRE $B?:template_body)': '(__def (__defname @$N) (__class) $M $$$PRE $B) #flavor=$ROOT | tag("flavor")'
       - '(trait_definition $M?:modifiers name: $N:identifier $$$PRE $B?:template_body)': '(__def (__defname @$N) (__trait) $M $$$PRE $B)'
-      - '(object_definition $M?:modifiers name: $N:identifier $$$PRE $B?:template_body)': '(__def (__defname @$N) (__class) $M $$$PRE $B)'
+      - '(object_definition $M?:modifiers name: $N:identifier $$$PRE $B?:template_body)': '(__def (__defname @$N) (__class) $M $$$PRE $B) #flavor=object'
   - stage: ssa-cleanup
     rewrite:
       - '(block $$$B)': '(__scope $$$B) #hoisted=true'
@@ -102,4 +105,7 @@ display:
       - '$M:__source_file': '#entity=File #fqn=$M | child("__package") #file_path=@$M #language=@$M | split_last(".") | map("scala:scala", "sc:scala")'
       - use: def_fqn_dotted_except_impl
   - use: def_types
+  - stage: def_type_names
+    rewrite:
+      - '(__def (__class))': '#def_type=$ROOT | tag("flavor") | map("case:CaseClass", "object:Object") or "Class"'
   - use: display_wildcard_imports
