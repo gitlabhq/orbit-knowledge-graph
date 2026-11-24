@@ -38,7 +38,7 @@ canonicalize:
     rewrite:
       - '(variable_declaration $N:identifier $D:struct_declaration)': '(__def (__defname @$N) (__struct) $D)'
       - '(variable_declaration $N:identifier $D:enum_declaration)': '(__def (__defname @$N) (__enum) $D)'
-      - '(variable_declaration $N:identifier $D:union_declaration)': '(__def (__defname @$N) (__struct) $D)'
+      - '(variable_declaration $N:identifier $D:union_declaration)': '(__def (__defname @$N) (__struct) $D) #flavor=union'
       - '(variable_declaration (const) $N:identifier $V:__call)': '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N (__declaration) (__rhs $V)))'
       - '(variable_declaration (const) $N:identifier ("=") $V:identifier)': '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N (__declaration) (__rhs @$V $V)))'
       - '(variable_declaration (const) $N:identifier $$$V)': '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N $$$V))'
@@ -49,8 +49,8 @@ canonicalize:
       - '(%loops $$$X)': '%loop($$$X)'
       - '(function_declaration name: $N:identifier $P:parameters type:? $RT:identifier body: $B:block)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
       - '(function_declaration name: $N:identifier $P:parameters $$$R)': '(__def (__defname @$N) (__function) $P)'
-      - '(test_declaration (string $S:string_content) $B:block)': '(__def (__defname @$S) (__function) $B)'
-      - '(test_declaration $B:block)': '(__def (__defname "test") (__function) $B)'
+      - '(test_declaration (string $S:string_content) $B:block)': '(__def (__defname @$S) (__function) $B) #flavor=test'
+      - '(test_declaration $B:block)': '(__def (__defname "test") (__function) $B) #flavor=test'
   - stage: ssa-cleanup
     rewrite:
       - '(block $$$B)': '(__scope $$$B)'
@@ -76,4 +76,10 @@ display:
       - '$M:__source_file': '#entity=File #file_path=@$M #language=@$M | split_last(".") | map("zig:zig")'
       - use: def_fqn_dotted_except_impl
   - use: def_types
+  - stage: def_type_names
+    rewrite:
+      - '(__def (__struct))': '#def_type=$ROOT | tag("flavor") | map("union:Union") or "Struct"'
+      - '(__def (__function))': '#def_type=$ROOT | tag("flavor") | map("test:Test") or "Function"'
+      - '(__def (__constant))': '#def_type=Const'
+      - '(__def (__variable))': '#def_type=Var'
   - use: display_wildcard_imports

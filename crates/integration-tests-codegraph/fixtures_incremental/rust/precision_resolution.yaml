@@ -303,7 +303,7 @@ tests:
       RETURN caller.file_path AS src, callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: "src/lib.rs", fqn: "dep::Service::new", type: "Function" } }
+      - { row: { src: "src/lib.rs", fqn: "dep::Service::new", type: "AssociatedFunction" } }
 
   - name: "generic trait-bound method calls resolve to the trait method"
     query: |

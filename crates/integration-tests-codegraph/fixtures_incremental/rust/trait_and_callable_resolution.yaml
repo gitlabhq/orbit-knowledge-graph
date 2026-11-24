@@ -133,7 +133,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "Function" } }
+      - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "AssociatedFunction" } }
 
   - name: "tuple struct constructor resolves to struct definition"
     query: |
@@ -187,7 +187,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "Function" } }
+      - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "AssociatedFunction" } }
 
   - name: "type alias associated call resolves to underlying impl"
     query: |
@@ -196,7 +196,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "Function" } }
+      - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "AssociatedFunction" } }
 
   - name: "autoderef method call resolves through Deref target"
     query: |
