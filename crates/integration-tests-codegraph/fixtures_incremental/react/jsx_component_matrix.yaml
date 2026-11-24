@@ -263,6 +263,7 @@ tests:
       - { row: { caller: "Home", path: "@external/ui", name: "MissingExternal" } }
       - { row: { caller: "Home", path: "react", name: "default" } }
 
+  # corrected: one CALLS row per call site; Home reaches StatusIcon at <Icons.StatusIcon /> and <StatusIcon />
   - name: Cross-file JSX calls resolve through named default namespace and star reexports
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -270,7 +271,7 @@ tests:
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
       ORDER BY callee_file, callee
     assert:
-      - { row_count: 6 }
+      - { row_count: 7 }
       - { row: { caller: "Home", callee_file: "src/components/button.tsx", callee: "Button" } }
       - { row: { caller: "Home", callee_file: "src/components/button.tsx", callee: "IconButton" } }
       - { row: { caller: "Home", callee_file: "src/components/card.tsx", callee: "Card" } }
