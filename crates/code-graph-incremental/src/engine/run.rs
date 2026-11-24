@@ -139,6 +139,7 @@ pub struct Run<'t, S: Store = Compact> {
     pub(super) memo: Table,
     /// The unfinished calls that results of the current cycle read.
     pub(super) cycle_reads: FxHashSet<Key>,
+    pub(super) reinvoking: FxHashSet<Key>,
     /// Bumped each time a cycle head reruns, retiring results of the last round.
     pub(super) round: u64,
     pub(super) profile: Option<Box<profile::Profile>>,
@@ -165,6 +166,7 @@ impl<'t, S: Store> Run<'t, S> {
             reading: u64::MAX,
             memo: Table::default(),
             cycle_reads: FxHashSet::default(),
+            reinvoking: FxHashSet::default(),
             round: 0,
             profile: profile::ON.then(Box::default),
             vm: None,

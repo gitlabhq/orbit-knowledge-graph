@@ -102,10 +102,6 @@ tests:
       - { row: { caller: use_looped, callee: target } }
 
   - name: "an associated type named after its imported target still resolves calls"
-    # Known gap: `Error` in the impl resolves to the associated type
-    # `type Error = Error;`, whose right-hand side resolves to itself, not to
-    # the import.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'try_from'

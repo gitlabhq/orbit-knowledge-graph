@@ -44,6 +44,7 @@ define:
     '$I:(%import_kinds $ROOT:(__name "*"))': '$I | modules | offered($N) or $I | modules | offered($ROOT)'
     '$I:(%import_kinds $ROOT:__name)': '$I | modules | offered($ROOT)'
   producing(ROOT):
+    '(__call #unwrapped)': '$ROOT | follow(calls, site) | unwrapped_return'
     '(__call)': '$ROOT | follow(calls, site) | returned or $ROOT | type'
     '(__binding $R:__rhs)': '$R | tail | producing or $ROOT | type'
     '(__binding $T:__ssa_typed)': '$T | type'
@@ -55,6 +56,8 @@ define:
     '_ when same(supertypes($ROOT), contract)': '$ROOT'
   linked_file(ROOT): "select(files, '(__source_file)' by $ROOT, @ROOT)"
   linked_section(ROOT, anchor): "select(under(linked_file($ROOT)), '(__def $N:__anchor)', @anchor)"
+  unwrapped_return(ROOT):
+    '(__def (__ssa_return_type $A:__type_arg))': '$A | type'
   returned(ROOT):
     '_ when $ROOT | returns | is_class': '$ROOT | returns'
     '_': 'visible($ROOT | returns, $ROOT)'

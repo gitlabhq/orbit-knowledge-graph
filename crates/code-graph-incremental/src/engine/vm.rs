@@ -408,6 +408,16 @@ impl<'e, S: Store> Vm<'e, S> {
                 (run.key(id, f, &args), deps, Callee::Native(id))
             }
         };
+        // A module answers a reentrant call once from its own state (a lazy walk so far), not a cycle partial.
+        let busy = matches!(run.memo.entries.get(&key), Some(Memo::Busy(_)));
+        if let (true, Callee::Native(id)) = (busy, &callee) {
+            if run.reinvoking.insert(key.clone()) {
+                let found = invoke(run, *id, &args);
+                run.reinvoking.remove(&key);
+                self.values.push(found);
+                return;
+            }
+        }
         match run.memo.entries.get(&key) {
             Some(Memo::Busy(partial)) => {
                 let partial = partial.clone();
