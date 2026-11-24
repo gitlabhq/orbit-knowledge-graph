@@ -1,6 +1,3 @@
-//! Runs the phases of `config/pipeline.yaml` in order over a family's files
-//! and its project tree, each as its `walks:` and `reads:` declare.
-
 mod repository;
 mod state;
 
@@ -24,7 +21,6 @@ pub struct Report {
     pub limited: Vec<Killed>,
     pub unread_files: Vec<String>,
     pub files: HashMap<String, FileStats>,
-    /// What the run's phases wrote to backends, such as export rows.
     pub outputs: Outputs,
 }
 
@@ -127,7 +123,6 @@ fn insert(
     Ok(())
 }
 
-/// Parses one file and runs the phases that walk each file alone.
 fn one_file(
     engine: &Engine,
     file: &SourceFile,
@@ -153,8 +148,6 @@ fn one_file(
     Ok((at.into_compact(engine), edges, cut))
 }
 
-/// A tree before and after it turns Compact, at the first phase that does
-/// not build, and how it turns Compact.
 struct Stage {
     tree: Storage,
     freeze: fn(&Engine, Tree<Mutable>) -> Tree<Compact>,
@@ -174,7 +167,6 @@ impl Stage {
         }
     }
 
-    /// Runs `phase` on the tree, Mutable while the phases so far build it.
     fn run(
         &mut self,
         phase: &Phase,
@@ -231,10 +223,6 @@ fn canonical(engine: &Engine, mut tree: Tree<Mutable>) -> Tree<Compact> {
     tree.compact_and_remap()
 }
 
-/// Runs the phases after the per-file ones over the family's trees and the
-/// project tree the project frontend builds from them. Each phase runs as
-/// its `walks:` and `reads:` declare: shared over every tree it walks, or on
-/// each tree it walks alone.
 pub fn finish(
     engine: &Engine,
     state: &mut State,

@@ -69,21 +69,14 @@ static FUNCTIONS: &[Function<Core>] = &[
         let kind = edge_kind(&a[1]);
         set(nodes(&a[0]).flat_map(|at| cx.targets(kind, at).iter().map(|&to| Val::Node(to))))
     }),
-    function!(Inline, "follow_each", [set, edge], |cx, a| {
-        let kind = edge_kind(&a[1]);
-        nodes(&a[0])
-            .flat_map(|at| cx.targets(kind, at).iter().map(|&to| Val::Node(to)))
-            .collect()
-    }),
     function!(Inline, "follow_at", [set, edge, node_attribute], |cx, a| {
-        set(by_attribute(cx, a))
+        let (kind, slot) = (edge_kind(&a[1]), number(&a[2]) as usize);
+        set(nodes(&a[0]).flat_map(|at| {
+            cx.by_attribute(slot, kind, at)
+                .iter()
+                .map(|&(_, to)| Val::Node(to))
+        }))
     }),
-    function!(
-        Inline,
-        "follow_each_without",
-        [set, edge, symbol_attribute],
-        |cx, a| { by_attribute(cx, a).collect() }
-    ),
     function!(Inline, "select", [set, pattern, set], |cx, a| select(
         cx, a, false
     )),
@@ -221,20 +214,6 @@ fn number(vals: &Vals) -> u32 {
         Some(&Val::Kind(k)) => u32::from(k),
         _ => 0,
     }
-}
-
-/// The target of each edge that the attribute `a[2]` files at a node of
-/// `a[0]`, for the edge kind `a[1]`.
-fn by_attribute<'a, S: Store>(
-    cx: &'a Cx<'_, '_, Core, S>,
-    a: &'a [Vals],
-) -> impl Iterator<Item = Val> + 'a {
-    let (kind, slot) = (edge_kind(&a[1]), number(&a[2]) as usize);
-    nodes(&a[0]).flat_map(move |at| {
-        cx.by_attribute(slot, kind, at)
-            .iter()
-            .map(|&(_, to)| Val::Node(to))
-    })
 }
 
 fn edge_kind(vals: &Vals) -> EdgeKind {

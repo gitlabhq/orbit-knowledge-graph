@@ -406,8 +406,6 @@ impl Tables {
     }
 }
 
-/// The rows the last run of `state` wrote, as `(table, batch)` per table,
-/// the edge table last.
 pub fn export(
     engine: &Engine,
     state: &State,

@@ -178,43 +178,47 @@ export:
     - '(%imports !(__name "/./"))': >-
         row(contains, $ROOT, source_id: $ROOT | tree_root, source_kind: "File", relationship_kind: "IMPORTS",
           target_id: $ROOT, target_kind: "ImportedSymbol", traversal_path: "")
-  graph:
-    - '(__def)':
-        - >-
+  calls:
+    - '(__def) --calls--> $T': >-
           row(to_definition, $ROOT, source_id: $ROOT, source_kind: "Definition", relationship_kind: "CALLS",
-            target_id: $ROOT | follow_each(calls), target_kind: "Definition", traversal_path: "")
-        - >-
-          row(to_definition, $ROOT, source_id: $ROOT, source_kind: "Definition", relationship_kind: "DEFINES",
-            target_id: $ROOT | follow_each(defines), target_kind: "Definition", traversal_path: "")
-        - >-
-          row(to_definition, $ROOT, source_id: $ROOT, source_kind: "Definition", relationship_kind: "EXTENDS",
-            target_id: $ROOT | follow_each(extends), target_kind: "Definition", traversal_path: "")
-        - >-
-          row(to_imported_symbol, $ROOT, source_id: $ROOT, source_kind: "Definition", relationship_kind: "CALLS",
-            target_id: $ROOT | follow_each_without(imports, resolution) | dangling, target_kind: "ImportedSymbol", traversal_path: "")
-    - '(__source_file)':
-        - >-
+            target_id: $T, target_kind: "Definition", traversal_path: "")
+    - '(__source_file) --calls--> $T': >-
           row(to_definition, $ROOT, source_id: $ROOT, source_kind: "File", relationship_kind: "CALLS",
-            target_id: $ROOT | follow_each(calls), target_kind: "Definition", traversal_path: "")
-        - >-
-          row(to_file, $ROOT, source_id: $ROOT, source_kind: "File", relationship_kind: "IMPORTS",
-            target_id: $ROOT | follow_each(links), target_kind: "File", traversal_path: "")
-        - >-
-          row(to_definition, $ROOT, source_id: $ROOT, source_kind: "File", relationship_kind: "IMPORTS",
-            target_id: $ROOT | follow_each(links), target_kind: "Definition", traversal_path: "")
+            target_id: $T, target_kind: "Definition", traversal_path: "")
     - '(__module_export (%imports $ROOT:__name))': none
     - '(__module_export $ROOT:%imports)': none
-    - '(%imports $ROOT:(__name "/./"))':
-        - >-
+    - '(%imports $ROOT:(__name "/./")) --calls--> $T': >-
           row(to_definition, $ROOT, source_id: $ROOT, source_kind: "ImportedSymbol", relationship_kind: "CALLS",
-            target_id: $ROOT | follow_each(calls), target_kind: "Definition", traversal_path: "")
-        - >-
-          row(to_definition, $ROOT, source_id: $ROOT, source_kind: "ImportedSymbol", relationship_kind: "IMPORTS",
-            target_id: $ROOT | follow_each(imports), target_kind: "Definition", traversal_path: "")
-    - '(%imports !(__name "/./"))':
-        - >-
+            target_id: $T, target_kind: "Definition", traversal_path: "")
+    - '(%imports !(__name "/./")) --calls--> $T': >-
           row(to_definition, $ROOT, source_id: $ROOT, source_kind: "ImportedSymbol", relationship_kind: "CALLS",
-            target_id: $ROOT | follow_each(calls), target_kind: "Definition", traversal_path: "")
+            target_id: $T, target_kind: "Definition", traversal_path: "")
+  defines:
+    - '(__def) --defines--> $T': >-
+          row(to_definition, $ROOT, source_id: $ROOT, source_kind: "Definition", relationship_kind: "DEFINES",
+            target_id: $T, target_kind: "Definition", traversal_path: "")
+  extends:
+    - '(__def) --extends--> $T': >-
+          row(to_definition, $ROOT, source_id: $ROOT, source_kind: "Definition", relationship_kind: "EXTENDS",
+            target_id: $T, target_kind: "Definition", traversal_path: "")
+  dangling:
+    - '(__def) --imports !resolution--> $T': >-
+          row(to_imported_symbol, $ROOT, source_id: $ROOT, source_kind: "Definition", relationship_kind: "CALLS",
+            target_id: $T | dangling, target_kind: "ImportedSymbol", traversal_path: "")
+  links:
+    - '(__source_file) --links--> $T':
         - >-
+            row(to_file, $ROOT, source_id: $ROOT, source_kind: "File", relationship_kind: "IMPORTS",
+              target_id: $T, target_kind: "File", traversal_path: "")
+        - >-
+            row(to_definition, $ROOT, source_id: $ROOT, source_kind: "File", relationship_kind: "IMPORTS",
+              target_id: $T, target_kind: "Definition", traversal_path: "")
+  imports:
+    - '(__module_export (%imports $ROOT:__name))': none
+    - '(__module_export $ROOT:%imports)': none
+    - '(%imports $ROOT:(__name "/./")) --imports--> $T': >-
           row(to_definition, $ROOT, source_id: $ROOT, source_kind: "ImportedSymbol", relationship_kind: "IMPORTS",
-            target_id: $ROOT | follow_each(imports), target_kind: "Definition", traversal_path: "")
+            target_id: $T, target_kind: "Definition", traversal_path: "")
+    - '(%imports !(__name "/./")) --imports--> $T': >-
+          row(to_definition, $ROOT, source_id: $ROOT, source_kind: "ImportedSymbol", relationship_kind: "IMPORTS",
+            target_id: $T, target_kind: "Definition", traversal_path: "")

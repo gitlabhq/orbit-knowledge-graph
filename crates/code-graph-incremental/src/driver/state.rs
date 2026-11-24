@@ -31,8 +31,7 @@ pub struct State {
     pub edges: Vec<Edge>,
     /// Manifest files (`parse_files`) the resolver reads for module roots.
     pub configs: Vec<SourceFile>,
-    /// The project tree of the last run, which its export rows point into;
-    /// each run builds it again, so a snapshot leaves it out.
+    /// Rebuilt by every run, so snapshots leave it out.
     pub project: Option<Tree<Compact>>,
 }
 

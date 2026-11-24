@@ -8,8 +8,6 @@ pub enum Step<R> {
     Out(R),
 }
 
-/// The trees a walk reaches by file index: a family's files, then its
-/// project tree, if the walk reads it, at index `files.len()`.
 pub struct Trees<'a, S: Storage = Mutable> {
     pub files: &'a [Tree<S>],
     pub project: Option<&'a Tree<S>>,
@@ -43,7 +41,6 @@ impl<'a, S: Storage> Trees<'a, S> {
         self.files.len() as u32
     }
 
-    /// The project tree's file index, if the walk reads it.
     pub fn project_fi(self) -> Option<u32> {
         self.project.map(|_| self.files())
     }

@@ -13,10 +13,6 @@ use crate::tree::{Edge, EdgeAttribute, EdgeKind};
 /// An edge's kind, file and node at one end.
 pub type End = (EdgeKind, u32, u32);
 
-/// The edges of a family and their indexes, each built on its first read:
-/// from each node, to each node, and by each declared attribute. A node
-/// attribute files each edge at its node; a symbol attribute files the
-/// edges that lack it at their source.
 #[derive(Default)]
 pub struct Graph {
     edges: Vec<Edge>,
@@ -27,7 +23,6 @@ pub struct Graph {
 }
 
 /// Every end a graph read can look an edge up by: its source, its target,
-/// and the nodes its node attributes name.
 pub fn ends<'a>(attributes: &'a [EdgeAttribute], e: &'a Edge) -> impl Iterator<Item = End> + 'a {
     let at = attributes
         .iter()
@@ -71,7 +66,6 @@ impl Graph {
             .map_or(&[], |t| t.as_slice())
     }
 
-    /// The edges of `kind` the attribute in `slot` files at `at`, as (from, to).
     pub fn by_attribute(&self, slot: usize, kind: EdgeKind, at: Loc) -> &[(Loc, Loc)] {
         let Some(lock) = self.by_attribute.get(slot) else {
             return &[];

@@ -395,8 +395,6 @@ pub enum Write {
     },
 }
 
-/// The only surface a module sees: navigation, its own state, calls through
-
 impl<S: Store> Drop for Run<'_, S> {
     fn drop(&mut self) {
         let Some(mut p) = self.profile.take() else {

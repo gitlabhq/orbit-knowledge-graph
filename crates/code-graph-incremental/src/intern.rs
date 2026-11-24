@@ -84,7 +84,6 @@ pub struct Lang {
     pub vocabulary: Interner,
     /// The kinds the engine's own tree builders use, bound in pipeline.yaml.
     pub tree: std::sync::OnceLock<crate::tree::TreeKinds>,
-    /// The attributes edges carry, by slot, as pipeline.yaml declares them.
     pub edge_attributes: std::sync::OnceLock<Vec<crate::edge::EdgeAttribute>>,
 }
 
@@ -139,7 +138,6 @@ impl Lang {
         self.edge_attributes.get().map_or(&[], Vec::as_slice)
     }
 
-    /// A declared edge attribute's slot by name.
     pub fn edge_attribute(&self, name: &str) -> Option<usize> {
         self.edge_attributes().iter().position(|a| a.name == name)
     }

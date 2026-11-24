@@ -31,6 +31,7 @@ pub(super) struct Match {
     pub(super) kinds: Vec<u16>,
     pub(super) slots: Slots,
     pub(super) lang: Option<u8>,
+    pub(super) edge: Option<(crate::tree::EdgeKind, Option<u8>)>,
 }
 
 impl Match {
@@ -213,7 +214,6 @@ pub struct Phase {
     pub name: String,
     pub label: &'static str,
     pub budget: BudgetSpec,
-    /// The trees the phase walks, and the trees each walk reads besides its own.
     pub walks: TreeSets,
     pub reads: TreeSets,
     /// Reruns over the family until its edges stop changing.
@@ -239,7 +239,6 @@ pub struct Phase {
     pub(super) region_by_lang: Vec<Vec<u16>>,
 }
 
-/// A family's tree sets: its files, and its project tree.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct TreeSets {
     pub files: bool,
@@ -253,14 +252,10 @@ impl TreeSets {
 }
 
 impl Phase {
-    /// Whether each walk reads trees the phase also walks. Its trees are then
-    /// read only, it writes edges and rows, and they land when it ends.
     pub fn shared(&self) -> bool {
         self.walks.meets(self.reads)
     }
 
-    /// Whether the phase walks each file alone, so it can run as the file
-    /// is parsed.
     pub fn per_file(&self) -> bool {
         self.walks
             == TreeSets {
@@ -299,7 +294,6 @@ impl Phase {
 pub struct Pipeline {
     pub registry: super::Registry,
     pub phases: Vec<Phase>,
-    /// The row shapes of `tables:`, by the index rules name them with.
     pub rows: Vec<RowShape>,
     pub(super) settings: Vec<BTreeMap<String, DataSpec>>,
 }
@@ -310,7 +304,6 @@ impl Pipeline {
         self.settings.get(rules)?.get(name)
     }
 
-    /// The leading phases that walk each file alone, and the rest.
     pub fn split(&self) -> (&[Phase], &[Phase]) {
         let at = self
             .phases

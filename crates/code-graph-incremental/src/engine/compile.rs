@@ -24,8 +24,6 @@ use crate::tree::{EDGE_ATTRIBUTES, EdgeAttribute, EdgeKind};
 struct PipelineSpec {
     scopes: Vec<String>,
     edges: Vec<String>,
-    /// Each attribute edges can carry, and whether its values are a `node`
-    /// or a `symbol`.
     #[serde(default)]
     edge_attributes: BTreeMap<String, String>,
     kinds: Vec<String>,
@@ -265,7 +263,6 @@ fn walk_of(spec: &PhaseSpec) -> Result<(bool, bool), LoadError> {
     Ok((post, stable))
 }
 
-/// An edge field's expression text.
 fn edge_text(v: &Value) -> Result<&str, LoadError> {
     match v {
         Value::String(s) => Ok(s.as_str()),
@@ -273,7 +270,28 @@ fn edge_text(v: &Value) -> Result<&str, LoadError> {
     }
 }
 
-/// The edge attributes pipeline.yaml declares, by slot.
+/// `pattern --kind--> $T`, or `pattern --kind !attribute--> $T` for the edges that lack it.
+fn edge_step(src: &str) -> Result<(&str, Option<(&str, Option<&str>, &str)>), LoadError> {
+    let Some((pattern, step)) = src.rsplit_once(" --").filter(|(_, s)| s.contains("--> $")) else {
+        return Ok((src, None));
+    };
+    let (edge, target) = step
+        .split_once("--> $")
+        .expect("the filter found the arrow");
+    let mut words = edge.split_whitespace();
+    let kind = words
+        .next()
+        .ok_or_else(|| LoadError("an edge step names an edge kind".into()))?;
+    let lacking = words
+        .next()
+        .map(|w| {
+            w.strip_prefix('!')
+                .ok_or_else(|| LoadError(format!("an edge step filter is !attribute, not {w}")))
+        })
+        .transpose()?;
+    Ok((pattern.trim_end(), Some((kind, lacking, target.trim()))))
+}
+
 fn edge_attributes(spec: &PipelineSpec) -> Result<Vec<EdgeAttribute>, LoadError> {
     if spec.edge_attributes.len() > EDGE_ATTRIBUTES {
         return Err(LoadError(format!(
@@ -300,7 +318,6 @@ fn edge_attributes(spec: &PipelineSpec) -> Result<Vec<EdgeAttribute>, LoadError>
         .collect()
 }
 
-/// The tree sets a phase's `walks:` or `reads:` names.
 fn tree_sets(spec: &PhaseSpec, names: &[String]) -> Result<TreeSets, LoadError> {
     let mut sets = TreeSets::default();
     for name in names {
@@ -318,8 +335,6 @@ fn tree_sets(spec: &PhaseSpec, names: &[String]) -> Result<TreeSets, LoadError> 
     Ok(sets)
 }
 
-/// Fails when a phase writes trees that other walks of it read, or walks
-/// files and the project tree while writing them.
 fn check_walks(phase: &Phase) -> Result<(), LoadError> {
     let err = |why: &str| Err(LoadError(format!("phase {}: {why}", phase.name)));
     if phase.walks == TreeSets::default() {
@@ -703,6 +718,27 @@ impl<'a> Loader<'a> {
         Expr::parse(src, &self.scope(slots, effects, None))
     }
 
+    fn edge_step(
+        &self,
+        kind: &str,
+        lacking: Option<&str>,
+    ) -> Result<(EdgeKind, Option<u8>), LoadError> {
+        let edge = self
+            .lang
+            .edge_kind(kind)
+            .ok_or_else(|| LoadError(format!("edge kind {kind} is not in pipeline.yaml edges")))?;
+        let lacking = lacking
+            .map(|name| {
+                self.lang
+                    .edge_attribute(name)
+                    .filter(|&slot| !self.lang.edge_attributes()[slot].node)
+                    .map(|slot| slot as u8)
+                    .ok_or_else(|| LoadError(format!("{name} is not a symbol edge attribute")))
+            })
+            .transpose()?;
+        Ok((edge, lacking))
+    }
+
     /// A pattern and its guard, written `pattern when guard`.
     fn matcher(
         &self,
@@ -743,6 +779,7 @@ impl<'a> Loader<'a> {
             kinds,
             slots,
             lang,
+            edge: None,
         };
         Ok((m, guard))
     }
@@ -1009,11 +1046,25 @@ impl<'a> Loader<'a> {
                     let err = |e: LoadError| {
                         LoadError(format!("{}: {:?}: {}", pair.origin, pair.pattern, e.0))
                     };
-                    let (m, guard) = self
-                        .matcher(&pair.pattern, pair.when.as_deref(), owner, &[])
+                    let (pattern, step) = edge_step(&pair.pattern).map_err(err)?;
+                    let (mut m, guard) = self
+                        .matcher(pattern, pair.when.as_deref(), owner, &[])
                         .map_err(err)?;
                     let cell = RefCell::new(m.slots.clone());
-                    let value = self.group_value(&pair.value, &cell).map_err(err)?;
+                    let step = step
+                        .map(|(kind, lacking, target)| {
+                            let edge = self.edge_step(kind, lacking)?;
+                            Ok::<_, LoadError>((edge, cell.borrow_mut().slot(target)))
+                        })
+                        .transpose()
+                        .map_err(err)?;
+                    let mut value = self.group_value(&pair.value, &cell).map_err(err)?;
+                    if let Some(((kind, lacking), target)) = step {
+                        m.edge = Some((kind, lacking));
+                        m.src = pair.pattern.as_str().into();
+                        let edges = Box::new(Expr::Edges(kind, lacking));
+                        value = Expr::Every(edges, target, Box::new(value));
+                    }
                     slots = slots.max(cell.borrow().len());
                     cases.push((group as u16, (Some(m), guard, value)));
                 }
@@ -1030,8 +1081,6 @@ impl<'a> Loader<'a> {
         })
     }
 
-    /// `{ kind: targets, ... }`; targets are an expression, a map with `to`,
-    /// `from` and declared edge attributes, or a list of those. `none` writes
     /// nothing and stops the group.
     fn edges(&self, value: &Value, slots: &RefCell<Slots>) -> Result<Expr, LoadError> {
         let map = match value {
@@ -1057,8 +1106,6 @@ impl<'a> Loader<'a> {
     }
 
     /// An edge's write: from the innermost scope above the node unless it
-    /// says otherwise, with the attributes it names. A symbol attribute is a
-    /// fixed name, or an expression over each target, read as `TARGET`.
     fn edge(
         &self,
         kind: EdgeKind,

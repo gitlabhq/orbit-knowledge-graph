@@ -19,9 +19,6 @@ use crate::intern::Lang;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Edge, Mutable, Storage};
 
-/// Runs a phase on one tree it writes, with the rules at `rules` or the
-/// tree's own, reading `project` besides and the graph with the tree as its
-/// file there; returns the edges it wrote and its backends' outputs.
 pub fn run_tree<S: Store>(
     phase: &Phase,
     tree: &mut Tree<S>,
@@ -141,8 +138,6 @@ fn region_nodes<S: Store>(
         .collect()
 }
 
-/// What a shared phase wrote: its edges, its backends' outputs, and the
-/// reason it stopped early, if it did.
 #[derive(Default)]
 pub struct Ran {
     pub edges: Vec<Edge>,
@@ -150,11 +145,7 @@ pub struct Ran {
     pub stopped: Option<Killed>,
 }
 
-/// Runs a shared phase on the trees at `walk`, each walk reading every tree
-/// and the graph so far; an `until: stable` phase reruns with its own edges
-/// in the graph until they stop changing. A rerun walks only the trees that
 /// read an end of an edge the last round added or dropped; the others would
-/// write what they wrote.
 pub fn run_shared(
     phase: &Phase,
     trees: Trees<'_>,
@@ -237,8 +228,6 @@ struct FileRun {
     reads: FxHashSet<End>,
 }
 
-/// Runs a phase on the trees at `walk` in parallel, each region of a tree
-/// under its own rules.
 fn run_files(
     phase: &Phase,
     trees: Trees<'_>,
@@ -303,7 +292,6 @@ struct On<'a, S: Store> {
     /// The region the walk covers: the tree's root or a region node.
     region: u32,
     engine: &'a Engine,
-    /// The graph, and the walked tree's file in it.
     graph: Option<(&'a Graph, u32)>,
     project: Option<&'a Tree<S>>,
     budget: &'a Sentinel,

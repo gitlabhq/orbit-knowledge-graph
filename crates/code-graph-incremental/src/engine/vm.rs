@@ -605,6 +605,9 @@ impl<'e, S: Store> Vm<'e, S> {
             let matched = match (pat, t.args[0].first().and_then(|v| v.loc())) {
                 (Some(m), Some(h)) => {
                     t.w.matches(run, m, Cursor::new(run.input.trees, h.fi, h.node))
+                        && m.edge.is_none_or(|(kind, lacking)| {
+                            !edge_targets(run, kind, lacking, &t.w.vals[0]).is_empty()
+                        })
                 }
                 (Some(_), None) => false,
                 (None, _) => {
@@ -725,6 +728,7 @@ impl<'e, S: Store> Vm<'e, S> {
             Expr::Lit(val) => SmallVec::from_elem(*val, 1),
             Expr::Empty => Vals::new(),
             Expr::Data(at) => run.phase.data[run.input.rules][usize::from(*at)].clone(),
+            Expr::Edges(kind, lacking) => edge_targets(run, *kind, *lacking, &self.envs[env][0]),
             _ => return None,
         })
     }
@@ -755,6 +759,31 @@ fn attempted<S: Store>(run: &mut Run<'_, S>, t: &Trying<'_, S>, fired: bool) {
 fn is_leaf(expr: &Expr) -> bool {
     matches!(
         expr,
-        Expr::Var(_) | Expr::Lit(_) | Expr::Empty | Expr::Data(_)
+        Expr::Var(_) | Expr::Lit(_) | Expr::Empty | Expr::Data(_) | Expr::Edges(..)
     )
+}
+
+fn edge_targets<S: Store>(
+    run: &Run<'_, S>,
+    kind: crate::tree::EdgeKind,
+    lacking: Option<u8>,
+    roots: &Vals,
+) -> Vals {
+    let Some(graph) = run.input.graph else {
+        return Vals::new();
+    };
+    let mut out = Vals::new();
+    for at in roots.iter().filter_map(|v| v.loc()) {
+        run.graph_reads.borrow_mut().push((kind, at.fi, at.node));
+        match lacking {
+            None => out.extend(graph.targets(kind, at).iter().map(|&to| Val::Node(to))),
+            Some(slot) => out.extend(
+                graph
+                    .by_attribute(usize::from(slot), kind, at)
+                    .iter()
+                    .map(|&(_, to)| Val::Node(to)),
+            ),
+        }
+    }
+    out
 }

@@ -24,10 +24,7 @@ pub enum Arg {
     Set,
     /// An edge kind's name, a number once the rules load.
     Edge,
-    /// A declared edge attribute's name, its slot once the rules load: one
-    /// whose values are nodes, or one whose values are symbols.
     NodeAttribute,
-    SymbolAttribute,
     /// `'pattern' [by key]`: a declared index, its id once the rules load.
     Pattern,
     /// A row shape's name, a number once the rules load; the call's named
@@ -121,7 +118,6 @@ impl Outputs {
         }
     }
 
-    /// Backend `B`'s merged output, if the run wrote any.
     pub fn get<B: Backend>(&self) -> Option<&B::Output> {
         self.0
             .iter()
@@ -513,7 +509,6 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
         self.run.input.graph.map_or(&[], |g| g.targets(kind, from))
     }
 
-    /// The edges of `kind` the attribute in `slot` files at `at`, as (from, to).
     pub fn by_attribute(&self, slot: usize, kind: EdgeKind, at: Loc) -> &'t [(Loc, Loc)] {
         self.run
             .graph_reads
@@ -530,7 +525,6 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
         self.run.input.trees.files()
     }
 
-    /// The project tree's root, when the phase reads it.
     pub fn project(&self) -> Option<Cursor<'t, S>> {
         let trees = self.run.input.trees;
         trees.project_fi().map(|fi| Cursor::new(trees, fi, 0))

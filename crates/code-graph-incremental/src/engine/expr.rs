@@ -1,3 +1,4 @@
+use crate::tree::EdgeKind;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -19,6 +20,8 @@ pub enum Expr {
     First(Box<Expr>, u16, Box<Expr>),
     /// The values every element's body yields.
     Every(Box<Expr>, u16, Box<Expr>),
+    /// Only edge steps build this, so no value a rule sees repeats.
+    Edges(EdgeKind, Option<u8>),
 }
 
 /// A `select` pattern and its key, shared by every phase so trees can keep
@@ -339,19 +342,15 @@ impl<'s> Parser<'s, '_> {
                             })?;
                             args.push(Expr::Lit(Val::Sym(u32::from(kind.0))));
                         }
-                        Arg::NodeAttribute | Arg::SymbolAttribute => {
+                        Arg::NodeAttribute => {
                             self.space();
                             let name = self.ident();
                             let lang = self.scope.lang;
-                            let node = sig[args.len().min(sig.len() - 1)] == Arg::NodeAttribute;
                             let slot = lang
                                 .edge_attribute(name)
-                                .filter(|&slot| lang.edge_attributes()[slot].node == node)
+                                .filter(|&slot| lang.edge_attributes()[slot].node)
                                 .ok_or_else(|| {
-                                    self.error(&format!(
-                                        "{name} is not a declared {} edge attribute",
-                                        if node { "node" } else { "symbol" }
-                                    ))
+                                    self.error(&format!("{name} is not a node edge attribute"))
                                 })?;
                             args.push(Expr::Lit(Val::Sym(slot as u32)));
                         }
