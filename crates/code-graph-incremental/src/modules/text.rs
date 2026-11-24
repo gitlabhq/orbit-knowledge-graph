@@ -224,15 +224,16 @@ fn at<'t, S: Store>(
     }
 }
 
-fn regex(src: &str) -> Option<Regex> {
+/// A shared instance keeps one warm matcher cache; a cloned Regex starts with an empty one.
+fn regex(src: &str) -> Option<std::rc::Rc<Regex>> {
     thread_local! {
-        static CACHE: RefCell<FxHashMap<Box<str>, Option<Regex>>> = RefCell::default();
+        static CACHE: RefCell<FxHashMap<Box<str>, Option<std::rc::Rc<Regex>>>> = RefCell::default();
     }
     CACHE.with_borrow_mut(|cache| {
         if let Some(re) = cache.get(src) {
             return re.clone();
         }
-        let re = Regex::new(src).ok();
+        let re = Regex::new(src).ok().map(std::rc::Rc::new);
         cache.insert(src.into(), re.clone());
         re
     })
