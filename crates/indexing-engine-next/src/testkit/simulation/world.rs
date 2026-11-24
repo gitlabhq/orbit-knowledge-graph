@@ -14,7 +14,7 @@ use crate::lease::{Fence, Generation, HolderId, Lease, Revision};
 use crate::task::{TaskId, TaskMessage};
 
 pub(super) const TICK: Duration = Duration::from_secs(20);
-pub(super) const ACKNOWLEDGE_WAIT_TICKS: u64 = 2;
+pub(super) const ACK_WAIT_TICKS: u64 = 2;
 const MAX_CALLS_PER_TICK: u64 = 10_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,7 +131,7 @@ impl SharedWorld {
             pending: SimulatedKeyValue::default(),
             nats_generation: Some(Generation(1)),
             recover_at: None,
-            broker: SimulatedBroker::new(ACKNOWLEDGE_WAIT_TICKS),
+            broker: SimulatedBroker::new(ACK_WAIT_TICKS),
             payloads: HashMap::new(),
             database: SimulatedDatabase::default(),
             processes,

@@ -19,7 +19,7 @@ const UNIT: Duration = Duration::from_secs(20);
 const OFFSETS: [u64; 2] = [0, 1];
 const TTL: u32 = 3;
 const SKEW_MARGIN: u32 = 1;
-const ACKNOWLEDGE_WAIT: u64 = 2;
+const ACK_WAIT: u64 = 2;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Bounds {
@@ -272,7 +272,7 @@ impl Cluster {
             lease: SimulatedKeyValue::default(),
             pending: SimulatedKeyValue::default(),
             generation,
-            broker: SimulatedBroker::new(ACKNOWLEDGE_WAIT),
+            broker: SimulatedBroker::new(ACK_WAIT),
             database,
             faults: bounds.faults,
             next_id: 1,
@@ -512,7 +512,7 @@ impl Cluster {
                     hold.record_renewal(&self.rules, &lease, written, local_now);
                 }
                 if let Some(c) = self.holders[h].held {
-                    self.broker.acknowledge_progress(c, h, self.clock.ticks());
+                    self.broker.ack_progress(c, h, self.clock.ticks());
                 }
             }
             Renewal::Lost => {
@@ -549,7 +549,7 @@ impl Cluster {
 
     fn finish(&mut self, h: usize) {
         if let Some(c) = self.holders[h].held {
-            self.broker.acknowledge(c);
+            self.broker.ack(c);
         }
         let release = self
             .holds(h)

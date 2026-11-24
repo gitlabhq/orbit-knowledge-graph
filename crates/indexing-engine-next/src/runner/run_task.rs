@@ -104,7 +104,7 @@ impl Runner {
         }
 
         let now = self.ports.clock.now().await;
-        if let Err(error) = delivery.in_flight.acknowledge().await {
+        if let Err(error) = delivery.in_flight.ack().await {
             self.observe_port_call_failure(message, now, Failure::new("ack_failed", error));
         }
 

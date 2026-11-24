@@ -59,9 +59,8 @@ impl Leases {
             }
             None => {
                 let delay = self.rules.renew_every;
-                if let Err(error) = in_flight.negative_acknowledge(delay).await {
-                    let failed =
-                        TaskStep::PortCallFailed(Failure::new("negative_ack_failed", error));
+                if let Err(error) = in_flight.nack(delay).await {
+                    let failed = TaskStep::PortCallFailed(Failure::new("nack_failed", error));
                     self.observer.observe(&message.build_event(now, failed));
                 }
                 let given_back = TaskStep::GivenBack { delay };
@@ -86,8 +85,8 @@ impl Leases {
             now = self.clock.now().await;
             match self.extend_if_ours(hold, &key, now).await {
                 Ok(true) => {
-                    if let Err(error) = in_flight.acknowledge_progress().await {
-                        let failure = Failure::new("progress_ack_failed", error);
+                    if let Err(error) = in_flight.ack_progress().await {
+                        let failure = Failure::new("ack_progress_failed", error);
                         let failed = TaskStep::PortCallFailed(failure);
                         self.observer.observe(&message.build_event(now, failed));
                     }

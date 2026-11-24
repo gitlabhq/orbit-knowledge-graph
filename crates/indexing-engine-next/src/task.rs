@@ -40,9 +40,9 @@ pub(crate) trait TaskQueue: Send + Sync {
 
 #[async_trait]
 pub(crate) trait InFlight: Send + Sync {
-    async fn acknowledge(&self) -> anyhow::Result<()>;
-    async fn acknowledge_progress(&self) -> anyhow::Result<()>;
-    async fn negative_acknowledge(&self, delay: Duration) -> anyhow::Result<()>;
+    async fn ack(&self) -> anyhow::Result<()>;
+    async fn ack_progress(&self) -> anyhow::Result<()>;
+    async fn nack(&self, delay: Duration) -> anyhow::Result<()>;
 }
 
 impl TaskId {

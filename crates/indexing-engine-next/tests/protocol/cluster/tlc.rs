@@ -67,7 +67,7 @@ pub(super) fn state_lines(cluster: &Cluster) -> Vec<String> {
             let state = match message.state {
                 MessageState::Ready => "ready",
                 MessageState::Inflight => "inflight",
-                MessageState::Acknowledged => "acked",
+                MessageState::Acked => "acked",
                 MessageState::Lost => "lost",
             };
             format!(

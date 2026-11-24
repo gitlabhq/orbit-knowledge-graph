@@ -44,22 +44,22 @@ fn a_publish_of_a_task_with_a_live_message_adds_no_message() {
     broker.publish(task(1));
     assert_eq!(broker.messages().len(), 1);
 
-    broker.acknowledge(0);
+    broker.ack(0);
     broker.publish(task(1));
     assert_eq!(broker.messages().len(), 2);
 }
 
 #[test]
-fn a_message_comes_back_after_the_acknowledge_wait_unless_its_consumer_acknowledges_progress() {
+fn a_message_comes_back_after_the_ack_wait_unless_its_consumer_acks_progress() {
     let mut broker = SimulatedBroker::new(2);
     broker.publish(task(1));
     broker.deliver(0, 0, 10);
 
     assert_eq!(broker.expired_messages(11).count(), 0);
-    broker.acknowledge_progress(0, 1, 11);
+    broker.ack_progress(0, 1, 11);
     assert_eq!(broker.expired_messages(12).collect::<Vec<_>>(), [0]);
 
-    broker.acknowledge_progress(0, 0, 11);
+    broker.ack_progress(0, 0, 11);
     assert_eq!(broker.expired_messages(12).count(), 0);
 
     broker.redeliver(0);
@@ -68,12 +68,12 @@ fn a_message_comes_back_after_the_acknowledge_wait_unless_its_consumer_acknowled
 }
 
 #[test]
-fn a_negative_acknowledge_frees_the_message_and_brings_it_back_after_the_delay() {
+fn a_nack_frees_the_message_and_brings_it_back_after_the_delay() {
     let mut broker = SimulatedBroker::new(2);
     broker.publish(task(1));
     broker.deliver(0, 0, 10);
 
-    broker.negative_acknowledge(0, 11);
+    broker.nack(0, 11);
 
     assert_eq!(broker.messages()[0].consumer, None);
     assert_eq!(broker.expired_messages(10).count(), 0);
@@ -81,11 +81,11 @@ fn a_negative_acknowledge_frees_the_message_and_brings_it_back_after_the_delay()
 }
 
 #[test]
-fn a_negative_acknowledge_of_a_message_that_is_not_in_flight_changes_nothing() {
+fn a_nack_of_a_message_that_is_not_in_flight_changes_nothing() {
     let mut broker = SimulatedBroker::new(2);
     broker.publish(task(1));
 
-    broker.negative_acknowledge(0, 11);
+    broker.nack(0, 11);
 
     assert_eq!(broker.messages()[0].state, MessageState::Ready);
     assert_eq!(broker.ready_messages().collect::<Vec<_>>(), [0]);
@@ -126,25 +126,21 @@ fn a_wiped_key_value_entry_starts_its_revisions_again() {
 }
 
 #[test]
-fn a_wipe_loses_every_live_message_and_an_acknowledge_cannot_bring_one_back() {
+fn a_wipe_loses_every_live_message_and_an_ack_cannot_bring_one_back() {
     let mut broker = SimulatedBroker::new(2);
     broker.publish(task(1));
     broker.publish(task(2));
     broker.deliver(1, 0, 0);
-    broker.acknowledge(1);
+    broker.ack(1);
     broker.publish(task(3));
 
     broker.wipe();
-    broker.acknowledge(0);
+    broker.ack(0);
 
     let states: Vec<MessageState> = broker.messages().iter().map(|m| m.state).collect();
     assert_eq!(
         states,
-        [
-            MessageState::Lost,
-            MessageState::Acknowledged,
-            MessageState::Lost
-        ]
+        [MessageState::Lost, MessageState::Acked, MessageState::Lost]
     );
     assert!(!broker.has_live_message(task(1)));
 }

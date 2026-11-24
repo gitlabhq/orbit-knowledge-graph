@@ -106,29 +106,25 @@ impl TaskQueue for SimulatedPorts {
 
 #[async_trait]
 impl InFlight for SimulatedInFlight {
-    async fn acknowledge(&self) -> anyhow::Result<()> {
+    async fn ack(&self) -> anyhow::Result<()> {
         self.world.stop_unless_allowed(self.actor).await;
-        self.world.lock().broker.acknowledge(self.message);
+        self.world.lock().broker.ack(self.message);
         Ok(())
     }
 
-    async fn acknowledge_progress(&self) -> anyhow::Result<()> {
+    async fn ack_progress(&self) -> anyhow::Result<()> {
         self.world.stop_unless_allowed(self.actor).await;
         let mut world = self.world.lock();
         let now = world.now_tick();
-        world
-            .broker
-            .acknowledge_progress(self.message, self.consumer, now);
+        world.broker.ack_progress(self.message, self.consumer, now);
         Ok(())
     }
 
-    async fn negative_acknowledge(&self, delay: Duration) -> anyhow::Result<()> {
+    async fn nack(&self, delay: Duration) -> anyhow::Result<()> {
         self.world.stop_unless_allowed(self.actor).await;
         let mut world = self.world.lock();
         let redeliver_at = world.now_tick() + ticks_in(delay);
-        world
-            .broker
-            .negative_acknowledge(self.message, redeliver_at);
+        world.broker.nack(self.message, redeliver_at);
         Ok(())
     }
 }
