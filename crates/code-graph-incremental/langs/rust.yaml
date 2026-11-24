@@ -39,8 +39,8 @@ canonicalize:
       - '(visibility_modifier $$$V)': '(__visibility $$$V)'
   - stage: retag-refs
     rewrite:
-      - '(field_initializer field: $N value: $V)': '(__field @$N (__binding @$ROOT | tree_node_id | prepend("$value:") (__rhs @$V $V)))'
-      - '(shorthand_field_initializer $N)': '(__field @$N $N (__binding @$ROOT | tree_node_id | prepend("$value:") (__rhs @$N)))'
+      - '(field_initializer field: $N value: $V)': '(__field @$N (__binding @$ROOT | position("id") | prepend("$value:") (__rhs @$V $V)))'
+      - '(shorthand_field_initializer $N)': '(__field @$N $N (__binding @$ROOT | position("id") | prepend("$value:") (__rhs @$N)))'
       - '(field_initializer_list $$$F:__field)': '(__obj $$$F)'
       - '(field_expression value: $O:__ivar field: $F)': '%member($F, $O)'
       - '(field_expression value: $O field: $F)': '%member_text($F, $O)'
@@ -76,8 +76,8 @@ canonicalize:
       - '(extern_crate_declaration name: $N)': '(__import (__source @$N) (__source_path @$N) (__name @$N)) #import_type=ExternCrate'
       - '(use_declaration (__visibility !(crate)) argument: (use_wildcard $P))': '(__import (__source @$P $P) (__source_path @$P | replace("::", "/") | regex_replace("^crate(/|$)", "")) (__name "*")) #import_type=ReExportGlob'
       - '(use_declaration argument: (use_wildcard $P))': '(__import (__source @$P $P) (__source_path @$P | replace("::", "/") | regex_replace("^crate(/|$)", "")) (__name "*")) #import_type=GlobUse'
-      - '(use_declaration (__visibility !(crate)) argument: (use_as_clause path: $P alias: $A))': '(__import (__source @$P $P) (__source_path @$P | field("path") | replace("::", "/") | regex_replace("^crate(/|$)", "")) (__name @$P | field("name") | default(@$P) (__alias @$A))) #import_type=ReExportAliased'
-      - '(use_declaration argument: (use_as_clause path: $P alias: $A))': '(__import (__source @$P $P) (__source_path @$P | field("path") | replace("::", "/") | regex_replace("^crate(/|$)", "")) (__name @$P | field("name") | default(@$P) (__alias @$A))) #import_type=AliasedUse'
+      - '(use_declaration (__visibility !(crate)) argument: (use_as_clause path: $P alias: $A))': '(__import (__source @$P $P) (__source_path @$P | field("path") | replace("::", "/") | regex_replace("^crate(/|$)", "")) (__name @$P | field("name") (__alias @$A))) #import_type=ReExportAliased'
+      - '(use_declaration argument: (use_as_clause path: $P alias: $A))': '(__import (__source @$P $P) (__source_path @$P | field("path") | replace("::", "/") | regex_replace("^crate(/|$)", "")) (__name @$P | field("name") (__alias @$A))) #import_type=AliasedUse'
       - '(use_declaration (__visibility !(crate)) argument: (scoped_use_list path: $P list: (use_list $$$E)))': '(use_group (__source @$P $P) (__source_path @$P | replace("::", "/") | regex_replace("^crate(/|$)", "")) $$$E:_*_named->pub_use_entry)'
       - '(use_declaration argument: (scoped_use_list path: $P list: (use_list $$$E)))': '(use_group (__source @$P $P) (__source_path @$P | replace("::", "/") | regex_replace("^crate(/|$)", "")) $$$E:_*_named->use_entry)'
       - '(use_declaration (__visibility !(crate)) argument: $A:scoped_identifier)': '(__import (__source @$A $A) (__source_path @$A | field("path") | replace("::", "/") | regex_replace("^crate(/|$)", "")) (__name @$A | field("name"))) #import_type=PubUse'
@@ -96,12 +96,12 @@ canonicalize:
       - '(use_group $$$I:__import)': '$$$I'
   - stage: patterns
     rewrite:
-      - '(tuple_struct_pattern type: $T !(remaining_field_pattern) $$$P:_*_named)': '(unpack_pattern (__object @$ROOT | tree_node_id | prepend("$binding:")) (unpack_positions $$$P:_*_named->unpack_position))'
-      - '(tuple_pattern !(remaining_field_pattern) $$$P:_*_named)': '(unpack_pattern (__object @$ROOT | tree_node_id | prepend("$binding:")) (unpack_positions $$$P:_*_named->unpack_position))'
+      - '(tuple_struct_pattern type: $T !(remaining_field_pattern) $$$P:_*_named)': '(unpack_pattern (__object @$ROOT | position("id") | prepend("$binding:")) (unpack_positions $$$P:_*_named->unpack_position))'
+      - '(tuple_pattern !(remaining_field_pattern) $$$P:_*_named)': '(unpack_pattern (__object @$ROOT | position("id") | prepend("$binding:")) (unpack_positions $$$P:_*_named->unpack_position))'
       - '(field_pattern name: $N pattern: $P:unpack_pattern)': '(unpack_field (__name @$N) $P)'
       - '(field_pattern name: $N pattern: $P)': '(unpack_field @$P $P (__name @$N))'
       - '(field_pattern name: $N)': '(unpack_field @$N (__name @$N))'
-      - '(struct_pattern $$$P:unpack_field)': '(unpack_pattern (__object @$ROOT | tree_node_id | prepend("$binding:")) $$$P)'
+      - '(struct_pattern $$$P:unpack_field)': '(unpack_pattern (__object @$ROOT | position("id") | prepend("$binding:")) $$$P)'
   - stage: classify
     rewrite:
       - '(reference_expression value: $V:__call)': '$V'
@@ -156,7 +156,7 @@ canonicalize:
       - '(enum_item name: $N body: $B)': '(__def (__defname @$N) (__enum) $B)'
       - '(trait_item name: $N bounds: (trait_bounds $$$SUPERS:type_identifier|scoped_type_identifier) body: $B)': '(__def (__defname @$N) (__trait) $$$SUPERS=>__supertype $B)'
       - '(trait_item name: $N body: $B)': '(__def (__defname @$N) (__trait) $B)'
-      - '(impl_item **/(type_parameter $TP) trait: $T type: $TY body: $B) when @$TY | eq(@$TP)': '(__def (__impl) (__supertype @$T $T) $B)'
+      - '(impl_item **/(type_parameter $TP) trait: $T type: $TY body: $B) when @$TY | in(@$TP)': '(__def (__impl) (__supertype @$T $T) $B)'
       - '(impl_item trait: $T:(type_identifier "Deref") type: $TY body: $B **/(__def (__defname "Target") (__type_alias) $TG:__ssa_typed))': '(__def (__defname @$TY $TY) (__impl) (__alias "Self") (__supertype @$T) (__supertype @$TG) $B)'
       - '(impl_item trait: $T:(scoped_type_identifier name: (type_identifier "Deref")) type: $TY body: $B **/(__def (__defname "Target") (__type_alias) $TG:__ssa_typed))': '(__def (__defname @$TY $TY) (__impl) (__alias "Self") (__supertype @$T $T) (__supertype @$TG) $B)'
       - '(impl_item trait: $T type: (generic_type type: $TY) body: $B)': '(__def (__defname @$TY $TY) (__impl) (__alias "Self") (__supertype @$T $T) $B)'
@@ -169,10 +169,10 @@ canonicalize:
       - '(__supertype "/::/")': '(__supertype @$ROOT | split_last("::") (__import (__source @$ROOT | regex_replace("::[^:]*$", "")) (__source_path @$ROOT | regex_replace("::[^:]*$", "") | replace("::", "/") | regex_replace("^crate(/|$)", "")) (__name @$ROOT | split_last("::"))))'
   - stage: tuple-fields
     rewrite:
-      - '(unpack_position $O:__object $$$P)': '(unpack_field (__name @$ROOT | sibling_index) (unpack_pattern $O $$$P))'
-      - '(unpack_position $N:identifier)': '(unpack_field @$N (__name @$ROOT | sibling_index))'
-      - '(unpack_position)': '(unpack_field @$ROOT (__name @$ROOT | sibling_index))'
-      - '(tuple_field)': '(__def (__defname @$ROOT | sibling_index) (__field_def))'
+      - '(unpack_position $O:__object $$$P)': '(unpack_field (__name @$ROOT | position("sibling")) (unpack_pattern $O $$$P))'
+      - '(unpack_position $N:identifier)': '(unpack_field @$N (__name @$ROOT | position("sibling")))'
+      - '(unpack_position)': '(unpack_field @$ROOT (__name @$ROOT | position("sibling")))'
+      - '(tuple_field)': '(__def (__defname @$ROOT | position("sibling")) (__field_def))'
   - stage: ssa-cleanup
     rewrite:
       - '(unpack_field $N:__name $P:unpack_pattern)': '(unpack (__binding @$P | child("__object") (__rhs (__member @$N $N (__object @$ROOT | up_child("__object"))))) $P)'
@@ -180,10 +180,10 @@ canonicalize:
       - '(arguments $$$V:_*_named)': '(__args $$$V:_*_named->tuple_value)'
   - stage: positional-fields
     rewrite:
-      - '(tuple_value $F:__field $$$REST:__field)': '(__field @$ROOT | sibling_index (__binding @$ROOT | tree_node_id | prepend("$value:") (__rhs (__obj $F $$$REST))))'
-      - '(tuple_value $C:__callee $$$REST)': '(__field @$ROOT | sibling_index (__binding @$ROOT | tree_node_id | prepend("$value:") (__rhs (__call $C $$$REST))))'
-      - '(tuple_value $P:closure_parameters $$$REST)': '(__field @$ROOT | sibling_index (__binding @$ROOT | tree_node_id | prepend("$value:") (__rhs (__lambda $P $$$REST))))'
-      - '(tuple_value)': '(__field @$ROOT | sibling_index (__binding @$ROOT | tree_node_id | prepend("$value:") (__rhs @$ROOT $ROOT)))'
+      - '(tuple_value $F:__field $$$REST:__field)': '(__field @$ROOT | position("sibling") (__binding @$ROOT | position("id") | prepend("$value:") (__rhs (__obj $F $$$REST))))'
+      - '(tuple_value $C:__callee $$$REST)': '(__field @$ROOT | position("sibling") (__binding @$ROOT | position("id") | prepend("$value:") (__rhs (__call $C $$$REST))))'
+      - '(tuple_value $P:closure_parameters $$$REST)': '(__field @$ROOT | position("sibling") (__binding @$ROOT | position("id") | prepend("$value:") (__rhs (__lambda $P $$$REST))))'
+      - '(tuple_value)': '(__field @$ROOT | position("sibling") (__binding @$ROOT | position("id") | prepend("$value:") (__rhs @$ROOT $ROOT)))'
       - '(__ssa_return $V:identifier)': '%return_value($V)'
       - '(__ssa_arm $V:identifier)': '(__ssa_arm (__rhs @$V $V))'
       - '(__ssa_arm (block $V:identifier))': '(__ssa_arm (__rhs @$V $V))'
@@ -232,8 +232,8 @@ display:
   - stage: def_type
     rewrite:
       - use: function_def_types
-      - '(__def (__class))': '#def_type=$ROOT | tag("flavor") | map("module:Module") | default("Class")'
-      - '(__def (__struct))': '#def_type=$ROOT | tag("flavor") | map("union:Union") | default("Struct")'
+      - '(__def (__class))': '#def_type=$ROOT | tag("flavor") | map("module:Module") or "Class"'
+      - '(__def (__struct))': '#def_type=$ROOT | tag("flavor") | map("union:Union") or "Struct"'
       - '(__def (__interface))': '#def_type=Interface'
       - '(__def (__enum))': '#def_type=Enum'
       - '(__def (__enum_variant))': '#def_type=Variant'

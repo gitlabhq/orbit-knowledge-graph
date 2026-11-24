@@ -43,7 +43,6 @@ static FUNCTIONS: &[Function<Text>] = &[
     on_text!("prepend", [one, one], prepend),
     on_text!("lowercase", [one], lowercase),
     on_text!("regex_replace", [one, one, one], regex_replace),
-    on_text!("regex_first", [one, one, one], regex_first),
     on_text!("regex_loop", [one, one, one], regex_loop),
     function!(Pure, "regex_match", [one, one], |cx, a| {
         let o = opts(cx, a);
@@ -56,13 +55,6 @@ static FUNCTIONS: &[Function<Text>] = &[
     on_text!("stem", [one], stem),
     on_text!("collapse_index", [one, set], collapse_index),
     on_text!("map", [one, set], map),
-    function!(Flow, "foreign", [set], |cx, a| {
-        let here = cx.fi();
-        a[0].iter()
-            .copied()
-            .filter(|v| v.loc().is_some_and(|l| l.fi != here))
-            .collect()
-    }),
     function!(Pure, "map_prefix", [one, one, one], |cx, a| {
         let texts: Vec<String> = (0..3)
             .map(|i| {
@@ -99,25 +91,6 @@ static FUNCTIONS: &[Function<Text>] = &[
             .filter_map(|&v| cx.text(v))
             .any(|t| texts.contains(&t)))
     }),
-    function!(Pure, "is_file", [set], |_, a| {
-        a[0].iter()
-            .copied()
-            .filter(|v| matches!(v, Val::Node(l) if l.node == 0))
-            .collect()
-    }),
-    function!(Pure, "default", [set, set], |cx, a| {
-        let present = |at: usize| -> Vals {
-            a[at]
-                .iter()
-                .filter(|&&v| text(cx, v).is_some_and(|s| !s.is_empty()))
-                .copied()
-                .collect()
-        };
-        match present(0) {
-            found if found.is_empty() => present(1),
-            found => found,
-        }
-    }),
     function!(Pure, "concat", [set, one, set], |cx, a| {
         let o = opts(cx, a);
         let first = |at: usize| {
@@ -127,27 +100,13 @@ static FUNCTIONS: &[Function<Text>] = &[
         };
         sym(o.lang, &concat(first(0), o.lit(1), first(2)))
     }),
-    function!(Pure, "eq", [set, set], |cx, a| {
-        yes(a[0].first().and_then(|&v| text(cx, v)) == a[1].first().and_then(|&v| text(cx, v)))
-    }),
     function!(Pure, "ne", [set, set], |cx, a| {
         yes(a[0].first().and_then(|&v| text(cx, v)) != a[1].first().and_then(|&v| text(cx, v)))
     }),
     on_node!("field", [one, one], field),
     on_node!("tag", [one, one], tag),
-    on_node!("sibling_index", [one], sibling_index),
-    on_node!("tree_node_id", [one], tree_node_id),
     on_node!("kind_name", [one], kind_name),
-    on_node!("start_line", [one], |c, o| number(o, c.start_row() + 1)),
-    on_node!("end_line", [one], |c, o| number(o, c.end_row() + 1)),
-    on_node!("start_byte", [one], |c, o| number(o, c.start())),
-    on_node!("end_byte", [one], |c, o| number(o, c.end())),
-    on_node!("start_col", [one], |c, o| number(o, c.start_col() + 1)),
-    on_node!("end_col", [one], |c, o| number(o, c.end_col() + 1)),
-    on_node!("span", [one], |c, o| text_val(
-        o,
-        &format!("{}:{}", c.start(), c.end())
-    )),
+    on_node!("position", [one, one], position),
 ];
 
 const MAX_REGEX_LOOP_PASSES: usize = 64;
@@ -316,10 +275,6 @@ fn regex_replace<'s>(s: &'s str, o: &Opts<'s>) -> Cow<'s, str> {
     })
 }
 
-fn regex_first<'s>(s: &'s str, o: &Opts<'s>) -> Cow<'s, str> {
-    regex(o.lit(1)).map_or(s.into(), |re| re.replace(s, o.lit(2)).into_owned().into())
-}
-
 fn regex_loop<'s>(s: &'s str, o: &Opts<'s>) -> Cow<'s, str> {
     let Some(re) = regex(o.lit(1)) else {
         return s.into();
@@ -409,18 +364,27 @@ fn tag<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
     c.tag(o.key(1)).map(Val::Sym)
 }
 
-fn sibling_index<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
-    let storage = &c.tree().storage;
-    let index = std::iter::successors(storage.previous_sibling(c.index()), |&id| {
-        storage.previous_sibling(id)
-    })
-    .filter(|&id| storage.node(id).named)
-    .count();
-    Some(Val::Sym(o.lang.syms.intern(&index.to_string())))
-}
-
-fn tree_node_id<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
-    Some(Val::Sym(o.lang.syms.intern(&c.index().to_string())))
+fn position<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
+    let n = match o.lit(1) {
+        "start_line" => c.start_row() + 1,
+        "end_line" => c.end_row() + 1,
+        "start_byte" => c.start(),
+        "end_byte" => c.end(),
+        "start_col" => c.start_col() + 1,
+        "end_col" => c.end_col() + 1,
+        "id" => c.index(),
+        "sibling" => {
+            let storage = &c.tree().storage;
+            std::iter::successors(storage.previous_sibling(c.index()), |&id| {
+                storage.previous_sibling(id)
+            })
+            .filter(|&id| storage.node(id).named)
+            .count() as u32
+        }
+        "span" => return text_val(o, &format!("{}:{}", c.start(), c.end())),
+        _ => return None,
+    };
+    number(o, n)
 }
 
 fn kind_name<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
@@ -480,7 +444,6 @@ mod tests {
             run(regex_replace, "FooBar", &["([a-z0-9])([A-Z])", "${1}_${2}"]),
             "Foo_Bar"
         );
-        assert_eq!(run(regex_first, "a/a/a", &["a", "b"]), "b/a/a");
         assert_eq!(run(regex_loop, "a/b/../../c", &["[^/.]+/\\.\\./", ""]), "c");
         assert_eq!(
             run(regex_replace, "abc", &["(", "x"]),
@@ -601,8 +564,6 @@ mod tests {
         assert_eq!(call(field, &["path"]), "p");
         assert_eq!(call(field, &["other"]), "m");
         assert_eq!(call(tag, &["fqn"]), "pkg.C.m");
-        assert_eq!(call(sibling_index, &[]), "1");
-        assert_eq!(call(tree_node_id, &[]), Tree::to_raw(target).to_string());
         assert_eq!(call(kind_name, &[]), "method");
     }
 }

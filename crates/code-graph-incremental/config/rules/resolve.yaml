@@ -25,7 +25,7 @@ define:
   aliased(ROOT): >-
     first(select(project, '(__alias)') | longest_first, a => alias_files(a, $ROOT))
   alias_files(ROOT, imp):
-    '(__alias $S:__scope) when eq($S, $imp | tag("alias_scope"))': 'files($imp | child("__source_path") | map_prefix($ROOT, $ROOT | child("__str")))'
+    '(__alias $S:__scope) when in($S, $imp | tag("alias_scope"))': 'files($imp | child("__source_path") | map_prefix($ROOT, $ROOT | child("__str")))'
     '(__alias !(__scope))': 'files($imp | child("__source_path") | map_prefix($ROOT, $ROOT | child("__str")))'
   submodule(ROOT, N): 'files($ROOT | tag("resolved_source") | concat("/", @$N))'
   exported(module, name): >-
@@ -62,26 +62,26 @@ resolve:
 
   import:
     - '$I:(%import_kinds $ROOT:__name) when $I | modules':
-        imports: { from: $ROOT, to: '$I | modules | offered(written($ROOT)) | foreign' }
+        imports: { from: $ROOT, to: '$I | modules | offered(written($ROOT)) | elsewhere(file($ROOT))' }
     - '$I:(%import_kinds $ROOT:__name)':
-        imports: { from: $ROOT, to: '$I | submodule($ROOT) | offered(written($ROOT)) | foreign' }
+        imports: { from: $ROOT, to: '$I | submodule($ROOT) | offered(written($ROOT)) | elsewhere(file($ROOT))' }
 
   call:
     - '(__call (__callee $M:(__member $O:__object))) when $O | read | is_file':
-        calls: { to: '$O | read | is_file | offered($M) | callable | foreign', site: $ROOT }
+        calls: { to: '$O | read | is_file | offered($M) | callable | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee $M:(__member $O:__object)))':
         calls:
-          - { to: '$O | type | member($M) | foreign', site: $ROOT }
+          - { to: '$O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
           - { to: '$ROOT | follow(type_flow, site) | producing | member($M)', site: $ROOT }
     - '(__call (__callee $I:__ivar))':
-        calls: { to: 'lookup(@$I, $ROOT, scope($ROOT) | class) | foreign', site: $ROOT }
+        calls: { to: 'lookup(@$I, $ROOT, scope($ROOT) | class) | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee "/./"))':
-        calls: { to: 'targets($ROOT, false) | callable | foreign', site: $ROOT }
+        calls: { to: 'targets($ROOT, false) | callable | elsewhere(file($ROOT))', site: $ROOT }
 
   decorator:
     - '$D:(__def $ROOT:__decorator)':
-        calls: { from: $D, to: '$ROOT | type | callable | foreign' }
+        calls: { from: $D, to: '$ROOT | type | callable | elsewhere(file($ROOT))' }
 
   supertype:
     - '$D:(__def $ROOT:__supertype)':
-        extends: { from: $D, to: '$ROOT | type | is_def | foreign' }
+        extends: { from: $D, to: '$ROOT | type | is_def | elsewhere(file($ROOT))' }

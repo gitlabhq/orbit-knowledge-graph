@@ -1,4 +1,9 @@
 define:
+  is_file(ROOT):
+    '_ when same($ROOT, file($ROOT))': '$ROOT'
+  elsewhere(ROOT, here):
+    '_ when same(file($ROOT), here)': none
+    '_ when file($ROOT)': '$ROOT'
   file_dir(ROOT): >-
     select(project, '(__dir)' by tree_path($ROOT), $ROOT | file | regex_replace("/?[^/]*$", ""))
     or select(project, '(__root)')
@@ -179,7 +184,7 @@ define:
     '_ when both_callable($ROOT, role)': none
     '_': 'fills($ROOT, role)'
   both_callable(ROOT, role):
-    '_ when eq(role, "callable")': 'both_roles($ROOT)'
+    '_ when in(role, "callable")': 'both_roles($ROOT)'
   both_roles(ROOT): 'fills(fills($ROOT, "value"), "callable")'
   class_member(ROOT, name, role, site): >-
     first(ancestors($ROOT), a => is_class(a)) | belongs_or_declares($ROOT, name, site)
@@ -189,7 +194,7 @@ define:
     '_ when first(ancestors(site), up => declares(up, def, name))': '$ROOT'
   declares(ROOT, def, name):
     '_ when same($ROOT, def)': '$ROOT'
-    '(__binding (__declaration)) when eq($ROOT, name)': '$ROOT'
+    '(__binding (__declaration)) when in($ROOT, name)': '$ROOT'
   first_member(ROOT, name, role): 'first(members($ROOT, name, role), m => m)'
   distinct_from(ROOT, def):
     '_ when both_pair($ROOT, def)': none
@@ -244,9 +249,9 @@ define:
     '(__scope)': '$ROOT'
   same(a, b): 'minus(a, minus(a, b))'
   fills(ROOT, role):
-    '(__def (%callable_kinds)) when eq(role, "callable")': '$ROOT'
-    '(__def (%value_kinds)) when eq(role, "value")': '$ROOT'
-    '(__def (%type_kinds)) when eq(role, "type")': '$ROOT'
+    '(__def (%callable_kinds)) when in(role, "callable")': '$ROOT'
+    '(__def (%value_kinds)) when in(role, "value")': '$ROOT'
+    '(__def (%type_kinds)) when in(role, "type")': '$ROOT'
   single_role(ROOT):
     '(__def (%value_kinds)) when $ROOT | fills("callable")': none
     '_': '$ROOT'
@@ -333,7 +338,7 @@ define:
   imported_name(name, at): >-
     select(under(file(at)), '(__import $ROOT:__name)' by local_name($ROOT), name) | target_of
     or select(under(file(at)), '(__import $ROOT:__name)' by $ROOT | written, "*") | follow(imports, from) | exported(name)
-  local_name(ROOT): 'default($ROOT | child("__alias"), default($ROOT | child("__ssa_hint"), $ROOT))'
+  local_name(ROOT): '$ROOT | child("__alias") or $ROOT | child("__ssa_hint") or $ROOT'
   declared_in(name, at): >-
     first(enclose(at), s => select(owned(s), '(__def $N:__defname)', name))
   target_of(ROOT): 'declared_in(@ROOT, ROOT) or $ROOT | follow(imports, from)'

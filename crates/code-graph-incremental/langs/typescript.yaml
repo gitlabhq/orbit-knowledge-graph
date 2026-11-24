@@ -205,7 +205,7 @@ display:
     rewrite:
       - '(__def)': '#definition_span=true'
       - '(__def (__function))': '#def_type=Function'
-      - '(__def (__method))': '#def_type=$ROOT | tag("flavor") | map("static:StaticMethod", "abstract:Method", "generator:Method") | default("Method")'
+      - '(__def (__method))': '#def_type=$ROOT | tag("flavor") | map("static:StaticMethod", "abstract:Method", "generator:Method") or "Method"'
       - use: type_def_types
   - stage: module_exports
     rewrite:
@@ -215,7 +215,7 @@ display:
     rewrite:
       - use: import_entity
       - '(__import_type)': '#entity=ImportedSymbol #file_path=$ROOT | tag_up("file_path") #source_path=$ROOT | child("__source")'
-      - '(__name)': '#import_type=$ROOT | tag("import_type") | default("NamedImport")'
-      - '(__name "default")': '#import_type=$ROOT | tag("import_type") | default("DefaultImport")'
-      - '(__name "*")': '#import_type=$ROOT | tag("import_type") | default("WildcardImport")'
-      - '(__name "*" (__alias))': '#import_type=$ROOT | tag("import_type") | default("NamespaceImport")'
+      - '(__name)': '#import_type=$ROOT | tag("import_type") or "NamedImport"'
+      - '(__name "default")': '#import_type=$ROOT | tag("import_type") or "DefaultImport"'
+      - '(__name "*")': '#import_type=$ROOT | tag("import_type") or "WildcardImport"'
+      - '(__name "*" (__alias))': '#import_type=$ROOT | tag("import_type") or "NamespaceImport"'

@@ -128,7 +128,7 @@ canonicalize:
   - use: tag_file_dir
   - stage: tag-source-path
     rewrite:
-      - '(__import)': '#source_rel=$ROOT | child("__source_path") | regex_loop("(\w)\.(\w)", "$1/$2") | regex_loop("^((?:~/)*)\.", "$1~/") | regex_first("~/", "./") | regex_replace("~/", "../") | regex_loop("^\./\.\./", "../")'
+      - '(__import)': '#source_rel=$ROOT | child("__source_path") | regex_loop("(\w)\.(\w)", "$1/$2") | regex_loop("^((?:~/)*)\.", "$1~/") | regex_replace("(?s)^(.*?)~/", "${1}./") | regex_replace("~/", "../") | regex_loop("^\./\.\./", "../")'
   - stage: resolve-paths
     rewrite:
       - '(__import)': '#resolved_source=$ROOT | tag("source_rel")'
@@ -160,4 +160,4 @@ display:
       - '(__import)': '#entity=ImportedSymbol #file_path=$ROOT | tag_up("file_path") #source_path=$ROOT | tag("resolved_source") | replace("/", ".")'
       - '(__name "*")': '#import_type=WildcardImport'
       - use: aliased_import_type
-      - '(__import $S:__source $$$A $N:__name $$$B) when @$N | eq(@$S)': '#import_type@__name=Import'
+      - '(__import $S:__source $$$A $N:__name $$$B) when @$N | in(@$S)': '#import_type@__name=Import'

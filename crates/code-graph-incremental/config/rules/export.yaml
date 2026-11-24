@@ -88,18 +88,15 @@ define:
 
 export:
   entity:
-    - '(%dirs)': >-
-        row(directory, $ROOT,
-          path: $ROOT | tree_path | default("."),
-          name: $ROOT | default("."),
-          traversal_path: "")
+    - '(__root)': 'row(directory, $ROOT, path: ".", name: ".", traversal_path: "")'
+    - '(%dirs)': 'row(directory, $ROOT, path: $ROOT | tree_path, name: $ROOT, traversal_path: "")'
     - '(__source_file)': >-
         row(file, $ROOT,
           path: $ROOT,
           name: $ROOT | split_last("/"),
           extension: $ROOT | split_last("/") | split_last("."),
           language: $ROOT | tag("language"),
-          size_bytes: $ROOT | end_byte,
+          size_bytes: $ROOT | position("end_byte"),
           reason: $ROOT | tag("reason"),
           traversal_path: "")
     - '(__def)': >-
@@ -108,12 +105,12 @@ export:
           fqn: $ROOT | tag("fqn"),
           name: $ROOT | child("__defname"),
           definition_type: $ROOT | tag("def_type"),
-          start_line: $ROOT | measured | start_line,
-          end_line: $ROOT | measured | end_line,
-          start_byte: $ROOT | measured | start_byte,
-          end_byte: $ROOT | measured | end_byte,
-          start_char: $ROOT | measured | start_col,
-          end_char: $ROOT | measured | end_col,
+          start_line: $ROOT | measured | position("start_line"),
+          end_line: $ROOT | measured | position("end_line"),
+          start_byte: $ROOT | measured | position("start_byte"),
+          end_byte: $ROOT | measured | position("end_byte"),
+          start_char: $ROOT | measured | position("start_col"),
+          end_char: $ROOT | measured | position("end_col"),
           front_matter_name: $ROOT | child("__front_matter_name"),
           front_matter_description: $ROOT | child("__front_matter_description"),
           front_matter_license: $ROOT | child("__front_matter_license"),
@@ -127,39 +124,39 @@ export:
           front_matter_version: $ROOT | child("__front_matter_version"),
           front_matter_category: $ROOT | child("__front_matter_category"),
           traversal_path: "",
-          span: $ROOT | span)
+          span: $ROOT | position("span"))
     - '(__module_export (%imports $ROOT:__name))': none
     - '(__module_export $ROOT:%imports)': none
     - '(%imports $ROOT:(__name "/./"))': >-
         row(imported_symbol, $ROOT,
           file_path: $ROOT | import_of | tag_up("file_path"),
-          import_type: $ROOT | tag("import_type") | default($ROOT | tag_up("import_type")) | default("NamedImport"),
+          import_type: $ROOT | tag("import_type") or $ROOT | tag_up("import_type") or "NamedImport",
           import_path: $ROOT | import_of | tag("source_path"),
           identifier_name: $ROOT,
           identifier_alias: $ROOT | up_child("__alias"),
-          start_line: $ROOT | import_of | start_line,
-          end_line: $ROOT | import_of | end_line,
-          start_byte: $ROOT | import_of | start_byte,
-          end_byte: $ROOT | import_of | end_byte,
-          start_char: $ROOT | import_of | start_col,
-          end_char: $ROOT | import_of | end_col,
+          start_line: $ROOT | import_of | position("start_line"),
+          end_line: $ROOT | import_of | position("end_line"),
+          start_byte: $ROOT | import_of | position("start_byte"),
+          end_byte: $ROOT | import_of | position("end_byte"),
+          start_char: $ROOT | import_of | position("start_col"),
+          end_char: $ROOT | import_of | position("end_col"),
           traversal_path: "",
-          span: $ROOT | import_of | span)
+          span: $ROOT | import_of | position("span"))
     - '(%imports !(__name "/./"))': >-
         row(imported_symbol, $ROOT,
           file_path: $ROOT | import_of | tag_up("file_path"),
-          import_type: $ROOT | tag("import_type") | default($ROOT | tag_up("import_type")) | default("NamedImport"),
+          import_type: $ROOT | tag("import_type") or $ROOT | tag_up("import_type") or "NamedImport",
           import_path: $ROOT | import_of | tag("source_path"),
           identifier_name: $ROOT,
           identifier_alias: $ROOT | up_child("__alias"),
-          start_line: $ROOT | import_of | start_line,
-          end_line: $ROOT | import_of | end_line,
-          start_byte: $ROOT | import_of | start_byte,
-          end_byte: $ROOT | import_of | end_byte,
-          start_char: $ROOT | import_of | start_col,
-          end_char: $ROOT | import_of | end_col,
+          start_line: $ROOT | import_of | position("start_line"),
+          end_line: $ROOT | import_of | position("end_line"),
+          start_byte: $ROOT | import_of | position("start_byte"),
+          end_byte: $ROOT | import_of | position("end_byte"),
+          start_char: $ROOT | import_of | position("start_col"),
+          end_char: $ROOT | import_of | position("end_col"),
           traversal_path: "",
-          span: $ROOT | import_of | span)
+          span: $ROOT | import_of | position("span"))
   contains:
     - '$P:(%dirs $ROOT:__dir)': >-
         row(contains, $ROOT, source_id: $P, source_kind: "Directory", relationship_kind: "CONTAINS",
