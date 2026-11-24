@@ -105,6 +105,7 @@ impl MetadataRule {
             decorators,
             companion_of,
             is_exported: false,
+            front_matter: None,
         }))
     }
 }

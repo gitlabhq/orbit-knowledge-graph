@@ -202,6 +202,18 @@ impl Resolver {
             .map(|req| req.fi)
             .collect();
         invalidated.extend(dirty_fis);
+        if env.resolve.config.submodule_imports {
+            let roots: FxHashSet<&str> = dirty_fis
+                .iter()
+                .filter_map(|&fi| main_rs_root(&trees[fi as usize].label))
+                .collect();
+            invalidated.extend(
+                self.reqs
+                    .iter()
+                    .filter(|req| roots.contains(req.target_path.as_str()))
+                    .map(|req| req.fi),
+            );
+        }
         let added_keys = self
             .file_index
             .keys
@@ -893,12 +905,7 @@ fn gather_imports_for(
     let root_relative = lang.syms.lookup("source_root_rel");
     let declared_roots: FxHashSet<_> = trees
         .iter()
-        .filter_map(|tree| {
-            let relative = lang.syms.resolve(tree.root().tag(root_relative)?);
-            tree.label
-                .strip_suffix(relative)
-                .map(|root| root.trim_end_matches(PATH_SEP))
-        })
+        .filter_map(|tree| source_root(tree, lang, root_relative))
         .collect();
     let stdlib_prefixes: Vec<_> = lookup
         .prefixes
@@ -945,18 +952,37 @@ fn gather_imports_for(
                     } else {
                         &lookup.prefixes
                     };
-                    let target_path = mapped.unwrap_or_else(|| raw_path.to_owned());
+                    let mut target_path = mapped.unwrap_or_else(|| raw_path.to_owned());
+                    if config.submodule_imports
+                        && target_path.is_empty()
+                        && let Some(root) = source_root(tree, lang, root_relative)
+                    {
+                        target_path =
+                            binary_crate_root(tree, root, lang, root_relative, trees, file_index)
+                                .unwrap_or_else(|| root.to_owned());
+                    }
                     let mut direct = resolve_glob(&target_path, file_index, prefixes);
                     direct.retain(|loc| loc.fi != fi);
                     if direct.is_empty() && stdlib {
                         return;
                     }
+                    let modules = match config.submodule_imports {
+                        true => {
+                            let names: Vec<_> =
+                                cur.names().map(|c| lang.syms.resolve(c.sym())).collect();
+                            submodule_files(&direct, &names, trees, file_index)
+                        }
+                        false => Vec::new(),
+                    };
                     let candidates = match direct.is_empty() {
-                        false => Either::Left(
+                        false if !modules.is_empty() => {
+                            Either::Left(Either::Left(modules.into_iter()))
+                        }
+                        false => Either::Left(Either::Right(
                             direct
                                 .into_iter()
                                 .map(|loc| (loc, target_path.clone(), false)),
-                        ),
+                        )),
                         true => Either::Right(cur.names().flat_map(|c| {
                             let submod =
                                 format!("{target_path}{PATH_SEP}{}", lang.syms.resolve(c.sym()));
@@ -2230,6 +2256,67 @@ fn build_file_index(
         }
     }
     idx
+}
+
+fn source_root<'a>(tree: &'a Tree, lang: &Lang, root_relative: u32) -> Option<&'a str> {
+    let relative = lang.syms.resolve(tree.root().tag(root_relative)?);
+    tree.label
+        .strip_suffix(relative)
+        .map(|root| root.trim_end_matches(PATH_SEP))
+}
+
+/// The source root holding a `main.rs`: `src/main.rs` gives `src`.
+fn main_rs_root(path: &str) -> Option<&str> {
+    path.strip_suffix("main.rs")?.strip_suffix(PATH_SEP)
+}
+
+/// `lib.rs` and `main.rs` side by side are two crates. A file is in the binary
+/// crate when `main.rs` declares its top-level module.
+fn binary_crate_root(
+    tree: &Tree,
+    root: &str,
+    lang: &Lang,
+    root_relative: u32,
+    trees: &[Tree],
+    file_index: &FileIndex,
+) -> Option<String> {
+    let main_key = format!("{root}{PATH_SEP}main");
+    let main = file_index.get(&main_key).filter(|loc| loc.node == 0)?;
+    let relative = lang.syms.resolve(tree.root().tag(root_relative)?);
+    let top = relative.split(PATH_SEP).next()?.split('.').next()?;
+    let import_type = lang.syms.lookup("import_type");
+    let declaration = lang.syms.lookup("ModDeclaration");
+    let declared = trees[main.fi as usize].root().children().any(|c| {
+        c.kind() == C::Import
+            && c.tag(import_type) == Some(declaration)
+            && c.names().any(|name| lang.syms.resolve(name.sym()) == top)
+    });
+    declared.then_some(main_key)
+}
+
+/// Module files for `names` under the files in `parents`: `a.rs` keeps them in `a/`.
+/// `lib.rs` and `mod.rs` need no lookup, since their `mod` declarations resolve.
+fn submodule_files(
+    parents: &[Loc],
+    names: &[&str],
+    trees: &[Tree],
+    file_index: &FileIndex,
+) -> Vec<(Loc, String, bool)> {
+    let mut found = Vec::new();
+    for parent in parents.iter().filter(|loc| loc.node == 0) {
+        let path = trees[parent.fi as usize].label.as_str();
+        let Some(file_lang) = SupportLang::from_path(path) else {
+            continue;
+        };
+        let stem = file_lang.strip_extension(path);
+        for &name in names {
+            let key = format!("{stem}{PATH_SEP}{name}");
+            if let Some(loc) = file_index.get(&key).filter(|loc| loc.node == 0) {
+                found.push((loc, key, true));
+            }
+        }
+    }
+    found
 }
 
 fn resolve_glob(target: &str, idx: &FileIndex, prefixes: &[String]) -> Vec<Loc> {

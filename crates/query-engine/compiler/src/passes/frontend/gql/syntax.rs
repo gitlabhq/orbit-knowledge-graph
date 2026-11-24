@@ -235,8 +235,25 @@ impl QueryParser {
 
     fn Where(input: Node) -> Result<BooleanExpression<Predicate>> {
         Ok(match_nodes!(input.into_children();
-            [AndExpression(predicate)] => predicate,
+            [OrExpression(predicate)] => predicate,
         ))
+    }
+
+    fn OrExpression(input: Node) -> Result<BooleanExpression<Predicate>> {
+        let span = input.as_span();
+        let mut branches: Vec<_> = match_nodes!(input.into_children();
+            [AndExpression(branches)..] => branches.collect(),
+        );
+        if branches.len() == 1 {
+            return Ok(branches.pop().expect("one branch"));
+        }
+        let expression = negate(BooleanExpression::And(
+            branches.into_iter().map(negate).collect(),
+        ));
+        if expression.depth() > super::MAX_NESTING {
+            return Err(error_at(span, "expression nesting is too deep"));
+        }
+        Ok(expression)
     }
 
     fn AndExpression(input: Node) -> Result<BooleanExpression<Predicate>> {
@@ -245,9 +262,8 @@ impl QueryParser {
             match child.as_rule() {
                 Rule::NotExpression => children.push(Self::NotExpression(child)?),
                 Rule::UnsupportedBooleanOperator => {
-                    return Err(child.error(
-                        "OR and XOR are not supported; combine conditions with AND and NOT, or use IN [...] to match one of several values",
-                    ));
+                    return Err(child
+                        .error("XOR is not supported; combine conditions with AND, OR, and NOT"));
                 }
                 _ => return Err(mismatch(&child)),
             }
@@ -270,7 +286,7 @@ impl QueryParser {
             return Err(error_at(span, "expression nesting is too deep"));
         }
         for _negation in children {
-            expression = BooleanExpression::Not(Box::new(expression));
+            expression = negate(expression);
         }
         Ok(expression)
     }
@@ -278,7 +294,7 @@ impl QueryParser {
     #[alias(predicate)]
     fn ParenthesizedExpression(input: Node) -> Result<BooleanExpression<Predicate>> {
         Ok(match_nodes!(input.into_children();
-            [AndExpression(predicate)] => predicate,
+            [OrExpression(predicate)] => predicate,
         ))
     }
 
@@ -702,6 +718,10 @@ fn has_temporal_literal(node: &Node) -> bool {
         .into_inner()
         .flatten()
         .any(|pair| pair.as_rule() == Rule::TemporalLiteral)
+}
+
+fn negate(expression: BooleanExpression<Predicate<'_>>) -> BooleanExpression<Predicate<'_>> {
+    BooleanExpression::Not(Box::new(expression))
 }
 
 fn leaf(comparison: Comparison<'_>) -> BooleanExpression<Predicate<'_>> {

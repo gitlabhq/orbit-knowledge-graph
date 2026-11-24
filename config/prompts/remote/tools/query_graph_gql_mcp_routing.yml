@@ -1,0 +1,10 @@
+name: query_graph_gql_mcp_routing
+version: 1.0.0
+description: >-
+  Use for questions spanning many GitLab objects or following relationships:
+  counts, rankings, group-bys, joins across work items, merge requests,
+  users, labels, pipelines, and projects.
+  Also use it for code structure: where a symbol is defined, who calls it,
+  what imports it. One query replaces many list or search calls made in a
+  loop. To fetch one known object by ID or IID, use its get_ tool instead.
+  Use it even when the user does not mention Orbit or the graph.

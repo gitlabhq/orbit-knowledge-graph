@@ -10,7 +10,7 @@
   ],
   "author": "GitLab",
   "license": "SEE LICENSE IN LICENSE.md",
-  "homepage": "https://gitlab.com/gitlab-org/orbit/knowledge-graph",
+  "homepage": "https://gitlaborbit.dev/",
   "repository": {
     "type": "git",
     "url": "git+https://gitlab.com/gitlab-org/orbit/knowledge-graph.git"

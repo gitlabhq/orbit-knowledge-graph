@@ -1,0 +1,224 @@
+config:
+  security: { paths: ["1/500/"] }
+  redaction:
+    allow:
+      user: [501, 502, 503]
+      group: [500]
+      merge_request: [5000, 5001]
+      note: [5100, 5101]
+  extra_seed:
+    gl_user:
+      - { id: 501, username: alice, name: Alice Admin, state: active, user_type: human }
+      - { id: 502, username: bob, name: 'Bob "the Builder"', state: active, user_type: human }
+      - { id: 503, username: unicode, name: "Iñtërnâtiônàlizætiøn 🎉", state: active, user_type: human }
+    gl_group:
+      - { id: 500, name: Public Group, visibility_level: public, traversal_path: "1/500/" }
+    gl_merge_request:
+      - { id: 5000, iid: 501, title: Add a feature, state: opened, source_branch: feat-a, target_branch: main, traversal_path: "1/500/5000/" }
+      - { id: 5001, iid: 502, title: "Multi-line\ntitle\twith escapes", state: merged, source_branch: fix-b, target_branch: main, traversal_path: "1/500/5001/" }
+    gl_note:
+      - { id: 5100, note: internal note, noteable_type: MergeRequest, noteable_id: 5000, traversal_path: "1/500/5000/", internal: true, confidential: true }
+      - { id: 5101, note: public note, noteable_type: MergeRequest, noteable_id: 5000, traversal_path: "1/500/5000/", internal: false, confidential: null }
+    gl_edge:
+      - { traversal_path: "1/500/", source_id: 501, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:public"] }
+      - { traversal_path: "1/500/", source_id: 502, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:public"] }
+      - { traversal_path: "1/500/", source_id: 503, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:public"] }
+      - { traversal_path: "1/500/5000/", source_id: 501, source_kind: User, relationship_kind: AUTHORED, target_id: 5000, target_kind: MergeRequest, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/500/5001/", source_id: 502, source_kind: User, relationship_kind: AUTHORED, target_id: 5001, target_kind: MergeRequest, source_tags: [], target_tags: [] }
+
+cases:
+  - name: traversal_groups_nodes_by_type_into_tables
+    description: A traversal encodes one TOON table per node type and one edge table
+    query:
+      json: |
+        {"query_type": "traversal",
+         "nodes": [
+           {"id": "u", "entity": "User", "columns": ["username", "name"]},
+           {"id": "g", "entity": "Group", "node_ids": [500]}
+         ],
+         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+         "order_by": "u.id",
+         "limit": 10}
+    expect:
+      node_count: 4
+      nodes:
+        User: { order: [501, 502, 503] }
+        Group: { ids: [500] }
+      edges:
+        MEMBER_OF: [[501, 500], [502, 500], [503, 500]]
+      format:
+        toon:
+          contains:
+            - "  User[3]{id,name,username}:\n"
+            - "edges[3]{from,from_id,type,to,to_id}:\n"
+          ends_with: "truncated: false\n"
+          value:
+            query_type: traversal
+            nodes:
+              User:
+                - { id: 501 }
+                - { id: 502 }
+                - { id: 503, name: "Iñtërnâtiônàlizætiøn 🎉" }
+              Group:
+                - { id: 500 }
+            edges:
+              - { type: MEMBER_OF, to_id: 500 }
+              - { type: MEMBER_OF, to_id: 500 }
+              - { type: MEMBER_OF, to_id: 500 }
+
+  - name: empty_result_omits_nodes_and_edges
+    description: An empty result encodes no node or edge tables
+    query:
+      json: |
+        {"query_type": "traversal",
+         "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 99000, "end": 99999}, "columns": ["username"]}],
+         "limit": 10}
+    expect:
+      node_count: 0
+      format:
+        toon:
+          absent: [nodes, edges]
+          value: { query_type: traversal }
+
+  - name: quoted_strings_round_trip
+    description: A string with double quotes decodes to the same value
+    query:
+      json: |
+        {"query_type": "traversal",
+         "nodes": [{"id": "u", "entity": "User", "node_ids": [502], "columns": ["name"]}],
+         "limit": 1}
+    expect:
+      nodes:
+        User:
+          ids: [502]
+          rows:
+            - { id: 502, name: 'Bob "the Builder"' }
+      format:
+        toon:
+          value:
+            nodes:
+              User:
+                - { name: 'Bob "the Builder"' }
+
+  - name: escaped_strings_round_trip
+    description: A title with a newline and a tab decodes to the same text
+    query:
+      json: |
+        {"query_type": "traversal",
+         "nodes": [{"id": "m", "entity": "MergeRequest", "node_ids": [5001], "columns": ["title"]}],
+         "limit": 1}
+    expect:
+      nodes:
+        MergeRequest:
+          ids: [5001]
+          rows:
+            - { id: 5001, title: "Multi-line\ntitle\twith escapes" }
+      format:
+        toon:
+          value:
+            nodes:
+              MergeRequest:
+                - { id: 5001, title: "Multi-line\ntitle\twith escapes" }
+
+  - name: booleans_round_trip
+    description: Boolean columns decode as booleans, and a null boolean decodes as null
+    query:
+      json: |
+        {"query_type": "traversal",
+         "nodes": [{"id": "n", "entity": "Note", "node_ids": [5100, 5101], "columns": ["note", "internal", "confidential"]}],
+         "order_by": "n.id",
+         "limit": 10}
+    expect:
+      nodes:
+        Note: { order: [5100, 5101] }
+      format:
+        toon:
+          value:
+            nodes:
+              Note:
+                - { id: 5100, internal: true, confidential: true }
+                - { id: 5101, internal: false, confidential: null }
+
+  - name: path_edges_carry_path_and_step
+    description: Path-finding edges carry the path id and the step
+    query:
+      json: |
+        {"query_type": "path_finding",
+         "nodes": [{"id": "u", "entity": "User", "node_ids": [501]}, {"id": "g", "entity": "Group", "node_ids": [500]}],
+         "path": {"type": "shortest", "from": "u", "to": "g", "max_depth": 2, "rel_types": ["MEMBER_OF"]}}
+    expect:
+      path_count: 1
+      format:
+        toon:
+          value:
+            query_type: path_finding
+            edges:
+              - { from: User, from_id: 501, type: MEMBER_OF, to: Group, to_id: 500, path_id: 0, step: 0 }
+
+  - name: aggregation_lifts_group_nodes_and_references_them_by_id
+    description: An aggregation grouped by a node lists the group nodes and references them by id in the rows
+    query:
+      json: |
+        {"query_type": "aggregation",
+         "nodes": [
+           {"id": "g", "entity": "Group", "node_ids": [500], "columns": ["name"]},
+           {"id": "u", "entity": "User"}
+         ],
+         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+         "group_by": ["g"],
+         "aggregations": [{"count": "u", "as": "user_count"}],
+         "limit": 10}
+    expect:
+      groups:
+        g:
+          rows:
+            - { entity: Group, id: 500, values: { user_count: 3 }, properties: { name: Public Group } }
+      format:
+        toon:
+          value:
+            nodes:
+              Group:
+                - { id: 500, name: Public Group }
+            group_columns:
+              - { entity: Group }
+            rows:
+              - { g: 500, user_count: 3 }
+
+  - name: aggregation_by_property_emits_scalar_rows
+    description: An aggregation grouped by a property has no node tables
+    query:
+      json: |
+        {"query_type": "aggregation",
+         "nodes": [{"id": "g", "entity": "Group", "node_ids": [500]}, {"id": "u", "entity": "User"}],
+         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+         "group_by": ["u.state"],
+         "aggregations": [{"count": "u", "as": "user_count"}],
+         "limit": 10}
+    expect:
+      row_values:
+        - { u_state: active, user_count: 3 }
+      format:
+        toon:
+          absent: [nodes]
+          value:
+            rows:
+              - { u_state: active, user_count: 3 }
+
+  - name: aggregation_without_groups_emits_one_row
+    description: An aggregation without a group key has no group columns
+    query:
+      json: |
+        {"query_type": "aggregation",
+         "nodes": [{"id": "g", "entity": "Group", "node_ids": [500]}, {"id": "u", "entity": "User"}],
+         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+         "aggregations": [{"count": "u", "as": "total"}],
+         "limit": 1}
+    expect:
+      row_values:
+        - { total: 3 }
+      format:
+        toon:
+          absent: [group_columns]
+          value:
+            rows:
+              - { total: 3 }

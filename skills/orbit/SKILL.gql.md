@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
-version: 0.35.17+gql
+version: 0.35.20+gql
 license: MIT
 compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance for commands that call the GitLab Orbit API.
 metadata:
@@ -15,6 +15,7 @@ metadata:
 # Orbit skill
 
 Query GitLab Orbit (previously GitLab Knowledge Graph) through the flat `glab orbit` command tree. It needs glab v1.126.0 or later. Hosted commands handle authentication, response framing, and exit codes. Local commands use the managed binary and the local DuckDB graph.
+User docs: <https://docs.gitlab.com/orbit/>. How Orbit is built: <https://gitlaborbit.dev/engineering/architecture/>.
 
 ## Prerequisites
 
@@ -42,7 +43,7 @@ Batch schema reads: make every schema read a question needs in one shell command
 glab orbit query 'CALL db.schema()'; echo; glab orbit query "CALL db.schema('Vulnerability')"; echo; glab orbit query "CALL db.schema('Pipeline')"
 ```
 
-The named-query catalog at `GET /api/v4/orbit/query/templates` is rendered in your mode. Do not reuse discovery results across users or mode changes. Entries contain only `name`, `description`, and `raw_query`; there is no client language selector. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
+List the named queries with `glab api graphql -f query='{ orbit { queryTemplates { name description query } } }'`. Run one with `glab api -X POST orbit/query/NAME`. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
 
 Each `glab orbit query` has fixed per-call overhead. Prefer one aggregate query, with `count(...)` in `RETURN`, over N lookups for "how many X grouped by Y", and batch related lookups.
 
@@ -73,6 +74,7 @@ Read [`references/gql.md`](references/gql.md) before you construct a query. Thes
 - To find MRs that ever touched a file, use `HAS_DIFF`; see [file history](references/gql.md#merge-requests-that-touched-a-file). Use `HAS_LATEST_DIFF` for one MR's current revision.
 - Issues, epics, tasks, and incidents are the `WorkItem` node. There is no `Issue` node.
 - There is no `OR`, `XOR`, `RETURN DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`. `DISTINCT` works only inside `count()`: `count(DISTINCT pl)`.
+- For "who authored, merged, reviewed or approved the most MRs in a period" questions, read [`references/per-user-period.md`](references/per-user-period.md) first. It has the query shape and the bot workaround.
 - For packages, their files, dependencies and vulnerabilities, and container repositories, load the `orbit-package-registry` skill first: `glab orbit skills get orbit-package-registry`.
 
 ## Iteration budget

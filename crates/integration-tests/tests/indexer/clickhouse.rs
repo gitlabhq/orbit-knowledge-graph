@@ -215,6 +215,60 @@ async fn arrow_string_overflow_recovers_with_byte_cap() {
     assert_eq!(rows, 2148);
 }
 
+/// Forwards responses in 1 KiB pieces, 1 ms apart, so a plain response reaches
+/// the client in many small chunks, as it does over a real network.
+async fn throttling_proxy(upstream_url: &str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let upstream = upstream_url
+        .strip_prefix("http://")
+        .expect("test ClickHouse URL uses http")
+        .to_string();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        let (client, _) = listener.accept().await.unwrap();
+        let server = tokio::net::TcpStream::connect(upstream).await.unwrap();
+        let (mut client_read, mut client_write) = client.into_split();
+        let (mut server_read, mut server_write) = server.into_split();
+        tokio::spawn(async move { tokio::io::copy(&mut client_read, &mut server_write).await });
+        let mut piece = [0; 1024];
+        loop {
+            let read = server_read.read(&mut piece).await.unwrap_or(0);
+            if read == 0 || client_write.write_all(&piece[..read]).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    });
+    url
+}
+
+#[tokio::test]
+async fn streamed_read_keeps_every_byte_of_a_slow_plain_response() {
+    use futures::StreamExt;
+
+    let context = integration_testkit::TestContext::new(&[]).await;
+    let config = ClickHouseConfiguration {
+        url: throttling_proxy(&context.config.url).await,
+        ..context.config.clone()
+    };
+
+    // Small blocks put many Arrow message headers across chunk boundaries.
+    let mut batches = config
+        .build_client("graph")
+        .query("SELECT number FROM numbers(3200)")
+        .with_setting("enable_http_compression", "0")
+        .fetch_arrow_streamed(Some(16))
+        .await
+        .expect("query opens");
+    let mut rows = 0;
+    while let Some(batch) = batches.next().await {
+        rows += batch.expect("every batch decodes").num_rows();
+    }
+    assert_eq!(rows, 3200);
+}
+
 #[tokio::test]
 async fn connection_failure_returns_error() {
     let config = ClickHouseConfiguration {
@@ -222,6 +276,9 @@ async fn connection_failure_returns_error() {
         url: "http://127.0.0.1:19000".to_string(),
         username: "default".to_string(),
         password: None,
+        compatibility: orbit_server_config::AppConfig::embedded_defaults()
+            .graph
+            .compatibility,
         session_settings: std::collections::HashMap::new(),
         replicated: false,
         insert_settings: std::collections::HashMap::new(),
@@ -243,4 +300,52 @@ async fn connection_failure_returns_error() {
         )
         .await;
     assert!(result.is_err(), "should fail to write to invalid address");
+}
+
+#[tokio::test]
+async fn datalake_watermark_reads_use_the_skip_index_on_tables_with_a_projection() {
+    let clickhouse = integration_testkit::TestContext::new(&[]).await;
+    let datalake = ClickHouseConfiguration {
+        url: clickhouse.config.url.clone(),
+        database: clickhouse.config.database.clone(),
+        username: clickhouse.config.username.clone(),
+        password: clickhouse.config.password.clone(),
+        ..orbit_server_config::AppConfig::embedded_defaults().datalake
+    }
+    .build_client("datalake");
+
+    // Large rows clustered in the sort key give the merged base part more marks than its
+    // projection, so ClickHouse 26.6 to 26.10 prefer the projection, which has no skip index.
+    for statement in [
+        "CREATE TABLE watermark_reads (k UInt32, id UInt64, payload String, watermark DateTime, \
+         INDEX idx_watermark watermark TYPE minmax GRANULARITY 1, \
+         PROJECTION by_id (SELECT * ORDER BY id)) \
+         ENGINE = MergeTree ORDER BY (k, id) \
+         SETTINGS index_granularity = 2048, index_granularity_bytes = 1048576, auto_statistics_types = ''",
+        "INSERT INTO watermark_reads SELECT number % 500, number, \
+         repeat('x', if(number % 500 < 10, 4000, 20)), toDateTime('2026-01-01') + number % 86400 \
+         FROM numbers(100000)",
+        "INSERT INTO watermark_reads SELECT number % 500, 100000 + number, \
+         repeat('x', if(number % 500 < 10, 4000, 20)), toDateTime('2026-01-02') + number % 86400 \
+         FROM numbers(100000)",
+        "OPTIMIZE TABLE watermark_reads FINAL",
+        "SYSTEM STOP MERGES watermark_reads",
+        "INSERT INTO watermark_reads SELECT number % 500, 200000 + number, 'recent', \
+         toDateTime('2026-06-01') + number % 3600 FROM numbers(10000)",
+    ] {
+        clickhouse.execute(statement).await;
+    }
+
+    let (_, summary) = datalake
+        .query("SELECT k, watermark FROM watermark_reads WHERE watermark >= '2026-06-01 00:00:00'")
+        .fetch_arrow_with_summary()
+        .await
+        .expect("watermark query runs");
+
+    let read_rows = summary.and_then(|summary| summary.read_rows());
+    assert_eq!(
+        read_rows,
+        Some(10_000),
+        "only the recent part should be read"
+    );
 }

@@ -21,5 +21,5 @@ expect:
     Note:
       ids: [3002]
       filters:
-        note: { ends_with: " [truncated]" }
+        note: { ends_with: " [truncated]", max_chars: 3000 }
       prop_present: [note, discussion_id]

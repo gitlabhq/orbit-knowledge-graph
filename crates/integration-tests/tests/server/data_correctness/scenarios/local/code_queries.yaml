@@ -1,0 +1,32 @@
+config:
+  backends: [clickhouse, duckdb]
+  extra_seed:
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 12000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition }
+      - { traversal_path: "1/100/1000/", source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12002, target_kind: Definition }
+
+cases:
+  - name: name_ends_with
+    description: An ends_with filter keeps the definitions whose name has the suffix
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[12000,12001,12002],"columns":["name"],"filters":{"name":{"ends_with":"query"}}}],"limit":10}
+      gql: |
+        MATCH (d:Definition) WHERE d.id IN [12000, 12001, 12002] AND d.name ENDS WITH 'query' RETURN d.name LIMIT 10
+    expect:
+      nodes:
+        Definition:
+          ids: [12002]
+          filters:
+            name: run_query
+
+  - name: paged_call_path
+    description: A paged shortest path orders by the path text and returns the two-hop call chain
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (a:Definition {id: 12000})-[:CALLS*1..3]->(b:Definition {id: 12002}) RETURN p SKIP 0 LIMIT 5
+    expect:
+      node_count: 3
+      path_count: 1
+      path_edges:
+        - [{ from: Definition, from_id: 12000, type: CALLS, to: Definition, to_id: 12001 }, { from: Definition, from_id: 12001, type: CALLS, to: Definition, to_id: 12002 }]

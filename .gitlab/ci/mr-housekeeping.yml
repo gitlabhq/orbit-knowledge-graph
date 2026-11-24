@@ -1,0 +1,25 @@
+mr-housekeeping:
+  stage: review
+  image: registry.gitlab.com/gitlab-org/cli:v1.102.0
+  tags:
+    - saas-linux-small-amd64
+  # Run independently of stage order so the blocking manual release job can't
+  # gate it; on the solo schedule this is the only job anyway.
+  needs: []
+  variables:
+    HOUSEKEEPING_TASKS: "stale milestone-assignee"
+    HOUSEKEEPING_EXCLUDE_LABEL: "Community contribution"
+    STALE_IDLE_DAYS: "5"
+    STALE_GRACE_DAYS: "2"
+    STALE_LABEL_PREFIX: "stale"
+    DRY_RUN: "false"
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "mr-housekeeping"
+  before_script:
+    - test -n "${MR_HOUSEKEEPING_GITLAB_TOKEN}" || (echo "Missing MR_HOUSEKEEPING_GITLAB_TOKEN" && exit 1)
+    - apk add --no-cache bash jq coreutils
+    - export GITLAB_TOKEN="$MR_HOUSEKEEPING_GITLAB_TOKEN"
+  script:
+    - bash scripts/ci/mr-housekeeping/run.sh

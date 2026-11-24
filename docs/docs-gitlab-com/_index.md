@@ -4,6 +4,7 @@ group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Give your agent a graph of your GitLab data and code, so the agent can answer questions about changes, pipelines, security, and code structure.
 title: GitLab Orbit
+layout: landing
 ---
 
 Software lifecycle context graph for AI agents
@@ -11,7 +12,7 @@ Software lifecycle context graph for AI agents
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
+- Tier: [Premium, Ultimate](https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/#trials-and-purchases)
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -54,7 +55,7 @@ For more examples, see [prompt examples](prompt-examples.md).
 <!-- Videos published on 2026-07-06 and 2026-06-26 -->
 
 - [GitLab Self-Managed setup](https://docs.gitlab.com/orbit/self-managed/orbit-setup/)<br>Install GitLab Orbit on Kubernetes, connect GitLab to it, and index your first group.
-- [See the roadmap](https://gitlab-org.gitlab.io/orbit/knowledge-graph/)<br>The work the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
+- [See the roadmap](https://gitlaborbit.dev/next)<br>The work the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
 {.product-cards .product-cards-2}
 
 <style>

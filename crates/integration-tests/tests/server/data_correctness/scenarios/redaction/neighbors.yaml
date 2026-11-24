@@ -1,0 +1,251 @@
+description: Neighbors redaction needs both the center node and the neighbor to be allowed
+
+config:
+  security: { paths: ["1/700/"] }
+  seed: redaction
+  extra_seed:
+    gl_project:
+      - { id: 9999, name: Collision Project, visibility_level: public, traversal_path: "1/700/9999/" }
+    gl_edge:
+      - { traversal_path: "1/700/", source_id: 1, source_kind: Group, relationship_kind: CONTAINS, target_id: 9999, target_kind: Project }
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+      "neighbors": {"direction": "outgoing"}
+    }
+  gql: |
+    MATCH (u:User {id: 1})-->(n) RETURN u, n
+
+cases:
+  - name: center_and_neighbors_allowed
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: [701, 703]
+    expect:
+      node_count: 3
+      referential_integrity: true
+      nodes:
+        User:
+          ids: [1]
+        Group:
+          ids: [701, 703]
+      edges:
+        MEMBER_OF: [[1, 701], [1, 703]]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 701 }
+          - { from: User, from_id: 1, to: Group, to_id: 703 }
+
+  - name: no_authorization_returns_nothing
+    config:
+      redaction: none
+    expect:
+      node_count: 0
+
+  - name: center_allowed_alone_returns_nothing
+    config:
+      redaction:
+        allow:
+          user: [1]
+    expect:
+      node_count: 0
+
+  - name: denied_neighbor_is_removed
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: [701]
+        deny:
+          group: [703]
+    expect:
+      node_count: 2
+      nodes:
+        User:
+          ids: [1]
+        Group:
+          ids: [701]
+          absent: [703]
+      edges:
+        MEMBER_OF: [[1, 701]]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 701 }
+
+  - name: denied_center_filters_all
+    config:
+      redaction:
+        allow:
+          group: [701, 702, 703]
+        deny:
+          user: [1]
+    expect:
+      node_count: 0
+
+  - name: multiple_centers_all_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [701, 702, 703]
+          project: [7100, 7101, 7102, 7103, 7104, 9999]
+          merge_request: [7200, 7201, 7202, 7203]
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 3]}],
+          "neighbors": {"direction": "outgoing"}
+        }
+      gql: |
+        MATCH (u:User)-->(n) WHERE u.id IN [1, 3] RETURN u, n
+    expect:
+      node_count: 5
+      nodes:
+        User:
+          ids: [1, 3]
+        Group:
+          ids: [701, 702, 703]
+      edges:
+        MEMBER_OF: [[1, 701], [1, 703], [3, 702]]
+
+  - name: multiple_centers_mixed_authorization
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: [701, 703]
+        deny:
+          user: [3]
+          group: [702]
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 3]}],
+          "neighbors": {"direction": "outgoing"}
+        }
+      gql: |
+        MATCH (u:User)-->(n) WHERE u.id IN [1, 3] RETURN u, n
+    expect:
+      node_count: 3
+      nodes:
+        User:
+          ids: [1]
+          absent: [3]
+        Group:
+          ids: [701, 703]
+          absent: [702]
+      edges:
+        MEMBER_OF: [[1, 701], [1, 703]]
+
+  - name: incoming_all_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [701, 702, 703]
+          project: [7100, 7101, 7102, 7103, 7104, 9999]
+          merge_request: [7200, 7201, 7202, 7203]
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "g", "entity": "Group", "node_ids": [701]}],
+          "neighbors": {"direction": "incoming", "rel_types": ["MEMBER_OF"]}
+        }
+      gql: |
+        MATCH (g:Group {id: 701})<-[:MEMBER_OF]-(n) RETURN g, n
+    expect:
+      node_count: 3
+      nodes:
+        Group:
+          ids: [701]
+        User:
+          ids: [1, 2]
+      edges:
+        MEMBER_OF: [[1, 701], [2, 701]]
+
+  - name: incoming_denied_neighbor_is_removed
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: [701]
+        deny:
+          user: [2]
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "g", "entity": "Group", "node_ids": [701]}],
+          "neighbors": {"direction": "incoming", "rel_types": ["MEMBER_OF"]}
+        }
+      gql: |
+        MATCH (g:Group {id: 701})<-[:MEMBER_OF]-(n) RETURN g, n
+    expect:
+      node_count: 2
+      nodes:
+        Group:
+          ids: [701]
+        User:
+          ids: [1]
+          absent: [2]
+      edges:
+        MEMBER_OF: [[1, 701]]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 701 }
+
+  - name: all_allowed_returns_only_the_group_neighbors
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [701, 702, 703]
+          project: [7100, 7101, 7102, 7103, 7104, 9999]
+          merge_request: [7200, 7201, 7202, 7203]
+    expect:
+      node_count: 3
+      nodes:
+        User:
+          ids: [1]
+        Group:
+          ids: [701, 703]
+        Project:
+          absent: [9999]
+      edges:
+        MEMBER_OF: [[1, 701], [1, 703]]
+      edge_absent:
+        CONTAINS:
+          - [1, 9999]
+
+  - name: source_kind_separates_colliding_ids_after_redaction
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: [701]
+          project: [9999]
+        deny:
+          group: [703]
+    expect:
+      node_count: 2
+      nodes:
+        User:
+          ids: [1]
+        Group:
+          ids: [701]
+          absent: [703]
+        Project:
+          absent: [9999]
+      edges:
+        MEMBER_OF: [[1, 701]]
+      edge_absent:
+        CONTAINS:
+          - [1, 9999]

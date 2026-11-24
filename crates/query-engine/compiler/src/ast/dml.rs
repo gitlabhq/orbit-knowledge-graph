@@ -85,7 +85,7 @@ pub enum TextMatch {
     AnyTokens,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display, strum::EnumIter)]
 pub enum Function {
     StartsWith,
     EndsWith,

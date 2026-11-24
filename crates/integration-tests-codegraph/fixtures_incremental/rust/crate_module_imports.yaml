@@ -1,0 +1,129 @@
+name: "Rust: use crate:: imports of modules"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_crate_module_imports_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod admin;
+      pub mod app;
+      pub mod net;
+      pub mod outer;
+      pub mod sibling;
+      pub mod tree;
+
+      pub fn helper() {}
+
+  - path: src/admin.rs
+    content: |
+      pub fn helper() {}
+
+  - path: src/net.rs
+    content: |
+      pub fn connect() {}
+
+  - path: src/outer.rs
+    content: |
+      pub mod inner;
+
+      pub fn outer_fn() {}
+
+  - path: src/outer/inner.rs
+    content: |
+      pub fn inner_fn() {}
+
+  - path: src/tree/mod.rs
+    content: |
+      pub mod leaf;
+
+      pub fn grow() {}
+
+  - path: src/tree/leaf.rs
+    content: |
+      pub fn fall() {}
+
+  - path: src/app.rs
+    content: |
+      use crate::helper;
+      use crate::net;
+      use crate::outer::inner;
+      use crate::tree;
+      use crate::tree::leaf;
+      use crate::outer::*;
+
+      pub fn via_crate_module() {
+          net::connect();
+      }
+
+      pub fn via_nested_module() {
+          inner::inner_fn();
+      }
+
+      pub fn via_mod_rs() {
+          tree::grow();
+      }
+
+      pub fn via_mod_rs_child() {
+          leaf::fall();
+      }
+
+      pub fn via_crate_item() {
+          helper();
+      }
+
+      pub fn via_wildcard() {
+          outer_fn();
+      }
+
+  - path: src/sibling.rs
+    content: |
+      use super::net;
+
+      pub fn via_super_module() {
+          net::connect();
+      }
+
+tests:
+  - name: "use crate::module resolves calls through the module file"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'src/app.rs' AND caller.name IN ['via_crate_module', 'via_nested_module', 'via_mod_rs', 'via_mod_rs_child']
+      RETURN caller.name AS caller, callee.file_path AS tgt
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: via_crate_module, tgt: "src/net.rs" } }
+      - { row: { caller: via_nested_module, tgt: "src/outer/inner.rs" } }
+      - { row: { caller: via_mod_rs, tgt: "src/tree/mod.rs" } }
+      - { row: { caller: via_mod_rs_child, tgt: "src/tree/leaf.rs" } }
+
+  - name: "use crate::item resolves in lib.rs, not a same-named item in another file"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'via_crate_item'
+      RETURN callee.fqn AS target, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { target: helper, tgt: "src/lib.rs" } }
+
+  - name: "Control: use super::module still resolves"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'via_super_module'
+      RETURN callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { tgt: "src/net.rs" } }
+
+  - name: "Control: a wildcard import keeps the parent module file"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'via_wildcard'
+      RETURN callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { tgt: "src/outer.rs" } }

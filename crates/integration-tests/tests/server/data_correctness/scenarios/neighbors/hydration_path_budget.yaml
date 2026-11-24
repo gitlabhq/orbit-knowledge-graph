@@ -1,0 +1,41 @@
+description: Neighbors at 900 distinct project paths, more than the hydration path budget, all come back with their properties, so no node is lost when the paths widen
+
+config:
+  redaction:
+    allow:
+      user: [1]
+
+generate:
+  - kind: rows
+    into: config.extra_seed.gl_project
+    count: 900
+    start: 20001
+    row: { id: $i, name: "p$i", full_path: "budget/p$i", visibility_level: private, traversal_path: "1/100/$i/" }
+
+  - kind: rows
+    into: config.extra_seed.gl_edge
+    count: 900
+    start: 20001
+    row: { traversal_path: "1/100/$i/", source_id: 1, source_kind: User, relationship_kind: CONTAINS, target_id: $i, target_kind: Project }
+
+  - kind: rows
+    into: config.redaction.allow.project
+    count: 900
+    start: 20001
+    row: $i
+
+query:
+  json: |
+    {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing","rel_types":["CONTAINS"]},"limit":1000}
+  gql: |
+    MATCH (u:User {id: 1})-[:CONTAINS]->(n) RETURN u, n LIMIT 1000
+
+expect:
+  nodes:
+    User:
+      ids: [1]
+    Project:
+      count: 900
+      prop_present: [name, full_path]
+  edge_count:
+    CONTAINS: 900

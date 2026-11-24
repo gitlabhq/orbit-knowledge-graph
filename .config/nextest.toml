@@ -4,8 +4,8 @@ retries = 1
 
 [profile.ci]
 fail-fast = false
-retries = { backoff = "exponential", count = 3, delay = "1s", max-delay = "10s", jitter = true }
-slow-timeout = { period = "90s" }
+retries = { backoff = "exponential", count = 1, delay = "1s", max-delay = "10s", jitter = true }
+slow-timeout = { period = "90s", terminate-after = 10 }
 
 [profile.ci.junit]
 path = "junit.xml"

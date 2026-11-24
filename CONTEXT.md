@@ -1,157 +1,153 @@
 # Orbit
 
-A property graph built from GitLab instance data (SDLC metadata and source code structure), queryable over HTTP, gRPC, and MCP.
+A property graph built from GitLab SDLC data and source code. You query it over HTTP, gRPC, and MCP.
 
 ## Language
 
 ### Product
 
 **GitLab Orbit**:
-The product. Previously named GitLab Knowledge Graph. Builds a property graph from GitLab data and serves user-scoped, JWT-authenticated queries against it. Has two parts: the **GitLab Orbit API** and the **GitLab Orbit CLI**. Do not shorten to Orbit in docs.
-_Avoid_: Orbit, KGaaS, Knowledge Graph Service, Orbit Remote, "Orbit service"
+The product, previously named GitLab Knowledge Graph. It builds a property graph from GitLab data and serves user-scoped queries. It has two parts: the **GitLab Orbit API** and the **GitLab Orbit CLI**. In docs, do not shorten it to Orbit.
+_Avoid_: KGaaS, Knowledge Graph Service, Orbit Remote, "Orbit service"
 
 **GKG**:
-Retired engineering abbreviation for Orbit ("GitLab Knowledge Graph"). Still present in the binary name (`gkg-server`), metrics, and pinned wire/database names.
-_Avoid_: using GKG in user-facing contexts
+The retired engineering abbreviation for Orbit. It stays only in existing names, such as the `gkg-server` binary, metrics, and pinned wire and database names.
+_Avoid_: GKG in user-facing text
 
 **GitLab Orbit API**:
 The REST, GraphQL, and MCP endpoints of **GitLab Orbit** on a GitLab instance. The **GitLab Orbit CLI**, agents, and GitLab Duo Agent Platform call them.
 _Avoid_: remote graph, "the server", "production GKG"
 
 **GitLab Orbit CLI**:
-The `orbit` binary. `glab orbit` installs it and forwards all verbs to it. `query`, `status`, and `schema` call the **GitLab Orbit API**, and `skills` calls it when a credential is available. The `workspace` group (`index`, `sql`, `schema`, `list`, `reset`) uses only the **Local graph**. `grep` and `context` combine both. Both read the **Local graph**. `grep` also searches GitLab entities through the **GitLab Orbit API** grep endpoint. `context` also reads GitLab entity tokens such as `MergeRequest[42]` through the context endpoint.
+The `orbit` binary. `glab orbit` installs it and forwards verbs to it. Some verbs call the **GitLab Orbit API**, some use only the **Local graph**, and `grep` and `context` use both. Run `orbit --help` for the current verbs.
 _Avoid_: Orbit CLI, Orbit Local, "local mode", "remote mode"
 
 **Local graph**:
-The DuckDB graph the **GitLab Orbit CLI** builds from a repository on the machine. Part of **GitLab Orbit**: it covers local code that **GitLab Orbit** on the GitLab instance does not have. `grep` and `context` index the working tree on their own.
+The DuckDB graph that the **GitLab Orbit CLI** builds from a repository on your machine. It covers local code that the GitLab instance does not have.
 _Avoid_: Orbit Local
 
 **Skill Placeholder**:
-A line-oriented HTML comment that marks where a local section belongs in the standalone skill that **GitLab Orbit** serves. Builds require each placeholder to have one matching local section. Both source trees remain independently usable, and the current CLI still serves only its embedded local tree.
-_Avoid_: include directive (the source files remain independently usable)
+An HTML comment in the skill that the **GitLab Orbit API** serves. It marks where the CLI inserts a section from its embedded local skill. Each placeholder must match one local section.
+_Avoid_: include directive
 
 ### Graph model
 
 **Property Graph**:
-A data model where typed **Nodes** carry properties and typed directed **Relationships** connect them. The foundational abstraction of Orbit.
-_Avoid_: knowledge graph (too vague), graph database (refers to the storage layer)
+A data model where typed **Nodes** carry properties and typed, directed **Relationships** connect them.
+_Avoid_: knowledge graph (too vague), graph database (the storage layer)
+
+**Ontology**:
+The YAML schema of the graph. It is the single source of truth for what the graph can contain.
+_Avoid_: schema (too generic), data model (the broader design)
 
 **Node**:
-A typed entity in the property graph representing a GitLab object (e.g., Project, MergeRequest, File, Definition). Each node type is defined in the **Ontology** and stored in a dedicated table (ClickHouse in **GitLab Orbit**, DuckDB in the **Local graph**). Called `entity` in the **Query DSL**.
+A typed entity that represents a GitLab object, such as Project, MergeRequest, File, or Definition. The **Ontology** defines each node type. Each type has its own table.
 _Avoid_: vertex
 
 **Relationship**:
-A typed directed connection between two **Nodes** (e.g., `AUTHORED`, `CONTAINS`, `IN_PROJECT`). Defined in the **Ontology** with one or more source→target **Node** type variants. Stored in physical edge tables.
+A typed, directed connection between two **Nodes**, such as `AUTHORED` or `IN_PROJECT`. The **Ontology** defines the valid source and target types.
 _Avoid_: interaction, link
 
 **Derived Entity**:
-A third **Ontology** shape alongside **Node** and **Relationship**: one or more **Pipelines** with no node table. A named Rust transform turns their extracted rows into **Relationships**. Declared per domain in `schema.yaml` and implemented in `config/ontology/derived/`. A derived entity stays dormant until its `transform.type` is registered in Rust. Used for entities (e.g. SystemNote) whose graph shape can't be a SQL row-projection. They need multi-hop datalake reads or free-text parsing. See ADR 015.
+An **Ontology** entry with **Pipelines** but no node table. A Rust transform turns the extracted rows into **Relationships**. Use it when one SQL row cannot express the graph shape, for example, SystemNote (ADR 015).
 _Avoid_: storageless node, derived node
 
 **Pipeline**:
-An **Ontology** ETL unit with `extract` and `transform` sections. Nodes, **Relationships**, and **Derived Entities** all use this shape. The extract names source tables and cursor ordering. It uses either a `.sql.j2` template next to the YAML that references it, or `query: generated` (optionally with an `extract.filter` predicate). The transform is `datafusion` or a registered Rust transform.
+The **Ontology** ETL unit, with `extract` and `transform` sections. **Nodes**, **Relationships**, and **Derived Entities** all use it.
 _Avoid_: old-style `etl` block
 
-**Ontology**:
-The YAML-defined schema of the property graph. Declares all **Node** types, **Relationship** types, **Derived Entity** definitions, their properties, and valid source→target pairings. Lives in `config/ontology/`. The single source of truth for what the graph can contain.
-_Avoid_: schema (too generic), data model (refers to the broader design)
-
 **WorkItem**:
-The unified **Node** type for all trackable units of work: issues, epics, tasks, incidents, test cases, requirements, objectives, key results. Distinguished by the `work_item_type` property. There are no separate Issue or Epic node types.
-_Avoid_: Issue, Epic (these are work item types, not separate graph entities)
+The one **Node** type for all units of work, such as issues, epics, tasks, incidents, and tickets. The `work_item_type` property tells them apart. There are no Issue or Epic node types.
+_Avoid_: Issue, Epic as node types
 
 ### Graph partitions
 
-**SDLC (Software Development Lifecycle) Data**:
-The sub-graph of GitLab platform entities: projects, groups, merge requests, work items, pipelines, vulnerabilities, users. Distinguished from **Code Graph** data. Indexed from the **Datalake** via the SDLC indexing pipeline.
-_Avoid_: namespace graph (outdated alias)
+**SDLC Data**:
+The sub-graph of GitLab platform entities, such as projects, groups, merge requests, work items, pipelines, and users. Indexed from the **Datalake**.
+_Avoid_: namespace graph
 
 **Code Graph**:
-The sub-graph of source code structure and relationships: branches, directories, files, definitions, imported symbols, and their connections (containment, calls, imports, inheritance). Distinguished from **SDLC Data**. Built by parsing repository contents via Gitaly.
-_Avoid_: call graph (refers only to invocation relationships, not the full sub-graph)
+The sub-graph of source code structure: branches, directories, files, definitions, imports, and their connections. Built from repository contents through Gitaly.
+_Avoid_: call graph (only invocation edges)
 
 **YAML Document Type**:
-A declarative config (one YAML file under `crates/code-graph/src/v2/langs/generic/yaml/document_types/`) tells the **Code Graph** which YAML files it claims. It claims them by filename, directory, or top-level keys. It also names which of their keys become definitions or imports. Shipped types: GitLab CI, ArgoCD, Helm chart, Helm values, Docker Compose. YAML that no document type claims keeps only its `File` node plus anchor definitions and alias references.
-_Avoid_: YAML dialect, YAML schema (that is the JSON schema the configs are validated against)
-
-**Namespace Partitioning**:
-The physical `PARTITION BY` of every graph table carrying a **Traversal Path**. It is keyed by a hash bucket of the top-level **Namespace** (`sipHash64(top_level_ns) % N`, declared once in `settings.partition`). Gives each tenant bucket its own ClickHouse part budget so one tenant's reindex burst cannot dead-letter inserts for the rest. A query scoped to a single top-level namespace also prunes to one bucket: the compiler emits the same bucket expression as a predicate. A storage-layer property, distinct from the logical SDLC/Code sub-graphs and from the read-side extraction slices used for parallel initial loads.
-_Avoid_: sharding (Orbit does not shard); conflating with the SDLC/Code "graph partitions" sub-graph split.
+A config that tells the **Code Graph** which YAML files it claims, by filename, directory, or top-level keys. It also names the keys that become definitions or imports. Unclaimed YAML keeps only its `File` node, anchors, and aliases.
+_Avoid_: YAML dialect, YAML schema
 
 ### Authorization
 
 **Traversal Path**:
-The slash-delimited ancestor **Namespace** hierarchy for an entity (e.g., `"42/100/1000/"`). Encodes **Organization**, group, and subgroup lineage. Used for hierarchical permission filtering: queries are scoped to paths the user is authorized for via prefix matching.
-_Avoid_: traversal ID, traversal_ids (these refer to the array encoding of the same concept)
+The slash-delimited ancestor **Namespace** IDs of an entity, for example `"42/100/1000/"`. The first segment is the **Organization**. A query returns a row only when the user can access the row's path or one of its ancestors.
+_Avoid_: traversal ID, traversal_ids (the array form of the same data)
 
 **Namespace**:
-A GitLab group at any level of the hierarchy. The root namespace (top-level group) is the unit of indexing dispatch and deletion. The full namespace hierarchy is encoded in the **Traversal Path** of descendant entities. Represented in the graph as a Group **Node**.
-_Avoid_: tenant (Orbit uses **Organization** for tenant isolation)
+A GitLab group at any level. The top-level group is the unit of indexing dispatch and deletion. The graph stores it as a Group **Node**.
+_Avoid_: tenant
 
 **Organization**:
-The top-level tenant boundary. The first segment of every **Traversal Path**. All data within Orbit is segregated by organization at the storage layer.
-_Avoid_: org, tenant (too informal / too generic)
+The top-level tenant boundary. Storage keeps the data of each organization apart.
+_Avoid_: org, tenant
 
 **Redaction**:
-Post-query authorization filtering where the service calls GitLab Rails to check per-resource permissions (`Ability.allowed?`). Rows the user cannot access are removed from the result. Handles cases that **Traversal Path** filtering cannot catch: confidential issues, runtime access controls, role-gated entities.
-_Avoid_: filtering (too generic), content masking (misleading: entire rows are removed, not obscured)
+Authorization after the query. The service asks GitLab Rails to check each resource and removes the rows that the user cannot access. It covers cases that **Traversal Path** filters cannot, such as confidential issues and role-gated entities.
+_Avoid_: filtering (too generic), content masking (rows are removed, not masked)
 
 ### Data pipeline
 
 **CDC (Change Data Capture)**:
-The pattern of capturing row-level changes from a source database as a stream of events. In Orbit, CDC flows from the GitLab PostgreSQL database through **Siphon** into the **Datalake**.
-_Avoid_: replication (too broad)
-
-**Dispatch ID**:
-A UUID stamped on each indexing request message. It identifies one dispatch unit: per (namespace × cycle) for SDLC namespace dispatch, and per cycle for the global and code dispatchers. Propagated to the `IndexingObserver` and tracing spans for correlation.
-_Avoid_: request ID, trace ID (`dispatch_id` groups many requests, not a single one)
-
-**Campaign**:
-The parent correlation above **Dispatch ID**: one campaign per "re-index everything" decision, `null` in steady state. Today a campaign is a schema migration: opened (`migration-v<N>`) when the dispatcher marks a version `migrating`, and closed when the migration completes (promotion to `active`). Every dispatch during the migration carries it. Held in process memory (`CampaignState`), not persisted. Lets analysts aggregate the cost of one re-index across pipelines without time-based joins.
-_Avoid_: batch, job (a campaign spans many dispatches and both pipelines)
-
-**Migration ledger**:
-`config/schema-migrations.yaml`, one entry per `SCHEMA_VERSION` bump declaring how much of the graph that version invalidates (`scope: "*" | sdlc | code`, optional `entities`). A clone-based **schema migration** reads it to decide what to clone versus rebuild. Entries are auto-derived from a fingerprint snapshot by `mise schema:bump`; humans may only widen them.
-_Avoid_: changelog, migration script (there is no per-version SQL)
+Capture of row-level changes from a source database as a stream of events. In Orbit, changes flow from GitLab PostgreSQL through **Siphon** into the **Datalake**.
+_Avoid_: replication
 
 **Siphon**:
-The GitLab CDC service. Captures PostgreSQL logical replication events and publishes them to NATS JetStream. External to Orbit, owned by the Analytics team.
+The GitLab CDC service. It publishes PostgreSQL replication events to NATS JetStream. It is not part of Orbit.
 _Avoid_: CDC bridge, producer
 
 **Datalake**:
-The ClickHouse database containing raw CDC rows replicated from GitLab PostgreSQL via **Siphon**. Tables are prefixed `siphon_`. The source data for ETL into graph tables.
+The ClickHouse database of raw CDC rows from **Siphon**. It is the source for the ETL into graph tables.
 _Avoid_: data lake, raw data tables, lake
+
+**Dispatch ID**:
+A UUID on each indexing request. It groups the requests of one dispatch, for example, one namespace in one cycle.
+_Avoid_: request ID, trace ID
+
+**Campaign**:
+The correlation ID above **Dispatch ID** for one full re-index, such as a schema migration. When no re-index runs, it has no value. Use it to add up the cost of one re-index across pipelines.
+_Avoid_: batch, job
+
+**Migration ledger**:
+The list of schema version bumps. Each entry says how much of the graph that version invalidates: all, SDLC, code, or none. A schema migration reads it to decide what to clone and what to rebuild. `mise schema:bump` writes the entry.
+_Avoid_: changelog, migration script
 
 ### Query system
 
-**Query DSL**:
-The JSON-based query language for the property graph. Supports four query types: traversal, aggregation, path_finding, and neighbors. Compiled to parameterized ClickHouse SQL. Versioned by `QUERY_DSL_VERSION`.
-_Avoid_: intermediate query language, intermediary LLM query language, JSON query language
+**GQL**:
+The read-only graph query language of **GitLab Orbit**, similar to OpenCypher. Clients write all queries in GQL.
+_Avoid_: Orbit Query
 
-**Orbit Query Frontend**:
-A compiler-level interface for Orbit's read-only graph language. The `gql` frontend module converts Pest pairs into a typed syntax tree, then lowers it into compiler Input. Rails selects it per user with the default-off `orbit_gql_queries` feature flag and sets the protobuf `QueryLanguage` enum, independently of raw or named source kind. JSON **Query DSL** and GQL are mutually exclusive modes, not client-selected languages.
-_Avoid_: Describing Orbit Query as the default query language
+**Query DSL**:
+The JSON query language that GQL replaced. GitLab 19.6 removed it. Only older instances accept it.
+_Avoid_: intermediate query language, JSON query language
 
 **Named Query**:
-A graph query defined in YAML under `config/named_queries/` and invoked by name. Each definition carries a JSON **Query DSL** spelling and a GQL spelling of the same shape; Rails sets `QUERY_TYPE_NAMED` and a separate `QueryLanguage` value. That language selects both the spelling and the matching compiler frontend. Trusted templates encode client values and bind caller identity separately. Both rendered examples compile against the ontology in `orbit-server` unit tests so drift fails CI.
+A query defined in YAML and called by name. CI checks each definition against the **Ontology**.
 _Avoid_: preset query, query template
 
 **Hop**:
-A single **Relationship** traversal in the graph. Multi-hop queries traverse multiple relationships in sequence. Hard-capped at 3 hops for security and performance.
-_Avoid_: depth (ambiguous with tree depth)
+One **Relationship** traversal. A query can have at most 3 hops.
+_Avoid_: depth
 
 **Denormalized Join**:
-A linear chain of tables declared under `settings.denormalized_joins` and pre-joined into one `gl_denorm_<name>` table. ClickHouse materialized views on each source table keep it current. Adjacent tables join on the ID that links them; every scoped table keeps its own **Traversal Path** in the row and the compiler filters each. Lets the compiler answer the matching **Hops** with one scan.
-_Avoid_: materialized table (the ClickHouse materialized views only feed it), projection (ClickHouse feature we deliberately do not use here). Distinct from the edge-tag `denormalization` settings block, which copies selected node properties onto edge rows.
+An **Ontology** setting that pre-joins a chain of tables into one table. The compiler then answers the **Hops** along that chain with one scan. ClickHouse materialized views keep it current.
+_Avoid_: materialized table, projection
 
 **Hydration**:
-Fetching properties for **Nodes** discovered dynamically during query execution. Required for PathFinding and Neighbors queries where the result set's node types aren't known upfront.
+Fetching **Node** properties found during the query, when the result node types are not known before the query runs.
 _Avoid_: enrichment, decoration
 
 **TOON (Token-Oriented Object Notation)**:
-A standard compact text encoding, used for every `format=llm` response. Query results list one table per node type, then an edge table. Schema, status, and health responses use it too. It replaced GOON (ADR 012).
+The compact text encoding for every `format=llm` response. It replaced GOON (ADR 012).
 _Avoid_: GOON, LLM format
 
 **GQL Response Format**:
-A cypher-shell style result table. Columns are node aliases, and cells hold node literals such as `(:Label {id: 1, ...})`. Used when queries specify `format=gql` (ADR 019).
-_Avoid_: Cypher output
+An OpenCypher-like result table for `format=gql` responses. Columns are node aliases, and cells are node literals (ADR 019).
+_Avoid_: query output table

@@ -64,8 +64,26 @@ impl ItemCountService {
         if plan.visibility.entities.is_empty() {
             return ScopeCounts::new();
         }
-        let counts =
-            counts::count_visible_entities(&self.client, &plan.scopes, &plan.visibility).await;
+        let counts = match self.client.has_parallel_replica_cluster().await {
+            Ok(parallel_replicas) => {
+                counts::count_visible_entities(
+                    &self.client,
+                    &plan.scopes,
+                    &plan.visibility,
+                    parallel_replicas,
+                )
+                .await
+            }
+            Err(error) => {
+                let error = Status::internal(format!(
+                    "ClickHouse error (parallel replica cluster): {error}"
+                ));
+                plan.scopes
+                    .iter()
+                    .map(|scope| (scope.as_str().to_string(), Err(error.clone())))
+                    .collect()
+            }
+        };
         for error in counts.values().filter_map(|counts| counts.as_ref().err()) {
             warn!(
                 safe(ERROR_TYPE) = "clickhouse_query",

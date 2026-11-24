@@ -8,7 +8,7 @@ title: Start a GitLab Orbit trial
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
+- Tier: [Premium, Ultimate](https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/#trials-and-purchases)
 - Offering: GitLab.com
 
 {{< /details >}}
@@ -20,7 +20,7 @@ title: Start a GitLab Orbit trial
 {{< /history >}}
 
 > [!note]
-> GitLab Orbit is available to Premium and Ultimate customers as a separate purchase.
+> GitLab Orbit is available to Premium and Ultimate customers as a [separate purchase](https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/#trials-and-purchases).
 > Eligible customers can [start a trial](#start-a-free-trial) before purchasing.
 
 On GitLab.com, you can start a free GitLab Orbit trial yourself in a top-level group.

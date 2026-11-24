@@ -256,6 +256,22 @@ impl CommandRegistry {
         commands
     }
 
+    pub fn agent_commands_for(frontend: Frontend) -> Vec<ToolDefinition> {
+        let mut commands = Self::commands_for(frontend);
+        if frontend == Frontend::Gql
+            && let Some(query) = commands
+                .iter_mut()
+                .find(|command| command.name == "query_graph")
+        {
+            query.description = format!(
+                "{} {}",
+                prompt("tools/query_graph_gql_mcp_routing").description(),
+                query.description
+            );
+        }
+        commands
+    }
+
     fn query_graph(frontend: Frontend) -> ToolDefinition {
         let prompt_key = match frontend {
             Frontend::JsonDsl => "tools/query_graph",
@@ -405,11 +421,26 @@ mod tests {
     }
 
     #[test]
+    fn plain_gql_query_graph_description_stays_under_680_bytes() {
+        let description = &CommandRegistry::commands_for(Frontend::Gql)
+            .into_iter()
+            .find(|command| command.name == "query_graph")
+            .expect("query_graph command should be registered")
+            .description;
+
+        assert!(
+            description.len() < 680,
+            "plain description is {} B",
+            description.len()
+        );
+    }
+
+    #[test]
     fn descriptions_are_bounded_and_carry_no_schema() {
         for frontend in [Frontend::JsonDsl, Frontend::Gql] {
             for definition in ToolRegistry::tools_for(frontend)
                 .into_iter()
-                .chain(CommandRegistry::commands_for(frontend))
+                .chain(CommandRegistry::agent_commands_for(frontend))
             {
                 assert!(
                     !definition.description.is_empty(),
@@ -418,7 +449,7 @@ mod tests {
                 );
                 if definition.name != "list_commands" {
                     let budget = match (frontend, definition.name.as_str()) {
-                        (Frontend::Gql, "query_graph") => 680,
+                        (Frontend::Gql, "query_graph") => 1150,
                         _ => 400,
                     };
                     assert!(

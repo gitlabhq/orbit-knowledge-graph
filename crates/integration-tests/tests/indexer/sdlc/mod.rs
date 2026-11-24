@@ -18,7 +18,7 @@ use super::common::scenarios::SdlcScenarioHandlers;
 use super::common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext};
 use integration_testkit::run_subtests;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn scenario_indexing() {
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     integration_testkit::scenario::run_dir(
