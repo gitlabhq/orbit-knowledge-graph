@@ -18,6 +18,13 @@ data:
   params: [parameter_declaration, variadic_parameter_declaration]
   type_specs: [type_spec, type_alias]
 
+define:
+  other_parts(ROOT): >-
+    minus(union(select(under(file($ROOT)), '(__def $N:__defname)', $ROOT | child("__defname")),
+    select(files, '(__def $N:__defname)' by $ROOT | package_name, $ROOT | package_name)), $ROOT)
+    | impl_pair($ROOT)
+  package_name(ROOT): '$ROOT | child("__defname") | concat("@", $ROOT | tag_up("file_dir") or ".")'
+
 canonicalize:
   - stage: normalize
     rewrite:
@@ -46,15 +53,15 @@ canonicalize:
       - '(import_spec path: (interpreted_string_literal $P:interpreted_string_literal_content))': '(__import (__source @$P) (__source_path @$P | regex_replace("$", "/*")) (__name @$P | split_last("/")))'
   - stage: classify
     rewrite:
-      - '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))': '(__binding @$N (__declaration) (__ssa_typed @$R) (__rhs $R))'
+      - '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))': '(__binding @$N (__declaration) (__ssa_typed @$R) $R)'
       - '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__call))': '(__binding @$N (__declaration) (__rhs $R))'
       - '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R))': '(__binding @$N (__declaration) (__rhs @$R $R))'
-      - '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))': '(__binding @$N (__ssa_typed @$R) (__rhs $R))'
+      - '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))': '(__binding @$N (__ssa_typed @$R) $R)'
       - '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__call))': '%bind_call($N, $R)'
       - '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R))': '%bind($N, $R)'
       - '(var_spec name: $N:identifier type: $T:type_identifier value: (expression_list $V))': '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__ssa_typed @$T) (__rhs $V)))'
       - '(var_spec name: $N:identifier type: $T:type_identifier)': '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__ssa_typed @$T)))'
-      - '(var_spec name: $N:identifier value: (expression_list $V:__struct_lit))': '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__ssa_typed @$V) (__rhs $V)))'
+      - '(var_spec name: $N:identifier value: (expression_list $V:__struct_lit))': '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__ssa_typed @$V) $V))'
       - '(var_spec name: $N:identifier value: (expression_list $V:__call))': '(var_spec (__def (__defname @$N) (__variable)) %bind_call($N, $V))'
       - '(var_spec name: $N:identifier value: (expression_list $V))': '(var_spec (__def (__defname @$N) (__variable)) %bind($N, $V))'
       - '(var_spec name: $N:identifier)': '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N))'
