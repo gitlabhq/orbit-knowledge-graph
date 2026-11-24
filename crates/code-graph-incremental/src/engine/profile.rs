@@ -23,6 +23,8 @@ const TOP: usize = 25;
 const TOP_FILES: usize = 100;
 /// Hottest keys kept per index in the JSON output.
 const TOP_KEYS: usize = 50;
+/// Stack depth past which deeper frames fold into the frame at this depth.
+const MAX_DEPTH: usize = 48;
 
 #[derive(Default, Clone, Copy, Serialize)]
 pub struct Stat {
@@ -87,6 +89,26 @@ struct IndexStat {
     empty: u64,
 }
 
+/// One caller -> callee edge of the weighted call graph.
+#[derive(Default, Clone, Copy, Serialize)]
+struct EdgeStat {
+    calls: u64,
+    /// Calls the callee computed rather than answered from the memo.
+    misses: u64,
+    /// Time in the callee under this caller, outermost calls only.
+    incl_ns: u64,
+    self_ns: u64,
+}
+
+impl EdgeStat {
+    fn add(&mut self, o: &EdgeStat) {
+        self.calls += o.calls;
+        self.misses += o.misses;
+        self.incl_ns += o.incl_ns;
+        self.self_ns += o.self_ns;
+    }
+}
+
 #[derive(Default, Clone, Copy, Serialize)]
 struct FileStat {
     ns: u64,
@@ -117,8 +139,10 @@ struct Totals {
     fns: FxHashMap<String, Stat>,
     rules: FxHashMap<String, Stat>,
     phases: FxHashMap<String, Stat>,
-    /// Calls and misses per (caller, callee) pair of cached calls, by name.
-    edges: FxHashMap<(String, String), (u64, u64)>,
+    /// The weighted call graph by (caller, callee) name.
+    edges: FxHashMap<(String, String), EdgeStat>,
+    /// Self ns per stack, `phase;frame;frame`.
+    folded: FxHashMap<String, u64>,
     indexes: FxHashMap<String, IndexStat>,
     /// Lookups and empty lookups per (index, key text).
     keys: FxHashMap<(String, String), (u64, u64)>,
@@ -136,14 +160,37 @@ fn total() -> MutexGuard<'static, Totals> {
     TOTAL.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// A call-graph frame: a computed call, or one attempt of a rule or case.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Frame {
+    Fn(FnId),
+    Rule(usize),
+}
+
+const ROOT: u32 = u32::MAX;
+
+/// An open frame: its stack-tree node, start, and the time of the frames
+/// under it, all of them and the function frames only.
+struct Open {
+    frame: Frame,
+    node: u32,
+    start: Instant,
+    inner: u64,
+    inner_fns: u64,
+}
+
 /// One run's counters, keyed by the memo's function id.
 #[derive(Default)]
 pub struct Profile {
     pub stats: FxHashMap<FnId, Stat>,
-    children: Vec<u64>,
-    active: FxHashMap<FnId, u32>,
-    stack: Vec<FnId>,
-    edges: FxHashMap<(Option<FnId>, FnId), (u64, u64)>,
+    stack: Vec<Open>,
+    active: FxHashMap<Frame, u32>,
+    active_edges: FxHashMap<(Option<Frame>, Frame), u32>,
+    edges: FxHashMap<(Option<Frame>, Frame), EdgeStat>,
+    /// The stack tree: parent node, frame, self ns.
+    nodes: Vec<(u32, Frame, u64)>,
+    children: FxHashMap<(u32, Frame), u32>,
+    rule_src: FxHashMap<usize, Box<str>>,
     rules: FxHashMap<usize, (Box<str>, Stat)>,
     /// Per key: times computed, times a kept result was reused.
     keys: FxHashMap<Key, (u32, u32)>,
@@ -152,11 +199,15 @@ pub struct Profile {
 }
 
 impl Profile {
+    fn caller(&self) -> Option<Frame> {
+        self.stack.last().map(|o| o.frame)
+    }
+
     pub(super) fn hit(&mut self, key: &Key, busy: bool) {
         self.edges
-            .entry((self.stack.last().copied(), key.0))
+            .entry((self.caller(), Frame::Fn(key.0)))
             .or_default()
-            .0 += 1;
+            .calls += 1;
         let s = self.stats.entry(key.0).or_default();
         s.calls += 1;
         match busy {
@@ -201,37 +252,98 @@ impl Profile {
         l.1 += u64::from(!found);
     }
 
-    pub fn enter(&mut self, id: FnId) -> Instant {
-        let edge = self
-            .edges
-            .entry((self.stack.last().copied(), id))
-            .or_default();
-        edge.0 += 1;
-        edge.1 += 1;
-        self.stack.push(id);
-        *self.active.entry(id).or_default() += 1;
-        self.children.push(0);
-        Instant::now()
+    fn open(&mut self, frame: Frame) -> Instant {
+        let caller = self.caller();
+        let edge = self.edges.entry((caller, frame)).or_default();
+        edge.calls += 1;
+        edge.misses += 1;
+        *self.active_edges.entry((caller, frame)).or_default() += 1;
+        *self.active.entry(frame).or_default() += 1;
+        let parent = self.stack.last().map_or(ROOT, |o| o.node);
+        let node = match self.stack.len() >= MAX_DEPTH {
+            true => parent,
+            false => *self.children.entry((parent, frame)).or_insert_with(|| {
+                self.nodes.push((parent, frame, 0));
+                self.nodes.len() as u32 - 1
+            }),
+        };
+        let start = Instant::now();
+        self.stack.push(Open {
+            frame,
+            node,
+            start,
+            inner: 0,
+            inner_fns: 0,
+        });
+        start
     }
 
-    pub fn leave(&mut self, id: FnId, start: Instant, reruns: u32) {
-        let total = start.elapsed().as_nanos() as u64;
-        self.stack.pop();
-        let inner = self.children.pop().unwrap_or(0);
-        if let Some(parent) = self.children.last_mut() {
-            *parent += total;
+    /// Closes `frame` and any frame a stopped run left open above it; its
+    /// total and self ns, and whether it was the outermost open call.
+    fn close(&mut self, frame: Frame) -> Option<(u64, u64, bool)> {
+        let at = self.stack.iter().rposition(|o| o.frame == frame)?;
+        while self.stack.len() > at + 1 {
+            let open = self.stack.last().map(|o| o.frame)?;
+            self.close(open);
         }
-        let outermost = self.active.get_mut(&id).is_some_and(|n| {
+        let open = self.stack.pop()?;
+        let total = open.start.elapsed().as_nanos() as u64;
+        let own = total.saturating_sub(open.inner);
+        let caller = self.caller();
+        if let Some(parent) = self.stack.last_mut() {
+            parent.inner += total;
+            parent.inner_fns += match frame {
+                Frame::Fn(_) => total,
+                Frame::Rule(_) => open.inner_fns,
+            };
+        }
+        let outermost = self.active.get_mut(&frame).is_some_and(|n| {
             *n -= 1;
             *n == 0
         });
+        let edge_outermost = self
+            .active_edges
+            .get_mut(&(caller, frame))
+            .is_some_and(|n| {
+                *n -= 1;
+                *n == 0
+            });
+        let edge = self.edges.entry((caller, frame)).or_default();
+        edge.self_ns += own;
+        if edge_outermost {
+            edge.incl_ns += total;
+        }
+        if let Some(node) = self.nodes.get_mut(open.node as usize) {
+            node.2 += own;
+        }
+        Some((total, total.saturating_sub(open.inner_fns), outermost))
+    }
+
+    pub fn enter(&mut self, id: FnId) -> Instant {
+        self.open(Frame::Fn(id))
+    }
+
+    pub fn leave(&mut self, id: FnId, _start: Instant, reruns: u32) {
+        let Some((total, own, outermost)) = self.close(Frame::Fn(id)) else {
+            return;
+        };
         let s = self.stats.entry(id).or_default();
         s.calls += 1;
         s.reruns += u64::from(reruns);
         if outermost {
             s.total_ns += total;
         }
-        s.self_ns += total.saturating_sub(inner);
+        s.self_ns += own;
+    }
+
+    /// Opens one attempt of the rule or case `id`, written `src`.
+    pub(super) fn enter_rule(&mut self, id: usize, src: &str) {
+        self.rule_src.entry(id).or_insert_with(|| src.into());
+        self.open(Frame::Rule(id));
+    }
+
+    pub(super) fn leave_rule(&mut self, id: usize) {
+        self.close(Frame::Rule(id));
     }
 
     /// One attempt of a rule: self time is matching, total adds its emits.
@@ -262,19 +374,34 @@ impl Profile {
                 self.stats.entry(key.0).or_default().never_hit += 1;
             }
         }
-        let name = |id: FnId| run.fn_name(id);
+        let rule_src = &self.rule_src;
+        let name = |frame: Frame| match frame {
+            Frame::Fn(id) => run.fn_name(id),
+            Frame::Rule(id) => format!("rule {}", cut(rule_src.get(&id).map_or("", |s| s), 60)),
+        };
+        let root = format!("[{}]", run.phase.name);
+        let mut paths: Vec<String> = Vec::with_capacity(self.nodes.len());
+        let mut folded: Vec<(usize, u64)> = Vec::new();
+        for (at, &(parent, frame, own)) in self.nodes.iter().enumerate() {
+            let above = paths.get(parent as usize).unwrap_or(&root);
+            paths.push(format!("{above};{}", name(frame).replace(';', ",")));
+            if own > 0 {
+                folded.push((at, own));
+            }
+        }
         let mut t = total();
+        for (at, own) in folded {
+            *t.folded.entry(std::mem::take(&mut paths[at])).or_default() += own;
+        }
         for (id, stat) in self.stats.drain() {
-            t.fns.entry(name(id)).or_default().add(&stat);
+            t.fns.entry(run.fn_name(id)).or_default().add(&stat);
         }
         for (_, (src, stat)) in self.rules.drain() {
             t.rules.entry(src.into()).or_default().add(&stat);
         }
-        for ((from, to), (calls, misses)) in self.edges.drain() {
-            let from = from.map_or_else(|| "(rule)".to_string(), name);
-            let e = t.edges.entry((from, name(to))).or_default();
-            e.0 += calls;
-            e.1 += misses;
+        for ((from, to), edge) in self.edges.drain() {
+            let from = from.map_or_else(|| root.clone(), name);
+            t.edges.entry((from, name(to))).or_default().add(&edge);
         }
         for ((index, key), (lookups, empty)) in self.lookups.drain() {
             let label = run.phase.index_label(index).to_string();
@@ -558,21 +685,64 @@ pub fn report() -> String {
         );
     }
 
-    header(
-        &mut out,
-        &format!("cached call edges (top {TOP} by misses)"),
-    );
-    let _ = writeln!(
-        out,
-        "{:<70} {:>10} {:>10}",
-        "caller -> callee", "calls", "misses"
-    );
-    for ((from, to), (calls, misses)) in sorted(&t.edges, |e| e.1).into_iter().take(TOP) {
+    let edge_row = |out: &mut String, from: &str, to: &str, e: &EdgeStat| {
         let _ = writeln!(
             out,
-            "{:<70} {calls:>10} {misses:>10}",
-            cut(&format!("{from} -> {to}"), 70)
+            "{:<80} {:>10} {:>10} {:>10.1} {:>10.1}",
+            cut(&format!("{from} -> {to}"), 80),
+            e.calls,
+            e.misses,
+            ms(e.incl_ns),
+            ms(e.self_ns)
         );
+    };
+    let edge_header = |out: &mut String| {
+        let _ = writeln!(
+            out,
+            "{:<80} {:>10} {:>10} {:>10} {:>10}",
+            "caller -> callee", "calls", "misses", "incl ms", "self ms"
+        );
+    };
+    for (title, by) in [
+        (
+            "inclusive ms",
+            (|e: &EdgeStat| e.incl_ns) as fn(&EdgeStat) -> u64,
+        ),
+        ("self ms", |e| e.self_ns),
+        ("misses", |e| e.misses),
+    ] {
+        header(
+            &mut out,
+            &format!("call graph edges (top {TOP} by {title})"),
+        );
+        edge_header(&mut out);
+        for ((from, to), e) in sorted(&t.edges, by).into_iter().take(TOP) {
+            edge_row(&mut out, &from, &to, &e);
+        }
+    }
+    header(
+        &mut out,
+        "callers of the 10 definitions with the most self ms (top 5 callers by self ms)",
+    );
+    for (callee, s) in sorted(&t.fns, |s| s.self_ns).into_iter().take(10) {
+        let _ = writeln!(out, "{} ({:.1} self ms)", cut(&callee, 80), ms(s.self_ns));
+        let mut callers: Vec<_> = t
+            .edges
+            .iter()
+            .filter(|((_, to), _)| *to == callee)
+            .collect();
+        callers.sort_by_key(|(_, e)| std::cmp::Reverse(e.self_ns));
+        for ((from, _), e) in callers.into_iter().take(5) {
+            let _ = writeln!(
+                out,
+                "  {:>10.1} self ms {:>10.1} incl ms {:>10} calls {:>10} misses  {}",
+                ms(e.self_ns),
+                ms(e.incl_ns),
+                e.calls,
+                e.misses,
+                cut(from, 70)
+            );
+        }
     }
 
     header(
@@ -704,12 +874,7 @@ pub fn save() -> std::io::Result<Option<std::path::PathBuf>> {
     let edges: BTreeMap<_, _> = t
         .edges
         .iter()
-        .map(|((from, to), (calls, misses))| {
-            (
-                format!("{from} -> {to}"),
-                json!({"calls": calls, "misses": misses}),
-            )
-        })
+        .map(|((from, to), e)| (format!("{from} -> {to}"), e))
         .collect();
     let keys: BTreeMap<_, Vec<_>> = keys_by_index(&t)
         .into_iter()
@@ -752,5 +917,12 @@ pub fn save() -> std::io::Result<Option<std::path::PathBuf>> {
         "memo_tables": tables,
     });
     std::fs::write(&path, serde_json::to_vec_pretty(&value)?)?;
+    let mut stacks: Vec<_> = t.folded.iter().collect();
+    stacks.sort();
+    let mut folded = String::new();
+    for (stack, ns) in stacks {
+        let _ = writeln!(folded, "{stack} {ns}");
+    }
+    std::fs::write(path.with_extension("folded"), folded)?;
     Ok(Some(path))
 }

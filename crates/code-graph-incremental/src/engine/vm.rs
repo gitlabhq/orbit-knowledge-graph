@@ -646,6 +646,9 @@ impl<'e, S: Store> Vm<'e, S> {
             }
             t.started = run.profiling().then(Instant::now);
             t.matched = None;
+            if let (Some(p), Some(m)) = (&mut run.profile, pat) {
+                p.enter_rule(m as *const _ as usize, &m.src);
+            }
             let matched = match (pat, t.args[0].first().and_then(|v| v.loc())) {
                 (Some(m), Some(h)) => {
                     t.w.matches(run, m, Cursor::new(run.input.trees, h.fi, h.node), &t.bound)
@@ -794,6 +797,9 @@ fn attempted<S: Store>(run: &mut Run<'_, S>, t: &Trying<'_, S>, fired: bool) {
     let (Some(started), Some(m)) = (t.started, &t.cases.items[usize::from(t.list[t.at])].0) else {
         return;
     };
+    if let Some(p) = &mut run.profile {
+        p.leave_rule(m as *const _ as usize);
+    }
     let total = started.elapsed();
     run.profile_rule(
         m as *const _ as usize,

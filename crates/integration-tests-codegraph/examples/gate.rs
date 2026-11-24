@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
+use code_graph_incremental::engine::profile;
+
 enum Outcome {
     Pass,
     Fail,
@@ -132,6 +134,14 @@ fn main() {
     if let Some(save) = save {
         let list: Vec<&str> = failed.iter().map(String::as_str).collect();
         std::fs::write(&save, list.join("\n") + "\n").expect("save failures");
+    }
+    if *profile::ON {
+        eprintln!("{}", profile::report());
+        match profile::save() {
+            Ok(Some(path)) => println!("profile: {}", path.display()),
+            Ok(None) => {}
+            Err(error) => println!("profile not written: {error}"),
+        }
     }
     std::process::exit(0);
 }
