@@ -1,0 +1,348 @@
+config:
+  security: { paths: ["1/600/"] }
+  redaction:
+    allow:
+      user: [1, 2, 3, 4, 5]
+      group: [100, 101, 102, 200, 300]
+      project: [1000, 1001, 1002]
+      merge_request: [2000, 2001, 2002]
+      note: [3000, 3001, 3002, 3003, 9000]
+  seed: graph_formatter
+
+cases:
+  - name: search_exact_properties
+    description: A user search returns every seeded user with its exact properties and no internal columns
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state", "name"]}],
+          "limit": 10
+        }
+    expect:
+      node_count: 5
+      nodes:
+        User:
+          ids: [1, 2, 3, 4, 5]
+          prop_absent: [_orbit_u_id]
+          rows:
+            - { id: 1, username: alice, state: active, name: Alice Admin }
+            - { id: 2, username: bob, state: active, name: Bob Builder }
+            - { id: 3, username: charlie, name: Charlie Private }
+            - { id: 4, username: diana, state: blocked, name: Diana Dev }
+            - { id: 5, username: "用户_émoji_🎉" }
+
+  - name: search_unicode_properties
+    description: Unicode usernames and names survive the pipeline byte for byte
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name"]}],
+          "limit": 10
+        }
+    expect:
+      nodes:
+        User:
+          rows:
+            - { id: 5, username: "用户_émoji_🎉", name: "Unicode Name ñ" }
+
+  - name: search_redaction_exact
+    description: Redaction keeps only the allowed users
+    config:
+      redaction:
+        allow:
+          user: [1, 3, 5]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+          "limit": 10
+        }
+    expect:
+      node_count: 3
+      nodes:
+        User:
+          ids: [1, 3, 5]
+          absent: [2, 4]
+          rows:
+            - { id: 1, username: alice }
+            - { id: 3, username: charlie }
+            - { id: 5, username: "用户_émoji_🎉" }
+
+  - name: search_no_authorization_returns_empty
+    description: A caller with no allowed ids sees no users
+    config:
+      redaction: none
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+          "limit": 10
+        }
+    expect:
+      node_count: 0
+
+  - name: search_wildcard_columns
+    description: Wildcard columns return public user properties and leave out admin-only email even for an admin
+    config:
+      security: { paths: ["1/600/"], admin: true, access_level: 50 }
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "columns": "*", "node_ids": [1]}],
+          "limit": 10
+        }
+    expect:
+      node_count: 1
+      nodes:
+        User:
+          ids: [1]
+          prop_absent: [email, _orbit_u_id]
+          rows:
+            - { id: 1, username: alice, state: active, name: Alice Admin }
+
+  - name: search_node_ids_filtering
+    description: node_ids returns exactly the requested users
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "node_ids": [2, 4]}],
+          "limit": 10
+        }
+    expect:
+      node_count: 2
+      nodes:
+        User:
+          ids: [2, 4]
+          absent: [1, 3]
+          rows:
+            - { id: 2, username: bob }
+            - { id: 4, username: diana }
+
+  - name: search_with_order_by
+    description: Descending username order puts the unicode username first
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+          "order_by": "-u.username",
+          "limit": 10
+        }
+    expect:
+      node_count: 5
+      nodes:
+        User:
+          order: [5, 4, 3, 2, 1]
+          rows:
+            - { id: 1, username: alice }
+
+  - name: search_boolean_columns
+    description: Boolean columns serialize as booleans and a NULL Nullable(Bool) selected in the base query stays a present null
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note", "confidential", "internal"]}],
+          "limit": 10
+        }
+    expect:
+      node_count: 4
+      nodes:
+        Note:
+          ids: [3000, 3001, 3002, 3003]
+          rows:
+            - { id: 3000, note: Normal note, internal: true, confidential: true }
+            - { id: 3002, internal: false, confidential: null }
+
+  - name: search_nullable_columns
+    description: An unset datetime column returns null
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "n", "entity": "Note", "columns": ["note", "created_at"], "node_ids": [3000]}],
+          "limit": 10
+        }
+    expect:
+      node_count: 1
+      nodes:
+        Note:
+          ids: [3000]
+          rows:
+            - { id: 3000, note: Normal note, created_at: null }
+
+  - name: search_datetime_columns
+    description: A datetime column serializes as an ISO 8601 UTC string
+    steps:
+      - seed:
+          gl_note:
+            - { id: 9000, note: timestamped, noteable_type: MergeRequest, traversal_path: "1/600/100/1000/", created_at: "2024-06-15 12:30:00" }
+        query:
+          json: |
+            {
+              "query_type": "traversal",
+              "nodes": [{"id": "n", "entity": "Note", "columns": ["note", "created_at"], "node_ids": [9000]}],
+              "limit": 10
+            }
+        expect:
+          node_count: 1
+          nodes:
+            Note:
+              ids: [9000]
+              rows:
+                - { id: 9000, note: timestamped, created_at: "2024-06-15T12:30:00Z" }
+
+  - name: giant_string_survives_pipeline
+    description: A 10,000 character note survives the pipeline intact
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3001]}],
+          "limit": 10
+        }
+    expect:
+      node_count: 1
+      nodes:
+        Note:
+          ids: [3001]
+          rows:
+            - { id: 3001, note: { repeat: A, count: 10000 } }
+
+  - name: sql_injection_string_preserved
+    description: A SQL injection payload is returned as data
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3002]}],
+          "limit": 10
+        }
+    expect:
+      node_count: 1
+      nodes:
+        Note:
+          ids: [3002]
+          rows:
+            - { id: 3002, note: "SQL injection attempt: '; DROP TABLE gl_user; --" }
+
+  - name: filter_in_operator
+    description: The in operator returns exactly the listed usernames
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"in": ["alice", "charlie"]}}}],
+          "limit": 10
+        }
+    expect:
+      node_count: 2
+      nodes:
+        User:
+          ids: [1, 3]
+          absent: [2]
+          filters:
+            username: { in: [alice, charlie] }
+          rows:
+            - { id: 1, username: alice }
+            - { id: 3, username: charlie }
+
+  - name: filter_contains_operator
+    description: The contains operator matches a substring
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"contains": "lic"}}}],
+          "limit": 10
+        }
+    expect:
+      node_count: 1
+      nodes:
+        User:
+          ids: [1]
+          filters:
+            username: { contains: lic }
+          rows:
+            - { id: 1, username: alice }
+
+  - name: filter_starts_with_operator
+    description: The starts_with operator matches a prefix
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"starts_with": "ali"}}}],
+          "limit": 10
+        }
+    expect:
+      node_count: 1
+      nodes:
+        User:
+          ids: [1]
+          filters:
+            username: { starts_with: ali }
+          rows:
+            - { id: 1, username: alice }
+
+  - name: filter_is_null_operator
+    description: The is_null operator matches every user without created_at
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "columns": ["username", "created_at"], "filters": {"created_at": {"is_null": true}}}],
+          "limit": 10
+        }
+    expect:
+      node_count: 5
+      nodes:
+        User:
+          ids: [1, 2, 3, 4, 5]
+          prop_present: [username]
+          filters:
+            created_at: { is_null: true }
+
+  - name: empty_result_all_fields_present
+    description: An empty result still carries empty nodes and edges arrays
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "node_ids": [99999]}],
+          "limit": 10
+        }
+    expect:
+      node_count: 0
+      total_edge_count: 0
+
+  - name: pagination_complete_within_limit
+    description: Five users within limit 10 report a complete window
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+          "limit": 10
+        }
+    expect:
+      has_more: false
+
+  - name: pagination_truncates_at_limit
+    description: Five users with limit 3 report truncation and return three nodes
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+          "limit": 3
+        }
+    expect:
+      node_count: 3
+      has_more: true

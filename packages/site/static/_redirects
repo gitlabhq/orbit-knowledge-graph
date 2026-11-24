@@ -1,0 +1,4 @@
+/roadmap /next 301
+/roadmap/* /next 301
+/content /about#related 301
+/content/ /about#related 301

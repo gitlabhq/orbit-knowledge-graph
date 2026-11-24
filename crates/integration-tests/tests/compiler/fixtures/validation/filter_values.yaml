@@ -1,0 +1,233 @@
+physical:
+  clickhouse: {}
+
+cases:
+  - name: A string filter on a text property passes validation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"alice"}}]}
+      gql: |
+        MATCH (u:User {username: 'alice'}) RETURN u
+    logical:
+      expect: ["(Filter u.username = 'alice' (NodeScan User AS u))"]
+
+  - name: An integer filter on an integer property passes validation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"n","entity":"Note","filters":{"noteable_id":42}}]}
+      gql: |
+        MATCH (n:Note {noteable_id: 42}) RETURN n
+    logical:
+      expect: ["(Filter n.noteable_id = 42 (NodeScan Note AS n))"]
+
+  - name: A boolean filter on a boolean property passes validation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"n","entity":"Note","filters":{"confidential":true}}]}
+      gql: |
+        MATCH (n:Note {confidential: true}) RETURN n
+    logical:
+      expect: ["(Filter n.confidential = true (NodeScan Note AS n))"]
+
+  - name: A string IN list on a text property passes validation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":{"in":["alice","bob"]}}}]}
+      gql: |
+        MATCH (u:User) WHERE u.username IN ['alice', 'bob'] RETURN u
+    logical:
+      expect: ["(Filter u.username IN ['alice', 'bob'] (NodeScan User AS u))"]
+
+  - name: An integer IN list on an integer property passes validation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"n","entity":"Note","filters":{"noteable_id":{"in":[1,2,3]}}}]}
+      gql: |
+        MATCH (n:Note) WHERE n.noteable_id IN [1, 2, 3] RETURN n
+    logical:
+      expect: ["(Filter n.noteable_id IN [1, 2, 3] (NodeScan Note AS n))"]
+
+  - name: A null check needs no value of the property type
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":{"is_null":true}}}]}
+      gql: |
+        MATCH (u:User) WHERE u.username IS NULL RETURN u
+    logical:
+      expect: ["(Filter u.username IS NULL (NodeScan User AS u))"]
+
+  - name: A label filter on an enum property passes validation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"user_type":"human"}}]}
+      gql: |
+        MATCH (u:User {user_type: 'human'}) RETURN u
+    logical:
+      expect: ["(Filter u.user_type = 'human' (NodeScan User AS u))"]
+
+  - name: An integer filter on an enum property passes validation and normalizes to its label
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"user_type":0}}]}
+      gql: |
+        MATCH (u:User {user_type: 0}) RETURN u
+    logical:
+      expect: ["(Filter u.user_type = 'human' (NodeScan User AS u))"]
+
+  - name: Substring matching on a text enum passes validation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":{"contains":"act"}}}],"limit":10}
+      gql: |
+        MATCH (u:User) WHERE u.state CONTAINS 'act' RETURN u LIMIT 10
+    logical:
+      expect: ["(Filter contains(u.state, 'act') (NodeScan User AS u))"]
+
+  - name: Equality on a field that disallows substring matching passes validation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"public_email":"test@example.com"}}],"limit":10}
+      gql: |
+        MATCH (u:User {public_email: 'test@example.com'}) RETURN u LIMIT 10
+    logical:
+      expect: ["(Filter u.public_email = 'test@example.com' (NodeScan User AS u))"]
+
+  - name: Equality on a property that disallows string operators is accepted for an administrator
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"email":"alice@example.com"}}],"limit":10}
+      gql: |
+        MATCH (u:User {email: 'alice@example.com'}) RETURN u LIMIT 10
+    security:
+      admin: true
+    logical:
+      expect: ["(Filter u.email = 'alice@example.com' (NodeScan User AS u))"]
+
+  - name: A filter on a filterable Group property passes validation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","filters":{"name":"Public Group"}}],"limit":10}
+      gql: |
+        MATCH (g:Group {name: 'Public Group'}) RETURN g LIMIT 10
+    logical:
+      expect: ["(Filter g.name = 'Public Group' (NodeScan Group AS g))"]
+
+  - name: A timestamp range on one property passes validation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"created_at":[{"gte":"2026-04-01T00:00:00Z"},{"lt":"2026-05-01T00:00:00Z"}]}}]}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.created_at >= '2026-04-01T00:00:00Z' AND u.created_at < '2026-05-01T00:00:00Z' RETURN u
+    logical:
+      expect: ["(Filter u.created_at >= '2026-04-01T00:00:00Z', u.created_at < '2026-05-01T00:00:00Z', u.id IN [1] (NodeScan User AS u))"]
+
+  - name: The node filter cap counts properties, so two properties with six conditions each pass
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"created_at":[{"gte":"2020-01-01"},{"lt":"2020-02-01"},{"gte":"2020-03-01"},{"lt":"2020-04-01"},{"gte":"2020-05-01"},{"lt":"2020-06-01"}],"username":[{"contains":"aaa"},{"contains":"bbb"},{"contains":"ccc"},{"contains":"ddd"},{"contains":"eee"},{"contains":"fff"}]}}]}
+      gql: |
+        MATCH (u:User) WHERE u.created_at >= '2020-01-01' AND u.created_at < '2020-02-01' AND u.created_at >= '2020-03-01' AND u.created_at < '2020-04-01' AND u.created_at >= '2020-05-01' AND u.created_at < '2020-06-01' AND u.username CONTAINS 'aaa' AND u.username CONTAINS 'bbb' AND u.username CONTAINS 'ccc' AND u.username CONTAINS 'ddd' AND u.username CONTAINS 'eee' AND u.username CONTAINS 'fff' RETURN u
+    logical:
+      expect: ["(Filter u.created_at < '2020-06-01', contains(u.username, 'fff'), ... (NodeScan User AS u))"]
+
+  - name: An integer filter on an integer edge column passes validation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","filters":{"source_id":42}}]}
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note) WHERE r.source_id = 42 RETURN u, n
+    logical:
+      expect: ["(Filter e0.source_id = 42 (EdgeScan AUTHORED u->n AS e0))"]
+
+  - name: A string filter on a text edge column passes validation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","filters":{"source_kind":"User"}}]}
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note) WHERE r.source_kind = 'User' RETURN u, n
+    logical:
+      expect: ["(Filter e0.source_kind = 'User' (EdgeScan AUTHORED u->n AS e0))"]
+
+  - name: A null check on an edge column passes validation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","filters":{"target_kind":{"is_null":true}}}]}
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note) WHERE r.target_kind IS NULL RETURN u, n
+    logical:
+      expect: ["(Filter e0.target_kind IS NULL (EdgeScan AUTHORED u->n AS e0))"]
+
+  - name: An integer IN list on an integer edge column passes validation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","filters":{"target_id":{"in":[1,2,3]}}}]}
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note) WHERE r.target_id IN [1, 2, 3] RETURN u, n
+    logical:
+      expect: ["(Filter e0.target_id IN [1, 2, 3] (EdgeScan AUTHORED u->n AS e0))"]
+
+  - name: Integer enum values normalize to their labels
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":1}}]}
+      gql: |
+        MATCH (mr:MergeRequest {state: 1}) RETURN mr
+    logical:
+      expect: ["(Filter mr.state = 'opened' (NodeScan MergeRequest AS mr))"]
+
+  - name: Integer enum values in an IN list normalize to their labels
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":{"in":[1,2,3,4]}}}]}
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.state IN [1, 2, 3, 4] RETURN mr
+    logical:
+      expect: ["(Filter mr.state IN ['opened', 'closed', 'merged', 'locked'] (NodeScan MergeRequest AS mr))"]
+
+  - name: An enum label stays a label
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}}]}
+      gql: |
+        MATCH (mr:MergeRequest {state: 'opened'}) RETURN mr
+    logical:
+      expect: ["(Filter mr.state = 'opened' (NodeScan MergeRequest AS mr))"]
+
+  - name: A null check on an enum keeps no value
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1],"filters":{"state":{"is_null":true}}}]}
+      gql: |
+        MATCH (mr:MergeRequest {id: 1}) WHERE mr.state IS NULL RETURN mr
+    logical:
+      expect: ["(Filter mr.state IS NULL, mr.id IN [1] (NodeScan MergeRequest AS mr))"]
+
+  - name: Enum values on every node of a traversal normalize to their labels and other values stay
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"admin","id":42}},{"id":"mr","entity":"MergeRequest","filters":{"state":3,"draft":false,"title":{"contains":"fix"}}},{"id":"p","entity":"Pipeline","filters":{"source":10,"failure_reason":1}}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"TRIGGERED","from":"mr","to":"p"}]}
+      gql: |
+        MATCH (u:User {username: 'admin', id: 42})-[:AUTHORED]->(mr:MergeRequest {state: 3, draft: false})-[:TRIGGERED]->(p:Pipeline {source: 10, failure_reason: 1}) WHERE mr.title CONTAINS 'fix' RETURN u, mr, p
+    logical:
+      expect:
+        - "(Filter u.username = 'admin', u.id IN [42] (NodeScan User AS u))"
+        - "(Filter mr.state = 'merged', mr.draft = false, contains(mr.title, 'fix') (NodeScan MergeRequest AS mr))"
+        - "(Filter p.source = 'merge_request_event', p.failure_reason = 'config_error' (NodeScan Pipeline AS p))"
+
+  - name: Work item enum values normalize to their labels
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","filters":{"state":2,"work_item_type":8}}]}
+      gql: |
+        MATCH (wi:WorkItem {state: 2, work_item_type: 8}) RETURN wi
+    logical:
+      expect: ["(Filter wi.state = 'closed', wi.work_item_type = 'epic' (NodeScan WorkItem AS wi))"]
+
+  - name: Non-enum values stay unchanged
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"squash":true,"source_branch":{"in":["main","develop"]}}}]}
+      gql: |
+        MATCH (mr:MergeRequest {squash: true}) WHERE mr.source_branch IN ['main', 'develop'] RETURN mr
+    logical:
+      expect: ["(Filter mr.squash = true, mr.source_branch IN ['main', 'develop'] (NodeScan MergeRequest AS mr))"]

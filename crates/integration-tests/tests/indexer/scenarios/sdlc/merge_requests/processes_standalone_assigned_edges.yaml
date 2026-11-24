@@ -1,4 +1,4 @@
-description: Assignee rows produce ASSIGNED edges with merge-request target tags
+description: Assignee rows produce ASSIGNED edges without merge request tags, which the link row cannot keep fresh
 scope: { namespace: 100 }
 
 seed:
@@ -19,5 +19,5 @@ expect:
       traversal_path: "1/100/"
       count: 2
       target_tags:
-        10: ["discussion_locked:null", "draft:false", "merge_status:can_be_merged", "squash:false", "state:opened"]
-        20: ["discussion_locked:null", "draft:false", "merge_status:merged", "squash:false", "state:merged"]
+        10: []
+        20: []

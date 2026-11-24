@@ -1,0 +1,48 @@
+cases:
+  - name: Path finding clamps time and memory to the path-finding ceiling
+    query:
+      json: |
+        {"query_type":"path_finding","nodes":[{"id":"start","entity":"User","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["MEMBER_OF","CONTAINS"]},"limit":10}
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(`end`:Project {id: 100}) RETURN p LIMIT 10
+    logical:
+      expect: ["(Limit 10 (Input path_finding (...)))"]
+    physical:
+      clickhouse:
+        settings:
+          equals:
+            max_execution_time: "15"
+            max_memory_usage: "16106127360"
+
+  - name: FINAL scans turn on the FINAL read settings
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":"active"}}],"limit":10}
+      gql: |
+        MATCH (u:User {state: 'active'}) RETURN u LIMIT 10
+    logical:
+      expect: ["(Filter u.state = 'active' (NodeScan User AS u))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Deduplicate Final (Scan Table(gl_user) AS u))"]
+        settings:
+          equals:
+            optimize_move_to_prewhere_if_final: "1"
+          absent: [use_index_for_in_with_subqueries_max_values]
+
+  - name: An IN subquery turns on the subquery index cap
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","filters":{"username":"alice"}},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"from":"u","to":"mr","type":"AUTHORED"}],"aggregations":[{"count":"mr","as":"c"}],"limit":20}
+      gql: |
+        MATCH (u:User {username: 'alice'})-[:AUTHORED]->(mr:MergeRequest) RETURN count(mr) AS c LIMIT 20
+    logical:
+      expect: ["(Aggregate COUNT(mr) AS c (_))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Filter mr.author_id IN ?.id, ... (_))"]
+        settings:
+          equals:
+            use_index_for_in_with_subqueries_max_values: "1000000"

@@ -67,6 +67,11 @@ pub struct Claims {
     /// self-managed / Dedicated instances.
     #[serde(default)]
     pub is_gitlab_team_member: Option<bool>,
+    /// Set by Rails on GitLab.com when the user's Orbit billing namespace has the
+    /// `orbit_gitlab_com_access_override` ops flag. Honored on SaaS only, like
+    /// `is_gitlab_team_member`.
+    #[serde(default)]
+    pub orbit_quota_exempt: Option<bool>,
     /// Rails `User#user_type`, such as `human`, `project_bot`, or `service_account`.
     #[serde(default)]
     pub user_type: Option<String>,
@@ -183,6 +188,23 @@ mod tests {
         let claims = parse_claims(None);
         assert_eq!(claims.user_type, None);
         assert_eq!(claims.token_type, None);
+    }
+
+    #[test]
+    fn orbit_quota_exempt_is_optional() {
+        assert_eq!(parse_claims(None).orbit_quota_exempt, None);
+
+        let mut json = claims_json(None);
+        json["orbit_quota_exempt"] = json!(true);
+        let claims: Claims = serde_json::from_value(json).unwrap();
+        assert_eq!(claims.orbit_quota_exempt, Some(true));
+    }
+
+    #[test]
+    fn unknown_claims_are_ignored() {
+        let mut json = claims_json(None);
+        json["some_future_claim"] = json!(true);
+        assert!(serde_json::from_value::<Claims>(json).is_ok());
     }
 
     #[test]

@@ -10,4 +10,4 @@ query:
     RETURN mr.title LIMIT 10
 
 expect:
-  compile_error: "administrator"
+  compile_error: restrict

@@ -1,0 +1,69 @@
+cases:
+  - name: Pinned wildcard neighbors scan each direction on its own id column and report the side
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","columns":["name"],"node_ids":[100]}],"neighbors":{"direction":"both"}}
+      gql: |
+        MATCH (g:Group {id: 100})--(n) RETURN n
+    logical:
+      expect: ["(Input neighbors (...))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=g direction=both directional outgoing=[gl_edge] incoming=[gl_edge] ... (_))"]
+        emitted:
+          expect:
+            - (Project _orbit_neighbor_edge.target_id AS _orbit_neighbor_node, _orbit_neighbor_edge.target_kind AS _orbit_neighbor_kind, _orbit_neighbor_edge.relationship_kind AS _orbit_relationship_kind, 1 AS _orbit_neighbor_is_outgoing, ... (Filter _orbit_neighbor_edge.source_id = 100, ... (Scan Table(gl_edge) AS _orbit_neighbor_edge)))
+            - (Project _orbit_neighbor_edge.source_id AS _orbit_neighbor_node, _orbit_neighbor_edge.source_kind AS _orbit_neighbor_kind, _orbit_neighbor_edge.relationship_kind AS _orbit_relationship_kind, 0 AS _orbit_neighbor_is_outgoing, ... (_))
+            - (Filter _orbit_neighbor_edge.target_id = 100, ... (Scan Table(gl_edge) AS _orbit_neighbor_edge))
+          reject: ["(Bind _orbit_fused (_))"]
+
+  - name: Wildcard neighbors scan every edge table that holds a relationship of the center
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"neighbors":{"direction":"both"}}
+      gql: |
+        MATCH (p:Project {id: 1})--(n) RETURN n
+    logical:
+      expect: ["(Input neighbors (...))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=p direction=both directional outgoing=[gl_code_edge] incoming=[gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge] ... (_))"]
+        emitted:
+          expect:
+            - (Scan Table(gl_code_edge) ...)
+            - (Scan Table(gl_edge) ...)
+
+  - name: Filtered neighbors of a node keyed by a redaction id scan the node once per arm without an alias clash
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"f","entity":"File","filters":{"path":{"contains":"labkit"}}}],"neighbors":{"direction":"both"}}
+      gql: |
+        MATCH (f:File)--(n) WHERE f.path CONTAINS 'labkit' RETURN n
+    logical:
+      expect: ["(Filter contains(f.path, 'labkit') (NodeScan File AS f))"]
+    physical:
+      clickhouse:
+        emitted:
+          occurrences:
+            - pattern: (Scan Table(gl_file) AS f)
+              count: 2
+            - pattern: (Project f.project_id AS _orbit_f_id, f.id AS _orbit_f_pk, ... (_))
+              count: 2
+
+  - name: Wildcard neighbors read only the kinds that leave the center entity
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing"},"limit":10}
+      gql: |
+        MATCH (u:User {id: 1})-[r]->(m) RETURN u, r, m LIMIT 10
+    logical:
+      expect: ["(Input neighbors (...))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=u direction=outgoing directional outgoing=[gl_ci_edge, gl_edge, gl_sec_edge] incoming=? center_filter=false relationships=[APPROVED, ASSIGNED, AUTHORED, CLOSED, CONFIRMED_BY, CONTAINS, CREATOR, DEPLOYED_BY, DISMISSED_BY, LAST_EDITED_BY, MEMBER_OF, MERGED, OWNER, REOPENED, RESOLVED_BY, REVIEWER, TRIGGERED, UPDATED_BY] ... (_))"]
+        emitted:
+          expect: ["(Scan Table(gl_edge) ...)"]
+          reject: ["(Scan Table(gl_code_edge) ...)"]

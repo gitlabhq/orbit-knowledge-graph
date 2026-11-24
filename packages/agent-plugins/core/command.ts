@@ -33,6 +33,8 @@ function redirectTarget(tokens: readonly Token[], from: number): { target?: stri
   return token?.kind === 'word' ? { target: token.text, end: at } : { end: from - 1 }
 }
 
+const BARE_CAT = /^cat(?: -)?$/
+
 function groupCommands(tokens: readonly Token[]): SimpleCommand[] {
   const commands: SimpleCommand[] = []
   let current = emptyCommand(false)
@@ -45,14 +47,15 @@ function groupCommands(tokens: readonly Token[]): SimpleCommand[] {
       const { target, end } = redirectTarget(tokens, i + 1)
       if (token.operator === '<') {
         current.readsInput = true
-        current.stdin = ''
-      }
-      else if (target !== undefined) current.writes.push(target)
+        current.stdin = token.hereString ? (target ?? '') : ''
+      } else if (target !== undefined) current.writes.push(target)
       current.substitutes ||= tokens.slice(i + 1, end + 1).some((skipped) => skipped.kind === 'substitution')
       i = end
     } else if (token?.kind === 'separator') {
+      const previous = current
       if (!isEmpty(current)) commands.push(current)
       current = emptyCommand(token.pipe)
+      if (token.pipe && BARE_CAT.test(previous.words.join(' '))) current.stdin = previous.stdin
     }
   }
   if (!isEmpty(current)) commands.push(current)

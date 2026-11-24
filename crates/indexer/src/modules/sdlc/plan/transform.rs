@@ -736,26 +736,27 @@ mod tests {
     fn standalone_edge_property_inputs_select_denormalized_tag_fields() {
         let ontology = test_ontology();
         let pipeline = ontology
-            .get_edge_etl("APPROVED")
+            .get_edge_etl("TRIGGERS_PIPELINE")
             .and_then(|pipelines| pipelines.first())
-            .expect("APPROVED pipeline");
+            .expect("TRIGGERS_PIPELINE pipeline");
         let mapping = pipeline
             .transform
             .edges()
             .first()
-            .expect("APPROVED edge mapping");
+            .expect("TRIGGERS_PIPELINE edge mapping");
 
-        let projections = standalone_edge_denormalized_columns("APPROVED", mapping, &ontology);
+        let projections =
+            standalone_edge_denormalized_columns("TRIGGERS_PIPELINE", mapping, &ontology);
 
         assert!(projections.iter().any(|projection| {
-            projection.source_column == "user_state"
+            projection.source_column == "job_when"
                 && projection.edge_column == "source_tags"
-                && projection.tag_key == "state"
+                && projection.tag_key == "when"
         }));
         assert!(projections.iter().any(|projection| {
-            projection.source_column == "merge_request_state_id"
+            projection.source_column == "pipeline_source"
                 && projection.edge_column == "target_tags"
-                && projection.tag_key == "state"
+                && projection.tag_key == "source"
         }));
     }
 
@@ -765,40 +766,41 @@ mod tests {
     fn string_enum_denormalized_tag_never_compares_against_int_ordinals() {
         let ontology = test_ontology();
         let pipeline = ontology
-            .get_edge_etl("APPROVED")
+            .get_edge_etl("TRIGGERS_PIPELINE")
             .and_then(|pipelines| pipelines.first())
-            .expect("APPROVED pipeline");
+            .expect("TRIGGERS_PIPELINE pipeline");
         let mapping = pipeline
             .transform
             .edges()
             .first()
-            .expect("APPROVED edge mapping");
+            .expect("TRIGGERS_PIPELINE edge mapping");
 
-        let projections = standalone_edge_denormalized_columns("APPROVED", mapping, &ontology);
-        let user_state = projections
+        let projections =
+            standalone_edge_denormalized_columns("TRIGGERS_PIPELINE", mapping, &ontology);
+        let job_when = projections
             .iter()
-            .find(|projection| projection.source_column == "user_state")
-            .expect("User.state denormalized onto APPROVED");
+            .find(|projection| projection.source_column == "job_when")
+            .expect("Job.when denormalized onto TRIGGERS_PIPELINE");
 
         assert!(
-            user_state.enum_mapping.is_none(),
-            "User.state is enum_type: string, mapping: {:?}",
-            user_state.enum_mapping
+            job_when.enum_mapping.is_none(),
+            "Job.when is enum_type: string, mapping: {:?}",
+            job_when.enum_mapping
         );
 
         let sql = edge_select_list(
-            "id",
-            "'User'",
-            "APPROVED",
-            "merge_request_id",
-            "'MergeRequest'",
+            "source_job_id",
+            "'Job'",
+            "TRIGGERS_PIPELINE",
+            "pipeline_id",
+            "'Pipeline'",
             true,
             &projections,
         )
         .join(", ");
-        assert!(!sql.contains(r#""user_state" = 0"#), "sql: {sql}");
+        assert!(!sql.contains(r#""job_when" = 0"#), "sql: {sql}");
         assert!(
-            sql.contains(r#"concat('state:', CAST("user_state" AS VARCHAR))"#),
+            sql.contains(r#"concat('when:', CAST("job_when" AS VARCHAR))"#),
             "sql: {sql}"
         );
     }

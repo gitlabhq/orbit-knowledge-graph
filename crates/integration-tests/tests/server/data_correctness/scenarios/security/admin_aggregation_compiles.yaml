@@ -27,5 +27,8 @@ expect:
     g:
       entity: Group
       ids: [100, 101]
-  gql_columns:
-    has_admin: ["TRUE", "TRUE"]
+  format:
+    gql:
+      value:
+        columns:
+          has_admin: ["TRUE", "TRUE"]

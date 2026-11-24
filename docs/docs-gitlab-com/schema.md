@@ -8,7 +8,7 @@ title: GitLab Orbit indexed data
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
+- Tier: [Premium, Ultimate](https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/#trials-and-purchases)
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -61,7 +61,7 @@ To see the current schema, use one of these methods:
   For more information, see [GitLab Orbit dashboard](dashboard.md).
 - In a terminal, run `glab orbit schema`. To show the properties and relationships of node types,
   add their names, for example `glab orbit schema MergeRequest Project`.
-- In GitLab 19.6 and later, in the GraphQL API, query `Query.orbit.schema`. For more information, see [`OrbitSchema`](https://docs.gitlab.com/api/graphql/reference/objects/#orbitschema).
+- In the GraphQL API, query `Query.orbit.schema`. For more information, see [`OrbitSchema`](https://docs.gitlab.com/api/graphql/reference/objects/#orbitschema).
 - In a query, for example in the **Query editor** tab of the [GitLab Orbit dashboard](dashboard.md) or with `glab orbit query`, run `CALL db.schema()`.
 
 ## Supported languages
@@ -75,6 +75,7 @@ Most languages also get imports and cross-file calls.
 | C | `.c`, `.h` | None |
 | C++ | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx` | None |
 | C# | `.cs` | None |
+| Dockerfile | `Dockerfile`, `Containerfile`, `Dockerfile.*`, `Containerfile.*`, `*.dockerfile`, `*.containerfile` | Stages, `ARG` and `ENV` variables, and base images, with references inside one file. File names are case-insensitive. A name whose extension belongs to another language or marks a template or backup, such as `.md`, `.yml`, `.erb`, or `.bak`, is not a Dockerfile. No `EXPOSE`, `ENTRYPOINT`, or `CMD`. No cross-file references. |
 | Elixir | `.ex`, `.exs` | None |
 | Go | `.go` | None |
 | HCL (Terraform) | `.tf`, `.tfvars` | None |
@@ -82,6 +83,7 @@ Most languages also get imports and cross-file calls.
 | JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, `.json` | None |
 | Kotlin | `.kt`, `.kts` | None |
 | Lua | `.lua` | Cross-file calls on module tables loaded with `require` only. No cross-file calls to global functions. |
+| Markdown | `.md`, `.markdown` | Headings become sections, and front matter becomes a definition. Relative links become imports of the linked file, or of its section when the anchor matches. External links, same-page links, and links to missing files add nothing. No calls. |
 | PHP | `.php`, `.phtml`, `.php3`, `.php4`, `.php5`, `.php7`, `.phps` | None |
 | Python | `.py` | None |
 | Ruby | `.rb`, `.rbw`, `.rake`, `.gemspec` | None |

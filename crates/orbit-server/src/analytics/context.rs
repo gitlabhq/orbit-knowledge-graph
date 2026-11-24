@@ -38,12 +38,12 @@ pub(crate) fn build_common(
         host_name: parse_opt(&claims.host_name, "host_name")?,
         organization_id: claims.organization_id.map(|id| id as i64),
         root_namespace_ids: claims.root_namespace_id.map(|ns| vec![ns]),
-        coding_agent: None,
         schema_version: Some(
             schema_version
                 .parse::<orbit_common::OrbitCommonSchemaVersion>()
                 .map_err(validation("schema_version"))?,
         ),
+        ..orbit_common::OrbitCommon::default()
     }))
 }
 
@@ -350,6 +350,7 @@ mod tests {
             deployment_type: None,
             realm: None,
             is_gitlab_team_member: None,
+            orbit_quota_exempt: None,
             user_type: None,
             token_type: None,
             license_checksum: None,

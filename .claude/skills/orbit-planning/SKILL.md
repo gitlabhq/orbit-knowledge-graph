@@ -2,19 +2,18 @@
 name: orbit-planning
 description: >-
   Label Orbit work items, epics, and MRs with the canonical taxonomy (orbit::
-  area, type::, priority::). Manage roadmap membership (orbit-roadmap::), due
-  dates, health, and epic hygiene. Use when you label or triage issues or MRs,
-  add or mark roadmap deliverables, or draft or repurpose epics.
-version: 2.0.0
+  area, type::, priority::). Manage public roadmap items, due dates, health,
+  and epic hygiene. Use when you label or triage issues or MRs, add or update
+  a roadmap item, or draft or repurpose epics.
+version: 3.0.0
 allowed-tools: Read, Bash(glab *)
 ---
 
 # Orbit planning
 
-The portal reads labels, dates, and health from GitLab. Curate on GitLab, not in YAML.
-The scheme and its decisions live in the portal repo:
-[label-taxonomy-and-epic-cleanup.md](https://gitlab.com/gitlab-org/orbit/portal/-/blob/main/docs/label-taxonomy-and-epic-cleanup.md)
-and [config/labels.yaml](https://gitlab.com/gitlab-org/orbit/portal/-/blob/main/config/labels.yaml).
+GitLab labels, dates, and health on each item are the source of truth. This
+repository is public, so do not copy customer names or other sensitive data
+from a confidential item into a public one.
 
 ## Fix one item
 
@@ -32,14 +31,14 @@ Type rules: docs work is `type::maintenance` plus `documentation`. Coverage and 
 items are `type::ignore`. Perf defects are `type::bug`. Perf refactors are
 `type::maintenance`. A capability gap is `type::feature` even when filed as a bug.
 
-Map old labels: `PREP` to `orbit::infra`, `devex` to `orbit::dx`, `P1`/`P2` to
-`priority::1`/`priority::2`, and bare `bug`/`feature`/`maintenance` to their `type::` form.
+Map old labels: `devex` to `orbit::dx`, `P1`/`P2` to `priority::1`/`priority::2`, and
+bare `bug`/`feature`/`maintenance` to their `type::` form.
 
 Leave other teams' labels alone: `section::`, `devops::`, `automation:`, `backend`,
 `frontend`, `bug::availability`, and R&D priority variants stay on the item.
 
-GitLab allows one label per scope. Adding an area removes any other `orbit::` label.
-Check what fell off.
+An item can have only one label per scoped prefix. When you add an area, GitLab removes the old
+`orbit::` label. Check which label it removed.
 
 ## Where labels live
 
@@ -48,35 +47,32 @@ Define all Orbit labels at the `gitlab-org` group. Orbit work also lives in
 or labels at `gitlab-org/orbit`. A project copy of a group label is a defect. Move its
 carriers to the group label. Then delete the copy.
 
-The `gitlab-com` group holds a sanctioned mirror for runbooks, handbook, and www items.
-Keep its colors and descriptions in step with `gitlab-org`.
+The `gitlab-com` group holds a mirror for runbooks, handbook, and www items. Keep its
+colors and descriptions in step with `gitlab-org`. A new `orbit::` area needs both labels.
 
-A new `orbit::` area needs four touches: the `gitlab-org` label, the `gitlab-com`
-mirror label, and both the `areas:` list and the `gitlab-com` track entry in the portal's
-`config/labels.yaml`. The portal renders swimlanes only for configured areas.
-After a config change run `bun run seed` in the portal repo. Label-only changes need no seed.
+## Roadmap
 
-## Roadmap membership
+The public roadmap is built from the Markdown pages in `docs/pages/roadmap/`, one page per
+item. The frontmatter sets `theme`, `status` (`shipped`, `in-progress`, `planned`,
+`exploring`), `start` and `end` quarters such as `FY27 Q4`, and an optional `tracking`
+work item URL. Themes are listed in `roadmap.yaml` in the same folder. GitLab FY runs Feb
+to Jan and is named for the year it ends.
 
-An item is on the roadmap when it carries one `orbit-roadmap::<confidence>` label.
-Committed means leadership can quote the date. Likely means a target quarter with a
-known dependency. Exploratory means intent without a date.
+The build reads the state, due date, and health status of each `tracking` item. A
+confidential tracking item fails the build. Give each unshipped tracking item a due date,
+a `workflow::` label, and a health status.
 
-The rest derives from GitLab fields:
+The tracking epic also carries one `orbit-roadmap::<confidence>` label:
 
-- Status: closed renders as shipped. Open `workflow::in dev|in review|verification|complete`
-  renders as building. `workflow::planning breakdown|ready for development` renders as
-  scoping. Validation or design values render as discovery. No label renders as planned.
-- Quarter: from the due date. GitLab FY runs Feb to Jan and is named for the year it ends.
-  FY27 Q1 is Feb-Apr 2026. No due date renders as unscheduled.
-- Risk: the native health-status widget (On track, Needs attention, At risk).
+| Label | Meaning |
+|---|---|
+| `orbit-roadmap::committed` | Leadership can quote the date. |
+| `orbit-roadmap::likely` | A target quarter with a known dependency. |
+| `orbit-roadmap::exploratory` | Intent without a date. |
 
-One row per deliverable. When an epic is the roll-up, only the epic carries the
-`orbit-roadmap::` label. Children with the label create duplicate rows.
-Every unshipped roadmap item needs a due date, a `workflow::` label, and a health status.
-
-A shipped deliverable stays on the roadmap with `orbit-roadmap::committed` and
-`workflow::complete`. Workstream containers and planning epics stay off the roadmap.
+Only the roll-up epic carries the label, not its
+children. A shipped item keeps `orbit-roadmap::committed` and `workflow::complete`.
+Workstream containers and planning epics stay off the roadmap.
 
 The fixed due date of a closed item is the date the work landed. Bulk-close dates
 are bookkeeping, not completion dates. Use the last substantive MR or child instead.
@@ -96,37 +92,37 @@ A container gets `type::` and `workflow::` but no area label.
 
 ## Bulk sweeps
 
-Work one project at a time. This keeps two people off the same item. Enumerate open
+Work one project at a time, so that two people do not change the same item. Enumerate open
 issues with `glab api "projects/<path>/issues?state=opened&per_page=100&page=N"`.
 Classify each one that misses an axis with the checklist. Apply in batches.
 State the plan and counts before you change more than 20 items.
 
 A person approves every new issue and epic. Prepare the draft and labels. Run the
 create call only after the user approves in this session. New issues get all three axes
-at creation. New deliverables also get an epic, a fixed due date, and an
-`orbit-roadmap::` label on the epic.
+at creation. A new roadmap item also gets a tracking epic with a fixed due date and an
+`orbit-roadmap::` label.
 
 ## Labels outside the taxonomy
 
-Do not add or create these labels. The portal ignores them.
+Do not add or create these labels.
 
 - `orbit::customer-zero`, `orbit::GA`, `orbit::backlog`
 - `knowledge graph` and its variants, `group::knowledge graph`, `group::context systems`
-- `orbit::hackathon`, `orbit_hackathon::*`, `Big Rock::Orbit`
-- `GKG::*`, `ai_review::*`, `design partner`, `beta-blocker`, `PREP`, `devex`
+- `orbit::hackathon`, `orbit_hackathon::*`, `Big Rock::Context`
+- `GKG::*`, `ai_review::*`, `design partner`, `beta-blocker`, `devex`
 
 Remove `GKG::*` when you see it. Customer Zero reports get flat `customer-zero`.
 
 ## Mechanics
 
-Use label ids, never names. Same-named labels make name-based REST ambiguous.
-Label search is a substring match. Search a full name, not a bare scope.
+Use label IDs, never names. Many groups have labels with the same name, so a name can match the wrong label.
+Label search matches a substring of the name or the description. Search a full name, and check the name of each hit.
 
 ```bash
 glab api "groups/gitlab-org/labels?search=orbit%3A%3Aquery&only_group_labels=true&include_ancestor_groups=false&per_page=50"
 ```
 
-The mutation needs a `WorkItem` gid. The API rejects an `Issue` gid with the same number.
+The mutation needs a `WorkItem` gid. An issue has an `Issue` gid and a `WorkItem` gid with the same number, and the mutation rejects the `Issue` gid.
 
 ```bash
 glab api graphql -f query='query { project(fullPath: "gitlab-org/orbit/knowledge-graph") {
@@ -155,7 +151,7 @@ glab api graphql -f query='mutation {
 }'
 ```
 
-Sweep by label. `labelName` accepts wildcards and `includeDescendants: true` reaches
+Sweep by label. `labelName` accepts wildcards, and `includeDescendants: true` reaches
 subgroup projects.
 
 ```bash
@@ -164,7 +160,7 @@ glab api graphql -f query='query { group(fullPath: "gitlab-org") {
     nodes { iid title state webUrl } } } }'
 ```
 
-Mint a new area at `gitlab-org` with the description from `config/labels.yaml`:
+Create a new area at `gitlab-org`:
 
 ```bash
 glab api -X POST "groups/gitlab-org/labels" \
@@ -178,11 +174,9 @@ API facts:
   project labels only in direct child projects. Copies in subgroup projects need a
   manual carrier swap.
 - Epic due dates roll up from children. Set `isFixed: true` to pin one.
-- GraphQL `count` caps at 1000. Paginate with `pageInfo` for real totals.
-- Do not filter out confidential items. The portal badges them.
 - Batch up to 10 aliased mutations per request to stay under the complexity limit of 250.
 
-Label ids at `gitlab-org`:
+Label IDs at `gitlab-org`:
 
 | Label | Id |
 |---|---|
@@ -199,7 +193,6 @@ Label ids at `gitlab-org`:
 
 ## Conventions
 
-Follow the host repository's `AGENTS.md` for comment format. Record label and epic
-decisions in the portal's `docs/label-taxonomy-and-epic-cleanup.md`. Rename GKG or
+Follow the host repository's `AGENTS.md` for comment format. Rename GKG or
 Knowledge Graph to Orbit in any title you touch. Keep code identifiers such as
-`gkg-webserver` and `GKG_INDEXER` as they are.
+`gkg-webserver` and `GKG_INDEXER`.

@@ -34,12 +34,11 @@ pipelines:
       query: generated
       lookups:
         - { node: User, id: user_id }
-        - { node: MergeRequest, id: merge_request_id }
     transform:
       type: datafusion
       edges:
         - from: { field: user_id, kind: User, enrich: true }
-          to: { field: merge_request_id, kind: MergeRequest, enrich: true }
+          to: { field: merge_request_id, kind: MergeRequest }
           label: REOPENED
   - name: REOPENED_siphon_resource_state_events_WorkItem
     extract:
@@ -51,10 +50,9 @@ pipelines:
       query: generated
       lookups:
         - { node: User, id: user_id }
-        - { node: WorkItem, id: issue_id }
     transform:
       type: datafusion
       edges:
         - from: { field: user_id, kind: User, enrich: true }
-          to: { field: issue_id, kind: WorkItem, enrich: true }
+          to: { field: issue_id, kind: WorkItem }
           label: REOPENED

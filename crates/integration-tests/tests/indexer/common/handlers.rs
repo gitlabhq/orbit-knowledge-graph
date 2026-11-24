@@ -68,13 +68,15 @@ async fn build_fan_out(
         ctx.config.clone().build_client("graph"),
         Arc::new(EngineMetrics::default()),
     ));
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    static ONTOLOGY: std::sync::LazyLock<ontology::Ontology> = std::sync::LazyLock::new(|| {
+        ontology::Ontology::load_embedded().expect("ontology must load")
+    });
     let registry = HandlerRegistry::default();
     indexer::modules::sdlc::register_handlers(
         &registry,
         &config,
         &indexer::clickhouse::ClickHouseClients::new(&config.graph, &config.datalake),
-        &ontology,
+        &ONTOLOGY,
         writer,
         indexer::analytics::IndexingAnalytics::disabled(),
         indexer::modules::sdlc::PARTITION_MIN_ROWS,

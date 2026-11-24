@@ -1,4 +1,6 @@
-import { DocsNav, findPage, type NavItem, type Page, pages } from "@gitlab-org/orbit-site";
+import { useState } from "react";
+import { findPage, Icon, type NavItem, type Page, pages, SectionNav } from "@gitlab-org/orbit-site";
+import { useRouterState } from "@tanstack/react-router";
 import { ENGINEERING } from "../sections";
 
 const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/"));
@@ -18,14 +20,25 @@ function tree(path: string): NavItem[] {
 const items = (): NavItem[] => [
   { path: "engineering", title: findPage("engineering")?.meta.title ?? "Engineering" },
   ...ENGINEERING.map(({ route, label }) => ({ path: route, title: label, children: tree(route) })),
+  { path: "team", title: "Team" },
 ];
 
-export function Sidebar() {
+export function Sidebar({ title }: { title: string }) {
+  const path = useRouterState({ select: (state) => state.location.pathname });
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState(path);
+  if (shown !== path) {
+    setShown(path);
+    setOpen(false);
+  }
   return (
-    <DocsNav
-      items={items()}
-      label="Engineering"
-      className="max-h-48 shrink-0 overflow-y-auto border-b border-border px-3 py-3 md:sticky md:top-[var(--header-h)] md:h-[calc(100vh-var(--header-h))] md:max-h-none md:w-72 md:border-r md:border-b-0 md:py-6"
-    />
+    <div data-open={open} className="sidebar md:contents">
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="sidebar-toggle md:hidden">
+        <span className="sidebar-toggle-section">Developers</span>
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <Icon name={open ? "chevron-up" : "chevron-down"} size={16} />
+      </button>
+      <SectionNav items={items()} label="Engineering" storageKey="orbit-site.sidebar-collapsed" />
+    </div>
   );
 }
