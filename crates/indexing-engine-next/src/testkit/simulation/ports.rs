@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use rand::RngExt;
 
 use crate::clock::Clock;
-use crate::event::{ProtocolEvent, ProtocolLog};
+use crate::event::{EngineEvent, Observer};
 use crate::lane::LaneId;
 use crate::lease::{Fence, Lease, LeaseEntry, LeaseStore, LeaseWrite, Revision};
 use crate::pending::{PendingEntry, PendingStore, PendingWrite};
@@ -37,7 +37,7 @@ pub(super) fn build_ports(world: &SharedWorld, actor: Actor) -> Ports {
         queue: ports.clone(),
         leases: ports.clone(),
         pending: ports.clone(),
-        log: ports,
+        observer: ports,
     }
 }
 
@@ -200,11 +200,16 @@ impl PendingStore for SimulatedPorts {
     }
 }
 
-impl ProtocolLog for SimulatedPorts {
-    fn record(&self, at: SystemTime, event: ProtocolEvent) {
-        let mut world = self.world.lock();
-        if world.allow_port_call(self.actor) {
-            world.apply_protocol_event(self.actor, at, event);
+impl Observer for SimulatedPorts {
+    fn observe(&self, event: &EngineEvent) {
+        match event {
+            EngineEvent::Task(event) => {
+                let mut world = self.world.lock();
+                if world.allow_port_call(self.actor) {
+                    world.apply_task_event(self.actor, event);
+                }
+            }
+            EngineEvent::Lane(_) => {}
         }
     }
 }

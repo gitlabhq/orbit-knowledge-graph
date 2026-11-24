@@ -1,8 +1,9 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use uuid::Uuid;
 
+use crate::event::{EngineEvent, TaskEvent, TaskIdentity, TaskStep};
 use crate::lane::{Lane, LaneId};
 use crate::payload::{Key, TaskInput, Tenant};
 
@@ -64,6 +65,20 @@ impl TaskMessage {
             lane,
             input: input.bytes,
         }
+    }
+
+    pub(crate) fn build_event(&self, at: SystemTime, step: TaskStep) -> EngineEvent {
+        EngineEvent::Task(TaskEvent {
+            at,
+            task: TaskIdentity {
+                id: self.task,
+                tenant: self.tenant.clone(),
+                worker: self.worker.clone(),
+                key: self.key.clone(),
+                lane: self.lane.clone(),
+            },
+            step,
+        })
     }
 
     pub(crate) fn worker_key(&self) -> WorkerKey {

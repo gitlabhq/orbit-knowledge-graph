@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::task::{JoinError, JoinSet};
 
 use crate::builder::{Engine, Registry};
-use crate::event::ProtocolEvent;
+use crate::event::{EngineEvent, Failure, LaneEvent, LaneStep, TaskStep};
 use crate::lane::LaneId;
 use crate::lease::{HolderId, LeaseRules, Leases};
 use crate::ports::Ports;
@@ -23,6 +23,7 @@ struct Runner {
 }
 
 pub(crate) async fn serve(engine: &Engine, ports: Ports, holder: HolderId, rules: LeaseRules) {
+    let ports = ports.observed_by(&engine.observers);
     let pools = Pools::new(
         engine.registry.list_registered_pools().clone(),
         engine.config.pools.clone(),
@@ -59,11 +60,15 @@ async fn serve_lane(runner: Arc<Runner>, lane: LaneId, slots: NonZeroU32) {
         let deliveries = match runner.ports.queue.pull(&lane, free).await {
             Ok(deliveries) => deliveries,
             Err(error) => {
-                orbit_log_fields::warn!(
-                    safe(ERROR_TYPE) = "pull_failed",
-                    expanded(ERROR_MESSAGE) = %error,
-                    "the pull of the lane failed"
-                );
+                let pull_failed = LaneEvent {
+                    at: now,
+                    lane: lane.clone(),
+                    step: LaneStep::PullFailed(Failure::new("pull_failed", error)),
+                };
+                runner
+                    .ports
+                    .observer
+                    .observe(&EngineEvent::Lane(pull_failed));
                 runner.ports.clock.sleep(PULL_RETRY).await;
                 continue;
             }
@@ -79,10 +84,8 @@ async fn serve_lane(runner: Arc<Runner>, lane: LaneId, slots: NonZeroU32) {
         }
 
         for delivery in deliveries {
-            runner
-                .ports
-                .log
-                .record(now, ProtocolEvent::Delivered(delivery.message.task));
+            let delivered = delivery.message.build_event(now, TaskStep::Delivered);
+            runner.ports.observer.observe(&delivered);
             runs.spawn(Arc::clone(&runner).run_delivered_task(delivery));
         }
     }
