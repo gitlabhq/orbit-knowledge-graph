@@ -82,6 +82,9 @@ canonicalize:
       - '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A:(arguments (reference_expression value: $R:identifier)))': '(__call (__callee (__member @$N (__object @$P $P (__qualifier)) (__dispatch @$P (__object @$R)))) $A)'
       - '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A)': '(__call (__callee (__member @$N (__object @$P $P (__qualifier)))) $A)'
       - '(call_expression function: $F arguments: $A)': '%call($F, $A)'
+      - '(token_tree $$$A $P:("::") $N:identifier $T:token_tree $$$B)': '(token_tree $$$A $P (macro_path $N) $T $$$B)'
+      - '(token_tree $$$A $P:(".") $N:identifier $T:token_tree $$$B)': '(token_tree $$$A $P (macro_path $N) $T $$$B)'
+      - '(token_tree $$$A $N:identifier $T:token_tree $$$B)': '(token_tree $$$A %call($N, $T) $$$B)'
   - stage: type-params
     rewrite:
       - '(type_parameter name: $T bounds: (trait_bounds **/$B:type_identifier))': '(__binding @$T (__qualifier) (__ssa_typed @$B))'
