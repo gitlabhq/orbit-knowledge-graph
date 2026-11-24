@@ -98,6 +98,7 @@ canonicalize:
       - '(assignment (directly_assignable_expression $N:__ivar) $R)': '(__binding $N (__rhs @$R $R))'
       - '(assignment (directly_assignable_expression $N:simple_identifier) $R:__call)': '%bind_call($N, $R)'
       - '(assignment (directly_assignable_expression $N:simple_identifier) $R)': '%bind($N, $R)'
+      - '(if_expression condition: $C consequence: $Q alternative: (control_structure_body (__ssa_branch $$$X)))': '(__ssa_branch $C (__ssa_arm $Q) $$$X)'
       - '(if_expression condition: $C consequence: $Q alternative:? $A)': '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
       - '(when_expression $S?:when_subject $$$E:when_entry)': '(__ssa_branch $S $$$E->__ssa_arm)'
       - '(try_expression $B:statements $$$ALTS:catch_block $F?:finally_block)': '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm $F)'

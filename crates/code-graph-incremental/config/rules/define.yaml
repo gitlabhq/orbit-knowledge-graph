@@ -67,6 +67,7 @@ define:
     '(__call)': none
     '_': "last(select(under(def), '(__binding)' by $ROOT, $ROOT) | rhs_callee) or $ROOT"
   value(ROOT):
+    '(__ssa_branch $$$A:__ssa_arm) when $A': '$A | tail | arm_leaf'
     '(%opaque_nodes)': 'opaque'
     '(__call)': '$ROOT'
     '(__ivar)': '$ROOT | ivar or opaque'
@@ -86,8 +87,11 @@ define:
     '_ when value_of($ROOT)': '$ROOT'
     '_ when value(tail($ROOT))': none
     '_ when minus(read(tail($ROOT)), opaque)': '$ROOT'
+  arm_leaf(ROOT):
+    '(__ssa_branch)': none
+    '_': 'value($ROOT)'
   ends_flow(ROOT):
-    '(__ssa_branch)': '$ROOT'
+    '(__ssa_branch !(__ssa_arm))': '$ROOT'
     '(__ssa_return)': '$ROOT'
   receiver_calls(ROOT):
     '(__member (__dispatch $O:__object))': 'read($O) | produced'
