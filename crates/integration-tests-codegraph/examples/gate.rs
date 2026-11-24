@@ -4,7 +4,8 @@
 //! `cargo run -q -p integration-tests-codegraph --profile gate --no-default-features --example gate -- [--save FILE] [--base FILE] [NAME...] 2>LOG`
 //!
 //! With `CGI_RULES_DIR` set to the crate dir of code-graph-incremental, rules
-//! and fixtures are read from disk, so a YAML change needs no rebuild. A suite
+//! and fixtures are read from disk under it, so a YAML change needs no
+//! rebuild and one binary serves every worktree with the same Rust. A suite
 //! still running after `CGI_SUITE_SECS` (10 by default) counts as a timeout.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,7 +36,12 @@ fn main() {
             .and_then(|s| s.parse().ok())
             .unwrap_or(10),
     );
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures_incremental");
+    let root = match std::env::var_os("CGI_RULES_DIR") {
+        Some(rules) => {
+            Path::new(&rules).join("../integration-tests-codegraph/fixtures_incremental")
+        }
+        None => Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures_incremental"),
+    };
     let mut suites = Vec::new();
     find(&root, &root, &mut suites);
     suites.sort();
