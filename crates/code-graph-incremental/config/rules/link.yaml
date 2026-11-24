@@ -56,6 +56,7 @@ link:
         imports:
           - { to: '$O | type | unmatched($M) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
           - { to: '$ROOT | mod.ssa.deferred | unmatched($M) | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
+          - { to: '$ROOT | unbound_receiver | mod.ssa.wildcards', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
     - '(__call (__callee (__member)))': none
     - '(__call (__callee $I:__ivar))':
         calls: { to: 'lookup(@$I, $ROOT, scope($ROOT) | class)', site: $ROOT }

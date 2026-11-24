@@ -31,6 +31,11 @@ data:
   namespaces: [class, module]
   blocks: [block, do_block]
 
+define:
+  unbound_receiver(ROOT):
+    '(__call (__callee (__member $O:__object))) when read($O)': none
+    '(__call (__callee (__member (__object "/^[A-Za-z_][A-Za-z0-9_]*$/"))))': '$ROOT'
+
 canonicalize:
   - stage: imports
     rewrite:

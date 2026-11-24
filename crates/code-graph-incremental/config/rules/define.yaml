@@ -175,6 +175,8 @@ define:
     '(__call $K:__callee) when read($K)': none
     '_ when implicit_targets($ROOT, implicit)': none
     '(__call (__callee "/^[^\s()\[\]{}<>*&,;\x27\x22=+/%^|~]+$/"))': '$ROOT'
+  unbound_receiver(ROOT):
+    '_': none
   implicit_targets(ROOT, implicit):
     '_ when implicit': 'targets($ROOT, true)'
   site_role(ROOT):

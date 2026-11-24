@@ -76,6 +76,8 @@ tables:
 
 define:
   dangling(ROOT):
+    '(__name "*") when $ROOT | follow(imports, from) | is_def': none
+    '(__name "*")': '$ROOT'
     '_ when $ROOT | follow(imports, from)': none
     '_': '$ROOT'
   measured(ROOT):
