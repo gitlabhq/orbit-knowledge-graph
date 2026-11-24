@@ -1,7 +1,6 @@
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BillingAuthMode {
     /// GCP workload-identity OIDC. Only works on GitLab.com (SaaS).
@@ -12,8 +11,7 @@ pub enum BillingAuthMode {
     CloudConnector,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BillingConfig {
     pub enabled: bool,
     pub collector_url: String,
@@ -21,8 +19,7 @@ pub struct BillingConfig {
     pub quota: QuotaConfig,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QuotaConfig {
     pub enabled: bool,
     pub customers_dot_url: String,
@@ -33,9 +30,7 @@ pub struct QuotaConfig {
     pub fallback_cache_ttl_secs: u64,
 }
 
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, strum::IntoStaticStr,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, strum::IntoStaticStr)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum QuotaAuthMode {
