@@ -34,6 +34,17 @@ fixtures:
                   c.M1();
               }
           }
+          public class GenericRunner
+          {
+              private C<int> g;
+              public void Run()
+              {
+                  g.M1();
+                  g.M2();
+                  new C<System.Collections.Generic.List<int>>().M1();
+                  new C().M3();
+              }
+          }
       }
 
 tests:
@@ -45,4 +56,14 @@ tests:
     assert:
       - { row_count: 2 }
       - { row: { callee: Geo.C.M2 } }
+      - { row: { callee: Geo.C.M3 } }
+
+  - name: "GenericRunner reaches the method of C<T> through C<int> and the parts of C through C"
+    query: |
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'App.GenericRunner.Run' AND callee.definition_type = 'Method'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 3 }
+      - { row: { callee: Geo.C.M1 } }
       - { row: { callee: Geo.C.M3 } }
