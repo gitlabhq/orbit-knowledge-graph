@@ -4,7 +4,7 @@ data:
 define:
   file_at(path):
     '_ when path | regex_match("(^|/)[*]$")': >-
-      select(files, '(__source_file)' by $ROOT | regex_replace("/?[^/]*$", ""), path | regex_replace("/?[*]$", ""))
+      select(files, '(__source_file)' by $ROOT | regex_replace("^([^/]*)$", "./$1") | regex_replace("/?[^/]*$", ""), path | regex_replace("^[*]$", "./*") | regex_replace("/?[*]$", ""))
       or select(files, '(__source_file $P:__package)' by package_path($P), path | regex_replace("/?[*]$", ""))
     '_': >-
       select(files, '(__source_file)' by $ROOT | stem, path)
