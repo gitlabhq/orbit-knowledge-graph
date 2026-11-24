@@ -1,0 +1,33 @@
+import: [canonical, display, roots, shapes]
+
+canonicalize:
+  - stage: normalize
+    rewrite:
+      - '(haskell $$$C)': '%source_file($$$C)'
+      - '(import module: $M:module)': '(__import (__source @$M) (__source_path @$M | replace(".", "/")) (__name "*"))'
+  - stage: retag-calls
+    rewrite:
+      - '(apply function: $F:variable argument: $A)': '(__call (__callee @$F $F) $A)'
+      - '(match expression: $V:variable)': '(match expression: (__call (__callee @$V $V)))'
+  - stage: classify
+    rewrite:
+      - '(function name: $N:variable $$$R)': '(__def (__defname @$N) (__function) $$$R)'
+      - '(bind name: $N:variable $$$R)': '(__def (__defname @$N) (__function) $$$R)'
+  - stage: tag-defs
+    rewrite:
+      - use: function_def_tags
+  - use: tag_file_dir
+  - use: resolve_paths
+
+project:
+  - stage: roots
+    rewrite:
+      - use: src_root
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #file_path=@$M #language=haskell'
+      - use: def_fqn_dotted
+  - use: def_types
+  - use: display_wildcard_imports
