@@ -192,8 +192,8 @@ pub struct Profile {
     children: FxHashMap<(u32, Frame), u32>,
     rule_src: FxHashMap<usize, Box<str>>,
     rules: FxHashMap<usize, (Box<str>, Stat)>,
-    /// Per key: times computed, times a kept result was reused.
-    keys: FxHashMap<Key, (u32, u32)>,
+    /// Per key: times computed, times a kept result was reused, whether one was kept.
+    keys: FxHashMap<Key, (u32, u32, bool)>,
     /// Per (index, key symbol): lookups and empty lookups.
     lookups: FxHashMap<(u32, u32), (u64, u64)>,
 }
@@ -240,6 +240,7 @@ impl Profile {
             None => s.discarded += 1,
         }
         let k = self.keys.entry(key.clone()).or_default();
+        k.2 |= memo.is_some();
         if k.0 > 0 {
             s.recomputes += 1;
         }
@@ -280,7 +281,7 @@ impl Profile {
 
     /// Closes `frame` and any frame a stopped run left open above it; its
     /// total and self ns, and whether it was the outermost open call.
-    fn close(&mut self, frame: Frame) -> Option<(u64, u64, bool)> {
+    fn close(&mut self, frame: Frame) -> Option<(u64, u64, u64, bool)> {
         let at = self.stack.iter().rposition(|o| o.frame == frame)?;
         while self.stack.len() > at + 1 {
             let open = self.stack.last().map(|o| o.frame)?;
@@ -316,7 +317,7 @@ impl Profile {
         if let Some(node) = self.nodes.get_mut(open.node as usize) {
             node.2 += own;
         }
-        Some((total, total.saturating_sub(open.inner_fns), outermost))
+        Some((total, total.saturating_sub(open.inner_fns), own, outermost))
     }
 
     pub fn enter(&mut self, id: FnId) -> Instant {
@@ -324,7 +325,7 @@ impl Profile {
     }
 
     pub fn leave(&mut self, id: FnId, _start: Instant, reruns: u32) {
-        let Some((total, own, outermost)) = self.close(Frame::Fn(id)) else {
+        let Some((total, own, _, outermost)) = self.close(Frame::Fn(id)) else {
             return;
         };
         let s = self.stats.entry(id).or_default();
@@ -342,19 +343,20 @@ impl Profile {
         self.open(Frame::Rule(id));
     }
 
-    pub(super) fn leave_rule(&mut self, id: usize) {
-        self.close(Frame::Rule(id));
+    /// Closes one attempt of a rule; its own ns, not counting any frame under it.
+    pub(super) fn leave_rule(&mut self, id: usize) -> u64 {
+        self.close(Frame::Rule(id)).map_or(0, |(_, _, own, _)| own)
     }
 
-    /// One attempt of a rule: self time is matching, total adds its emits.
-    pub fn rule(&mut self, id: usize, src: &str, fired: bool, matching: Duration, total: Duration) {
+    /// One attempt of a rule: self time is its own frame's, total adds its calls and emits.
+    pub fn rule(&mut self, id: usize, src: &str, fired: bool, own_ns: u64, total: Duration) {
         let (_, s) = self
             .rules
             .entry(id)
             .or_insert_with(|| (src.into(), Stat::default()));
         s.calls += 1;
         s.hits += u64::from(fired);
-        s.self_ns += matching.as_nanos() as u64;
+        s.self_ns += own_ns;
         s.total_ns += total.as_nanos() as u64;
     }
 
@@ -369,8 +371,8 @@ impl Profile {
             }
             held += bytes(key, memo);
         }
-        for (key, &(_, reused)) in &self.keys {
-            if reused == 0 {
+        for (key, &(_, reused, kept)) in &self.keys {
+            if kept && reused == 0 {
                 self.stats.entry(key.0).or_default().never_hit += 1;
             }
         }

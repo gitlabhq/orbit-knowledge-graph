@@ -332,11 +332,11 @@ impl<'t, S: Store> Run<'t, S> {
         id: usize,
         src: &str,
         fired: bool,
-        matching: std::time::Duration,
+        own_ns: u64,
         total: std::time::Duration,
     ) {
         if let Some(p) = &mut self.profile {
-            p.rule(id, src, fired, matching, total);
+            p.rule(id, src, fired, own_ns, total);
         }
     }
 

@@ -4,7 +4,7 @@
 //! looked up or computed, and a cycle through it reruns its body until its
 //! value stops growing.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
@@ -66,7 +66,6 @@ struct Trying<'e, S: Store> {
     fired: SmallVec<[u16; 4]>,
     out: Vals,
     started: Option<Instant>,
-    matched: Option<Duration>,
 }
 
 #[derive(Clone, Copy)]
@@ -554,7 +553,6 @@ impl<'e, S: Store> Vm<'e, S> {
             fired: SmallVec::new(),
             out: Vals::new(),
             started: None,
-            matched: None,
         }));
     }
 
@@ -611,7 +609,6 @@ impl<'e, S: Store> Vm<'e, S> {
         match t.step {
             Step::Guard => {
                 if truthy(&self.values.pop().unwrap_or_default()) {
-                    t.matched = t.started.map(|s| s.elapsed());
                     self.value(t);
                     return;
                 }
@@ -649,7 +646,6 @@ impl<'e, S: Store> Vm<'e, S> {
                 continue;
             }
             t.started = run.profiling().then(Instant::now);
-            t.matched = None;
             if let (Some(p), Some(m)) = (&mut run.profile, pat) {
                 p.enter_rule(m as *const _ as usize, &m.src);
             }
@@ -683,7 +679,6 @@ impl<'e, S: Store> Vm<'e, S> {
                     self.tasks.push(Task::Eval(g, env));
                 }
                 None => {
-                    t.matched = t.started.map(|s| s.elapsed());
                     self.value(t);
                 }
             }
@@ -801,17 +796,12 @@ fn attempted<S: Store>(run: &mut Run<'_, S>, t: &Trying<'_, S>, fired: bool) {
     let (Some(started), Some(m)) = (t.started, &t.cases.items[usize::from(t.list[t.at])].0) else {
         return;
     };
-    if let Some(p) = &mut run.profile {
-        p.leave_rule(m as *const _ as usize);
-    }
+    let own = run
+        .profile
+        .as_mut()
+        .map_or(0, |p| p.leave_rule(m as *const _ as usize));
     let total = started.elapsed();
-    run.profile_rule(
-        m as *const _ as usize,
-        &m.src,
-        fired,
-        t.matched.unwrap_or(total),
-        total,
-    );
+    run.profile_rule(m as *const _ as usize, &m.src, fired, own, total);
 }
 
 fn is_leaf(expr: &Expr) -> bool {
