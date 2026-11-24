@@ -89,4 +89,7 @@ display:
       - '$M:__source_file': '#entity=File #file_path=@$M #language=@$M | split_last(".") | map("swift:swift")'
       - use: def_fqn_dotted_except_impl
   - use: def_types
+  - stage: def_type_names
+    rewrite:
+      - '(__def (__enum_variant))': '#def_type=EnumEntry'
   - use: display_wildcard_imports

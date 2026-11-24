@@ -116,7 +116,7 @@ tests:
       - { row: { fqn: "inventory::Runner::KIND", type: "Constant" } }
       - { row: { fqn: "inventory::Runner::Output", type: "TypeAlias" } }
       - { row: { fqn: "inventory::Runner::run", type: "Method" } }
-      - { row: { fqn: "inventory::Runner::build", type: "Function" } }
+      - { row: { fqn: "inventory::Runner::build", type: "AssociatedFunction" } }
 
   - name: "impl associated items are retained on the concrete type"
     query: |
@@ -135,8 +135,8 @@ tests:
       - { row: { fqn: "inventory::Service::KIND", type: "Constant" } }
       - { row: { fqn: "inventory::Service::Output", type: "TypeAlias" } }
       - { row: { fqn: "inventory::Service::run", type: "Method" } }
-      - { row: { fqn: "inventory::Service::build", type: "Function" } }
-      - { row: { fqn: "inventory::Service::inherent", type: "Function" } }
+      - { row: { fqn: "inventory::Service::build", type: "AssociatedFunction" } }
+      - { row: { fqn: "inventory::Service::inherent", type: "AssociatedFunction" } }
 
   - name: "variant imports and aliases retain their metadata"
     query: |

@@ -94,4 +94,4 @@ tests:
       WHERE c.name = 'read' AND t.name = 'FOO'
       RETURN t.fqn AS callee, t.definition_type AS kind
     assert:
-      - { column_values: { field: kind, values: ["EnumVariant"] } }
+      - { column_values: { field: kind, values: ["EnumConstant"] } }

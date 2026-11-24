@@ -145,8 +145,8 @@ tests:
       RETURN d.fqn AS fqn, d.definition_type AS type
     assert:
       - { row_count: 2 }
-      - { row: { fqn: "Model::name", type: Property } }
-      - { row: { fqn: "Model::email", type: Property } }
+      - { row: { fqn: "Model::name", type: Attribute } }
+      - { row: { fqn: "Model::email", type: Attribute } }
 
   - name: "delegate generates synthetic method defs"
     query: |
@@ -249,8 +249,8 @@ tests:
       RETURN d.fqn AS fqn, d.definition_type AS type
     assert:
       - { row_count: 2 }
-      - { row: { fqn: "Post::published", type: Method } }
-      - { row: { fqn: "Post::recent", type: Method } }
+      - { row: { fqn: "Post::published", type: StaticMethod } }
+      - { row: { fqn: "Post::recent", type: StaticMethod } }
 
   # ══════════════════════════════════════════════════════════════
   # CLASS ATTRIBUTES
@@ -260,7 +260,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Post::max_length'
-        AND d.definition_type = 'Property'
+        AND d.definition_type = 'Attribute'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

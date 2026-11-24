@@ -55,7 +55,7 @@ tests:
       RETURN d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Class" } }
+      - { row: { type: "DataClass" } }
 
   - name: "data-class subclass Add is extracted as a DataClass"
     query: |
@@ -64,7 +64,7 @@ tests:
       RETURN d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Class" } }
+      - { row: { type: "DataClass" } }
 
   - name: "object subclass Zero is extracted as an Object"
     query: |
@@ -73,7 +73,7 @@ tests:
       RETURN d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Class" } }
+      - { row: { type: "Object" } }
 
   - name: "Each subclass overrides eval() as a Function definition"
     query: |
@@ -129,7 +129,7 @@ tests:
           'com.example.sealed.Const',
           'com.example.sealed.Add'
         ]
-        AND d.definition_type = 'Class'
+        AND d.definition_type = 'DataClass'
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
     assert:

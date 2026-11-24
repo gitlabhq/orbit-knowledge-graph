@@ -172,7 +172,7 @@ tests:
   - name: "Exact typedef count"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'TypeAlias'
+      WHERE d.definition_type = 'Typedef'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 4 }
@@ -335,7 +335,7 @@ tests:
       RETURN d.fqn AS fqn, d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: "nested::Callback", type: TypeAlias } }
+      - { row: { fqn: "nested::Callback", type: Typedef } }
 
   - name: "Task typedef struct"
     query: |
@@ -344,7 +344,7 @@ tests:
       RETURN d.fqn AS fqn, d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: "nested::Task", type: TypeAlias } }
+      - { row: { fqn: "nested::Task", type: Typedef } }
 
   # ══════════════════════════════════════════════════════════════
   # ENUM SCOPING
@@ -353,7 +353,7 @@ tests:
   - name: "ErrorCode enum constants with full scope"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumVariant'
+      WHERE d.definition_type = 'EnumConstant'
         AND d.fqn STARTS WITH 'error::ErrorCode::'
       RETURN d.fqn AS fqn
     assert:

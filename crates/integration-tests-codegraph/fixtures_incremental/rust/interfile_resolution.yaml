@@ -72,7 +72,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: "src/api.rs", tgt: "src/worker.rs", type: "Function" } }
+      - { row: { src: "src/api.rs", tgt: "src/worker.rs", type: "AssociatedFunction" } }
 
   - name: "execute -> Worker::run resolves with inferred receiver type"
     query: |

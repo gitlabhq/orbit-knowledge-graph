@@ -98,4 +98,8 @@ display:
       - '$M:__source_file': '#entity=File #fqn=@$M | stem | split_last("/") #file_path=@$M #language=@$M | split_last(".") | map("c:c", "h:c")'
       - use: def_fqn_colons_except_impl
   - use: def_types
+  - stage: def_type_names
+    rewrite:
+      - '(__def (__type_alias))': '#def_type=Typedef'
+      - '(__def (__enum_variant))': '#def_type=EnumConstant'
   - use: display_wildcard_imports

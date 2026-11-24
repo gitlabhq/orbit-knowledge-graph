@@ -232,6 +232,8 @@ display:
   - stage: def_type
     rewrite:
       - use: function_def_types
+      - '(__def (__impl) $ROOT:(__def (__function)))': '#def_type=AssociatedFunction'
+      - '(__def (__trait) $ROOT:(__def (__function)))': '#def_type=AssociatedFunction'
       - '(__def (__class))': '#def_type=$ROOT | tag("flavor") | map("module:Module") or "Class"'
       - '(__def (__struct))': '#def_type=$ROOT | tag("flavor") | map("union:Union") or "Struct"'
       - '(__def (__interface))': '#def_type=Interface'

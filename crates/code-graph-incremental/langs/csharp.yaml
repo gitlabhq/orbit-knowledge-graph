@@ -89,12 +89,12 @@ canonicalize:
       - '(enum_member_declaration name: $N:identifier)': '(__def (__defname @$N) (__enum_variant))'
       - '(method_declaration $$$PRE returns: $RT:identifier name: $N:identifier parameters: $P body:? $B)': '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $$$PRE $P (__call (__callee @$RT $RT)) $B)'
       - '(method_declaration $$$PRE name: $N:identifier parameters: $P body:? $B)': '(__def (__defname @$N) (__method) $$$PRE $P $B)'
-      - '(constructor_declaration $$$PRE name: $N:identifier parameters: $P body: $B)': '(__def (__defname @$N) (__method) $$$PRE $P $B)'
+      - '(constructor_declaration $$$PRE name: $N:identifier parameters: $P body: $B)': '(__def (__defname @$N) (__method) $$$PRE $P $B) #flavor=constructor'
       - '(local_function_statement $$$PRE name: $N:identifier parameters: $P body: $B)': '(__def (__defname @$N) (__function) $$$PRE $P $B)'
       - '(class_declaration $$$PRE name: $N:identifier (base_list $S:__supertype $$$REST) body: (declaration_list $$$B))': '(__def (__defname @$N) (__class) $$$PRE $S $$$REST (__binding (__ivar "base") (__rhs (__call (__callee @$S)))) $$$B)'
       - '(class_declaration $$$PRE name: $N:identifier $$$ANN body: (declaration_list $$$B))': '(__def (__defname @$N) (__class) $$$PRE $$$ANN $$$B)'
-      - '(record_declaration $$$PRE ("struct") name: $N:identifier $P?:parameter_list $$$ANN body:? (declaration_list $$$B))': '(__def (__defname @$N) (__struct) $$$PRE $$$ANN $P $$$B)'
-      - '(record_declaration $$$PRE name: $N:identifier $P?:parameter_list $$$ANN body:? (declaration_list $$$B))': '(__def (__defname @$N) (__class) $$$PRE $$$ANN $P $$$B)'
+      - '(record_declaration $$$PRE ("struct") name: $N:identifier $P?:parameter_list $$$ANN body:? (declaration_list $$$B))': '(__def (__defname @$N) (__struct) $$$PRE $$$ANN $P $$$B) #flavor=record'
+      - '(record_declaration $$$PRE name: $N:identifier $P?:parameter_list $$$ANN body:? (declaration_list $$$B))': '(__def (__defname @$N) (__class) $$$PRE $$$ANN $P $$$B) #flavor=record'
       - '(struct_declaration $$$PRE name: $N:identifier $$$ANN body: (declaration_list $$$B))': '(__def (__defname @$N) (__struct) $$$PRE $$$ANN $$$B)'
       - '(interface_declaration $$$PRE name: $N:identifier $$$ANN body: (declaration_list $$$B))': '(__def (__defname @$N) (__interface) $$$PRE $$$ANN $$$B)'
       - '(enum_declaration $$$PRE name: $N:identifier $$$ANN body: (enum_member_declaration_list $$$B))': '(__def (__defname @$N) (__enum) $$$PRE $$$ANN $$$B)'
@@ -126,6 +126,12 @@ display:
       - '$M:__source_file': '#entity=File #fqn=$M | child("__package") #file_path=@$M #language=@$M | split_last(".") | map("cs:csharp")'
       - use: def_fqn_dotted
   - use: def_types
+  - stage: def_type_names
+    rewrite:
+      - '(__def (__method))': '#def_type=$ROOT | tag("flavor") | map("constructor:Constructor") or "Method"'
+      - '(__def (__class))': '#def_type=$ROOT | tag("flavor") | map("record:Record") or "Class"'
+      - '(__def (__struct))': '#def_type=$ROOT | tag("flavor") | map("record:Record") or "Struct"'
+      - '(__def (__enum_variant))': '#def_type=EnumMember'
   - stage: imports
     rewrite:
       - use: import_entity

@@ -86,8 +86,7 @@ tests:
     query: |
       MATCH (s:Definition)-[e:DEFINES]->(c:Definition)
       WHERE s.fqn = 'Geometry.Point'
-        AND c.definition_type = 'Method'
-        AND c.name = 'Point'
+        AND c.definition_type = 'Constructor'
       RETURN c.name AS name
     assert:
       - { row_count: 1 }
