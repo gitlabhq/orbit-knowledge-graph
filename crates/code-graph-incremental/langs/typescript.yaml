@@ -36,6 +36,11 @@ data:
   call_wrappers: [await_expression, as_expression, non_null_expression, parenthesized_expression, satisfies_expression]
   loops: [for_statement, for_in_statement, while_statement, do_statement]
 
+define:
+  modules(ROOT):
+    '(_ (__source_path "^."))': 'aliased($ROOT) or file_at($ROOT | tag("resolved_source"))'
+    '_': 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
+
 canonicalize:
   - stage: normalize
     rewrite:
