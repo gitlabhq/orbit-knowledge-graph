@@ -109,6 +109,7 @@ resolve:
   bound_import_call:
     - '(__call (__callee "/./")) when $ROOT | follow(type_flow, site) | follow(imports, site)':
         calls: { to: '$ROOT | follow(type_flow, site) | follow(imports, site) | follow(imports, from) | callable | elsewhere(file($ROOT))', site: $ROOT }
+        imports: { to: '$ROOT | follow(type_flow, site) | follow(imports, site)', site: $ROOT }
 
   bound_import:
     - '(__binding (__rhs !$ANY)) when $ROOT | follow(imports, site)':

@@ -278,7 +278,6 @@ define:
     '(__def $K:__trait|__interface)': 'plain($ROOT)'
   imported(ROOT):
     '(__name)': 'plain($ROOT)'
-    '(__binding $R:__rhs)': 'read($R) | imported'
   produced(ROOT):
     '(__def)': none
     '(__name)': none
