@@ -67,8 +67,13 @@ fn suite_limits(suite: &TestSuite) -> Limits {
         Some("default") => default_limits(),
         Some(other) => panic!("suite {:?}: unknown limits {other:?}", suite.name),
     };
+    let total_ms = std::env::var("CGI_GATE_MS")
+        .ok()
+        .and_then(|ms| ms.parse().ok())
+        .unwrap_or(limits.total_ms);
     Limits {
         max_tree_depth: suite.max_tree_depth.unwrap_or(limits.max_tree_depth),
+        total_ms,
         ..limits
     }
 }
@@ -103,6 +108,11 @@ pub fn run_incremental_suite(yaml: &str) {
         .build()
         .expect("worker pool")
         .install(|| index_and_check(yaml));
+}
+
+/// Runs one suite in the caller's pool; panics with the suite's failures.
+pub fn check_incremental_suite(yaml: &str) {
+    index_and_check(yaml);
 }
 
 fn index_and_check(yaml: &str) {

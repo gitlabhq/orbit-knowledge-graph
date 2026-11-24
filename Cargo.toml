@@ -264,6 +264,11 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 debug = false
 
+[profile.gate]
+inherits = "dev"
+opt-level = 2
+incremental = true
+
 # Synthetic data generation spends most of its time in these deps; dev keeps them unoptimised for cold builds.
 [profile.synth]
 inherits = "dev"

@@ -113,29 +113,92 @@ static LANG_CONFIG: std::sync::LazyLock<LangConfig> = std::sync::LazyLock::new(|
 
 pub fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
     match lang_id {
-        SupportLang::Python => Some(include_str!("../langs/python.yaml")),
+        SupportLang::Python => Some(crate::config::source(
+            "langs/python.yaml",
+            include_str!("../langs/python.yaml"),
+        )),
         SupportLang::TypeScript | SupportLang::Tsx | SupportLang::JavaScript => {
-            Some(include_str!("../langs/typescript.yaml"))
+            Some(crate::config::source(
+                "langs/typescript.yaml",
+                include_str!("../langs/typescript.yaml"),
+            ))
         }
-        SupportLang::Rust => Some(include_str!("../langs/rust.yaml")),
-        SupportLang::Go => Some(include_str!("../langs/go.yaml")),
-        SupportLang::Php => Some(include_str!("../langs/php.yaml")),
-        SupportLang::Java => Some(include_str!("../langs/java.yaml")),
-        SupportLang::Kotlin => Some(include_str!("../langs/kotlin.yaml")),
-        SupportLang::Ruby => Some(include_str!("../langs/ruby.yaml")),
-        SupportLang::CSharp => Some(include_str!("../langs/csharp.yaml")),
-        SupportLang::C => Some(include_str!("../langs/c.yaml")),
-        SupportLang::Cpp => Some(include_str!("../langs/cpp.yaml")),
-        SupportLang::Scala => Some(include_str!("../langs/scala.yaml")),
-        SupportLang::Bash => Some(include_str!("../langs/bash.yaml")),
-        SupportLang::Dockerfile => Some(include_str!("../langs/dockerfile.yaml")),
-        SupportLang::Elixir => Some(include_str!("../langs/elixir.yaml")),
-        SupportLang::Lua => Some(include_str!("../langs/lua.yaml")),
-        SupportLang::Swift => Some(include_str!("../langs/swift.yaml")),
-        SupportLang::Zig => Some(include_str!("../langs/zig.yaml")),
-        SupportLang::Markdown => Some(include_str!("../langs/markdown.yaml")),
-        SupportLang::Vue => Some(include_str!("../langs/vue.yaml")),
-        SupportLang::GraphQl => Some(include_str!("../langs/graphql.yaml")),
+        SupportLang::Rust => Some(crate::config::source(
+            "langs/rust.yaml",
+            include_str!("../langs/rust.yaml"),
+        )),
+        SupportLang::Go => Some(crate::config::source(
+            "langs/go.yaml",
+            include_str!("../langs/go.yaml"),
+        )),
+        SupportLang::Php => Some(crate::config::source(
+            "langs/php.yaml",
+            include_str!("../langs/php.yaml"),
+        )),
+        SupportLang::Java => Some(crate::config::source(
+            "langs/java.yaml",
+            include_str!("../langs/java.yaml"),
+        )),
+        SupportLang::Kotlin => Some(crate::config::source(
+            "langs/kotlin.yaml",
+            include_str!("../langs/kotlin.yaml"),
+        )),
+        SupportLang::Ruby => Some(crate::config::source(
+            "langs/ruby.yaml",
+            include_str!("../langs/ruby.yaml"),
+        )),
+        SupportLang::CSharp => Some(crate::config::source(
+            "langs/csharp.yaml",
+            include_str!("../langs/csharp.yaml"),
+        )),
+        SupportLang::C => Some(crate::config::source(
+            "langs/c.yaml",
+            include_str!("../langs/c.yaml"),
+        )),
+        SupportLang::Cpp => Some(crate::config::source(
+            "langs/cpp.yaml",
+            include_str!("../langs/cpp.yaml"),
+        )),
+        SupportLang::Scala => Some(crate::config::source(
+            "langs/scala.yaml",
+            include_str!("../langs/scala.yaml"),
+        )),
+        SupportLang::Bash => Some(crate::config::source(
+            "langs/bash.yaml",
+            include_str!("../langs/bash.yaml"),
+        )),
+        SupportLang::Dockerfile => Some(crate::config::source(
+            "langs/dockerfile.yaml",
+            include_str!("../langs/dockerfile.yaml"),
+        )),
+        SupportLang::Elixir => Some(crate::config::source(
+            "langs/elixir.yaml",
+            include_str!("../langs/elixir.yaml"),
+        )),
+        SupportLang::Lua => Some(crate::config::source(
+            "langs/lua.yaml",
+            include_str!("../langs/lua.yaml"),
+        )),
+        SupportLang::Swift => Some(crate::config::source(
+            "langs/swift.yaml",
+            include_str!("../langs/swift.yaml"),
+        )),
+        SupportLang::Zig => Some(crate::config::source(
+            "langs/zig.yaml",
+            include_str!("../langs/zig.yaml"),
+        )),
+        SupportLang::Markdown => Some(crate::config::source(
+            "langs/markdown.yaml",
+            include_str!("../langs/markdown.yaml"),
+        )),
+        SupportLang::Vue => Some(crate::config::source(
+            "langs/vue.yaml",
+            include_str!("../langs/vue.yaml"),
+        )),
+        SupportLang::GraphQl => Some(crate::config::source(
+            "langs/graphql.yaml",
+            include_str!("../langs/graphql.yaml"),
+        )),
         _ => None,
     }
 }
@@ -263,9 +326,9 @@ impl crate::engine::Engine {
         let mut members = language.family_members();
         members.sort_by_key(|&m| m != language);
         let source = crate::engine::PipelineSource {
-            pipeline: crate::config::PIPELINE,
-            rules: crate::config::RULES,
-            libs: crate::config::LIBS,
+            pipeline: crate::config::source("config/pipeline.yaml", crate::config::PIPELINE),
+            rules: crate::config::sources("config/rules", crate::config::RULES),
+            libs: crate::config::sources("config/lib", crate::config::LIBS),
         };
         let embedded: Vec<SupportLang> = members
             .iter()
