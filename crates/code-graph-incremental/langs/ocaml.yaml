@@ -1,0 +1,28 @@
+import: [canonical, display, shapes]
+
+canonicalize:
+  - stage: normalize
+    rewrite:
+      - '(compilation_unit $$$C)': '%source_file($$$C)'
+      - '(include_module module: $M:module_path)': '(__module_export (__import (__source @$M) (__source_path @$M | lowercase | prepend("./")) (__name "*")))'
+  - stage: retag-calls
+    rewrite:
+      - '(application_expression function: (value_path $M:module_path $N:value_name) $$$A)': '(ml_qualified (__import (__source @$M) (__source_path @$M | lowercase | prepend("./")) (__name @$M | lowercase (__alias @$M))) (__call (__callee %member_text($N, $M)) $$$A))'
+      - '(application_expression function: (value_path $N:value_name) $$$A)': '%call($N, $$$A)'
+  - stage: classify
+    rewrite:
+      - '(let_binding pattern: $N:value_name (parameter) body: $B)': '(__def (__defname @$N) (__function) $B)'
+      - '(let_binding pattern: $N:value_name body: $B)': '(__def (__defname @$N) (__variable) $B)'
+  - stage: tag-defs
+    rewrite:
+      - use: function_def_tags
+      - '(__def (__variable))': '#value=true'
+  - use: tag_file_dir
+  - use: resolve_paths
+
+display:
+  - stage: fqn
+    rewrite:
+      - '$M:__source_file': '#entity=File #file_path=@$M #language=ocaml'
+      - use: def_fqn_dotted
+  - use: def_types

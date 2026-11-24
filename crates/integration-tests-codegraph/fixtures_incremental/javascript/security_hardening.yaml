@@ -171,7 +171,7 @@ tests:
       - { row: { caller: "runFromA", callee: "fromA" } }
 
   - name: Vue virtual class does not collide with a real class of the same name
-    # Known gap: Vue SFC extraction is not implemented.
+    # Known gap: the Vue component class is not namespaced as <vue>::Name when a real class in the file has the same name.
     skip: true
     query: |
       MATCH (def:Definition)

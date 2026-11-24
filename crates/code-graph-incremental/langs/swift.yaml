@@ -21,7 +21,7 @@ canonicalize:
       - '(import_declaration $I:identifier)': '(__import (__source @$I $I) (__source_path @$I | replace(".", "/")) (__name @$I | split_last(".")))'
   - stage: normalize
     rewrite:
-      - '(source_file $$$C)': '%source_file($$$C)'
+      - '(source_file $$$C)': '(__source_file @$ROOT $$$C (__module_export (__import (__source "./*") (__source_path "./*") (__name "*"))))'
       - '(control_transfer_statement (return) $$$V)': '(__ssa_return $$$V)'
       - '(%wrapped_types $T:type_identifier)': '(type_identifier @$T)'
       - '(inheritance_specifier $T:type_identifier)': '(__supertype @$T)'

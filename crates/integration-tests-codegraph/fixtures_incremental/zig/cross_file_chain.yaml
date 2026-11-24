@@ -29,7 +29,7 @@ tests:
       - { row: { name: run, file: src/c.zig } }
 
   - name: "a call through the imported namespaces links to the definition"
-    # Known gap: Zig calls through an @import namespace do not link, even with a direct import.
+    # Known gap: a namespace that another file re-exports (`pub const a = @import("a.zig")`) does not resolve as a member; exported() keeps only definitions, so `b.a.helper()` gets no edge. A direct `@import` call links.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

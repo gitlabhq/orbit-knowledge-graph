@@ -28,9 +28,17 @@ canonicalize:
       - '(parameter name: $N:identifier)': '(__binding @$N)'
       - '(zig_enum_member name: $N:identifier)': '(__def (__defname @$N) (__enum_variant))'
       - '(container_field name: $N:identifier)': '(__def (__defname @$N) (__field_def))'
+  - stage: imports
+    rewrite:
+      - '(variable_declaration $N:identifier (builtin_function (builtin_identifier "@import") (arguments (string $S:(string_content "/[.]zig$/")))))': '(__import (__source @$S) (__source_path @$S | regex_replace("[.]zig$", "") | prepend("./")) (__name @$S | regex_replace("[.]zig$", "") | split_last("/") (__alias @$N)))'
+      - '(variable_declaration $N:identifier (builtin_function (builtin_identifier "@import") (arguments (string $S:string_content))))': '(__import (__source @$S) (__source_path @$S) (__name @$S (__alias @$N)))'
+  - stage: retag-refs
+    rewrite:
+      - '(field_expression object: $O:identifier member: $M:identifier)': '%member_text($M, $O)'
+      - '(field_expression object: $O:__member member: $M:identifier)': '%member($M, $O)'
   - stage: retag-calls
     rewrite:
-      - '(call_expression function: (field_expression object: $O:identifier member: $M:identifier) $$$A)': '(__call (__callee %member_text($M, $O)) $$$A)'
+      - '(call_expression function: $F:__member $$$A)': '(__call (__callee $F) $$$A)'
       - '(call_expression function: $F:identifier $$$A)': '%call($F, $$$A)'
       - '(struct_initializer $T:identifier $L:initializer_list)': '%call($T, $L)'
   - stage: classify

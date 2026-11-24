@@ -36,8 +36,6 @@ tests:
       - { row: { fqn: Start.run } }
 
   - name: "calls in one module link across files"
-    # Known gap: Swift calls do not link across files; the same calls in one file link.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name IN ['run', 'go'] AND callee.name IN ['go', 'stop']

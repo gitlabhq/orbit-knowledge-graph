@@ -27,6 +27,7 @@ data:
   interface_lists: []
   io_symbols: []
   kotlin_symbols: []
+  lifecycle_hooks: []
   loops: []
   mem_symbols: []
   member_accesses: []
