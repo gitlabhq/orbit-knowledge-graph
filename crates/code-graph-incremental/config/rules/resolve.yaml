@@ -8,6 +8,7 @@ define:
       or select(files, '(__source_file $P:__package)' by package_path($P), path | regex_replace("/?[*]$", ""))
     '_': >-
       select(files, '(__source_file)' by $ROOT | stem, path)
+      or select(files, '(__source_file)' by $ROOT, path)
       or select(files, '(__source_file)' by $ROOT | collapse_index(%index_files), path)
       or file(select(files, '(__source_file $P:__package (__def $ROOT:__defname))' by package_path($P) | concat("/", $ROOT), path))
       or file(select(files, '(__source_file (__def $ROOT:__defname))' by package_path($ROOT), path))
@@ -23,10 +24,17 @@ define:
     '_ when in(path | split_first("/"), names)': 'opaque'
   modules(ROOT): 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
   aliased(ROOT): >-
-    first(select(project, '(__alias)') | longest_first, a => alias_files(a, $ROOT))
+    first(union(governing($ROOT) | config_aliases, select(project, '(__alias)')) | longest_first,
+      a => alias_files(a, $ROOT))
+  governing(ROOT): 'config_file($ROOT | file_dir | inherited_tag("ts_config"))'
+  config_file(path): "select(project, '(__file)' by tree_path($ROOT), path)"
+  config_aliases(ROOT): >-
+    select(under($ROOT), '(__config_alias)')
+    or $ROOT | child("__extends") | config_file | config_aliases
+    or select(under($ROOT), '(__reference)') | config_file | config_aliases
   alias_files(ROOT, imp):
-    '(__alias $S:__scope) when in($S, $imp | tag("alias_scope"))': 'files($imp | child("__source_path") | map_prefix($ROOT, $ROOT | child("__str")))'
-    '(__alias !(__scope))': 'files($imp | child("__source_path") | map_prefix($ROOT, $ROOT | child("__str")))'
+    '(_ $S:__scope) when in($S, $imp | tag("alias_scope"))': 'files($imp | child("__source_path") | map_prefix($ROOT, $ROOT | child("__str")))'
+    '(_ !(__scope))': 'files($imp | child("__source_path") | map_prefix($ROOT, $ROOT | child("__str")))'
   submodule(ROOT, N): 'files($ROOT | tag("resolved_source") | concat("/", @$N))'
   exported(module, name): >-
     select(owned(module), '(__def $N:__defname)', name)
@@ -34,8 +42,11 @@ define:
     or select(owned(module), '(__def $N:__default_export)', name)
     or select(owned(module), '(__module_export (__default_export))' by $ROOT | child("__default_export"), name) | target_of
     or select(under(module), '(__def #exports)' by $ROOT | tag("exports"), name)
+    or select(owned(module), '(%import_kinds $ROOT:(__name "*" $A:__alias))' by $A, name) | namespace_module
     or select(owned(module), '(%import_kinds $ROOT:__name)' by local_name($ROOT), name) | reexported(name) | is_def
     or select(owned(module), '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def
+  namespace_module(ROOT):
+    '$I:(%import_kinds $ROOT)': '$I | modules'
   offered(module, name): 'exported(module, name) or module'
   written(ROOT):
     '(_ (__ssa_hint "*"))': '"*"'

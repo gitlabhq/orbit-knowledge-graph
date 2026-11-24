@@ -11,7 +11,6 @@ data:
   - [Swift, '%builtins']
   - [Foundation, NSLog, NSStringFromClass, NSClassFromString, NSStringFromSelector, NSSelectorFromString,
     NSHomeDirectory, NSTemporaryDirectory, NSSearchPathForDirectoriesInDomains]
-  lookup_from: [__source_root]
   wrapped_types: [user_type, optional_type]
   branches: [if_statement, guard_statement, switch_statement]
   loops: [for_statement, while_statement, repeat_while_statement]

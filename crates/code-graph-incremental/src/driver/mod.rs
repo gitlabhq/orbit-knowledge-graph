@@ -243,6 +243,7 @@ pub fn finish(
 ) -> Result<(), Error> {
     let (_, rest) = engine.pipeline.split();
     let input = engine.lang.input_set();
+    state.linked_from = state.edges.len();
     let paths: Vec<&str> = state
         .trees
         .iter()

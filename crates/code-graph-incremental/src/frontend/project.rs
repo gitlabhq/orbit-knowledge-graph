@@ -35,14 +35,17 @@ pub trait SetFrontend: Send + Sync {
 #[derive(Clone)]
 pub enum ParseFormat {
     Json,
+    /// JSON with comments and trailing commas, as in `tsconfig.json`.
+    Jsonc,
     Toml,
     Raw(regex::Regex),
 }
 
-/// A manifest the project tree inlines, by file name, and how to read it.
+/// A manifest the project tree inlines, by file name or glob, and how to
+/// read it.
 #[derive(Clone)]
 pub struct ParseFile {
-    pub name: String,
+    pub name: globset::GlobMatcher,
     pub format: ParseFormat,
 }
 
@@ -64,15 +67,22 @@ impl SetFrontend for ProjectTree {
                 let fields = texts(Some(entry));
                 let (name, format) = match fields.as_slice() {
                     [name, "json"] => (*name, ParseFormat::Json),
+                    [name, "jsonc"] => (*name, ParseFormat::Jsonc),
                     [name, "toml"] => (*name, ParseFormat::Toml),
                     [name, "raw", extract] => {
                         (*name, ParseFormat::Raw(regex::Regex::new(extract)?))
                     }
                     _ => return Err(LoadError(format!("parse_files entry {fields:?}"))),
                 };
-                if !self.parse_files.iter().any(|p| p.name == name) {
+                if !self
+                    .parse_files
+                    .iter()
+                    .any(|p| p.name.glob().glob() == name)
+                {
+                    let glob = globset::Glob::new(name)
+                        .map_err(|e| LoadError(format!("parse_files name {name:?}: {e}")))?;
                     self.parse_files.push(ParseFile {
-                        name: name.to_string(),
+                        name: glob.compile_matcher(),
                         format,
                     });
                 }
@@ -82,10 +92,8 @@ impl SetFrontend for ProjectTree {
     }
 
     fn reads(&self, path: &str) -> bool {
-        let name = path.rsplit(PATH_SEP).next();
-        self.parse_files
-            .iter()
-            .any(|p| Some(p.name.as_str()) == name)
+        self.parse_file(path.rsplit(PATH_SEP).next().unwrap_or(path))
+            .is_some()
     }
 
     fn build(&self, paths: &[&str], files: &[SourceFile], lang: &Lang) -> Tree {
@@ -146,7 +154,7 @@ impl SetFrontend for ProjectTree {
                 stack.push((dirs[&(dir, segment)], node, 0));
                 continue;
             }
-            if let Some(spec) = self.parse_files.iter().find(|pf| pf.name == segment) {
+            if let Some(spec) = self.parse_file(segment) {
                 let full = path.iter().chain([&segment]).join(PATH_SEP);
                 if let Some(content) = contents.get(full.as_str()) {
                     inline_config(content, &spec.format, node, &mut tree, lang);
@@ -154,6 +162,12 @@ impl SetFrontend for ProjectTree {
             }
         }
         tree
+    }
+}
+
+impl ProjectTree {
+    fn parse_file(&self, name: &str) -> Option<&ParseFile> {
+        self.parse_files.iter().find(|p| p.name.is_match(name))
     }
 }
 
@@ -196,6 +210,10 @@ fn inline_config(
                     Ok(v) => v,
                     Err(_) => return,
                 },
+                ParseFormat::Jsonc => match serde_json::from_str(&strict_json(content)) {
+                    Ok(v) => v,
+                    Err(_) => return,
+                },
                 ParseFormat::Toml => match toml::from_str::<toml::Value>(content) {
                     Ok(tv) => toml_to_json(tv),
                     Err(_) => return,
@@ -205,6 +223,59 @@ fn inline_config(
             emit_json_value(&value, parent, tree, lang);
         }
     }
+}
+
+/// JSONC as strict JSON: comments become spaces and a comma before a closing
+/// bracket goes.
+fn strict_json(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut chars = src.chars().peekable();
+    let mut comma = None;
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                out.push(c);
+                while let Some(c) = chars.next() {
+                    out.push(c);
+                    match c {
+                        '\\' => out.extend(chars.next()),
+                        '"' => break,
+                        _ => {}
+                    }
+                }
+            }
+            '/' if chars.peek() == Some(&'/') => {
+                while chars.next_if(|&c| c != '\n').is_some() {}
+                out.push(' ');
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut last = ' ';
+                while let Some(c) = chars.next() {
+                    if last == '*' && c == '/' {
+                        break;
+                    }
+                    last = c;
+                }
+                out.push(' ');
+            }
+            ',' => {
+                comma = Some(out.len());
+                out.push(c);
+            }
+            '}' | ']' => {
+                if let Some(at) = comma.filter(|&at| out[at + 1..].trim().is_empty()) {
+                    out.remove(at);
+                }
+                out.push(c);
+            }
+            _ => out.push(c),
+        }
+        if !c.is_whitespace() && c != ',' && c != '/' {
+            comma = None;
+        }
+    }
+    out
 }
 
 fn toml_to_json(v: toml::Value) -> serde_json::Value {
@@ -321,6 +392,13 @@ mod tests {
             .join()
             .unwrap();
         assert_eq!(nodes, 5_002);
+    }
+
+    #[test]
+    fn jsonc_reads_as_json() {
+        let src = "{\n  // note\n  \"a\": \"x // y\", /* b */ \"b\": [1, 2,],\n}";
+        let value: serde_json::Value = serde_json::from_str(&strict_json(src)).unwrap();
+        assert_eq!(value, serde_json::json!({"a": "x // y", "b": [1, 2]}));
     }
 }
 

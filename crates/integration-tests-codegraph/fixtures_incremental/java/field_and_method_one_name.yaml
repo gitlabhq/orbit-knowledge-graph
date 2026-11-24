@@ -177,8 +177,6 @@ tests:
       - { row: { callee: "Set.first", kind: "Method" } }
 
   - name: a chained call on a method of a nested class types by its return
-    # Known gap: a return type that names a nested class is not resolved, on main too.
-    skip: true
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.fqn = 'Main.Nested.goCall'

@@ -5,8 +5,4 @@ data:
 project:
   - stage: lookup
     rewrite:
-      - '(__file $M:(__source_root "/./" $S?:__scope))': '+ (__alias "*" (__str @$ROOT | tree_path | regex_replace("[^/]*$", "") | concat("", @$M) | regex_replace("(^|/)\./", "$1") | regex_replace("/?$", "/*") | regex_replace("^/", "")) $S)'
       - '(__root $ROOT:(__dir !(__package) !(__source_root)))': '+ (__source_root)'
-  - stage: entrypoints
-    rewrite:
-      - '(_ !(__source_path) $F:(__file %index_files))': '+ (__source_path @$F | tree_path)'
