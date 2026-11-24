@@ -362,6 +362,7 @@ define:
   target_of(ROOT): 'declared_in(@ROOT, ROOT) or $ROOT | follow(imports, from)'
   resolved(ROOT):
     '$D:(__def $ROOT:__supertype)': 'class_in(@ROOT, $D) or visible(@ROOT, $D)'
+    '$D:(__def (__binding #outer (__rhs (__call $ROOT:__callee))))': 'class_in(@ROOT, $D) or visible(@ROOT, $D)'
     '(__call (__type) $ROOT)': 'declared_in(@ROOT, ROOT) | is_class or imported_name(@ROOT, ROOT) or visible(@ROOT, ROOT)'
     '(__ssa_typed)': 'class_in(@ROOT, ROOT) or visible(@ROOT, ROOT)'
     '(__ssa_return_type)': 'class_in(@ROOT, ROOT) or visible(@ROOT, ROOT)'

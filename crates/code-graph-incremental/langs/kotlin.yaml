@@ -123,6 +123,7 @@ canonicalize:
   - stage: tag-defs
     rewrite:
       - '(__def (__class) (modifiers (class_modifier "data")))': '#flavor=data'
+      - '(__binding (__ivar "super"))': '#outer=true'
       - '(__def (__property))': '#callable=true #value=true #scoped=true'
       - use: function_def_tags
       - use: type_def_tags

@@ -135,6 +135,7 @@ canonicalize:
   - stage: tag-defs
     rewrite:
       - '(block $$$B)': '(__scope $$$B)'
+      - '(__binding (__ivar "super"))': '#outer=true'
       - '(__def (__function))': '#callable=true #scoped=true'
       - '(__def (__method))': '#callable=true #scoped=true #definition_span=true'
       - use: type_def_tags
