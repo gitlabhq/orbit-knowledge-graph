@@ -98,7 +98,6 @@ impl Channel {
         let addresses: Vec<IpAddr> = match url.host() {
             None => return Self::InvalidUrl,
             Some(Host::Domain("localhost")) if dialled.is_none() => return Self::Localhost,
-            // reqwest ignores the resolve_host override for an IP literal host.
             Some(Host::Ipv4(ip)) => vec![ip.into()],
             Some(Host::Ipv6(ip)) => vec![ip.into()],
             Some(Host::Domain(domain)) => match dialled {
@@ -247,7 +246,6 @@ impl GitlabClient {
         // installed a provider.
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-        // A redirect could carry the credential header to a host that was never classified.
         let mut builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
 
         if let Some(dns_override) = dns_override {
