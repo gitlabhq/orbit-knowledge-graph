@@ -85,6 +85,7 @@ pub fn reindex(
     state.retain(|label| !gone.contains(label));
     state.configs.extend(configs);
     insert(engine, &mut state, &files, run, &mut report)?;
+    unparsed(engine, repository, &mut state, &report);
     finish(engine, &mut state, run, &mut report)?;
     Ok((state, report))
 }
