@@ -65,24 +65,26 @@ static FUNCTIONS: &[Function<Core>] = &[
     function!(Inline, "ancestors", [set], |cx, a| {
         set(nodes(&a[0]).flat_map(|at| cx.jump(at).ancestors().map(|c| Val::Node(c.into()))))
     }),
-    function!(Inline, "follow", [set, edge], |cx, a| {
-        let kind = edge_kind(&a[1]);
-        set(nodes(&a[0]).flat_map(|at| cx.targets(kind, at).iter().map(|&to| Val::Node(to))))
+    function!(Inline, "follow", [set, edge, edge_key], |cx, a| {
+        let (kind, key) = (edge_kind(&a[1]), number(&a[2]) as usize);
+        let mut out = Vals::new();
+        for at in nodes(&a[0]) {
+            match key {
+                0 => cx
+                    .targets(kind, at)
+                    .iter()
+                    .for_each(|&to| push(&mut out, Val::Node(to))),
+                key => cx
+                    .by_attribute(key - 1, kind, at)
+                    .iter()
+                    .for_each(|&(_, to)| push(&mut out, Val::Node(to))),
+            }
+        }
+        out
     }),
-    function!(Inline, "follow_at", [set, edge, node_attribute], |cx, a| {
-        let (kind, slot) = (edge_kind(&a[1]), number(&a[2]) as usize);
-        set(nodes(&a[0]).flat_map(|at| {
-            cx.by_attribute(slot, kind, at)
-                .iter()
-                .map(|&(_, to)| Val::Node(to))
-        }))
+    function!(Inline, "select", [set, region, pattern, set], |cx, a| {
+        select(cx, a)
     }),
-    function!(Inline, "select", [set, pattern, set], |cx, a| select(
-        cx, a, false
-    )),
-    function!(Inline, "select_all", [set, pattern, set], |cx, a| select(
-        cx, a, true
-    )),
     function!(Inline, "select_project", [pattern, set], |cx, a| {
         let id = number(&a[0]);
         let mut out = Vals::new();
@@ -167,15 +169,18 @@ static FUNCTIONS: &[Function<Core>] = &[
 
 /// Matches of a declared index under each node of the first set, by each
 /// key of the third: in the node's own scope, or anywhere under it.
-fn select<S: Store>(cx: &mut Cx<'_, '_, Core, S>, a: &[Vals], all: bool) -> Vals {
-    let id = number(&a[1]);
+/// The matches of index `a[2]` for keys `a[3]`, owned by a node of `a[0]` or
+/// under it, as region `a[1]` says.
+fn select<S: Store>(cx: &mut Cx<'_, '_, Core, S>, a: &[Vals]) -> Vals {
+    let under = number(&a[1]) == 1;
+    let id = number(&a[2]);
     let mut out = Vals::new();
     for at in nodes(&a[0]) {
-        let anchor = if all { WHOLE } else { at.node };
+        let anchor = if under { WHOLE } else { at.node };
         let Some(piece) = cx.piece(at.fi, id) else {
             return out;
         };
-        for key in a[2].iter().filter_map(|&k| cx.text(k)) {
+        for key in a[3].iter().filter_map(|&k| cx.text(k)) {
             for &node in piece.get(&(anchor, key)).into_iter().flatten() {
                 let inside = anchor != WHOLE
                     || at.node == 0

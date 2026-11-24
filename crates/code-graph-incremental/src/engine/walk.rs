@@ -25,7 +25,6 @@ pub fn run_tree<S: Store>(
     project: Option<&Tree<S>>,
     rules: Option<usize>,
     engine: &Engine,
-    graph: Option<(&Graph, u32)>,
     budget: &Sentinel,
 ) -> Result<(Vec<Edge>, Outputs), Killed> {
     let file = tree_budget(phase, engine, &tree.label);
@@ -64,7 +63,6 @@ pub fn run_tree<S: Store>(
                     rules,
                     region,
                     engine,
-                    graph,
                     project,
                     budget,
                     file: &file,
@@ -263,7 +261,6 @@ fn run_files(
                         fi,
                         rules,
                         graph: Some(graph),
-                        graph_fi: fi,
                         indexed: Some(&indexed),
                         budget: &scope,
                         file: &file,
@@ -292,7 +289,6 @@ struct On<'a, S: Store> {
     /// The region the walk covers: the tree's root or a region node.
     region: u32,
     engine: &'a Engine,
-    graph: Option<(&'a Graph, u32)>,
     project: Option<&'a Tree<S>>,
     budget: &'a Sentinel,
     file: &'a Sentinel,
@@ -323,8 +319,7 @@ impl<S: Store> On<'_, S> {
                     trees,
                     fi: 0,
                     rules: self.rules,
-                    graph: self.graph.map(|(graph, _)| graph),
-                    graph_fi: self.graph.map_or(0, |(_, fi)| fi),
+                    graph: None,
                     indexed: Some(&indexed),
                     budget: self.budget,
                     file: self.file,

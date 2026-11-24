@@ -51,7 +51,6 @@ impl<'t, S: Store> Indexed<'t, S> {
                     fi,
                     rules: engine.rules_index(&trees.get(fi).label),
                     graph: None,
-                    graph_fi: 0,
                     indexed: None,
                     budget,
                     file: budget,
@@ -116,8 +115,6 @@ pub(super) struct Input<'t, S: Store> {
     /// The rule set the run's tree runs.
     pub(super) rules: usize,
     pub(super) graph: Option<&'t Graph>,
-    /// The run's tree's file index in the graph.
-    pub(super) graph_fi: u32,
     pub(super) indexed: Option<&'t Indexed<'t, S>>,
     pub(super) budget: &'t Sentinel,
     pub(super) file: &'t Sentinel,

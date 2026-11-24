@@ -9,7 +9,7 @@ use rayon::prelude::*;
 pub use repository::{Options, WORKER_STACK_BYTES, repository};
 pub use state::{SNAPSHOT_VERSION, SourceFile, State};
 
-use crate::engine::{self, Engine, Graph, Outputs, Phase, Trees};
+use crate::engine::{self, Engine, Outputs, Phase, Trees};
 use crate::error::Error;
 use crate::language::SupportLang;
 use crate::sentinel::{Killed, Sentinel};
@@ -138,8 +138,7 @@ fn one_file(
     let mut at = Stage::new(tree, canonical);
     for phase in phases {
         let started = Instant::now();
-        let graph = Graph::new(&engine.lang, &edges);
-        let (found, _) = at.run(phase, None, engine, Some((&graph, 0)), run)?;
+        let (found, _) = at.run(phase, None, engine, run)?;
         edges.extend(found);
         if *engine::profile::ON {
             engine::profile::phase(&phase.name, started);
@@ -172,17 +171,14 @@ impl Stage {
         phase: &Phase,
         rules: Option<usize>,
         engine: &Engine,
-        graph: Option<(&Graph, u32)>,
         budget: &Sentinel,
     ) -> Result<(Vec<Edge>, engine::Outputs), Killed> {
         if !phase.builds() {
             let tree = self.compact(engine);
-            return engine::run_tree(phase, tree, None, rules, engine, graph, budget);
+            return engine::run_tree(phase, tree, None, rules, engine, budget);
         }
         match &mut self.tree {
-            Storage::Mutable(tree) => {
-                engine::run_tree(phase, tree, None, rules, engine, graph, budget)
-            }
+            Storage::Mutable(tree) => engine::run_tree(phase, tree, None, rules, engine, budget),
             _ => unreachable!("the pipeline builds a tree only before it turns Compact"),
         }
     }
@@ -258,7 +254,7 @@ pub fn finish(
             state.edges.extend(ran.edges);
         } else if phase.walks.project {
             for rules in engine.file_rules() {
-                let (edges, outputs) = project.run(phase, Some(rules), engine, None, run)?;
+                let (edges, outputs) = project.run(phase, Some(rules), engine, run)?;
                 report.outputs.merge(outputs);
                 state
                     .edges
@@ -266,15 +262,10 @@ pub fn finish(
             }
         } else {
             let project = phase.reads.project.then(|| &*project.compact(engine));
-            let graph = Graph::new(&engine.lang, &state.edges);
             let done = state
                 .trees
                 .par_iter_mut()
-                .enumerate()
-                .map(|(fi, tree)| {
-                    let graph = Some((&graph, fi as u32));
-                    engine::run_tree(phase, tree, project, None, engine, graph, run)
-                })
+                .map(|tree| engine::run_tree(phase, tree, project, None, engine, run))
                 .collect::<Result<Vec<_>, Killed>>()?;
             for (fi, (edges, outputs)) in done.into_iter().enumerate() {
                 report.outputs.merge(outputs);

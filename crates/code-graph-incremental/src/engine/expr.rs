@@ -342,17 +342,32 @@ impl<'s> Parser<'s, '_> {
                             })?;
                             args.push(Expr::Lit(Val::Sym(u32::from(kind.0))));
                         }
-                        Arg::NodeAttribute => {
+                        Arg::Region => {
+                            self.space();
+                            let name = self.ident();
+                            let region = ["owned", "under"]
+                                .iter()
+                                .position(|&r| r == name)
+                                .ok_or_else(|| {
+                                    self.error(&format!("{name} is not owned or under"))
+                                })?;
+                            args.push(Expr::Lit(Val::Sym(region as u32)));
+                        }
+                        Arg::EdgeKey => {
                             self.space();
                             let name = self.ident();
                             let lang = self.scope.lang;
-                            let slot = lang
-                                .edge_attribute(name)
-                                .filter(|&slot| lang.edge_attributes()[slot].node)
-                                .ok_or_else(|| {
-                                    self.error(&format!("{name} is not a node edge attribute"))
-                                })?;
-                            args.push(Expr::Lit(Val::Sym(slot as u32)));
+                            let key = match name {
+                                "from" => Some(0),
+                                _ => lang
+                                    .edge_attribute(name)
+                                    .filter(|&slot| lang.edge_attributes()[slot].node)
+                                    .map(|slot| slot as u32 + 1),
+                            };
+                            let key = key.ok_or_else(|| {
+                                self.error(&format!("{name} is not from or a node edge attribute"))
+                            })?;
+                            args.push(Expr::Lit(Val::Sym(key)));
                         }
                         Arg::Shape => {
                             self.space();

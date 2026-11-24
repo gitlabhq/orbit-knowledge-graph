@@ -37,7 +37,6 @@ macro_rules! on_node {
 
 static FUNCTIONS: &[Function<Text>] = &[
     on_text!("strip", [one, one], strip),
-    on_text!("strip_leading", [one, one], strip_leading),
     on_text!("strip_suffix", [one, one], strip_suffix),
     on_text!("split_last", [one, one], split_last),
     on_text!("split_first", [one, one], split_first),
@@ -135,17 +134,8 @@ static FUNCTIONS: &[Function<Text>] = &[
     function!(Pure, "ne", [set, set], |cx, a| {
         yes(a[0].first().and_then(|&v| text(cx, v)) != a[1].first().and_then(|&v| text(cx, v)))
     }),
-    function!(Pure, "has_incoming", [one, one], |cx, a| has_edge(
-        cx, a, true
-    )),
-    function!(Pure, "has_outgoing", [one, one], |cx, a| has_edge(
-        cx, a, false
-    )),
     on_node!("field", [one, one], field),
-    on_node!("child", [one, one], child),
-    on_node!("field_child", [one, one, one], field_child),
     on_node!("child_sym", [one, one], child_sym),
-    on_node!("parent_sym", [one, one], parent_sym),
     on_node!("ancestor_sym", [one, one], ancestor_sym),
     on_node!("ancestor_tag", [one, one], ancestor_tag),
     on_node!("tag", [one, one], tag),
@@ -153,7 +143,6 @@ static FUNCTIONS: &[Function<Text>] = &[
     on_node!("sibling_index", [one], sibling_index),
     on_node!("tree_node_id", [one], tree_node_id),
     on_node!("kind_name", [one], kind_name),
-    on_node!("const", [one, one], constant),
     on_node!("start_line", [one], |c, o| number(o, c.start_row() + 1)),
     on_node!("end_line", [one], |c, o| number(o, c.end_row() + 1)),
     on_node!("start_byte", [one], |c, o| number(o, c.start())),
@@ -258,16 +247,6 @@ fn file_dir<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals]) -> Vals {
     one(Val::Node(at.into()))
 }
 
-fn has_edge<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals], incoming: bool) -> Vals {
-    let (Some(loc), Ok(kind)) = (
-        a[0][0].loc(),
-        cx.lang().edge_kind(opts(cx, a).lit(1)).ok_or(()),
-    ) else {
-        return Vals::new();
-    };
-    yes(cx.has_edge(kind, incoming, loc.node))
-}
-
 fn sym(lang: &Lang, s: &str) -> Vals {
     match s.is_empty() {
         true => Vals::new(),
@@ -320,11 +299,6 @@ fn regex(src: &str) -> Option<Regex> {
 
 fn strip<'s>(s: &'s str, o: &Opts<'s>) -> Cow<'s, str> {
     s.strip_prefix(o.lit(1)).unwrap_or(s).into()
-}
-
-fn strip_leading<'s>(s: &'s str, o: &Opts<'s>) -> Cow<'s, str> {
-    let chars = o.lit(1);
-    s.trim_start_matches(|c| chars.contains(c)).into()
 }
 
 fn strip_suffix<'s>(s: &'s str, o: &Opts<'s>) -> Cow<'s, str> {
@@ -460,22 +434,8 @@ fn field<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
     Some(Val::Sym(if found != 0 { found } else { sym(c) }))
 }
 
-fn child<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
-    child_of(c, o.kind(1)).map(|k| Val::Node(k.into()))
-}
-
-fn field_child<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
-    let (field, kind) = (o.field(1), o.kind(2));
-    let holder = c.children().find(|k| k.node().field == field)?;
-    text_sym(child_of(holder, kind)?, o.lang)
-}
-
 fn child_sym<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
     text_sym(child_of(c, o.kind(1))?, o.lang)
-}
-
-fn parent_sym<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
-    text_sym(child_of(c.parent()?, o.kind(1))?, o.lang)
 }
 
 fn ancestor_sym<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
@@ -533,10 +493,6 @@ fn text_val(o: &Opts, s: &str) -> Option<Val> {
     Some(Val::Sym(o.lang.syms.intern(s)))
 }
 
-fn constant<S: Storage<Node = Node>>(_: Cursor<'_, S>, o: &Opts) -> Option<Val> {
-    Some(Val::Sym(o.lang.syms.intern(o.lit(1))))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -565,7 +521,6 @@ mod tests {
     fn affixes_and_splits() {
         assert_eq!(run(strip, "::A::B", &["::"]), "A::B");
         assert_eq!(run(strip, "A", &["::"]), "A");
-        assert_eq!(run(strip_leading, "@@:a", &["@:"]), "a");
         assert_eq!(run(strip_suffix, "List<T>", &[">"]), "List<T");
         assert_eq!(run(split_last, "a.b.c", &["."]), "c");
         assert_eq!(run(split_first, "a.b.c", &["."]), "a");
@@ -701,10 +656,8 @@ mod tests {
         };
         assert_eq!(call(field, &["path"]), "p");
         assert_eq!(call(field, &["other"]), "m");
-        assert_eq!(call(field_child, &["path", "leaf"]), "L");
         assert_eq!(call(child_sym, &["path"]), "p");
         assert_eq!(call(child_sym, &["leaf"]), "None");
-        assert_eq!(call(parent_sym, &["punct"]), "None");
         assert_eq!(call(ancestor_sym, &["name"]), "Klass");
         assert_eq!(call(ancestor_tag, &["fqn"]), "pkg.C");
         assert_eq!(call(tag, &["fqn"]), "pkg.C.m");
@@ -712,18 +665,5 @@ mod tests {
         assert_eq!(call(sibling_index, &[]), "1");
         assert_eq!(call(tree_node_id, &[]), Tree::to_raw(target).to_string());
         assert_eq!(call(kind_name, &[]), "method");
-        assert_eq!(call(constant, &["x"]), "x");
-        let a = args(&lang, &["path"]);
-        let found = child(
-            c,
-            &Opts {
-                lang: &lang,
-                args: &a,
-            },
-        );
-        assert_eq!(
-            found,
-            Some(Val::Node(tree.cursor(Tree::to_raw(path)).into()))
-        );
     }
 }

@@ -13,7 +13,7 @@ define:
       or file(select_project('(__source_file (__def $ROOT:__defname))' by package_path($ROOT), path))
   package_path(ROOT): '$ROOT | regex_replace("[.]|::|[\\\\]", "/")'
   roots(at): >-
-    select_all(project(), '(__dir $D:__source_root)') | tree_path("/")
+    select(project(), under, '(__dir $D:__source_root)') | tree_path("/")
   files(path): 'first(%search, place => locate(place, path))'
   locate(place, path):
     '_ when in(place, "external")': 'outside(path, %external)'
@@ -23,19 +23,19 @@ define:
     '_ when in(path | split_first("/"), names)': 'opaque'
   modules(ROOT): 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
   aliased(ROOT): >-
-    first(select_all(project(), '(__alias)') | longest_first, a => alias_files(a, $ROOT))
+    first(select(project(), under, '(__alias)') | longest_first, a => alias_files(a, $ROOT))
   alias_files(ROOT, imp):
     '(__alias $S:__scope) when eq($S, $imp | tag("alias_scope"))': 'files($imp | child_sym("__source_path") | map_prefix($ROOT, $ROOT | child_sym("__str")))'
     '(__alias !(__scope))': 'files($imp | child_sym("__source_path") | map_prefix($ROOT, $ROOT | child_sym("__str")))'
   submodule(ROOT, N): 'files($ROOT | tag("resolved_source") | concat("/", @$N))'
   exported(module, name): >-
-    select(module, '(__def $N:__defname)', name)
-    or select_all(module, '(__def $N:__defname)', name)
-    or select(module, '(__def $N:__default_export)', name)
-    or select(module, '(__module_export (__default_export))' by $ROOT | child_sym("__default_export"), name) | target_of
-    or select_all(module, '(__def #exports)' by $ROOT | tag("exports"), name)
-    or select(module, '(%import_kinds $ROOT:__name)' by local_name($ROOT), name) | reexported(name) | is_def
-    or select(module, '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def
+    select(module, owned, '(__def $N:__defname)', name)
+    or select(module, under, '(__def $N:__defname)', name)
+    or select(module, owned, '(__def $N:__default_export)', name)
+    or select(module, owned, '(__module_export (__default_export))' by $ROOT | child_sym("__default_export"), name) | target_of
+    or select(module, under, '(__def #exports)' by $ROOT | tag("exports"), name)
+    or select(module, owned, '(%import_kinds $ROOT:__name)' by local_name($ROOT), name) | reexported(name) | is_def
+    or select(module, owned, '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def
   offered(module, name): 'exported(module, name) or module'
   written(ROOT):
     '(_ (__ssa_hint "*"))': '"*"'
@@ -44,11 +44,11 @@ define:
     '$I:(%import_kinds $ROOT:(__name "*"))': '$I | modules | offered($N) or $I | modules | offered($ROOT)'
     '$I:(%import_kinds $ROOT:__name)': '$I | modules | offered($ROOT)'
   producing(ROOT):
-    '(__call)': '$ROOT | follow_at(calls, site) | returned or $ROOT | type'
+    '(__call)': '$ROOT | follow(calls, site) | returned or $ROOT | type'
     '(__binding $R:__rhs)': '$R | tail | producing or $ROOT | type'
     '_': '$ROOT | type'
   linked_file(ROOT): "select_project('(__source_file)' by $ROOT, @ROOT)"
-  linked_section(ROOT, anchor): "select_all(linked_file($ROOT), '(__def $N:__anchor)', @anchor)"
+  linked_section(ROOT, anchor): "select(linked_file($ROOT), under, '(__def $N:__anchor)', @anchor)"
   returned(ROOT):
     '_ when $ROOT | returns | is_class': '$ROOT | returns'
     '_': 'visible($ROOT | returns, $ROOT)'
@@ -72,7 +72,7 @@ resolve:
     - '(__call (__callee $M:(__member $O:__object)))':
         calls:
           - { to: '$O | type | member($M) | foreign', site: $ROOT }
-          - { to: '$ROOT | follow_at(type_flow, site) | producing | member($M)', site: $ROOT }
+          - { to: '$ROOT | follow(type_flow, site) | producing | member($M)', site: $ROOT }
     - '(__call (__callee $I:__ivar))':
         calls: { to: 'lookup(@$I, $ROOT, scope($ROOT) | class) | foreign', site: $ROOT }
     - '(__call (__callee "/./"))':

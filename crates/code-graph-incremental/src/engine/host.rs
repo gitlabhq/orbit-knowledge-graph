@@ -24,7 +24,11 @@ pub enum Arg {
     Set,
     /// An edge kind's name, a number once the rules load.
     Edge,
-    NodeAttribute,
+    /// `from`, or a node edge attribute's name: 0, or the attribute's slot
+    /// plus one, once the rules load.
+    EdgeKey,
+    /// `owned` or `under`: 0 or 1 once the rules load.
+    Region,
     /// `'pattern' [by key]`: a declared index, its id once the rules load.
     Pattern,
     /// A row shape's name, a number once the rules load; the call's named
@@ -482,22 +486,6 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
     /// A value's text: a symbol as is, or a node's own text.
     pub fn text(&self, val: Val) -> Option<u32> {
         self.run.text_of(val)
-    }
-
-    /// Whether `node` of this tree has an edge of `kind` in the phase's graph.
-    pub fn has_edge(&self, kind: EdgeKind, incoming: bool, node: u32) -> bool {
-        let at = Loc {
-            fi: self.run.input.graph_fi,
-            node,
-        };
-        self.run
-            .graph_reads
-            .borrow_mut()
-            .push((kind, at.fi, at.node));
-        self.run
-            .input
-            .graph
-            .is_some_and(|g| g.has(kind, incoming, at))
     }
 
     /// The targets of `from`'s edges of `kind` in the graph so far.

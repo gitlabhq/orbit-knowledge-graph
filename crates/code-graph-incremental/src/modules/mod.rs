@@ -62,7 +62,8 @@ macro_rules! function {
     (@arg one) => { $crate::engine::Arg::One };
     (@arg set) => { $crate::engine::Arg::Set };
     (@arg edge) => { $crate::engine::Arg::Edge };
-    (@arg node_attribute) => { $crate::engine::Arg::NodeAttribute };
+    (@arg edge_key) => { $crate::engine::Arg::EdgeKey };
+    (@arg region) => { $crate::engine::Arg::Region };
     (@arg pattern) => { $crate::engine::Arg::Pattern };
     (@arg rest) => { $crate::engine::Arg::Rest };
     (@arg shape) => { $crate::engine::Arg::Shape };

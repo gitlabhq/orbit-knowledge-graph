@@ -3,7 +3,7 @@
 
 use std::sync::OnceLock;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use super::Loc;
@@ -17,7 +17,6 @@ pub type End = (EdgeKind, u32, u32);
 pub struct Graph {
     edges: Vec<Edge>,
     attributes: Vec<EdgeAttribute>,
-    incoming: OnceLock<FxHashSet<End>>,
     outgoing: OnceLock<FxHashMap<End, SmallVec<[Loc; 2]>>>,
     by_attribute: Vec<OnceLock<FxHashMap<End, SmallVec<[(Loc, Loc); 1]>>>>,
 }
@@ -89,22 +88,5 @@ impl Graph {
         index
             .get(&(kind, at.fi, at.node))
             .map_or(&[], |t| t.as_slice())
-    }
-
-    /// Whether `at` has an edge of `kind` into it, or out of it.
-    pub fn has(&self, kind: EdgeKind, incoming: bool, at: Loc) -> bool {
-        let key = (kind, at.fi, at.node);
-        match incoming {
-            true => self
-                .incoming
-                .get_or_init(|| {
-                    self.edges
-                        .iter()
-                        .map(|e| (e.kind, e.to_tree, e.to_node))
-                        .collect()
-                })
-                .contains(&key),
-            false => !self.targets(kind, at).is_empty(),
-        }
     }
 }
