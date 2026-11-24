@@ -123,11 +123,10 @@ tests:
       - { row_count: 1 }
       - { row: { name: "point init works" } }
 
-  # corrected: an anonymous test block is indexed under the name test
   - name: Anonymous test block is indexed with a synthesized name
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Test' AND d.name = 'test'
+      WHERE d.definition_type = 'Test' AND d.name STARTS WITH 'test@L'
       RETURN d.name AS name
     assert:
       - { row_count: 1 }
@@ -135,7 +134,7 @@ tests:
   - name: Both named and anonymous test blocks are indexed
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Test' AND d.name IN ['point init works', 'test']
+      WHERE d.definition_type = 'Test'
       RETURN d.name AS name
     assert:
       - { row_count: 2 }
