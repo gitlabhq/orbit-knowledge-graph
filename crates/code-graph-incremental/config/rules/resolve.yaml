@@ -12,6 +12,12 @@ define:
       or select(files, '(__source_file)' by $ROOT | collapse_index(%index_files), path)
       or file(select(files, '(__source_file $P:__package (__def $ROOT:__defname))' by package_path($P) | concat("/", $ROOT), path))
       or file(select(files, '(__source_file (__def $ROOT:__defname))' by package_path($ROOT), path))
+  called(ROOT):
+    '(__def $K:__callable)': 'members(nodes($ROOT), $K, "callable")'
+    '(__def (__class))': none
+    '(__def)': '$ROOT | callable'
+  receiver_imports(ROOT):
+    '_': none
   package_path(ROOT): '$ROOT | regex_replace("[.]|::|[\\\\]", "/")'
   roots(at): >-
     select(project, '(__dir $D:__source_root)') | tree_path
@@ -22,7 +28,9 @@ define:
     '_ when in(place, "roots")': 'file_at(path) or first(roots(path), r => file_at(r | concat("/", path)))'
   outside(path, names):
     '_ when in(path | split_first("/"), names)': 'opaque'
-  modules(ROOT): 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
+  modules(ROOT):
+    '(__import (__source_path "/^[.]/"))': 'aliased($ROOT) or locate("roots", $ROOT | tag("resolved_source"))'
+    '_': 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
   aliased(ROOT): >-
     first(union(governing($ROOT) | config_aliases, select(project, '(__alias)')) | longest_first,
       a => alias_files(a, $ROOT))
@@ -44,7 +52,14 @@ define:
     or select(under(module), '(__def #exports)' by $ROOT | tag("exports"), name)
     or select(owned(module), '(%import_kinds $ROOT:(__name "*" $A:__alias))' by $A, name) | namespace_module
     or select(owned(module), '(%import_kinds $ROOT:__name)' by local_name($ROOT), name) | reexported(name) | is_def
-    or select(owned(module), '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def
+    or unique(select(owned(module), '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | star_defined(name))
+    or unique(select(owned(module), '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def)
+  star_defined(ROOT, N):
+    '$I:(%import_kinds $ROOT:(__name "*"))': 'defined($I | modules, $N)'
+    '$I:(%import_kinds $ROOT:__name)': 'defined($I | modules, $N)'
+  defined(module, name): >-
+    select(owned(module), '(__def $N:__defname)', name) | is_def
+    or select(under(module), '(__def $N:__defname)', name) | is_def
   namespace_module(ROOT):
     '$I:(%import_kinds $ROOT)': '$I | modules'
   offered(module, name): 'exported(module, name) or module'
@@ -73,7 +88,7 @@ define:
     '(__def (__ssa_return_type $A:__type_arg))': '$A | type'
   returned(ROOT):
     '_ when $ROOT | returns | is_class': '$ROOT | returns'
-    '_': 'visible($ROOT | returns, $ROOT)'
+    '_': 'visible($ROOT | returns, $ROOT | returns)'
 
 resolve:
   destructure:
@@ -112,10 +127,20 @@ resolve:
         calls: { to: '$I | ivar | type_node | type | callable | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee $I:__ivar))':
         calls: { to: 'lookup(@$I, $ROOT, scope($ROOT) | class) | elsewhere(file($ROOT))', site: $ROOT }
+    - '(__call #implicit_self (__callee "/./"))':
+        calls: { to: 'targets($ROOT, true) | callable | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee "/./"))':
         calls:
           - { to: 'targets($ROOT, false) | callable | elsewhere(file($ROOT))', site: $ROOT }
           - { to: '$ROOT | impl_targets | callable', site: $ROOT }
+
+  imported_receiver:
+    - '(__call (__callee (__member $O:__object))) when receiver_imports($ROOT)':
+        calls: { to: 'receiver_imports($ROOT) | follow(imports, from) | callable | elsewhere(file($ROOT))', site: $ROOT }
+
+  produced_call:
+    - '(__call (__callee "/./")) when $ROOT | follow(type_flow, site) | producing':
+        calls: { to: '$ROOT | follow(type_flow, site) | producing | called', site: $ROOT }
 
   bound_import_call:
     - '(__call (__callee "/./")) when $ROOT | follow(type_flow, site) | follow(imports, site)':
