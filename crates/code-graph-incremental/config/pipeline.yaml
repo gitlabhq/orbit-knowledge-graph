@@ -48,7 +48,7 @@ modules:
       config_field: __field
       class: __class
       arr: __arr
-    tags: { scoped: scoped, hoisted: hoisted, lifted: lifted, implicit_self: implicit_self, type_only: type_only, weak: weak }
+    tags: { scoped: scoped, hoisted: hoisted, lifted: lifted, implicit_self: implicit_self, type_only: type_only, weak: weak, outer: outer }
 
 phases:
   - { name: canonicalize, walks: [files], order: children_first, budget: { label: rewrite, tree: file_rewrite_ms, skip: skip_timeout_walk } }

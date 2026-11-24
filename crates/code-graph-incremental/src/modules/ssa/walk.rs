@@ -104,11 +104,11 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
 
     fn record(&mut self, c: Cursor<'t, S>) {
         let k = self.state().k;
-        if c.sym_opt().is_some() {
+        if c.sym_opt().is_some() && !self.state().read_outside.contains(&c.index()) {
             let found = self.read(c);
             self.write().seen.insert(c.index(), found);
         }
-        if c.is(k.call) {
+        if c.is(k.call) || c.is(k.decorator) {
             let wildcards = std::rc::Rc::clone(&self.state().wildcards);
             self.write().wild_at.insert(c.index(), wildcards);
         }
@@ -147,6 +147,15 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
             }
         }
         if named {
+            for outer in c
+                .children()
+                .filter(|o| o.is(k.supertype) || o.has_tag(t.outer))
+            {
+                for n in std::iter::once(outer).chain(outer.descendants()) {
+                    self.record(n);
+                    self.write().read_outside.insert(n.index());
+                }
+            }
             let scoped = c.has_tag(t.scoped);
             self.enter_def(c, scoped.then(|| c.tag(t.scoped)));
             if scoped {
