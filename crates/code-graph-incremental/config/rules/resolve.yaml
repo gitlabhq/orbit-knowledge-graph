@@ -42,6 +42,7 @@ define:
     or select(owned(module), '(__def $N:__default_export)', name)
     or select(owned(module), '(__module_export (__default_export))' by $ROOT | child("__default_export"), name) | target_of
     or select(under(module), '(__def #exports)' by $ROOT | tag("exports"), name)
+    or select(owned(module), '(__module_export $ROOT:__name)' by local_name($ROOT), name) | target_of
     or select(owned(module), '(%import_kinds $ROOT:(__name "*" $A:__alias))' by $A, name) | namespace_module
     or select(owned(module), '(%import_kinds $ROOT:__name)' by local_name($ROOT), name) | reexported(name) | is_def
     or select(owned(module), '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def
@@ -49,6 +50,9 @@ define:
     '$I:(%import_kinds $ROOT)': '$I | modules'
   namespace_name(ROOT): >-
     select(under(file($ROOT)), '(%import_kinds $ROOT:(__name "*" (__alias)))' by local_name($ROOT), @$ROOT)
+  namespace_miss(ROOT, M):
+    '_ when $ROOT | read | is_file | offered(M) | callable': none
+    '_': '$ROOT | namespace_name'
   offered(module, name): 'exported(module, name) or module'
   written(ROOT):
     '(_ (__ssa_hint "*"))': '"*"'
@@ -92,6 +96,7 @@ resolve:
     - '(__call (__callee $M:(__member $O:__object))) when $O | read | is_file':
         calls: { to: '$O | read | is_file | offered($M) | callable | elsewhere(file($ROOT))', site: $ROOT }
         imports: { from: '$O | namespace_name', to: '$O | read | is_file | offered($M) | callable | elsewhere(file($ROOT))' }
+        fallbacks: { to: '$O | namespace_miss($M)', site: $ROOT }
     - '(__call (__callee $M:(__member $O:__object $D:(__dispatch !(__object)))))':
         calls: { to: '$O | type | dispatched($D | type, $M)', site: $ROOT }
     - '(__call (__callee $M:(__member $O:__object (__dispatch (__object))))) when $O | type | is_contract':

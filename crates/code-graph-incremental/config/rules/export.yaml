@@ -205,6 +205,10 @@ export:
     - '(__def) --imports !resolution--> $T': >-
           row(to_imported_symbol, $ROOT, source_id: $ROOT, source_kind: "Definition", relationship_kind: "CALLS",
             target_id: $T | dangling, target_kind: "ImportedSymbol", traversal_path: "")
+  fallbacks:
+    - '(__def) --fallbacks--> $T': >-
+          row(to_imported_symbol, $ROOT, source_id: $ROOT, source_kind: "Definition", relationship_kind: "CALLS",
+            target_id: $T, target_kind: "ImportedSymbol", traversal_path: "")
   links:
     - '(__source_file) --links--> $T':
         - >-
