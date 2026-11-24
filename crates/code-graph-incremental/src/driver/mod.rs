@@ -132,21 +132,19 @@ fn one_file(
     phases: &[Phase],
     run: &Sentinel,
 ) -> Result<(Tree<Compact>, Vec<Edge>, Option<Killed>), Killed> {
-    let started = Instant::now();
+    let started = engine::profile::start();
     let (tree, cut) = crate::frontend::parse(engine, &file.path, &file.content, run)?;
-    if *engine::profile::ON {
-        engine::profile::phase("parse", started);
-    }
+    engine::profile::phase("parse", started);
+    engine::profile::file("parse", &tree, started);
     let mut edges = Vec::new();
     let mut at = Stage::new(tree, canonical);
     for phase in phases {
-        let started = Instant::now();
+        let started = engine::profile::start();
         let around = Around::alone(engine.lang.input_set());
         let (found, _) = at.run(phase, around, None, engine, run)?;
         edges.extend(found);
-        if *engine::profile::ON {
-            engine::profile::phase(&phase.name, started);
-        }
+        engine::profile::phase(&phase.name, started);
+        at.profile(&phase.name, started);
     }
     Ok((at.into_compact(engine), edges, cut))
 }
@@ -190,6 +188,14 @@ impl Stage {
                 engine::run_tree(phase, tree, around, rules, engine, budget)
             }
             _ => unreachable!("the pipeline builds a tree only before it turns Compact"),
+        }
+    }
+
+    fn profile(&self, phase: &str, started: Option<Instant>) {
+        match &self.tree {
+            Storage::Mutable(tree) => engine::profile::file(phase, tree, started),
+            Storage::Compact(tree) => engine::profile::file(phase, tree, started),
+            Storage::Moving => {}
         }
     }
 
@@ -263,7 +269,7 @@ pub fn finish(
         .collect();
     for phase in rest {
         run.check()?;
-        let started = Instant::now();
+        let started = engine::profile::start();
         let seen = TreeSets(phase.walks.0 | phase.reads.0);
         let walked = phase.walks.iter().next().expect("a phase walks a tree set");
         let alone = (!phase.shared() && walked != input).then(|| whole[walked].take());
@@ -309,7 +315,12 @@ pub fn finish(
             let done = state
                 .trees
                 .par_iter_mut()
-                .map(|tree| engine::run_tree(phase, tree, around, None, engine, run))
+                .map(|tree| {
+                    let started = engine::profile::start();
+                    let done = engine::run_tree(phase, tree, around, None, engine, run);
+                    engine::profile::file(&phase.name, tree, started);
+                    done
+                })
                 .collect::<Result<Vec<_>, Killed>>()?;
             for (fi, (edges, outputs)) in done.into_iter().enumerate() {
                 report.outputs.merge(outputs);
@@ -318,9 +329,7 @@ pub fn finish(
                     .extend(edges.into_iter().map(|e| e.in_file(fi as u32)));
             }
         }
-        if *engine::profile::ON {
-            engine::profile::phase(&phase.name, started);
-        }
+        engine::profile::phase(&phase.name, started);
     }
     state.sets = whole
         .into_iter()

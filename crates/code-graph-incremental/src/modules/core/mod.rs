@@ -176,13 +176,11 @@ fn select<S: Store>(cx: &mut Cx<'_, '_, Core, S>, a: &[Vals]) -> Vals {
     let (region, id) = (number(&a[1]), number(&a[2]));
     let mut out = Distinct::default();
     if let Some(set) = region.checked_sub(SETS) {
-        for key in a[3].iter().filter_map(|&k| cx.text(k)) {
-            for &found in cx
-                .family(set as usize, id)
-                .and_then(|f| f.get(&key))
-                .into_iter()
-                .flatten()
-            {
+        for &k in &a[3] {
+            let Some(key) = cx.text(k) else { continue };
+            let found = cx.family(set as usize, id).and_then(|f| f.get(&key));
+            cx.profile_lookup(id, key, found.is_some_and(|f| !f.is_empty()));
+            for &found in found.into_iter().flatten() {
                 out.push(Val::Node(found));
             }
         }
@@ -193,8 +191,11 @@ fn select<S: Store>(cx: &mut Cx<'_, '_, Core, S>, a: &[Vals]) -> Vals {
         let Some(piece) = cx.piece(at.fi, id) else {
             return out.into_vals();
         };
-        for key in a[3].iter().filter_map(|&k| cx.text(k)) {
-            for &node in piece.get(&(anchor, key)).into_iter().flatten() {
+        for &k in &a[3] {
+            let Some(key) = cx.text(k) else { continue };
+            let found = piece.get(&(anchor, key));
+            cx.profile_lookup(id, key, found.is_some_and(|f| !f.is_empty()));
+            for &node in found.into_iter().flatten() {
                 let inside = anchor != WHOLE
                     || at.node == 0
                     || cx

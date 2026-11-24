@@ -191,6 +191,8 @@ pub(super) struct Indexer {
     pub(super) at: Match,
     pub(super) id: u32,
     pub(super) key: Expr,
+    /// The declared pattern and key, as written.
+    pub(super) label: Box<str>,
 }
 
 /// A row shape: its table, its column names, and how its id is made. Values
@@ -269,6 +271,13 @@ impl TreeSets {
 }
 
 impl Phase {
+    pub(super) fn index_label(&self, id: u32) -> &str {
+        self.indexers
+            .iter()
+            .find(|i| i.id == id)
+            .map_or("", |i| &i.label)
+    }
+
     pub fn shared(&self) -> bool {
         self.walks.meets(self.reads)
     }

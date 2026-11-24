@@ -529,6 +529,12 @@ fn indexers(loader: &Loader, files: &RuleFiles) -> Result<Vec<Indexer>, LoadErro
                 at,
                 id: id as u32,
                 key,
+                label: format!(
+                    "{} by {}",
+                    index.pattern,
+                    index.key.as_deref().unwrap_or("$1")
+                )
+                .into(),
             });
         }
     }

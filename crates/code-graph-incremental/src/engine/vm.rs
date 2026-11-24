@@ -424,7 +424,7 @@ impl<'e, S: Store> Vm<'e, S> {
             Some(Memo::Busy(partial)) => {
                 let partial = partial.clone();
                 if let Some(p) = &mut run.profile {
-                    p.hit(key.0, true);
+                    p.hit(&key, true);
                 }
                 run.cycle_reads.insert(key);
                 run.used |= deps;
@@ -441,7 +441,7 @@ impl<'e, S: Store> Vm<'e, S> {
             {
                 let vals = vals.clone();
                 if let Some(p) = &mut run.profile {
-                    p.hit(key.0, false);
+                    p.hit(&key, false);
                 }
                 run.used |= *deps;
                 if let Some((_, read)) = within {
@@ -451,7 +451,12 @@ impl<'e, S: Store> Vm<'e, S> {
                 self.values.push(vals);
                 return;
             }
-            _ => {}
+            Some(Memo::Done { .. }) => {
+                if let Some(p) = &mut run.profile {
+                    p.stale(key.0);
+                }
+            }
+            None => {}
         }
         run.sweep();
         run.memo
@@ -574,18 +579,22 @@ impl<'e, S: Store> Vm<'e, S> {
         run.cycle_reads.extend(p.outer);
         if p.written != run.written {
             run.memo.entries.remove(&p.key);
+            if let Some(prof) = &mut run.profile {
+                prof.done(&p.key, None);
+            }
         } else {
             let stamp = run.stamp(run.used);
             let within = (!read.is_empty()).then(|| (run.round, read));
-            run.memo.entries.insert(
-                p.key,
-                Memo::Done {
-                    vals: found.clone(),
-                    deps: run.used,
-                    stamp,
-                    within,
-                },
-            );
+            let memo = Memo::Done {
+                vals: found.clone(),
+                deps: run.used,
+                stamp,
+                within,
+            };
+            if let Some(prof) = &mut run.profile {
+                prof.done(&p.key, Some(&memo));
+            }
+            run.memo.entries.insert(p.key, memo);
         }
         run.reading = p.reading;
         run.used |= p.used;

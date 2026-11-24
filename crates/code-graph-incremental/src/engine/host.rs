@@ -587,6 +587,13 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
         Some(self.run.input.indexed?.piece(fi, id))
     }
 
+    /// Counts a lookup of `key` in index `index` when profiling.
+    pub fn profile_lookup(&mut self, index: u32, key: u32, found: bool) {
+        if let Some(p) = &mut self.run.profile {
+            p.lookup(index, key, found);
+        }
+    }
+
     /// A declared rule index's whole-tree matches across the family, by key.
     pub fn family(&self, set: usize, id: u32) -> Option<&'t FxHashMap<u32, Vec<Loc>>> {
         Some(self.run.input.indexed?.family(set, id))

@@ -190,7 +190,9 @@ pub fn run_shared(
             .filter(|e| !known.contains(e) && seen.insert(*e))
             .collect::<Vec<Edge>>()
     };
+    let mut round = 0;
     settle(|| {
+        let started = super::profile::start();
         let graph = Graph::new(&engine.lang, base.iter().chain(&last));
         let at: Vec<u32> = pending.iter().map(|&i| walk[i]).collect();
         let done = match run_files(phase, trees, &at, &graph, engine, budget) {
@@ -213,6 +215,8 @@ pub fn run_shared(
             .symmetric_difference(&before)
             .flat_map(|e| super::graph::ends(engine.lang.edge_attributes(), e))
             .collect();
+        super::profile::round(&phase.name, round, at.len(), &now, &before, started);
+        round += 1;
         last = found;
         pending = (0..walk.len())
             .filter(|&i| {
@@ -264,6 +268,7 @@ fn run_files(
     let indexed = Indexed::new(phase, trees, engine, &scope);
     walk.par_iter()
         .map(|&fi| {
+            let started = super::profile::start();
             let tree = trees.get(fi);
             let file = tree_budget(phase, engine, &tree.label);
             let own = engine.rules_of(trees, fi);
@@ -303,6 +308,7 @@ fn run_files(
                     done.reads.extend(run.graph_reads.take());
                 }
             }
+            super::profile::file(&phase.name, tree, started);
             Ok(done)
         })
         .collect()

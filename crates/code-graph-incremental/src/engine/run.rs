@@ -46,6 +46,7 @@ impl<'t, S: Store> Indexed<'t, S> {
             .get(fi)
             .indexes
             .piece(phase.index_count, id as usize, || {
+                let started = profile::start();
                 let input = Input {
                     trees,
                     fi,
@@ -56,12 +57,15 @@ impl<'t, S: Store> Indexed<'t, S> {
                     file: budget,
                 };
                 let mut run = Run::new(input, phase, engine);
-                walk::piece(phase, &mut run, Cursor::new(trees, fi, 0), id)
+                let piece = walk::piece(phase, &mut run, Cursor::new(trees, fi, 0), id);
+                profile::piece(phase.index_label(id), started, &piece);
+                piece
             })
     }
 
     pub(super) fn family(&self, set: usize, id: u32) -> &FxHashMap<u32, Vec<Loc>> {
         self.family[set * self.phase.index_count + id as usize].get_or_init(|| {
+            let started = profile::start();
             let mut map: FxHashMap<u32, Vec<Loc>> = FxHashMap::default();
             for fi in self.trees.range(set) {
                 for (&(anchor, key), nodes) in self.piece(fi, id) {
@@ -72,6 +76,7 @@ impl<'t, S: Store> Indexed<'t, S> {
                     }
                 }
             }
+            profile::family(self.phase.index_label(id), started, map.len());
             map
         })
     }
@@ -259,15 +264,21 @@ impl<'t, S: Store> Run<'t, S> {
         if table.entries.len() < 1024 || table.entries.len() < 2 * table.swept {
             return;
         }
-        let epochs = &self.epochs;
-        table.entries.retain(|_, memo| match memo {
-            Memo::Busy(_) => true,
-            Memo::Done {
-                deps,
-                stamp: at,
-                within,
-                ..
-            } => within.is_none() && stamp(epochs, *deps) == *at,
+        let (epochs, profile) = (&self.epochs, &mut self.profile);
+        table.entries.retain(|key, memo| {
+            let keep = match memo {
+                Memo::Busy(_) => true,
+                Memo::Done {
+                    deps,
+                    stamp: at,
+                    within,
+                    ..
+                } => within.is_none() && stamp(epochs, *deps) == *at,
+            };
+            if let (false, Some(p)) = (keep, profile.as_mut()) {
+                p.swept(key.0);
+            }
+            keep
         });
         table.swept = table.entries.len();
     }
@@ -399,16 +410,8 @@ pub enum Write {
 
 impl<S: Store> Drop for Run<'_, S> {
     fn drop(&mut self) {
-        let Some(mut p) = self.profile.take() else {
-            return;
-        };
-        for ((id, _), memo) in &self.memo.entries {
-            let s = p.stats.entry(*id).or_default();
-            s.entries += 1;
-            if let Memo::Done { vals, .. } = memo {
-                s.values += vals.len() as u64;
-            }
+        if let Some(p) = self.profile.take() {
+            p.merge(self);
         }
-        p.merge(|id| self.fn_name(id));
     }
 }
