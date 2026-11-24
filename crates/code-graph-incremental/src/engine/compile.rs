@@ -17,13 +17,17 @@ use super::program::{
 use super::{FnId, Kind, Registration, Registry, Val, Vals};
 use crate::error::LoadError;
 use crate::intern::Lang;
-use crate::tree::EdgeKind;
+use crate::tree::{EDGE_ATTRIBUTES, EdgeAttribute, EdgeKind};
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PipelineSpec {
     scopes: Vec<String>,
     edges: Vec<String>,
+    /// Each attribute edges can carry, and whether its values are a `node`
+    /// or a `symbol`.
+    #[serde(default)]
+    edge_attributes: BTreeMap<String, String>,
     kinds: Vec<String>,
     #[serde(default)]
     modules: BTreeMap<String, ModuleSpec>,
@@ -71,6 +75,7 @@ impl Pipeline {
         for edge in &spec.edges {
             lang.edges.intern(edge);
         }
+        let _ = lang.edge_attributes.set(edge_attributes(&spec)?);
         for kind in &spec.kinds {
             lang.vocabulary.intern(kind);
             lang.intern_kind(kind);
@@ -258,6 +263,41 @@ fn walk_of(spec: &PhaseSpec) -> Result<(bool, bool), LoadError> {
         Some(other) => return Err(err("until", other)),
     };
     Ok((post, stable))
+}
+
+/// An edge field's expression text.
+fn edge_text(v: &Value) -> Result<&str, LoadError> {
+    match v {
+        Value::String(s) => Ok(s.as_str()),
+        _ => Err(LoadError("an edge field is an expression".into())),
+    }
+}
+
+/// The edge attributes pipeline.yaml declares, by slot.
+fn edge_attributes(spec: &PipelineSpec) -> Result<Vec<EdgeAttribute>, LoadError> {
+    if spec.edge_attributes.len() > EDGE_ATTRIBUTES {
+        return Err(LoadError(format!(
+            "pipeline.yaml declares more than {EDGE_ATTRIBUTES} edge attributes"
+        )));
+    }
+    spec.edge_attributes
+        .iter()
+        .map(|(name, kind)| {
+            let node = match kind.as_str() {
+                "node" => true,
+                "symbol" => false,
+                other => {
+                    return Err(LoadError(format!(
+                        "edge attribute {name}: unknown type {other}"
+                    )));
+                }
+            };
+            Ok(EdgeAttribute {
+                name: name.clone(),
+                node,
+            })
+        })
+        .collect()
 }
 
 /// The tree sets a phase's `walks:` or `reads:` names.
@@ -990,8 +1030,8 @@ impl<'a> Loader<'a> {
         })
     }
 
-    /// `{ kind: targets, ... }`; targets are an expression, a map with
-    /// `to`/`from`/`site`/`resolution`, or a list of those. `none` writes
+    /// `{ kind: targets, ... }`; targets are an expression, a map with `to`,
+    /// `from` and declared edge attributes, or a list of those. `none` writes
     /// nothing and stops the group.
     fn edges(&self, value: &Value, slots: &RefCell<Slots>) -> Result<Expr, LoadError> {
         let map = match value {
@@ -1017,39 +1057,39 @@ impl<'a> Loader<'a> {
     }
 
     /// An edge's write: from the innermost scope above the node unless it
-    /// says otherwise, at the site it names, if any. A resolution that is not
-    /// a fixed name is an expression over each target, read as `TARGET`.
+    /// says otherwise, with the attributes it names. A symbol attribute is a
+    /// fixed name, or an expression over each target, read as `TARGET`.
     fn edge(
         &self,
         kind: EdgeKind,
         value: &Value,
         slots: &RefCell<Slots>,
     ) -> Result<Expr, LoadError> {
-        fn text(v: Option<&Value>) -> Option<&str> {
-            match v {
-                Some(Value::String(s)) => Some(s.as_str()),
-                _ => None,
-            }
-        }
-        let (to, from, site, res) = match value {
-            Value::String(to) => (to.as_str(), None, None, None),
+        let declared = self.lang.edge_attributes();
+        let mut attrs: Vec<Option<&str>> = vec![None; declared.len()];
+        let (to, from) = match value {
+            Value::String(to) => (to.as_str(), None),
             Value::Object(map) => {
-                if let Some(key) = map
-                    .keys()
-                    .find(|k| !matches!(k.as_str(), "to" | "from" | "site" | "resolution"))
-                {
-                    return Err(LoadError(format!("unknown edge field {key}")));
+                let mut to = None;
+                let mut from = None;
+                for (key, v) in map {
+                    match (key.as_str(), self.lang.edge_attribute(key)) {
+                        ("to", _) => to = Some(edge_text(v)?),
+                        ("from", _) => from = Some(edge_text(v)?),
+                        (_, Some(slot)) => attrs[slot] = Some(edge_text(v)?),
+                        (other, None) => {
+                            return Err(LoadError(format!("unknown edge field {other}")));
+                        }
+                    }
                 }
                 (
-                    text(map.get("to")).ok_or_else(|| LoadError("an edge needs to:".into()))?,
-                    text(map.get("from")),
-                    text(map.get("site")),
-                    text(map.get("resolution")),
+                    to.ok_or_else(|| LoadError("an edge needs to:".into()))?,
+                    from,
                 )
             }
             _ => {
                 return Err(LoadError(
-                    "an edge is an expression or { to, from, site, resolution }".into(),
+                    "an edge is an expression or a map of to, from and attributes".into(),
                 ));
             }
         };
@@ -1058,25 +1098,36 @@ impl<'a> Loader<'a> {
             Some(f) => self.parse(f, slots, true)?,
             None => self.core("scope", vec![Expr::Var(0)]),
         };
-        let site = match site {
-            Some(s) => self.parse(s, slots, true)?,
-            None => Expr::Empty,
-        };
-        let kind = number(u32::from(kind.0));
         let literal = |name: &str| name.chars().all(|c| c.is_ascii_lowercase() || c == '_');
-        Ok(match res {
-            Some(name) if !literal(name) => {
-                let slot = slots.borrow_mut().slot("TARGET");
-                let of = self.parse(name, slots, true)?;
-                let edge = self.core("edge", vec![kind, from, Expr::Var(slot), site, of]);
-                Expr::Every(Box::new(to), slot, Box::new(edge))
-            }
-            Some(name) => {
-                let fixed = Expr::Lit(Val::Sym(self.lang.syms.intern(name)));
-                self.core("edge", vec![kind, from, to, site, fixed])
-            }
-            None => self.core("edge", vec![kind, from, to, site, Expr::Empty]),
-        })
+        let per_target = declared
+            .iter()
+            .zip(&attrs)
+            .any(|(attribute, src)| !attribute.node && src.is_some_and(|s| !literal(s)));
+        let target = per_target.then(|| slots.borrow_mut().slot("TARGET"));
+        let mut values = Vec::with_capacity(declared.len());
+        for (attribute, src) in declared.iter().zip(attrs) {
+            values.push(match src {
+                None => Expr::Empty,
+                Some(name) if !attribute.node && literal(name) => {
+                    Expr::Lit(Val::Sym(self.lang.syms.intern(name)))
+                }
+                Some(src) => self.parse(src, slots, true)?,
+            });
+        }
+        let kind = number(u32::from(kind.0));
+        let Some(slot) = target else {
+            let args = [kind, from, to].into_iter().chain(values).collect();
+            return Ok(self.core("edge", args));
+        };
+        let args = [kind, from, Expr::Var(slot)]
+            .into_iter()
+            .chain(values)
+            .collect();
+        Ok(Expr::Every(
+            Box::new(to),
+            slot,
+            Box::new(self.core("edge", args)),
+        ))
     }
 
     /// A group pair's value by its shape: a map from edge kinds to targets,

@@ -24,6 +24,10 @@ pub enum Arg {
     Set,
     /// An edge kind's name, a number once the rules load.
     Edge,
+    /// A declared edge attribute's name, its slot once the rules load: one
+    /// whose values are nodes, or one whose values are symbols.
+    NodeAttribute,
+    SymbolAttribute,
     /// `'pattern' [by key]`: a declared index, its id once the rules load.
     Pattern,
     /// A row shape's name, a number once the rules load; the call's named
@@ -509,25 +513,16 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
         self.run.input.graph.map_or(&[], |g| g.targets(kind, from))
     }
 
-    /// The targets of `from`'s edges of `kind` that carry no label.
-    pub fn unlabelled_targets(&self, kind: EdgeKind, from: Loc) -> &'t [Loc] {
+    /// The edges of `kind` the attribute in `slot` files at `at`, as (from, to).
+    pub fn by_attribute(&self, slot: usize, kind: EdgeKind, at: Loc) -> &'t [(Loc, Loc)] {
         self.run
             .graph_reads
             .borrow_mut()
-            .push((kind, from.fi, from.node));
+            .push((kind, at.fi, at.node));
         self.run
             .input
             .graph
-            .map_or(&[], |g| g.unlabelled(kind, from))
-    }
-
-    /// The edges of `kind` made at `site`, as (from, to).
-    pub fn at_site(&self, kind: EdgeKind, site: Loc) -> &'t [(Loc, Loc)] {
-        self.run
-            .graph_reads
-            .borrow_mut()
-            .push((kind, site.fi, site.node));
-        self.run.input.graph.map_or(&[], |g| g.at_site(kind, site))
+            .map_or(&[], |g| g.by_attribute(slot, kind, at))
     }
 
     /// How many files the run covers; file indexes are `0..files()`.

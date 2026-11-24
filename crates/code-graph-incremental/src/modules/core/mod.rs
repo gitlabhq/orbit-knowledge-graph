@@ -69,10 +69,21 @@ static FUNCTIONS: &[Function<Core>] = &[
         let kind = edge_kind(&a[1]);
         set(nodes(&a[0]).flat_map(|at| cx.targets(kind, at).iter().map(|&to| Val::Node(to))))
     }),
-    function!(Inline, "sited", [set, edge], |cx, a| {
+    function!(Inline, "follow_each", [set, edge], |cx, a| {
         let kind = edge_kind(&a[1]);
-        set(nodes(&a[0]).flat_map(|at| cx.at_site(kind, at).iter().map(|&(_, to)| Val::Node(to))))
+        nodes(&a[0])
+            .flat_map(|at| cx.targets(kind, at).iter().map(|&to| Val::Node(to)))
+            .collect()
     }),
+    function!(Inline, "follow_at", [set, edge, node_attribute], |cx, a| {
+        set(by_attribute(cx, a))
+    }),
+    function!(
+        Inline,
+        "follow_each_without",
+        [set, edge, symbol_attribute],
+        |cx, a| { by_attribute(cx, a).collect() }
+    ),
     function!(Inline, "select", [set, pattern, set], |cx, a| select(
         cx, a, false
     )),
@@ -94,20 +105,31 @@ static FUNCTIONS: &[Function<Core>] = &[
         }
         out
     }),
-    function!(Effect, "edge", [edge, set, set, set, set], |cx, a| {
+    function!(Effect, "edge", [edge, set, set, rest], |cx, a| {
         let kind = edge_kind(&a[0]);
-        let site = a[3].first().and_then(|v| v.loc()).map(|l| l.node);
-        let label = match a[4].first() {
-            Some(&Val::Sym(label)) => label,
-            _ => 0,
-        };
+        let attrs: Vec<(usize, u32)> = cx
+            .lang()
+            .edge_attributes()
+            .iter()
+            .zip(&a[3..])
+            .enumerate()
+            .filter_map(|(slot, (attribute, vals))| {
+                let value = match (attribute.node, vals.first()) {
+                    (true, Some(v)) => v.loc()?.node,
+                    (false, Some(&Val::Sym(sym))) => sym,
+                    _ => return None,
+                };
+                Some((slot, value))
+            })
+            .collect();
         for from in nodes(&a[1]) {
             for to in nodes(&a[2]) {
-                cx.emit(Edge {
-                    site,
-                    label,
-                    ..Edge::new(from.fi, from.node, to.fi, to.node, kind)
-                });
+                let edge = Edge::new(from.fi, from.node, to.fi, to.node, kind);
+                cx.emit(
+                    attrs
+                        .iter()
+                        .fold(edge, |edge, &(slot, value)| edge.with_attr(slot, value)),
+                );
             }
         }
         Vals::new()
@@ -199,6 +221,20 @@ fn number(vals: &Vals) -> u32 {
         Some(&Val::Kind(k)) => u32::from(k),
         _ => 0,
     }
+}
+
+/// The target of each edge that the attribute `a[2]` files at a node of
+/// `a[0]`, for the edge kind `a[1]`.
+fn by_attribute<'a, S: Store>(
+    cx: &'a Cx<'_, '_, Core, S>,
+    a: &'a [Vals],
+) -> impl Iterator<Item = Val> + 'a {
+    let (kind, slot) = (edge_kind(&a[1]), number(&a[2]) as usize);
+    nodes(&a[0]).flat_map(move |at| {
+        cx.by_attribute(slot, kind, at)
+            .iter()
+            .map(|&(_, to)| Val::Node(to))
+    })
 }
 
 fn edge_kind(vals: &Vals) -> EdgeKind {

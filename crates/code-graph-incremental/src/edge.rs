@@ -13,11 +13,20 @@ pub struct Edge {
     pub to_tree: u32,
     pub to_node: u32,
     pub kind: EdgeKind,
-    /// The node the edge was made at, if any.
-    pub site: Option<u32>,
-    /// A symbol that qualifies the edge, such as how a call resolved; 0 for
-    /// none.
-    pub label: u32,
+    /// Each declared attribute's value plus one, by slot; 0 when the edge
+    /// has none.
+    pub attrs: [u32; EDGE_ATTRIBUTES],
+}
+
+/// How many attributes pipeline.yaml can declare for edges.
+pub const EDGE_ATTRIBUTES: usize = 4;
+
+/// An attribute edges can carry: a node of the edge's source tree, or a
+/// symbol.
+#[derive(Clone, Debug)]
+pub struct EdgeAttribute {
+    pub name: String,
+    pub node: bool,
 }
 
 impl Edge {
@@ -37,9 +46,18 @@ impl Edge {
             to_tree,
             to_node,
             kind,
-            site: None,
-            label: 0,
+            attrs: [0; EDGE_ATTRIBUTES],
         }
+    }
+
+    /// The value of the attribute in `slot`, if the edge has it.
+    pub fn attr(&self, slot: usize) -> Option<u32> {
+        self.attrs[slot].checked_sub(1)
+    }
+
+    pub fn with_attr(mut self, slot: usize, value: u32) -> Self {
+        self.attrs[slot] = value + 1;
+        self
     }
     pub fn from_fi(&self) -> usize {
         self.from_tree as usize

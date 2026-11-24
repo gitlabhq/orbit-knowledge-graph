@@ -298,8 +298,7 @@ impl<'t, S: Store> Run<'t, S> {
             return Err(killed);
         }
         let mut seen = FxHashSet::default();
-        self.edges
-            .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.label)));
+        self.edges.retain(|e| seen.insert(*e));
         let mut outputs = Outputs::default();
         for &slot in &phase.modules {
             let module = registry.module(slot);

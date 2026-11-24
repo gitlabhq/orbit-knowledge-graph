@@ -143,7 +143,7 @@ fn one_file(
     let mut at = Stage::new(tree, canonical);
     for phase in phases {
         let started = Instant::now();
-        let graph = Graph::new(&edges);
+        let graph = Graph::new(&engine.lang, &edges);
         let (found, _) = at.run(phase, None, engine, Some((&graph, 0)), run)?;
         edges.extend(found);
         if *engine::profile::ON {
@@ -278,7 +278,7 @@ pub fn finish(
             }
         } else {
             let project = phase.reads.project.then(|| &*project.compact(engine));
-            let graph = Graph::new(&state.edges);
+            let graph = Graph::new(&engine.lang, &state.edges);
             let done = state
                 .trees
                 .par_iter_mut()

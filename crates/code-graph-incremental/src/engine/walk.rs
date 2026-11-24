@@ -176,7 +176,7 @@ pub fn run_shared(
             .collect::<Vec<Edge>>()
     };
     settle(|| {
-        let graph = Graph::new(base.iter().chain(&last));
+        let graph = Graph::new(&engine.lang, base.iter().chain(&last));
         let at: Vec<u32> = pending.iter().map(|&i| walk[i]).collect();
         let done = match run_files(phase, trees, &at, &graph, engine, budget) {
             Ok(done) => done,
@@ -196,7 +196,7 @@ pub fn run_shared(
         );
         let changed: FxHashSet<End> = now
             .symmetric_difference(&before)
-            .flat_map(super::graph::ends)
+            .flat_map(|e| super::graph::ends(engine.lang.edge_attributes(), e))
             .collect();
         last = found;
         pending = (0..walk.len())

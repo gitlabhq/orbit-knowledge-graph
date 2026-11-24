@@ -339,6 +339,22 @@ impl<'s> Parser<'s, '_> {
                             })?;
                             args.push(Expr::Lit(Val::Sym(u32::from(kind.0))));
                         }
+                        Arg::NodeAttribute | Arg::SymbolAttribute => {
+                            self.space();
+                            let name = self.ident();
+                            let lang = self.scope.lang;
+                            let node = sig[args.len().min(sig.len() - 1)] == Arg::NodeAttribute;
+                            let slot = lang
+                                .edge_attribute(name)
+                                .filter(|&slot| lang.edge_attributes()[slot].node == node)
+                                .ok_or_else(|| {
+                                    self.error(&format!(
+                                        "{name} is not a declared {} edge attribute",
+                                        if node { "node" } else { "symbol" }
+                                    ))
+                                })?;
+                            args.push(Expr::Lit(Val::Sym(slot as u32)));
+                        }
                         Arg::Shape => {
                             self.space();
                             let name = self.ident();

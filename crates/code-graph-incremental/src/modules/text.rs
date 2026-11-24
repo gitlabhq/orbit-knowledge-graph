@@ -167,10 +167,6 @@ static FUNCTIONS: &[Function<Text>] = &[
     on_node!("tree_root", [one], |c, _| Some(Val::Node(
         c.jump(c.fi(), 0).into()
     ))),
-    function!(Pure, "out", [one, one], |cx, a| targets(cx, a, false)),
-    function!(Pure, "out_unresolved", [one, one], |cx, a| targets(
-        cx, a, true
-    )),
     function!(Pure, "file_dir", [one], |cx, a| file_dir(cx, a)),
 ];
 
@@ -239,20 +235,6 @@ fn text<'t, S: Store>(cx: &Cx<'_, 't, Text, S>, v: Val) -> Option<&'t str> {
         Val::Opaque => None,
         v => Some(lit(lang, v)),
     }
-}
-
-fn targets<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals], unresolved: bool) -> Vals {
-    let (Some(loc), Ok(kind)) = (
-        a[0][0].loc(),
-        cx.lang().edge_kind(opts(cx, a).lit(1)).ok_or(()),
-    ) else {
-        return Vals::new();
-    };
-    let found = match unresolved {
-        true => cx.unlabelled_targets(kind, loc),
-        false => cx.targets(kind, loc),
-    };
-    found.iter().map(|&l| Val::Node(l)).collect()
 }
 
 /// The project tree's directory that holds a file tree, found by its path.

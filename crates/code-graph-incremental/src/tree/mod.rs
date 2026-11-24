@@ -8,7 +8,7 @@ use indextree::Arena;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
-pub use crate::edge::{Edge, EdgeKind};
+pub use crate::edge::{EDGE_ATTRIBUTES, Edge, EdgeAttribute, EdgeKind};
 pub use cursor::{Cursor, Step, Trees, Walk};
 pub use node::{Node, Tag};
 #[cfg(feature = "pretty-print")]
