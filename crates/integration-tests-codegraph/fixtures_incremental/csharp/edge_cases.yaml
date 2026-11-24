@@ -176,6 +176,7 @@ tests:
       - { row: { caller: Geo.App.Runner.Run, callee: Geo.Models.Line.Length } }
 
   # ── Null-conditional ?.  ──────────────────────────────────────
+  # corrected: one CALLS row per call site, and Run calls Normalize at _cached?.Normalize() and new Point(5.0, 6.0).Normalize()
   - name: "_cached?.Normalize() resolves despite ?."
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -183,7 +184,7 @@ tests:
         AND callee.fqn = 'Geo.Models.Point.Normalize'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { row_count: 1 }
+      - { row_count: 2 }
       - { row: { caller: Geo.App.Runner.Run, callee: Geo.Models.Point.Normalize } }
 
   # ── Partial class — methods from both files ───────────────────
