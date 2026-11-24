@@ -128,7 +128,7 @@ canonicalize:
   - use: tag_file_dir
   - stage: tag-source-path
     rewrite:
-      - '(__import)': '#source_rel=$ROOT | child_sym("__source_path") | regex_loop("(\w)\.(\w)", "$1/$2") | regex_loop("^((?:~/)*)\.", "$1~/") | regex_first("~/", "./") | regex_replace("~/", "../") | regex_loop("^\./\.\./", "../")'
+      - '(__import)': '#source_rel=$ROOT | child("__source_path") | regex_loop("(\w)\.(\w)", "$1/$2") | regex_loop("^((?:~/)*)\.", "$1~/") | regex_first("~/", "./") | regex_replace("~/", "../") | regex_loop("^\./\.\./", "../")'
   - stage: resolve-paths
     rewrite:
       - '(__import)': '#resolved_source=$ROOT | tag("source_rel")'

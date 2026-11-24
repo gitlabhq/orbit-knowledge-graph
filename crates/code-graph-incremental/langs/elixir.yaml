@@ -61,7 +61,7 @@ canonicalize:
       - '(do_block $$$B)': '(__scope $$$B) #hoisted=true'
   - stage: tag-defs
     rewrite:
-      - '(__def (__class))': '#declares_type=true #value=true #exports=$ROOT | child_sym("__defname") | split_last(".")'
+      - '(__def (__class))': '#declares_type=true #value=true #exports=$ROOT | child("__defname") | split_last(".")'
       - use: function_def_tags
       - '(__def (__class))': '#value=true #declares_type=true #scoped=true #hoisted=true'
       - '(__def (__lambda))': '#callable=true'

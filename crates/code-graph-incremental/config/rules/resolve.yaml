@@ -25,14 +25,14 @@ define:
   aliased(ROOT): >-
     first(select(project, '(__alias)') | longest_first, a => alias_files(a, $ROOT))
   alias_files(ROOT, imp):
-    '(__alias $S:__scope) when eq($S, $imp | tag("alias_scope"))': 'files($imp | child_sym("__source_path") | map_prefix($ROOT, $ROOT | child_sym("__str")))'
-    '(__alias !(__scope))': 'files($imp | child_sym("__source_path") | map_prefix($ROOT, $ROOT | child_sym("__str")))'
+    '(__alias $S:__scope) when eq($S, $imp | tag("alias_scope"))': 'files($imp | child("__source_path") | map_prefix($ROOT, $ROOT | child("__str")))'
+    '(__alias !(__scope))': 'files($imp | child("__source_path") | map_prefix($ROOT, $ROOT | child("__str")))'
   submodule(ROOT, N): 'files($ROOT | tag("resolved_source") | concat("/", @$N))'
   exported(module, name): >-
     select(owned(module), '(__def $N:__defname)', name)
     or select(under(module), '(__def $N:__defname)', name)
     or select(owned(module), '(__def $N:__default_export)', name)
-    or select(owned(module), '(__module_export (__default_export))' by $ROOT | child_sym("__default_export"), name) | target_of
+    or select(owned(module), '(__module_export (__default_export))' by $ROOT | child("__default_export"), name) | target_of
     or select(under(module), '(__def #exports)' by $ROOT | tag("exports"), name)
     or select(owned(module), '(%import_kinds $ROOT:__name)' by local_name($ROOT), name) | reexported(name) | is_def
     or select(owned(module), '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def

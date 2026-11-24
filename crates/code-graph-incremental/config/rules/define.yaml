@@ -1,4 +1,9 @@
 define:
+  child(ROOT, KIND):
+    '(_ $C:(KIND "/(?s)./"))': '$C'
+  up_child(ROOT, KIND):
+    '(_ $C:(KIND "/(?s)./"))': '$C'
+    '$P:(_ $ROOT)': 'up_child($P, KIND)'
   tag_up(ROOT, key):
     '$P:(_ $ROOT)': '$P | tag(key) or tag_up($P, key)'
   tree_path(ROOT):
@@ -86,9 +91,9 @@ define:
     '_ when listed': none
     '_': '$ROOT'
   listed_import(ROOT, import, list):
-    '_ when in(import | child_sym("__source_path"), list)': '$ROOT'
+    '_ when in(import | child("__source_path"), list)': '$ROOT'
   unlisted_import(ROOT, import, list):
-    '_ when in(import | child_sym("__source_path"), list)': none
+    '_ when in(import | child("__source_path"), list)': none
     '_': '$ROOT'
   meaning(ROOT, site): 'member_for($ROOT, site) | stored_value'
   stored_value(ROOT):
@@ -205,8 +210,8 @@ define:
     or other_parts(owner) | declared(name, role)
     or union(owner, other_parts(owner)) | supers | members(name, role)
   other_parts(ROOT): >-
-    minus(union(select(under(file($ROOT)), '(__def $N:__defname)', $ROOT | child_sym("__defname")),
-    select(files, '(__def $N:__defname)', $ROOT | child_sym("__defname"))), $ROOT)
+    minus(union(select(under(file($ROOT)), '(__def $N:__defname)', $ROOT | child("__defname")),
+    select(files, '(__def $N:__defname)', $ROOT | child("__defname"))), $ROOT)
     | impl_pair($ROOT)
   impl_pair(ROOT, owner):
     '(__def (__impl))': '$ROOT'
@@ -321,7 +326,7 @@ define:
   imported_name(name, at): >-
     select(under(file(at)), '(__import $ROOT:__name)' by local_name($ROOT), name) | target_of
     or select(under(file(at)), '(__import $ROOT:__name)' by $ROOT | written, "*") | follow(imports, from) | exported(name)
-  local_name(ROOT): 'default($ROOT | child_sym("__alias"), default($ROOT | child_sym("__ssa_hint"), $ROOT))'
+  local_name(ROOT): 'default($ROOT | child("__alias"), default($ROOT | child("__ssa_hint"), $ROOT))'
   declared_in(name, at): >-
     first(enclose(at), s => select(owned(s), '(__def $N:__defname)', name))
   target_of(ROOT): 'declared_in(@ROOT, ROOT) or $ROOT | follow(imports, from)'

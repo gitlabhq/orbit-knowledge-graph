@@ -154,7 +154,7 @@ project:
 display:
   - stage: fqn
     rewrite:
-      - '$M:__source_file': '#entity=File #fqn=$M | child_sym("__package") #file_path=@$M #language=@$M | split_last(".") | map("java:java")'
+      - '$M:__source_file': '#entity=File #fqn=$M | child("__package") #file_path=@$M #language=@$M | split_last(".") | map("java:java")'
       - use: def_fqn_dotted
   - use: def_types
   - stage: imports

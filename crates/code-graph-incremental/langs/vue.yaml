@@ -24,7 +24,7 @@ canonicalize:
   - stage: options-this
     before: regions
     rewrite:
-      - '(variable_declarator name: $N value: (this)) when $ROOT | ancestor_sym("type_identifier")': '(variable_declarator name: $N value: (identifier @$ROOT | ancestor_sym("type_identifier")))'
+      - '(variable_declarator name: $N value: (this)) when $ROOT | up_child("type_identifier")': '(variable_declarator name: $N value: (identifier @$ROOT | up_child("type_identifier")))'
 
 display:
   - stage: fqn

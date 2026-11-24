@@ -85,14 +85,14 @@ canonicalize:
       - '(use_declaration argument: $A:identifier)': '(__import (__source @$A) (__source_path "") (__name @$A)) #import_type=Use'
   - stage: import-entries
     rewrite:
-      - '(use_entry path: (self) alias: $A)': '(__import (__source @$ROOT | ancestor_sym("__source")) (__source_path @$ROOT | ancestor_sym("__source_path") | regex_replace("/?[^/]*$", "")) (__name @$ROOT | ancestor_sym("__source") | split_last("::") (__alias @$A))) #import_type=UseGroup'
-      - '(pub_use_entry path: (self) alias: $A)': '(__import (__source @$ROOT | ancestor_sym("__source")) (__source_path @$ROOT | ancestor_sym("__source_path") | regex_replace("/?[^/]*$", "")) (__name @$ROOT | ancestor_sym("__source") | split_last("::") (__alias @$A))) #import_type=PubUseGroup'
-      - '(use_entry "self")': '(__import (__source @$ROOT | ancestor_sym("__source")) (__source_path @$ROOT | ancestor_sym("__source_path") | regex_replace("/?[^/]*$", "")) (__name @$ROOT | ancestor_sym("__source") | split_last("::"))) #import_type=UseGroup'
-      - '(pub_use_entry "self")': '(__import (__source @$ROOT | ancestor_sym("__source")) (__source_path @$ROOT | ancestor_sym("__source_path") | regex_replace("/?[^/]*$", "")) (__name @$ROOT | ancestor_sym("__source") | split_last("::"))) #import_type=PubUseGroup'
-      - '(use_entry path: $N alias: $A)': '(__import (__source @$ROOT | ancestor_sym("__source") | concat("::", $ROOT | field("path"))) (__source_path @$ROOT | ancestor_sym("__source_path")) (__name @$N (__alias @$A))) #import_type=UseGroup'
-      - '(pub_use_entry path: $N alias: $A)': '(__import (__source @$ROOT | ancestor_sym("__source") | concat("::", $ROOT | field("path"))) (__source_path @$ROOT | ancestor_sym("__source_path")) (__name @$N (__alias @$A))) #import_type=PubUseGroup'
-      - '(use_entry)': '(__import (__source @$ROOT | ancestor_sym("__source") | concat("::", @$ROOT)) (__source_path @$ROOT | ancestor_sym("__source_path")) (__name @$ROOT)) #import_type=UseGroup'
-      - '(pub_use_entry)': '(__import (__source @$ROOT | ancestor_sym("__source") | concat("::", @$ROOT)) (__source_path @$ROOT | ancestor_sym("__source_path")) (__name @$ROOT)) #import_type=PubUseGroup'
+      - '(use_entry path: (self) alias: $A)': '(__import (__source @$ROOT | up_child("__source")) (__source_path @$ROOT | up_child("__source_path") | regex_replace("/?[^/]*$", "")) (__name @$ROOT | up_child("__source") | split_last("::") (__alias @$A))) #import_type=UseGroup'
+      - '(pub_use_entry path: (self) alias: $A)': '(__import (__source @$ROOT | up_child("__source")) (__source_path @$ROOT | up_child("__source_path") | regex_replace("/?[^/]*$", "")) (__name @$ROOT | up_child("__source") | split_last("::") (__alias @$A))) #import_type=PubUseGroup'
+      - '(use_entry "self")': '(__import (__source @$ROOT | up_child("__source")) (__source_path @$ROOT | up_child("__source_path") | regex_replace("/?[^/]*$", "")) (__name @$ROOT | up_child("__source") | split_last("::"))) #import_type=UseGroup'
+      - '(pub_use_entry "self")': '(__import (__source @$ROOT | up_child("__source")) (__source_path @$ROOT | up_child("__source_path") | regex_replace("/?[^/]*$", "")) (__name @$ROOT | up_child("__source") | split_last("::"))) #import_type=PubUseGroup'
+      - '(use_entry path: $N alias: $A)': '(__import (__source @$ROOT | up_child("__source") | concat("::", $ROOT | field("path"))) (__source_path @$ROOT | up_child("__source_path")) (__name @$N (__alias @$A))) #import_type=UseGroup'
+      - '(pub_use_entry path: $N alias: $A)': '(__import (__source @$ROOT | up_child("__source") | concat("::", $ROOT | field("path"))) (__source_path @$ROOT | up_child("__source_path")) (__name @$N (__alias @$A))) #import_type=PubUseGroup'
+      - '(use_entry)': '(__import (__source @$ROOT | up_child("__source") | concat("::", @$ROOT)) (__source_path @$ROOT | up_child("__source_path")) (__name @$ROOT)) #import_type=UseGroup'
+      - '(pub_use_entry)': '(__import (__source @$ROOT | up_child("__source") | concat("::", @$ROOT)) (__source_path @$ROOT | up_child("__source_path")) (__name @$ROOT)) #import_type=PubUseGroup'
       - '(use_group $$$I:__import)': '$$$I'
   - stage: patterns
     rewrite:
@@ -106,7 +106,7 @@ canonicalize:
     rewrite:
       - '(reference_expression value: $V:__call)': '$V'
       - '(parenthesized_expression $V:__call)': '$V'
-      - '(let_declaration pattern: $P:unpack_pattern value: $V)': '(unpack (__binding @$P | child_sym("__object") (__rhs @$V $V)) $P)'
+      - '(let_declaration pattern: $P:unpack_pattern value: $V)': '(unpack (__binding @$P | child("__object") (__rhs @$V $V)) $P)'
       - '(tuple_expression $$$V:_*_named)': '(__obj $$$V:_*_named->tuple_value)'
       - '(let_declaration pattern: $N value: $V:__ssa_branch)': '(__binding @$N $N (__declaration) (__rhs $V))'
       - '(let_declaration pattern: $N value: $V:block)': '(__binding @$N $N (__declaration) (__rhs $V))'
@@ -175,8 +175,8 @@ canonicalize:
       - '(tuple_field)': '(__def (__defname @$ROOT | sibling_index) (__field_def))'
   - stage: ssa-cleanup
     rewrite:
-      - '(unpack_field $N:__name $P:unpack_pattern)': '(unpack (__binding @$P | child_sym("__object") (__rhs (__member @$N $N (__object @$ROOT | ancestor_sym("__object"))))) $P)'
-      - '(unpack_field $N:__name)': '(__binding @$ROOT (__declaration) (__rhs (__member @$N $N (__object @$ROOT | ancestor_sym("__object")))))'
+      - '(unpack_field $N:__name $P:unpack_pattern)': '(unpack (__binding @$P | child("__object") (__rhs (__member @$N $N (__object @$ROOT | up_child("__object"))))) $P)'
+      - '(unpack_field $N:__name)': '(__binding @$ROOT (__declaration) (__rhs (__member @$N $N (__object @$ROOT | up_child("__object")))))'
       - '(arguments $$$V:_*_named)': '(__args $$$V:_*_named->tuple_value)'
   - stage: positional-fields
     rewrite:
@@ -206,10 +206,10 @@ canonicalize:
   - stage: tag-module-path
     rewrite:
       - '$M:__source_file': '#mod_self=@$M | regex_replace("\.rs$", "") | regex_replace("(^|/)(mod|lib|main)$", "")'
-      - '(__import (__source_path "/^(self|super)(/|$)/"))': '#source_rel=$ROOT | child_sym("__source_path") | regex_replace("^self(/|$)", "./") | regex_loop("super(/|$)", "../")'
+      - '(__import (__source_path "/^(self|super)(/|$)/"))': '#source_rel=$ROOT | child("__source_path") | regex_replace("^self(/|$)", "./") | regex_loop("super(/|$)", "../")'
   - stage: resolve-paths
     rewrite:
-      - '(__import)': '#resolved_source=$ROOT | child_sym("__source_path")'
+      - '(__import)': '#resolved_source=$ROOT | child("__source_path")'
       - '(__import (__source_path "/^(self|super)(/|$)/"))': '#resolved_source=$ROOT | tag_up("mod_self") | concat("/", $ROOT | tag("source_rel")) | regex_replace("(^|/)\./", "$1") | regex_loop("[^/]+/\.\./", "") | regex_replace("/$", "") | regex_replace("^/", "")'
 
 project:

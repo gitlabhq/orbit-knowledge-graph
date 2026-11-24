@@ -8,8 +8,8 @@ stages:
   resolve_paths:
     - stage: resolve-paths
       rewrite:
-        - '(__import)': '#resolved_source=$ROOT | child_sym("__source_path")'
-        - '(__import (__source_path "^."))': '#resolved_source=$ROOT | tag_up("file_dir") | concat("/", $ROOT | child_sym("__source_path")) | regex_replace("(^|/)\./", "$1") | regex_loop("[^/]+/\.\./", "") | regex_replace("/$", "") | regex_replace("^/", "")'
+        - '(__import)': '#resolved_source=$ROOT | child("__source_path")'
+        - '(__import (__source_path "^."))': '#resolved_source=$ROOT | tag_up("file_dir") | concat("/", $ROOT | child("__source_path")) | regex_replace("(^|/)\./", "$1") | regex_loop("[^/]+/\.\./", "") | regex_replace("/$", "") | regex_replace("^/", "")'
   ssa_cleanup:
     - stage: ssa-cleanup
       rewrite:

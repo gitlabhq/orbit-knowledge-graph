@@ -98,9 +98,9 @@ project:
 display:
   - stage: fqn
     rewrite:
-      - '$M:__source_file': '#entity=File #fqn=$M | child_sym("__package") #file_path=@$M #language=@$M | split_last(".") | map("go:go")'
+      - '$M:__source_file': '#entity=File #fqn=$M | child("__package") #file_path=@$M #language=@$M | split_last(".") | map("go:go")'
       - '(__def (__impl))': '#entity=Definition #file_path=$ROOT | tag_up("file_path")'
-      - '(__def !(__impl))': '#entity=Definition #fqn=$ROOT | tag_up("fqn") | concat(".", $ROOT | child_sym("__defname")) | keep_last(".", 64, 4096) #file_path=$ROOT | tag_up("file_path")'
+      - '(__def !(__impl))': '#entity=Definition #fqn=$ROOT | tag_up("fqn") | concat(".", $ROOT | child("__defname")) | keep_last(".", 64, 4096) #file_path=$ROOT | tag_up("file_path")'
   - use: def_types
   - stage: imports
     rewrite:

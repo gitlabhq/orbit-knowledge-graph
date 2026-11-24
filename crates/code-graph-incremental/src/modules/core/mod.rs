@@ -34,9 +34,6 @@ static FUNCTIONS: &[Function<Core>] = &[
     function!(Inline, "nodes", [set], |_, a| set(
         nodes(&a[0]).map(Val::Node)
     )),
-    function!(Inline, "count", [set], |cx, a| {
-        one(Val::Sym(cx.lang().syms.intern(&a[0].len().to_string())))
-    }),
     function!(Inline, "last", [set], |_, a| {
         a[0].last().map_or_else(Vals::new, |&v| one(v))
     }),

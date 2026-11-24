@@ -99,7 +99,7 @@ project:
 display:
   - stage: fqn
     rewrite:
-      - '$M:__source_file': '#entity=File #fqn=$M | child_sym("__package") #file_path=@$M #language=@$M | split_last(".") | map("scala:scala", "sc:scala")'
+      - '$M:__source_file': '#entity=File #fqn=$M | child("__package") #file_path=@$M #language=@$M | split_last(".") | map("scala:scala", "sc:scala")'
       - use: def_fqn_dotted_except_impl
   - use: def_types
   - use: display_wildcard_imports

@@ -134,8 +134,6 @@ static FUNCTIONS: &[Function<Text>] = &[
         yes(a[0].first().and_then(|&v| text(cx, v)) != a[1].first().and_then(|&v| text(cx, v)))
     }),
     on_node!("field", [one, one], field),
-    on_node!("child_sym", [one, one], child_sym),
-    on_node!("ancestor_sym", [one, one], ancestor_sym),
     on_node!("tag", [one, one], tag),
     on_node!("sibling_index", [one], sibling_index),
     on_node!("tree_node_id", [one], tree_node_id),
@@ -170,13 +168,6 @@ impl<'s> Opts<'s> {
         match self.args[at].first() {
             Some(&Val::Sym(n)) => n as usize,
             _ => 0,
-        }
-    }
-
-    fn kind(&self, at: usize) -> u16 {
-        match self.args[at].first() {
-            Some(&Val::Kind(k)) => k,
-            _ => self.lang.lookup_kind(self.lit(at)),
         }
     }
 
@@ -411,17 +402,6 @@ fn concat(a: Option<&str>, sep: &str, b: Option<&str>) -> String {
     }
 }
 
-fn text_sym<S: Storage<Node = Node>>(c: Cursor<'_, S>, lang: &Lang) -> Option<Val> {
-    match c.tree().sym_at(c.index(), lang) {
-        0 => None,
-        sym => Some(Val::Sym(sym)),
-    }
-}
-
-fn child_of<'s, S: Storage<Node = Node>>(c: Cursor<'s, S>, kind: u16) -> Option<Cursor<'s, S>> {
-    c.children().find(|k| k.node().kind == kind)
-}
-
 fn field<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
     let field = o.field(1);
     let sym = |c: Cursor<'_, S>| c.tree().sym_at(c.index(), o.lang);
@@ -430,18 +410,6 @@ fn field<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
         .find(|k| k.node().field == field)
         .map_or(0, sym);
     Some(Val::Sym(if found != 0 { found } else { sym(c) }))
-}
-
-fn child_sym<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
-    text_sym(child_of(c, o.kind(1))?, o.lang)
-}
-
-fn ancestor_sym<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
-    let kind = o.kind(1);
-    let found = std::iter::once(c)
-        .chain(c.ancestors())
-        .find_map(|a| child_of(a, kind).filter(|k| k.tree().sym_at(k.index(), o.lang) != 0))?;
-    text_sym(found, o.lang)
 }
 
 fn tag<S: Storage<Node = Node>>(c: Cursor<'_, S>, o: &Opts) -> Option<Val> {
@@ -639,9 +607,6 @@ mod tests {
         };
         assert_eq!(call(field, &["path"]), "p");
         assert_eq!(call(field, &["other"]), "m");
-        assert_eq!(call(child_sym, &["path"]), "p");
-        assert_eq!(call(child_sym, &["leaf"]), "None");
-        assert_eq!(call(ancestor_sym, &["name"]), "Klass");
         assert_eq!(call(tag, &["fqn"]), "pkg.C.m");
         assert_eq!(call(sibling_index, &[]), "1");
         assert_eq!(call(tree_node_id, &[]), Tree::to_raw(target).to_string());

@@ -151,7 +151,7 @@ canonicalize:
   - stage: tag-defs
     rewrite:
       - use: function_def_tags
-      - '(__def (__class))': '#declares_type=true #value=true #callable=true #scoped=true #exports=$ROOT | child_sym("__defname")'
+      - '(__def (__class))': '#declares_type=true #value=true #callable=true #scoped=true #exports=$ROOT | child("__defname")'
       - '(__def (__lambda))': '#callable=true #scoped=true'
       - '(__def (__property))': '#callable=true #value=true'
       - '(__def (__enum_variant))': '#callable=true #value=true'
