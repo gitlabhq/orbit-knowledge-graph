@@ -59,8 +59,19 @@ define:
     '_ when $ROOT | follow(imports, from) | tag("non_callable")': '$ROOT'
 
   modules(ROOT):
-    '(_ (__source_path "^."))': 'aliased($ROOT) or file_at($ROOT | tag("resolved_source"))'
-    '_': 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
+    '_ when ts_alias($ROOT)': 'first(ts_targets($ROOT), p => files(p))'
+    '(_ (__source_path "^."))': 'file_at($ROOT | tag("resolved_source"))'
+    '_': 'files($ROOT | tag("resolved_source"))'
+  ts_aliases(ROOT): "union(governing($ROOT) | config_aliases, select(project, '(__alias)')) | longest_first"
+  ts_alias(ROOT): 'first(ts_aliases($ROOT), a => ts_matched(a, $ROOT))'
+  ts_targets(ROOT): 'ts_aliases($ROOT) | ts_same_key(ts_alias($ROOT)) | ts_target($ROOT)'
+  ts_same_key(ROOT, other):
+    '_ when in($ROOT, $other)': '$ROOT'
+  ts_matched(ROOT, imp):
+    '_ when ts_target($ROOT, $imp)': '$ROOT'
+  ts_target(ROOT, imp):
+    '(_ $S:__scope) when in($S, $imp | tag("alias_scope"))': '$imp | child("__source_path") | map_prefix($ROOT, $ROOT | child("__str"))'
+    '(_ !(__scope))': '$imp | child("__source_path") | map_prefix($ROOT, $ROOT | child("__str"))'
 
   missing_export(ROOT):
     '_ when $ROOT | follow(imports, from) | is_def': none

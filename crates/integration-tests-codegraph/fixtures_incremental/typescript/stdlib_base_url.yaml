@@ -51,14 +51,23 @@ steps:
         content: |
           {"compilerOptions":{"baseUrl":"./src","paths":{"constants":["other/constants"]}}}
     tests:
-      - name: Explicit mapping wins
+      # corrected: paths targets are relative to baseUrl, so "constants" maps to src/other/constants, which is missing;
+      # tsc then leaves the import unresolved and does not fall back to baseUrl (checked with tsc --traceResolution)
+      - name: A matched paths key with no existing target leaves the import unresolved
         query: |
           MATCH (caller:Definition)-[:CALLS]->(target:Definition)
           WHERE caller.name = 'run'
           RETURN target.file_path AS file
         assert:
+          - { empty: true }
+      - name: The unresolved mapped import stays an imported symbol
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+          WHERE caller.name = 'run'
+          RETURN target.import_path AS path
+        assert:
           - { row_count: 1 }
-          - { row: { file: other/constants/index.ts } }
+          - { row: { path: constants } }
       - name: Missing conditional target retains runtime fallback
         query: |
           MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
