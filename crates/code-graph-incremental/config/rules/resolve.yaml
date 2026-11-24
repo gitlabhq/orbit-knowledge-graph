@@ -69,6 +69,11 @@ define:
     '_ when $ROOT | read | is_file | offered(M) | callable': none
     '_': '$ROOT | namespace_name'
   offered(module, name): 'exported(module, name) or module'
+  namespace_of(ROOT):
+    '(__object $M:__member)': '$M | namespace_member'
+    '(__object)': '$ROOT | read | is_file'
+  namespace_member(ROOT):
+    '(__member $O:__object)': '$O | namespace_of | exported($ROOT) | is_file'
   written(ROOT):
     '(_ (__ssa_hint "*"))': '"*"'
     '_': '$ROOT'
@@ -117,6 +122,8 @@ resolve:
         calls: { to: '$O | read | is_file | offered($M) | callable | elsewhere(file($ROOT))', site: $ROOT }
         imports: { from: '$O | namespace_name', to: '$O | read | is_file | offered($M) | callable | elsewhere(file($ROOT))' }
         fallbacks: { to: '$O | namespace_miss($M)', site: $ROOT }
+    - '(__call (__callee $M:(__member $O:(__object (__member))))) when $O | namespace_of':
+        calls: { to: '$O | namespace_of | offered($M) | callable | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee $M:(__member $O:__object $D:(__dispatch !(__object)))))':
         calls: { to: '$O | type | dispatched($D | type, $M)', site: $ROOT }
     - '(__call (__callee $M:(__member $O:__object (__dispatch (__object))))) when $O | type | is_contract':

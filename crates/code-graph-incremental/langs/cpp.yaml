@@ -30,6 +30,9 @@ data:
     isupper, isxdigit, tolower, toupper]
 
 define:
+  impl_pair(ROOT, owner):
+    '_ when in($owner | tag("flavor"), "namespace")': '$ROOT'
+    '_': 'super(ROOT, owner)'
   exported(module, name):
     '_ when module | regex_match("[.](h|hh|hpp|hxx)$")': >-
       super(module, name)
