@@ -49,7 +49,7 @@ distilled_at_sha: cf64a3d8f7ef3e3137b983ecedac825dcf82a0b3
 ### REST API — cURL Examples
 
 - Always put `--request <METHOD>` first in cURL commands, including for `GET`.
-- Use long option names (`--header` instead of `-H`, `--url` instead of `-u`) in all cURL examples (linted by `scripts/lint-doc.sh`).
+- Use long option names (`--header` instead of `-H`) in all cURL examples (linted by `scripts/lint-doc.sh`).
 - Declare URLs with `--url` and wrap the URL in double quotes.
 - Use `https://gitlab.example.com/api/v4/` as the endpoint and `<your_access_token>` as the personal access token placeholder.
 - Use `--data-urlencode` for data containing special characters (Markdown, regex, quotes, ampersands); use `--data` for plain alphanumeric data.
