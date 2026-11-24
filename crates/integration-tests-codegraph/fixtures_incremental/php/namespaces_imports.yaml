@@ -314,14 +314,14 @@ tests:
 
   # A fully qualified type on a parameter acts as an inline import, so the
   # typed local resolves like a `use`-imported type.
-  - name: "Leading-backslash typed-parameter $bare->run() resolves"
+  - name: "Leading-backslash typed-parameter $bare->run() and the new local's $x->run() both resolve"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\LeadingBackslash\go'
         AND callee.fqn = 'Vendor\Other\Bare\run'
       RETURN caller.fqn AS c
     assert:
-      - { row_count: 1 }
+      - { row_count: 2 }
 
   # ── FQN reference without import ────────────────────────────────
   - name: "Static call by fully-qualified name without use: \\Vendor\\Other\\Bare::call()"

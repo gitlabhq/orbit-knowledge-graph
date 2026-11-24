@@ -507,7 +507,6 @@ impl Sink<'_> {
                 }
             }
         }
-        let mut seen = FxHashSet::default();
         for row in edges {
             let shape = &self.engine.pipeline.rows[usize::from(row.shape)];
             let at = self.tables.shapes[usize::from(row.shape)];
@@ -525,17 +524,6 @@ impl Sink<'_> {
             };
             if !written {
                 continue;
-            }
-            if nodes.windows(2).any(|w| w[0].1.fi != w[1].1.fi) {
-                let key: Vec<String> = (0..shape.columns.len())
-                    .map(|i| match row.values[i] {
-                        Some(Val::Node(loc)) => ids[&loc].0.to_string(),
-                        value => self.text(value).into_owned(),
-                    })
-                    .collect();
-                if !seen.insert(key) {
-                    continue;
-                }
             }
             self.row(&mut builders[at], &tables[at], shape, row, None, &ids)?;
             if let Some(batch) = builders[at].take_if_over(self.tables.batch_bytes)? {
