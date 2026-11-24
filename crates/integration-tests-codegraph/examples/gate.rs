@@ -1,7 +1,7 @@
 //! Runs every incremental fixture suite in one process and compares the
 //! failures with a saved list.
 //!
-//! `cargo run -q -p integration-tests-codegraph --profile gate --example gate -- [--save FILE] [--base FILE] [NAME...] 2>LOG`
+//! `cargo run -q -p integration-tests-codegraph --profile gate --no-default-features --example gate -- [--save FILE] [--base FILE] [NAME...] 2>LOG`
 //!
 //! With `CGI_RULES_DIR` set to the crate dir of code-graph-incremental, rules
 //! and fixtures are read from disk, so a YAML change needs no rebuild. A suite

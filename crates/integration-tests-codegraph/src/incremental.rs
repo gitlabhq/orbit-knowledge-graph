@@ -33,7 +33,7 @@ impl orbit_utils::vfs::Pass for FixturePolicy {
 }
 
 use super::assertions::{SkippedFile, TestCase, TestSuite};
-use super::runner::create_test_db;
+use super::validator::create_test_db;
 use super::validator::{Failure, load_suite, report, run_suite, write_fixtures, write_suite_files};
 
 fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {

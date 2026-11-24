@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-code-graph = { path = "../code-graph" }
+code-graph = { path = "../code-graph", optional = true }
 code-graph-incremental = { path = "../code-graph-incremental" }
 compiler = { path = "../query-engine/compiler" }
 duckdb-client = { path = "../duckdb-client" }
@@ -25,6 +25,25 @@ orbit-arrow = { path = "../utils/arrow" }
 tabled = { workspace = true }
 anyhow = { workspace = true }
 tempfile = { workspace = true }
+
+[features]
+default = ["code-graph"]
+
+[[test]]
+name = "cancellation"
+required-features = ["code-graph"]
+
+[[test]]
+name = "file_name_detection"
+required-features = ["code-graph"]
+
+[[test]]
+name = "suites"
+required-features = ["code-graph"]
+
+[[test]]
+name = "vanished_tree"
+required-features = ["code-graph"]
 
 [lints]
 workspace = true

@@ -1,8 +1,6 @@
-use std::path::Path;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 
-use anyhow::Context;
 use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::trace::Tracer;
 use code_graph::v2::{
@@ -11,18 +9,7 @@ use code_graph::v2::{
 };
 use duckdb_client::DuckDbClient;
 
-use super::validator::{load_suite, report, run_suite, write_suite_files};
-
-const LOCAL_DDL: &str = include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/graph_local.sql"));
-
-pub fn create_test_db() -> anyhow::Result<DuckDbClient> {
-    let client =
-        DuckDbClient::open(Path::new(":memory:")).context("failed to open in-memory DuckDB")?;
-    client
-        .initialize_schema(LOCAL_DDL)
-        .context("failed to initialize local DDL")?;
-    Ok(client)
-}
+use super::validator::{create_test_db, load_suite, report, run_suite, write_suite_files};
 
 fn on_batch_for(client: &Arc<Mutex<DuckDbClient>>) -> Arc<OnBatch> {
     let client = Arc::clone(client);

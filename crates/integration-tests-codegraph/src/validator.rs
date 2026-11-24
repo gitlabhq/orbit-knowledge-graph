@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use anyhow::Context;
 use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use compiler::{Frontend, compile_local};
@@ -12,6 +13,17 @@ use tabled::{Table, builder::Builder};
 use super::assertions::{
     Assert, AssertCheck, FieldValueArgs, FixtureFile, QueryBlock, Severity, TestCase, TestSuite,
 };
+
+const LOCAL_DDL: &str = include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/graph_local.sql"));
+
+pub fn create_test_db() -> anyhow::Result<DuckDbClient> {
+    let client = DuckDbClient::open(std::path::Path::new(":memory:"))
+        .context("failed to open in-memory DuckDB")?;
+    client
+        .initialize_schema(LOCAL_DDL)
+        .context("failed to initialize local DDL")?;
+    Ok(client)
+}
 
 #[derive(Debug)]
 pub struct Failure {
