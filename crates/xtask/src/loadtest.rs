@@ -288,7 +288,7 @@ fn correlation_id(run_id: &str, phase: Phase, query_idx: usize, seq: u64) -> Str
 }
 
 /// Recover `(phase, query index, seq)` from a correlation id or a ClickHouse
-/// `query_id` built from one (`<corr>-base`, `<corr>-hydration-...`).
+/// `query_id` built from one (`<corr>-base-<ulid>`, `<corr>-hydration-...-<ulid>`).
 fn parse_correlation(run_id: &str, id: &str) -> Option<(Phase, usize, u64)> {
     let rest = id.strip_prefix(&format!("lt-{run_id}-"))?;
     let mut parts = rest.splitn(4, '-');
@@ -819,6 +819,7 @@ fn mint_token(secret_b64: &str, admin: bool) -> Result<String> {
         deployment_type: None,
         realm: None,
         is_gitlab_team_member: None,
+        orbit_quota_exempt: None,
         user_type: None,
         token_type: None,
         license_checksum: None,
@@ -1194,13 +1195,14 @@ mod tests {
             parse_correlation("123456", &id),
             Some((Phase::Measured, 7, 42))
         );
-        // ClickHouse query_ids append the stage after the correlation id.
+        // ClickHouse query_ids append the stage and a ULID after the correlation id.
+        let ulid = "01M7V5PMAW0H93HS96V7F9PA1B";
         assert_eq!(
-            parse_correlation("123456", &format!("{id}-base")),
+            parse_correlation("123456", &format!("{id}-base-{ulid}")),
             Some((Phase::Measured, 7, 42))
         );
         assert_eq!(
-            parse_correlation("123456", &format!("{id}-hydration-static-0")),
+            parse_correlation("123456", &format!("{id}-hydration-static-0-{ulid}")),
             Some((Phase::Measured, 7, 42))
         );
         let warm = correlation_id("123456", Phase::Warmup, 12, 0);

@@ -38,18 +38,21 @@ fi
 
 # Gate on the migrations Job, not the toolbox pod: toolbox goes Running
 # before migrations finish and rails-runner crashes on an unmigrated DB.
-MIGRATED=""
-for _ in $(seq 1 120); do
-  MIGRATED=$($KC get jobs -n "$NS_GITLAB" \
-    -o jsonpath='{range .items[?(@.status.succeeded>=1)]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
-    | grep -m1 'migrations' || true)
-  [[ -n "$MIGRATED" ]] && break
+MIGRATIONS=""
+for _ in $(seq 1 360); do
+  MIGRATIONS=$($KC get jobs -n "$NS_GITLAB" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
+    | tr ' ' '\n' | grep -m1 'migrations' || true)
+  [[ -n "$MIGRATIONS" ]] && break
   sleep 5
 done
-if [[ -z "$MIGRATED" ]]; then
-  echo "GitLab migrations job not complete in $NS_GITLAB after 600s"
+if [[ -z "$MIGRATIONS" ]]; then
+  echo "GitLab migrations job not created in $NS_GITLAB after 1800s"
   exit 1
 fi
+$KC wait -n "$NS_GITLAB" "job/$MIGRATIONS" --for=condition=complete --timeout=600s || {
+  echo "GitLab migrations job $MIGRATIONS not complete in $NS_GITLAB after 600s"
+  exit 1
+}
 
 TOOLBOX=""
 for _ in $(seq 1 60); do
@@ -80,15 +83,22 @@ current = ::License.current
 if current && current.cloud_license? && !current.expired?
   warn "license already active: plan=#{current.plan} expires=#{current.expires_at}"
 else
-  result = ::GitlabSubscriptions::ActivateService.new.execute(code)
+  # Runs the seat link sync it queues, which provisions the license add-ons, before the entitlement check.
+  require 'sidekiq/testing'
+  Sidekiq::Testing.disable!
+  result = Sidekiq::Testing.inline! { ::GitlabSubscriptions::ActivateService.new.execute(code) }
   abort "activation failed: #{result[:errors].inspect}" unless result[:success]
   l = ::License.current
   warn "license activated: plan=#{l.plan} expires=#{l.expires_at} cloud=#{l.cloud_license?}"
 end
 
-# Turned off here, minutes before the tests: each Puma worker caches flag values for about a minute.
-%i[orbit_promo_access_gate orbit_trial].each { |flag| ::Feature.disable(flag) }
-warn 'orbit_promo_access_gate and orbit_trial turned off'
+settings = ::ApplicationSetting.current_without_cache
+settings.update_columns(auto_devops_enabled: false)
+abort "auto_devops_enabled still on" if settings.reload.auto_devops_enabled
+::ApplicationSetting.expire
+
+account = ::Analytics::Orbit::Billing::InstanceAccount.new
+abort 'Orbit is not entitled by the license add-ons' unless account.entitled?
 
 user = User.find_by(username: 'root') or abort 'no root user'
 token = user.personal_access_tokens.find_or_create_by!(name: 'e2e-bootstrap') do |t|

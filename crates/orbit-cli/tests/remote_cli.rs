@@ -448,7 +448,7 @@ fn status_without_orbit_for_the_user_exits_unavailable() {
     );
 }
 
-const GRAPH_STATUS_RESPONSE: &str = r#"{"data":{"group":null,"project":{"orbit":{
+const GRAPH_STATUS_RESPONSE: &str = r#"{"data":{"group":null,"project":{"id":"gid://gitlab/Project/1","orbit":{
     "indexing":{"state":"READY","areas":null,"projects":null},"itemCounts":null}}}}"#;
 
 #[test]
@@ -582,8 +582,7 @@ fn graph_status_resolves_a_project_id_to_its_full_path() {
     );
 }
 
-const STATUS_WITHOUT_ORBIT: &str =
-    r#"{"data":{"group":{"orbit":{"indexing":null,"itemCounts":null}},"project":null}}"#;
+const STATUS_WITHOUT_ORBIT: &str = r#"{"data":{"group":{"id":"gid://gitlab/Group/1","orbit":{"indexing":null,"itemCounts":null}},"project":null}}"#;
 
 fn run_graph_status_without_orbit(bodies: &'static [&'static str]) -> std::process::Output {
     let (base_url, handle) = serve_in_order(bodies);
@@ -665,7 +664,7 @@ fn graph_status_falls_back_to_rest_text_for_the_llm_format() {
     let (base_url, handle) = serve_routes(vec![
         (
             "POST /api/graphql",
-            r#"{"data":{"group":{"orbit":null},"project":null}}"#,
+            r#"{"data":{"group":{"id":"gid://gitlab/Group/1","orbit":null},"project":null}}"#,
         ),
         (
             "GET /api/v4/orbit/graph_status",
@@ -697,7 +696,7 @@ fn graph_status_keeps_the_rest_exit_code_after_a_fallback() {
         (
             "POST /api/graphql",
             200,
-            r#"{"data":{"group":{"orbit":null},"project":null}}"#,
+            r#"{"data":{"group":{"id":"gid://gitlab/Group/1","orbit":null},"project":null}}"#,
         ),
         ("GET /api/v4/orbit/graph_status", 403, "{}"),
     ]);
@@ -712,7 +711,7 @@ fn graph_status_falls_back_to_rest_for_a_token_that_cannot_read_orbit_graphql() 
     let (base_url, handle) = serve_routes(vec![
         (
             "POST /api/graphql",
-            r#"{"data":{"group":{"orbit":null},"project":null}}"#,
+            r#"{"data":{"group":{"id":"gid://gitlab/Group/1","orbit":null},"project":null}}"#,
         ),
         (
             "GET /api/v4/orbit/graph_status",
@@ -736,9 +735,35 @@ fn graph_status_falls_back_to_rest_for_a_token_that_cannot_read_orbit_graphql() 
 }
 
 #[test]
+fn graph_status_falls_back_to_rest_when_gitlab_hides_the_orbit_field() {
+    let (base_url, handle) = serve_routes(vec![
+        (
+            "POST /api/graphql",
+            r#"{"data":{"group":null,"project":{"id":"gid://gitlab/Project/1","orbit":null}}}"#,
+        ),
+        (
+            "GET /api/v4/orbit/graph_status",
+            r#"{"projects":{"indexed":1}}"#,
+        ),
+    ]);
+    let output = run_orbit(&base_url, &["status", "--full-path", "gsd-alpha"]);
+    let requests = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        requests[1].request_line,
+        "GET /api/v4/orbit/graph_status?full_path=gsd-alpha HTTP/1.1"
+    );
+}
+
+#[test]
 fn graph_status_prints_the_data_and_fails_on_a_field_error() {
     let (base_url, handle) = serve_once(
-        r#"{"data":{"group":{"orbit":{"indexing":{"state":"READY","areas":null,"projects":null},"itemCounts":null}},"project":null},
+        r#"{"data":{"group":{"id":"gid://gitlab/Group/1","orbit":{"indexing":{"state":"READY","areas":null,"projects":null},"itemCounts":null}},"project":null},
             "errors":[{"message":"requested too many times","path":["group","orbit","itemCounts"]}]}"#,
         "application/json",
     );

@@ -1,0 +1,31 @@
+description: A state filter across a link-table edge reads the merge request, not the tag the link row copied
+
+config:
+  extra_seed:
+    gl_user:
+      - { id: 99102, username: stale_tag_reviewer }
+    gl_merge_request:
+      - { id: 99100, traversal_path: "1/100/1000/", project_id: 1000, state: merged, title: merged after review }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 99102, source_kind: User, relationship_kind: REVIEWER, target_id: 99100, target_kind: MergeRequest, target_tags: ["state:opened"] }
+
+cases:
+  - name: current_state_matches
+    description: The merged merge request matches a merged filter while its edge still says opened
+    query:
+      gql: |
+        MATCH (u:User {id: 99102})-[:REVIEWER]->(mr:MergeRequest {state: 'merged'})
+        RETURN count(mr) AS n
+    expect:
+      row_count: 1
+      row_values: [{ n: 1 }]
+
+  - name: stale_tag_does_not_match
+    description: The stale opened tag does not make the merge request match an opened filter
+    query:
+      gql: |
+        MATCH (u:User {id: 99102})-[:REVIEWER]->(mr:MergeRequest {state: 'opened'})
+        RETURN count(mr) AS n
+    expect:
+      row_count: 1
+      row_values: [{ n: 0 }]

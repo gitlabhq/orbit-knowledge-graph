@@ -6,4 +6,4 @@ query:
     RETURN u
 
 expect:
-  compile_error: "declare a node's properties once"
+  compile_error: schema

@@ -19,6 +19,9 @@ pub enum ClickHouseError {
     #[error("bad response ({status}): {body}")]
     BadResponse { status: u16, body: String },
 
+    #[error("column decode error: {0}")]
+    Extract(#[from] crate::extract::ExtractError),
+
     #[error("circuit open for service {service}")]
     CircuitOpen { service: &'static str },
 }

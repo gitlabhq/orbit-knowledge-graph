@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use clickhouse_client::ArrowClickHouseClient;
 use integration_testkit::{load_ontology, run_subtests_shared, t};
 use orbit_server::item_counts::{ItemCountService, ScopeItemCounts};
 use orbit_utils::traversal_path::TraversalPath;
@@ -31,6 +32,7 @@ async fn item_counts() {
         repeated_counts_read_the_cache_with_a_five_second_ttl,
         each_scope_gets_its_own_cache_entry,
         each_path_gets_one_plain_count_query,
+        a_parallel_replica_cluster_turns_on_parallel_reads,
         nested_scopes_count_rows_at_each_scope_once,
         each_scope_needs_its_own_role,
         a_hundred_scopes_get_a_hundred_queries,
@@ -165,7 +167,39 @@ async fn each_path_gets_one_plain_count_query(ctx: &TestContext) {
         "concat(toString(position(query, 'ARRAY JOIN') > 0), Settings['parallel_replicas_min_number_of_rows_per_replica'])",
     )
     .await;
-    assert_eq!(shapes, ["050000000", "050000000"]);
+    assert_eq!(shapes, ["0", "0"]);
+}
+
+async fn a_parallel_replica_cluster_turns_on_parallel_reads(ctx: &TestContext) {
+    let db = ctx.fork("item_counts_parallel_replicas").await;
+    let mut settings = db.config.session_settings.clone();
+    settings.insert("cluster_for_parallel_replicas".into(), "default".into());
+    let client = ArrowClickHouseClient::new(
+        &db.config.url,
+        &db.config.database,
+        &db.config.username,
+        db.config.password.as_deref(),
+        &settings,
+        &HashMap::new(),
+        "graph",
+    );
+
+    ItemCountService::new(Arc::new(client))
+        .count_items(
+            &load_ontology(),
+            &admin_context(),
+            &[TraversalPath::new_unchecked("1/100/")],
+        )
+        .await
+        .expect("item counts");
+
+    let shapes = read_cached_query_log(
+        &db,
+        "QueryStart",
+        "Settings['parallel_replicas_min_number_of_rows_per_replica']",
+    )
+    .await;
+    assert_eq!(shapes, ["50000000"]);
 }
 
 async fn nested_scopes_count_rows_at_each_scope_once(ctx: &TestContext) {

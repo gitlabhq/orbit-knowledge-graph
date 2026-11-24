@@ -1,0 +1,45 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description": "Daily snapshot of one Orbit-enabled top-level group's share of the graph. The dispatcher sends one per enabled top-level group per day, next to orbit_graph_stats. The group is in the root_namespace_ids of orbit_common.",
+  "self": {
+    "vendor": "com.gitlab",
+    "name": "orbit_namespace_graph_stats",
+    "version": "1-0-0",
+    "format": "jsonschema"
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "graph_bytes",
+    "entity_counts",
+    "projects_indexed"
+  ],
+  "properties": {
+    "graph_bytes": {
+      "description": "Compressed bytes of the graph node and edge tables that belong to this group, from the latest daily storage snapshot. Each granule counts for the group of its first row, so the value is an estimate within a few percent.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    },
+    "entity_counts": {
+      "description": "Live rows of this group per ontology node type, without soft-deleted rows. Keys are ontology node type names, such as `Project`. Node types without a traversal path, such as `User`, are not listed.",
+      "type": "object",
+      "maxProperties": 256,
+      "patternProperties": {
+        "^[A-Z][A-Za-z0-9]{0,63}$": {
+          "description": "Live rows of one node type in this group",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
+      },
+      "additionalProperties": false
+    },
+    "projects_indexed": {
+      "description": "Projects in this group whose default branch has a completed code index.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    }
+  }
+}

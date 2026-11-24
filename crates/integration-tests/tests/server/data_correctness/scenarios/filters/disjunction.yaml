@@ -1,0 +1,136 @@
+cases:
+  - name: or_on_one_node
+    description: OR on one property returns the same work items as the IN case below
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.weight = 3 OR wi.weight = 13)
+        RETURN wi.weight LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          ids: [4000, 4003]
+          absent: [4001, 4002, 4010]
+          filters:
+            weight:
+              in: [3, 13]
+
+  - name: in_on_one_node
+    description: IN matches the rows of or_on_one_node
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight IN [3, 13]
+        RETURN wi.weight LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          ids: [4000, 4003]
+          absent: [4001, 4002, 4010]
+          filters:
+            weight:
+              in: [3, 13]
+
+  - name: or_across_two_nodes
+    description: An OR across the author and the work item keeps the closed work item and the one that charlie wrote
+    query:
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.state = 'closed' OR u.username = 'charlie')
+        RETURN wi.id, u.username LIMIT 10
+    expect:
+      node_count: 4
+      nodes:
+        User:
+          ids: [2, 3]
+        WorkItem:
+          ids: [4001, 4003]
+          absent: [4000, 4002, 4010]
+      edges:
+        AUTHORED:
+          - [2, 4001]
+          - [3, 4003]
+
+  - name: or_binds_looser_than_and
+    description: AND groups before OR, so the opened work item with weight 13 matches and the other opened ones do not
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.state = 'closed' OR wi.state = 'opened' AND wi.weight = 13)
+        RETURN wi.weight LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          ids: [4001, 4003]
+          absent: [4000, 4002, 4010]
+
+  - name: or_with_null_values
+    description: A NULL weight matches only the IS NULL branch, and a NULL branch does not hide a true one
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.weight = 3 OR wi.weight IS NULL)
+        RETURN wi.weight LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          ids: [4000, 4002]
+          absent: [4001, 4003, 4010]
+
+  - name: negated_or_drops_null
+    description: NOT over an OR drops the NULL weight like NOT IN does
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT (wi.weight = 3 OR wi.weight = 8)
+        RETURN wi.weight LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          ids: [4003, 4010]
+          absent: [4000, 4001, 4002]
+          filters:
+            weight:
+              in: [13, 5]
+
+  - name: negated_in_drops_null
+    description: NOT IN matches the rows of negated_or_drops_null
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN [3, 8]
+        RETURN wi.weight LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          ids: [4003, 4010]
+          absent: [4000, 4001, 4002]
+          filters:
+            weight:
+              in: [13, 5]
+
+  - name: or_alone_is_not_selective
+    description: An OR does not count as a selective filter
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id = 4000 OR wi.id = 4001
+        RETURN wi.state LIMIT 10
+    expect:
+      compile_error: schema
+
+  - name: or_on_traversal_path_rejected
+    description: OR does not open traversal_path to filters
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.traversal_path = '1/100/' OR wi.weight = 3)
+        RETURN wi.weight LIMIT 10
+    expect:
+      compile_error: ontology

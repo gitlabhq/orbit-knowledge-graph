@@ -1,8 +1,12 @@
 use std::collections::BTreeMap;
 
-use query_engine::compiler::QueryType;
+use query_engine::compiler::{QueryType, RejectionReason};
+use query_engine::formatters::ColumnDescriptor;
+use regex::Regex;
 use serde::Deserialize;
+use strum::IntoEnumIterator;
 
+use super::output_format::{OutputExpect, OutputFormat};
 use crate::scenario::Seed;
 
 #[derive(Debug, Deserialize)]
@@ -34,25 +38,29 @@ pub struct QueryStep {
 }
 
 impl QueryScenario {
-    pub fn into_steps(self) -> (ScenarioConfig, Vec<QueryStep>) {
+    pub fn into_steps(self, name: &str) -> (ScenarioConfig, Vec<QueryStep>) {
         let steps = match (self.query.is_empty(), self.steps.is_empty()) {
             (false, true) => vec![QueryStep {
                 seed: Seed::default(),
                 query: self.query,
-                expect: self.expect.expect("scenario declares query without expect"),
+                expect: self
+                    .expect
+                    .unwrap_or_else(|| panic!("{name}: scenario declares query without expect")),
             }],
             (true, false) => self.steps,
-            (false, false) => panic!("scenario declares both query/expect and steps:"),
-            (true, true) => panic!("scenario declares neither query nor steps:"),
+            (false, false) => panic!("{name}: scenario declares both query/expect and steps"),
+            (true, true) => panic!("{name}: scenario declares neither query nor steps"),
         };
         (self.config, steps)
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioConfig {
     pub ontology_overlay: Option<String>,
+    #[serde(default)]
+    pub seed: Option<String>,
     #[serde(default)]
     pub extra_seed: Seed,
     #[serde(default)]
@@ -61,8 +69,48 @@ pub struct ScenarioConfig {
     pub security: Option<PresetOr<SecurityOverride>>,
     #[serde(default)]
     pub redaction: Option<PresetOr<RedactionConfig>>,
-    #[serde(default)]
-    pub duckdb: bool,
+    #[serde(default = "clickhouse_only", deserialize_with = "backends")]
+    pub backends: Vec<Backend>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Backend {
+    Clickhouse,
+    Duckdb,
+}
+
+impl Default for ScenarioConfig {
+    fn default() -> Self {
+        Self {
+            ontology_overlay: None,
+            seed: None,
+            extra_seed: Seed::default(),
+            unmerged_seed: false,
+            security: None,
+            redaction: None,
+            backends: clickhouse_only(),
+        }
+    }
+}
+
+fn clickhouse_only() -> Vec<Backend> {
+    vec![Backend::Clickhouse]
+}
+
+fn backends<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Backend>, D::Error> {
+    let backends = Vec::<Backend>::deserialize(deserializer)?;
+    if backends.is_empty()
+        || backends
+            .iter()
+            .enumerate()
+            .any(|(index, backend)| backends[..index].contains(backend))
+    {
+        return Err(serde::de::Error::custom(
+            "backends must list clickhouse, duckdb, or both, once each",
+        ));
+    }
+    Ok(backends)
 }
 
 /// Either a preset name (string) or an inline value.
@@ -115,9 +163,9 @@ pub struct QueryExpect {
     #[serde(default)]
     pub compile_error: Option<CompileErrorExpect>,
     #[serde(default)]
-    pub compile_error_contains: MessageExpect,
+    pub compile_error_not_contains: Vec<ErrorPattern>,
     #[serde(default)]
-    pub compile_error_not_contains: MessageExpect,
+    pub format: BTreeMap<OutputFormat, OutputExpect>,
     #[serde(default)]
     pub node_count: Option<usize>,
     #[serde(default)]
@@ -138,7 +186,6 @@ pub struct QueryExpect {
     /// Assert row count for ungrouped/property-grouped aggregation results.
     #[serde(default)]
     pub row_count: Option<usize>,
-    /// Assert values on rows by index: `[{index: 0, col: val}]`
     #[serde(default)]
     pub row_values: Vec<BTreeMap<String, serde_json::Value>>,
     /// Assert group column metadata: `{ v_severity: "v.severity" }` verifies
@@ -146,6 +193,10 @@ pub struct QueryExpect {
     /// node `v`, property `severity`.
     #[serde(default)]
     pub group_columns: BTreeMap<String, String>,
+    #[serde(default)]
+    pub aggregation_columns: Option<Vec<ColumnDescriptor>>,
+    #[serde(default)]
+    pub edge_prop_absent: Vec<String>,
     /// Assert total edge count across all types.
     #[serde(default)]
     pub total_edge_count: Option<usize>,
@@ -168,10 +219,6 @@ pub struct QueryExpect {
     pub referential_integrity: bool,
     #[serde(default)]
     pub has_more: Option<bool>,
-    #[serde(default)]
-    pub gql_columns: BTreeMap<String, Vec<String>>,
-    #[serde(default)]
-    pub gql_column_names: Vec<String>,
     /// Assertions across ALL pages combined. The runner collects node IDs
     /// and edge tuples from every page and asserts at the end.
     #[serde(default)]
@@ -290,8 +337,8 @@ impl QueryExpect {
             assert!(
                 page.repeat_count.is_none()
                     && page.compile_error.is_none()
-                    && !page.compile_error_contains.is_configured()
-                    && !page.compile_error_not_contains.is_configured()
+                    && page.compile_error_not_contains.is_empty()
+                    && page.format.is_empty()
                     && page.pages.is_empty()
                     && page.all_pages.is_none(),
                 "{scenario}: page {} supports only result assertions",
@@ -317,6 +364,7 @@ impl QueryExpect {
             || self.empty_aggregation
             || self.row_count.is_some()
             || !self.row_values.is_empty()
+            || self.aggregation_columns.is_some()
     }
 
     fn has_path_assertions(&self) -> bool {
@@ -337,9 +385,9 @@ impl QueryExpect {
             || self.total_edge_count.is_some()
             || self.has_path_assertions()
             || self.referential_integrity
+            || !self.edge_prop_absent.is_empty()
             || self.has_more.is_some()
-            || !self.gql_columns.is_empty()
-            || !self.gql_column_names.is_empty()
+            || !self.format.is_empty()
     }
 
     /// Derive a total node count from per-entity specs when `node_count` is
@@ -360,55 +408,77 @@ impl QueryExpect {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(untagged)]
+#[serde(try_from = "RawCompileError")]
 pub enum CompileErrorExpect {
-    Flag(bool),
-    Substring(String),
-    PerFrontend(BTreeMap<String, String>),
+    Everywhere(RejectionReason),
+    By(BTreeMap<String, RejectionReason>),
 }
 
-impl CompileErrorExpect {
-    pub fn substring_for(&self, frontend_key: &str) -> Option<&str> {
-        match self {
-            Self::Flag(_) => None,
-            Self::Substring(sub) => Some(sub),
-            Self::PerFrontend(by_frontend) => Some(
-                by_frontend
-                    .get(frontend_key)
-                    .unwrap_or_else(|| panic!("compile_error missing frontend '{frontend_key}'"))
-                    .as_str(),
-            ),
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RawCompileError {
+    Everywhere(String),
+    By(BTreeMap<String, String>),
+}
+
+impl TryFrom<RawCompileError> for CompileErrorExpect {
+    type Error = String;
+
+    fn try_from(raw: RawCompileError) -> Result<Self, String> {
+        match raw {
+            RawCompileError::Everywhere(name) => rejection_reason(&name).map(Self::Everywhere),
+            RawCompileError::By(by) => by
+                .into_iter()
+                .map(|(key, name)| {
+                    if !["json", "gql", "clickhouse", "duckdb"].contains(&key.as_str()) {
+                        return Err(format!(
+                            "compile_error key '{key}' is not json, gql, clickhouse, or duckdb"
+                        ));
+                    }
+                    Ok((key, rejection_reason(&name)?))
+                })
+                .collect::<Result<_, _>>()
+                .map(Self::By),
         }
     }
 }
 
+pub(crate) fn rejection_reason(name: &str) -> Result<RejectionReason, String> {
+    RejectionReason::iter()
+        .find(|reason| <&str>::from(*reason) == name)
+        .ok_or_else(|| {
+            let known: Vec<&str> = RejectionReason::iter().map(<&str>::from).collect();
+            format!(
+                "unknown rejection reason '{name}'; expected one of {}",
+                known.join(", ")
+            )
+        })
+}
+
 #[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum MessageExpect {
-    All(Vec<String>),
-    PerFrontend(BTreeMap<String, Vec<String>>),
-}
+#[serde(try_from = "String")]
+pub struct ErrorPattern(pub Regex);
 
-impl Default for MessageExpect {
-    fn default() -> Self {
-        Self::All(Vec::new())
+impl TryFrom<String> for ErrorPattern {
+    type Error = regex::Error;
+
+    fn try_from(pattern: String) -> Result<Self, regex::Error> {
+        Regex::new(&pattern).map(Self)
     }
 }
 
-impl MessageExpect {
-    fn is_configured(&self) -> bool {
-        !matches!(self, Self::All(fragments) if fragments.is_empty())
-    }
-
-    pub fn for_frontend(&self, frontend_key: &str) -> &[String] {
+impl CompileErrorExpect {
+    pub fn reason_for(&self, backend: &str, frontend: &str) -> RejectionReason {
         match self {
-            Self::All(fragments) => fragments,
-            Self::PerFrontend(by_frontend) => by_frontend
-                .get(frontend_key)
+            Self::Everywhere(reason) => *reason,
+            Self::By(by) => *by
+                .get(backend)
+                .or_else(|| by.get(frontend))
                 .unwrap_or_else(|| {
-                    panic!("compile error message expectation missing frontend '{frontend_key}'")
-                })
-                .as_slice(),
+                    panic!(
+                        "compile_error names neither backend '{backend}' nor frontend '{frontend}'"
+                    )
+                }),
         }
     }
 }

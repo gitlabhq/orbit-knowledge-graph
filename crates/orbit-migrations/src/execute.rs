@@ -149,6 +149,7 @@ pub async fn replace_refreshable_views(
     let storage = query_data_model::Relational::<
         query_data_model::implementations::clickhouse::layout::ClickHouse,
     >::derive(ontology)?;
+    let settings = schema::compatibility_clause(session_compatibility(graph));
     for view in storage.refreshable_views() {
         let view_name = if view.versioned {
             format!("{prefix}{}", view.name)
@@ -173,7 +174,7 @@ pub async fn replace_refreshable_views(
             &view_name,
             format!(
                 "CREATE MATERIALIZED VIEW IF NOT EXISTS {view_name}\n\
-             REFRESH {} APPEND TO {}\nAS {rendered_select}",
+             REFRESH {} APPEND TO {}\nAS {rendered_select}{settings}",
                 view.refresh, view.append_to,
             ),
         )
@@ -228,6 +229,10 @@ pub async fn drop_all_version_entities(
         .await?;
     }
     Ok(())
+}
+
+fn session_compatibility(graph: &ArrowClickHouseClient) -> Option<&str> {
+    graph.inner().get_setting("compatibility")
 }
 
 async fn run_ddl(
@@ -397,7 +402,8 @@ async fn create_dictionaries_and_views(
             safe(SOURCE_TABLE) = prefixed.source_table.as_str(),
             "creating dictionary"
         );
-        run_ddl(graph, &prefixed.name, prefixed.to_create_sql(credentials)).await?;
+        let ddl = prefixed.to_create_sql(credentials, session_compatibility(graph));
+        run_ddl(graph, &prefixed.name, ddl).await?;
     }
 
     let all_table_names: Vec<String> = schema

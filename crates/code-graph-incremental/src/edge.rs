@@ -19,6 +19,7 @@ pub enum EdgeKind {
     Imports = 3,
     Extends = 4,
     TypeFlow = 5,
+    Links = 6,
 }
 
 impl EdgeKind {

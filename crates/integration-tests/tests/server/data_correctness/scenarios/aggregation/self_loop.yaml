@@ -12,4 +12,4 @@ query:
     {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","filters":{"name":"audit_caller"}}],"relationships":[{"type":"CALLS","from":"a","to":"a"}],"aggregations":[{"count":"a","as":"n"}]}
 
 expect:
-  compile_error: "relationship endpoints must use different node aliases"
+  compile_error: schema

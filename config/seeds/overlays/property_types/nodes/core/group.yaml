@@ -1,0 +1,16 @@
+properties:
+  score:
+    type: float
+    source: score
+    nullable: true
+    description: "Fixture float score."
+  private_note:
+    type: string
+    source: private_note
+    nullable: true
+    filterable: false
+    description: "Fixture note that cannot be filtered."
+storage:
+  columns:
+    - {name: score, type: "Nullable(Float64)", codec: ["ZSTD(1)"]}
+    - {name: private_note, type: "String", default: "''", codec: ["ZSTD(1)"]}

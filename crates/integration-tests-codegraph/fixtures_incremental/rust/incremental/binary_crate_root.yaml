@@ -1,0 +1,76 @@
+name: "Rust: a module moves between the library and binary crates when main.rs changes"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_binary_crate_root_steps"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub fn helper() {}
+
+  - path: src/main.rs
+    content: |
+      pub fn helper() {}
+
+      fn main() {}
+
+  - path: src/cli.rs
+    content: |
+      use crate::helper;
+
+      pub fn run() {
+          helper();
+      }
+
+tests:
+  - name: an undeclared module resolves through lib.rs
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'helper'
+      RETURN callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { tgt: "src/lib.rs" } }
+
+steps:
+  - name: main.rs declares the module
+    modify:
+      - path: src/main.rs
+        content: |
+          mod cli;
+
+          pub fn helper() {}
+
+          fn main() {
+              cli::run();
+          }
+    tests:
+      - name: the untouched module now resolves through main.rs
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+          WHERE caller.name = 'run' AND callee.name = 'helper'
+          RETURN callee.file_path AS tgt
+        assert:
+          - { row_count: 1 }
+          - { row: { tgt: "src/main.rs" } }
+
+  - name: main.rs drops the declaration again
+    modify:
+      - path: src/main.rs
+        content: |
+          pub fn helper() {}
+
+          fn main() {}
+    tests:
+      - name: the module resolves through lib.rs again
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+          WHERE caller.name = 'run' AND callee.name = 'helper'
+          RETURN callee.file_path AS tgt
+        assert:
+          - { row_count: 1 }
+          - { row: { tgt: "src/lib.rs" } }

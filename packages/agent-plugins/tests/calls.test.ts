@@ -91,6 +91,11 @@ test('each stdin query shows its own entities, and a stdin schema call keeps its
   expect([schema?.label, schema?.detail]).toEqual(['Read Orbit schema', 'Project'])
 })
 
+test('a query piped from a bare cat heredoc shows its entities', () => {
+  const envelope = JSON.stringify({ query: 'MATCH (mr:MergeRequest) RETURN mr' })
+  expect(describeOrbitCall('Bash', { command: `cat <<'EOF' | orbit query --file -\n${envelope}\nEOF` })?.detail).toBe('Merge requests')
+})
+
 test('calls that are not Orbit calls are left alone', () => {
   expect(describeOrbitCall('Bash', { command: 'ls -la' })).toBe(null)
   expect(describeOrbitCall('Read', { file_path: 'README.md' })).toBe(null)

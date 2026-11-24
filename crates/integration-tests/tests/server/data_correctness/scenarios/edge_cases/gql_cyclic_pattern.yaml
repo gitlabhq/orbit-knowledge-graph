@@ -6,4 +6,4 @@ query:
     RETURN u, n
 
 expect:
-  compile_error: "cycles are unsupported"
+  compile_error: schema

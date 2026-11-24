@@ -12,4 +12,5 @@ pub struct QuotaCheckInputs {
     pub instance_version: Option<String>,
     pub license_checksum: Option<SecretString>,
     pub is_gitlab_team_member: bool,
+    pub orbit_quota_exempt: bool,
 }

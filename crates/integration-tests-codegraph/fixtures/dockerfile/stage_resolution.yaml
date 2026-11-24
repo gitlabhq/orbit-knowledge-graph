@@ -1,0 +1,36 @@
+name: "Dockerfile: stage references resolve once, and FROM only sees earlier stages"
+
+fixtures:
+  - path: Dockerfile
+    content: |
+      ARG BP=linux
+      FROM --platform=$BP later AS a
+      LABEL v=$BP w=$BP
+      FROM x AS later
+      COPY --from=a /x /y
+
+tests:
+  - name: "FROM naming a later stage links nothing"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE b.name = 'later'
+      RETURN a.name AS from_stage, b.name AS to_stage
+    assert:
+      - { empty: true }
+
+  - name: "a variable used several times in a stage is one edge"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(v:Definition)
+      WHERE v.definition_type = 'Variable'
+      RETURN a.name AS user, v.name AS variable
+    assert:
+      - { row_count: 1 }
+      - { row: { user: "a", variable: "BP" } }
+
+  - name: "a stage definition spans its whole body"
+    query: |
+      MATCH (s:Definition)
+      WHERE s.name = 'a'
+      RETURN s.start_line AS start_line, s.end_line AS end_line
+    assert:
+      - { row: { start_line: 2, end_line: 3 } }

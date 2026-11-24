@@ -22,7 +22,7 @@ cases:
       gql: |
         MATCH (g:Group {id: 100})-[r:CONTAINS]->(p:Project) WHERE r.target_kind = 'Group' RETURN p LIMIT 10
     expect:
-      compile_error_contains: ['"Group" cannot match this pattern', "Valid values: Project"]
+      compile_error: schema
 
   - name: unknown_relationship_kind
     description: A relationship_kind that the schema does not have rejects, like type(r) does
@@ -30,7 +30,7 @@ cases:
       gql: |
         MATCH (g:Group {id: 100})-[r]->(p:Project) WHERE r.relationship_kind IN ['CONTAINS', 'NOT_A_KIND'] RETURN p LIMIT 10
     expect:
-      compile_error_contains: ['"NOT_A_KIND" cannot match this pattern', CONTAINS]
+      compile_error: schema
 
   - name: relationship_kind_outside_pattern
     description: A relationship_kind outside the pattern's declared types rejects instead of returning nothing
@@ -40,7 +40,7 @@ cases:
       gql: |
         MATCH (g:Group {id: 100})-[r:CONTAINS]->(p:Project) WHERE r.relationship_kind = 'AUTHORED' RETURN p LIMIT 10
     expect:
-      compile_error_contains: ['"AUTHORED" cannot match this pattern', "Valid values: CONTAINS"]
+      compile_error: schema
 
   - name: excluding_the_only_kind
     description: Excluding the only relationship_kind the pattern allows rejects instead of returning nothing
@@ -48,4 +48,4 @@ cases:
       gql: |
         MATCH (g:Group {id: 100})-[r:CONTAINS]->(p:Project) WHERE r.relationship_kind <> 'CONTAINS' RETURN p LIMIT 10
     expect:
-      compile_error_contains: ['<> "CONTAINS" excludes the only value this pattern allows; remove the filter']
+      compile_error: schema

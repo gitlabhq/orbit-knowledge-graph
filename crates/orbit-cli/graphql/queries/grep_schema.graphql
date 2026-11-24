@@ -1,5 +1,5 @@
 query GrepSchema {
-  orbit @gl_introduced(version: "19.4.0") {
+  orbit @gl_introduced(version: "19.3.0") {
     schema {
       nodes(first: 100) {
         nodes {

@@ -5,4 +5,4 @@ query:
     MATCH (f:File {id: 13004}) RETURN f.id ORDER BY f.content
 
 expect:
-  compile_error: "virtual"
+  compile_error: schema

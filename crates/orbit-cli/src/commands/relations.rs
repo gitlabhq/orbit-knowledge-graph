@@ -109,8 +109,10 @@ pub(crate) fn render(
                 .properties
                 .get("path")
                 .and_then(serde_json::Value::as_str);
+            let is_section =
+                node.properties.get("definition_type") == Some(&serde_json::Value::from("Section"));
             format!(
-                "({order}, {}, {})",
+                "({order}, {}, {}, {is_section})",
                 node.id,
                 path.map(sql_lit).unwrap_or_else(|| "NULL".into())
             )
@@ -120,7 +122,7 @@ pub(crate) fn render(
     let params = [git.project_id.into(), git.commit_sha.clone().into()];
     let edges = client.query_arrow_json(
         &format!(
-            "WITH {labels_cte}, targets(ord, target_id, path) AS (VALUES {targets})
+            "WITH {labels_cte}, targets(ord, target_id, path, is_section) AS (VALUES {targets})
 SELECT DISTINCT t.ord, t.target_id, e.relationship_kind AS kind,
        CASE WHEN e.source_id = t.target_id THEN '-->' ELSE '<--' END AS dir,
        l.label, l.reference, l.loc, l.def_kind, '' AS via, {hidden_expr} AS hidden
@@ -128,15 +130,29 @@ FROM targets t
 JOIN gl_edge e ON e.source_id = t.target_id OR e.target_id = t.target_id
 LEFT JOIN import_files i ON i.id = e.source_id
 JOIN labels l ON l.id = CASE WHEN e.source_id = t.target_id THEN e.target_id ELSE COALESCE(i.file_id, e.source_id) END
-WHERE e.relationship_kind <> 'DEFINES'
-  AND (t.path IS NULL OR l.path <> t.path OR l.reference = 'external/unresolved')
-ORDER BY t.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
+WHERE (
+    e.relationship_kind = 'DEFINES'
+    AND t.is_section
+    AND NOT (
+      l.reference LIKE 'File:%'
+      AND EXISTS (
+        SELECT 1 FROM gl_edge p
+        WHERE p.target_id = e.target_id AND p.relationship_kind = 'DEFINES' AND p.source_id <> e.source_id
+      )
+    )
+  ) OR (
+    e.relationship_kind <> 'DEFINES'
+    AND (t.path IS NULL OR l.path <> t.path OR l.reference = 'external/unresolved')
+  )
+ORDER BY t.ord, kind, dir DESC,
+         CASE WHEN kind = 'DEFINES' THEN TRY_CAST(regexp_extract(l.loc, '[0-9]+$') AS BIGINT) END,
+         l.path, l.label, l.loc, l.reference"
         ),
         &params,
     )?;
     let via = client.query_arrow_json(
         &format!(
-            "WITH {labels_cte}, targets(ord, target_id, path) AS (VALUES {targets}),
+            "WITH {labels_cte}, targets(ord, target_id, path, is_section) AS (VALUES {targets}),
 members AS (
   SELECT t.ord, t.target_id, t.path, e.target_id AS id FROM targets t
   JOIN gl_edge e ON e.source_id = t.target_id AND e.relationship_kind = 'DEFINES'
