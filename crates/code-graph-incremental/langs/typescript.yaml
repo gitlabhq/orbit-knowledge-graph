@@ -47,6 +47,10 @@ define:
       or select(owned(module), '(__module_export (__default_export))' by $ROOT | child("__default_export"), "default") | target_of
     '_': 'super(module, name)'
 
+  declared_in(name, at): >-
+    first(enclose(at), s => select(owned(s), '(__def $N:__defname)', name)
+      or select(owned(s), '(__binding (__declaration))' by $ROOT, name))
+
   object_field(ROOT, M):
     '(__def (__variable) $B:__binding)': >-
       select(under($B), '(__field)' by $ROOT, M) | child("__binding") | child("__rhs") | resolved
