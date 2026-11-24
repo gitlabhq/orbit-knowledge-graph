@@ -32,7 +32,6 @@ data:
   - [setjmp.h, setjmp, longjmp]
   - [signal.h, signal, raise]
   - [inttypes.h, imaxabs, imaxdiv, strtoimax, strtoumax, wcstoimax, wcstoumax]
-  lookup_from: [__source_root]
   records: [struct_specifier, union_specifier]
 
 canonicalize:

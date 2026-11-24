@@ -1493,6 +1493,7 @@ dependencies = [
  "arrow",
  "cpu-time",
  "either",
+ "globset",
  "indexmap 2.14.2",
  "indextree",
  "itertools 0.14.0",

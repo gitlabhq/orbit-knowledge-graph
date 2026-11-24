@@ -28,7 +28,6 @@ data:
     hypot, ldexp, log, log10, log1p, log2, modf, pow, remainder, round, sin, sinh, sqrt, tan, tanh, trunc]
   - [cctype, isalnum, isalpha, isblank, iscntrl, isdigit, isgraph, islower, isprint, ispunct, isspace,
     isupper, isxdigit, tolower, toupper]
-  lookup_from: [__source_root]
 
 canonicalize:
   - stage: imports

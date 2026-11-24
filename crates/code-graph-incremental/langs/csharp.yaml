@@ -11,7 +11,6 @@ data:
   - [System/Console, Beep, Clear, OpenStandardError, OpenStandardInput, OpenStandardOutput, Read, ReadKey,
     ReadLine, ResetColor, SetBufferSize, SetCursorPosition, SetError, SetIn, SetOut, SetWindowPosition,
     SetWindowSize, Write, WriteLine]
-  lookup_from: [__source_root]
   merge_same_named_types: true
   throws: [throw_statement, throw_expression]
   wrapped_types: [generic_name, nullable_type]

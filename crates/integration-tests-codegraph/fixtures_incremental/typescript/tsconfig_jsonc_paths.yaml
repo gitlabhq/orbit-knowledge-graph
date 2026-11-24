@@ -1,0 +1,41 @@
+name: tsconfig with comments, trailing commas and paths before baseUrl
+
+fixtures:
+  - path: tsconfig.json
+    content: |
+      {
+        // tsc --init writes comments like this one
+        "compilerOptions": {
+          /* paths sit before baseUrl */
+          "paths": {
+            "@lib": ["lib/index.ts"],
+            "@ui/*": ["missing/*", "ui/*",],
+          },
+          "baseUrl": "./src",
+        },
+      }
+
+  - path: src/lib/index.ts
+    content: |
+      export function helper() {}
+
+  - path: src/ui/button.ts
+    content: |
+      export function button() {}
+
+  - path: src/main.ts
+    content: |
+      import { helper } from '@lib';
+      import { button } from '@ui/button';
+      export function run() { helper(); button(); }
+
+tests:
+  - name: Aliases from a commented tsconfig resolve, and a later target is tried
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'run'
+      RETURN target.name AS name, target.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { name: helper, file: src/lib/index.ts } }
+      - { row: { name: button, file: src/ui/button.ts } }
