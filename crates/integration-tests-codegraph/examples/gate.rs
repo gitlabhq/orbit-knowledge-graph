@@ -116,6 +116,7 @@ fn main() {
             .unwrap_or_default()
             .lines()
             .map(str::to_string)
+            .filter(|name| outcomes.contains_key(name))
             .collect();
         let new: Vec<&String> = failed.difference(&before).collect();
         let fixed: Vec<&String> = before.difference(&failed).collect();
