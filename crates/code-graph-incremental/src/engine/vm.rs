@@ -402,7 +402,11 @@ impl<'e, S: Store> Vm<'e, S> {
                         Kind::Effect => std::mem::replace(&mut run.reading, u64::MAX),
                         _ => run.reading,
                     };
+                    let started = run.profile.as_mut().map(|p| p.enter(id));
                     let found = invoke(run, id, &args);
+                    if let (Some(p), Some(start)) = (&mut run.profile, started) {
+                        p.leave(id, start, 0);
+                    }
                     run.reading = reading;
                     self.values.push(found);
                     return;
