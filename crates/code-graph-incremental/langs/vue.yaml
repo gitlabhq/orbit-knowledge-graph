@@ -1,5 +1,9 @@
 import: [shapes]
 
+data:
+  lifecycle_hooks: [beforeCreate, created, beforeMount, mounted, beforeUpdate, updated, beforeDestroy, destroyed,
+    beforeUnmount, unmounted, activated, deactivated, errorCaptured, serverPrefetch]
+
 canonicalize:
   - stage: normalize
     rewrite:
@@ -16,6 +20,10 @@ canonicalize:
     before: regions
     rewrite:
       - '(export_statement $$$P value: (object $$$A (pair key: (property_identifier "/^(methods|computed)$/") value: (object $$$M)) $$$B))': '(export_statement $$$P value: (object $$$A $$$M $$$B))'
+  - stage: options-hooks
+    before: regions
+    rewrite:
+      - '(export_statement value: (object $ROOT:(method_definition name: $N:(property_identifier %lifecycle_hooks) body: $B)))': '(__def (__defname @$N) (__method) $B) #flavor=LifecycleHook'
   - stage: options-component
     before: regions
     rewrite:
