@@ -235,7 +235,12 @@ define:
     | first_member(name, role) | distinct_from($ROOT)
   belongs_or_declares(ROOT, def, name, site):
     '_ when belongs(def, $ROOT)': '$ROOT'
+    '_ when implicit_member(def, site)': '$ROOT'
     '_ when first(ancestors(site), up => declares(up, def, name))': '$ROOT'
+  implicit_member(ROOT, site):
+    '_ when stored($ROOT)': 'implicit_call(site)'
+  implicit_call(ROOT):
+    '(__call #implicit_self)': '$ROOT'
   declares(ROOT, def, name):
     '_ when same($ROOT, def)': '$ROOT'
     '(__binding (__declaration)) when in($ROOT, name)': '$ROOT'
