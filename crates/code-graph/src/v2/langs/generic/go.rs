@@ -56,7 +56,6 @@ impl DslLanguage for GoDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        // Unconditional rules first; reverse iteration checks the pointer rules first.
         let mut scopes: Vec<ScopeRule> = go_callable_scopes(field("result")).into();
         scopes.extend(
             go_callable_scopes(go_pointer_result())
@@ -190,7 +189,6 @@ impl DslLanguage for GoDsl {
     }
 }
 
-/// A pointer result's pointee, so `*T` matches the receiver `T`.
 fn go_pointer_result() -> Extract {
     field("result").nav(Child, AnyKind(&["type_identifier", "qualified_type"]))
 }
@@ -340,7 +338,6 @@ impl HasRules for GoRules {
 
 const GO_MOD_MAX_BYTES: u64 = 1 << 20;
 
-/// Go package names repeat across directories, so the FQN alone cannot pick the target.
 fn build_go_import_directory_index(graph: &CodeGraph) -> ImportDirectoryIndex {
     let mut index = ImportDirectoryIndex::default();
     let package_dirs: FxHashSet<&str> = graph
@@ -372,7 +369,6 @@ struct GoModule {
     directory: String,
 }
 
-/// A module path declared by more than one `go.mod` is dropped: the target is ambiguous.
 fn go_modules(root: &Path, package_dirs: &FxHashSet<&str>) -> Vec<GoModule> {
     let mut checked: FxHashSet<&str> = FxHashSet::default();
     let mut modules: Vec<GoModule> = Vec::new();

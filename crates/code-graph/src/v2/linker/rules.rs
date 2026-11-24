@@ -123,7 +123,6 @@ pub struct ResolverHooks {
     pub external_import_type: Option<ExternalImportTypeHook>,
     pub resolve_ident_type: Option<fn(&super::CodeGraph, &str) -> Option<String>>,
     pub reexport_index_builder: Option<ReexportIndexBuilder>,
-    /// When set, a member of an imported package resolves to definitions in its directory.
     pub import_directory_index_builder: Option<ImportDirectoryIndexBuilder>,
 }
 

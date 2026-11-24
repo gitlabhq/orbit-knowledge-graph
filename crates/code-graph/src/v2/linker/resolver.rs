@@ -440,8 +440,6 @@ impl<'a> ResolveCtx<'a> {
         !self.resolve_import_cached(import_node).is_empty()
     }
 
-    /// A directory-mapped import resolves for a ref only when its package
-    /// defines the member the ref names.
     fn import_resolves_for_ref(&mut self, import_node: NodeIndex, r: &RefData<'_>) -> bool {
         let member = match r.chain {
             None => r.name,
@@ -467,9 +465,6 @@ impl<'a> ResolveCtx<'a> {
             .directory(self.graph.str(import.path))
     }
 
-    /// For a chain base bound to imports of repository packages, the
-    /// definitions that the next step names in those package directories.
-    /// `None` when no reaching import maps to a directory.
     fn resolve_directory_import_member(
         &mut self,
         chain: &[ExpressionStep],

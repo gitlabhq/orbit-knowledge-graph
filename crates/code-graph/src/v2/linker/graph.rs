@@ -965,7 +965,6 @@ impl CodeGraph {
         }
     }
 
-    /// Methods are excluded; they are addressed through their receiver.
     pub fn lookup_top_level_in_directory(&self, directory: &str, name: &str) -> Vec<NodeIndex> {
         let sep = self.sep();
         self.lookup_name(name)
