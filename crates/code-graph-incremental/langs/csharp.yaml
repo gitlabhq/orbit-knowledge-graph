@@ -42,7 +42,7 @@ canonicalize:
       - '(attribute name: $N:identifier)': '(__decorator @$N)'
       - '(member_access_expression (this) name: $N:identifier)': '(__ivar @$N)'
       - '(base_list $$$T:identifier)': '(base_list $$$T=>__supertype)'
-      - '(%typed_params type: $T:identifier name: $N:identifier)': '%typed_param($N, $T)'
+      - '(%typed_params type: $T:identifier name: $N:identifier)': '(__binding @$N (__ssa_typed @$T))'
       - '(parameter name: $N:identifier)': '(__binding @$N)'
   - stage: retag-expressions
     rewrite:
