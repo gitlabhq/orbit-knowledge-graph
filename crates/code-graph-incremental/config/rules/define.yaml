@@ -351,7 +351,7 @@ define:
   aliased_as(ROOT, name):
     '(__def $A:__alias) when in($A, name)': '$ROOT'
   imported_name(name, at): >-
-    select(under(file(at)), '(__import $ROOT:__name)' by local_name($ROOT), name) | target_of
+    select(under(file(at)), '(__import $ROOT:(__name #!type_only))' by local_name($ROOT), name) | target_of
     or select(under(file(at)), '(__import $ROOT:__name)' by $ROOT | written, "*") | follow(imports, from) | exported(name)
   local_name(ROOT): '$ROOT | child("__alias") or $ROOT | child("__ssa_hint") or $ROOT'
   declared_in(name, at): >-
