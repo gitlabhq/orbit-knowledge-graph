@@ -47,6 +47,14 @@ define:
       or select(owned(module), '(__module_export (__default_export))' by $ROOT | child("__default_export"), "default") | target_of
     '_': 'super(module, name)'
 
+  namespace_miss(ROOT, M):
+    '_ when absent_from($ROOT | read | is_file, M)': none
+    '_': 'super(ROOT, M)'
+  absent_from(ROOT, name):
+    '_ when exported($ROOT, name)': none
+    '_ when select(under($ROOT), ''(__module_export (__import (__name "*")))'' by "x", "x")': none
+    '_ when select(under($ROOT), ''(__module_export)'' by "x", "x") or select(under($ROOT), ''(__def #esm)'' by "x", "x")': '$ROOT'
+
   declared_in(name, at): >-
     first(enclose(at), s => select(owned(s), '(__def $N:__defname)', name)
       or select(owned(s), '(__binding (__declaration))' by $ROOT, name))
@@ -202,6 +210,9 @@ canonicalize:
     rewrite:
       - '(export_statement **/(default) (__def $$$CHILDREN))': '(export_statement (__def (__default_export "default") $$$CHILDREN))'
       - '(export_statement (variable_owner $B:__binding))': '(export_statement (__def (__defname @$B $B) (__variable) $B))'
+  - stage: esm-exports
+    rewrite:
+      - '(export_statement)': '#esm@__def=true'
   - use: ssa_cleanup
   - stage: tag-defs
     rewrite:
