@@ -8,7 +8,7 @@ data:
     ArrayIndexOutOfBoundsException, ArrayStoreException, IllegalMonitorStateException, IllegalThreadStateException,
     InterruptedException, NegativeArraySizeException, NumberFormatException, ReflectiveOperationException,
     StringIndexOutOfBoundsException, StackTraceElement, ThreadGroup, ThreadLocal, InheritableThreadLocal,
-    ProcessBuilder, RuntimePermission]
+    ProcessBuilder, RuntimePermission, Override, Deprecated, FunctionalInterface, SuppressWarnings, SafeVarargs]
   stdlib: [javax, jdk, java/lang/Math, java/util/Objects]
   external: [java, java/lang]
   providers:

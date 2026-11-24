@@ -108,7 +108,7 @@ impl<'t, S: Store> Cx<'_, 't, Ssa, S> {
             let found = self.read(c);
             self.write().seen.insert(c.index(), found);
         }
-        if c.is(k.call) {
+        if c.is(k.call) || c.is(k.decorator) {
             let wildcards = std::rc::Rc::clone(&self.state().wildcards);
             self.write().wild_at.insert(c.index(), wildcards);
         }

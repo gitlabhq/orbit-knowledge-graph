@@ -12,7 +12,9 @@ link:
   decorator:
     - '$D:(__def $ROOT:__decorator)':
         calls: { from: $D, to: '$ROOT | type | is_def' }
-        imports: { from: $D, to: '$ROOT | type | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
+        imports:
+          - { from: $D, to: '$ROOT | type | imported', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
+          - { from: $D, to: '$ROOT | unbound | wildcards_for($ROOT)', site: $ROOT, resolution: 'resolution(TARGET, $ROOT)' }
 
   call:
     - '(__def $K:__class|__struct|__impl|__interface|__trait|__enum (__binding "/^$/" (__rhs $ROOT:__call)))': none
