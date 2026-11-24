@@ -32,6 +32,8 @@ data:
   blocks: [block, do_block]
 
 define:
+  receiver_imports(ROOT):
+    '(__call)': '$ROOT | follow(imports, site)'
   unbound_receiver(ROOT):
     '(__call (__callee (__member $O:__object))) when read($O)': none
     '(__call (__callee (__member (__object "/^[A-Za-z_][A-Za-z0-9_]*$/"))))': '$ROOT'
@@ -89,7 +91,7 @@ canonicalize:
       - '(program $$$C)': '%source_file($$$C)'
       - '(return $$$V)': '(__ssa_return $$$V)'
       - '(superclass $S:constant)': '(rb_super (__supertype @$S) (__import (__source @$S) (__source_path @$S | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$S))) #import_type@__import=Autoload'
-      - '(superclass $S:scope_resolution)': '(rb_super (__supertype @$S | strip("::") | split_last("::") $S) (__import (__source @$S | regex_replace("(::)?[^:]+$", "")) (__source_path @$S | strip("::") | replace("::", "/") | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$S | strip("::") | split_last("::")))) #import_type@__import=Autoload'
+      - '(superclass $S:scope_resolution)': '(rb_super (__supertype @$S | strip("::") | split_last("::")) (__import (__source @$S | regex_replace("(::)?[^:]+$", "")) (__source_path @$S | strip("::") | replace("::", "/") | regex_replace("([a-z0-9])([A-Z])", "${1}_${2}") | lowercase) (__name @$S | strip("::") | split_last("::")))) #import_type@__import=Autoload'
       - '(%params name: $N:identifier)': '(__binding @$N)'
       - '(method_parameters $$$P)': '(method_parameters $$$P=>__binding)'
       - '(block_parameters $$$P)': '(block_parameters $$$P=>block_local)'

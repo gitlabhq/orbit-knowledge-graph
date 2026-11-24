@@ -12,6 +12,8 @@ define:
       or select(files, '(__source_file)' by $ROOT | collapse_index(%index_files), path)
       or file(select(files, '(__source_file $P:__package (__def $ROOT:__defname))' by package_path($P) | concat("/", $ROOT), path))
       or file(select(files, '(__source_file (__def $ROOT:__defname))' by package_path($ROOT), path))
+  receiver_imports(ROOT):
+    '_': none
   package_path(ROOT): '$ROOT | regex_replace("[.]|::|[\\\\]", "/")'
   roots(at): >-
     select(project, '(__dir $D:__source_root)') | tree_path
@@ -22,7 +24,9 @@ define:
     '_ when in(place, "roots")': 'file_at(path) or first(roots(path), r => file_at(r | concat("/", path)))'
   outside(path, names):
     '_ when in(path | split_first("/"), names)': 'opaque'
-  modules(ROOT): 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
+  modules(ROOT):
+    '(__import (__source_path "/^[.]/"))': 'aliased($ROOT) or locate("roots", $ROOT | tag("resolved_source"))'
+    '_': 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
   aliased(ROOT): >-
     first(union(governing($ROOT) | config_aliases, select(project, '(__alias)')) | longest_first,
       a => alias_files(a, $ROOT))
@@ -103,8 +107,14 @@ resolve:
         calls: { to: '$I | ivar | type_node | type | callable | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee $I:__ivar))':
         calls: { to: 'lookup(@$I, $ROOT, scope($ROOT) | class) | elsewhere(file($ROOT))', site: $ROOT }
+    - '(__call #implicit_self (__callee "/./"))':
+        calls: { to: 'targets($ROOT, true) | callable | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee "/./"))':
         calls: { to: 'targets($ROOT, false) | callable | elsewhere(file($ROOT))', site: $ROOT }
+
+  imported_receiver:
+    - '(__call (__callee (__member $O:__object))) when receiver_imports($ROOT)':
+        calls: { to: 'receiver_imports($ROOT) | follow(imports, from) | callable | elsewhere(file($ROOT))', site: $ROOT }
 
   bound_import_call:
     - '(__call (__callee "/./")) when $ROOT | follow(type_flow, site) | follow(imports, site)':
