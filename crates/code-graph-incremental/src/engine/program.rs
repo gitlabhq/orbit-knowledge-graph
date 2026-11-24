@@ -137,7 +137,7 @@ pub(super) struct Template {
     pub(super) case: u16,
     pub(super) tpl: Tpl<Expr>,
     pub(super) replace: bool,
-    pub(super) unique: Option<(Pat, u16, usize)>,
+    pub(super) unique: Option<(Pat, u8, u16, usize)>,
     pub(super) tags: Vec<u32>,
     pub(super) tag_on: Option<u16>,
 }

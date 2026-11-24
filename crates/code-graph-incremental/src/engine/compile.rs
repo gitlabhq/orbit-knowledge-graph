@@ -1028,9 +1028,9 @@ impl<'a> Loader<'a> {
             .map(|src| {
                 let mut slots = Slots::new();
                 let pat = pattern::parse_pattern(src, &mut slots, self.lang, &|_| None)?;
-                let (_, kind) =
+                let (depth, kind) =
                     pattern::anchor(&pat).ok_or_else(|| LoadError(format!("unique {src:?}")))?;
-                Ok::<_, LoadError>((pat, kind, slots.len()))
+                Ok::<_, LoadError>((pat, depth, kind, slots.len()))
             })
             .transpose()?;
         let mut writes = Vec::new();

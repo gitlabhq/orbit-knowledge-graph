@@ -127,10 +127,10 @@ canonicalize:
       - '(annotation_type_declaration $M?:modifiers name: $N:identifier body: $B)': '(__def (__defname @$N) (__interface) $M $B)'
   - stage: records
     rewrite:
-      - '(record_component "/^equals$/")': '(__def (__defname @$ROOT) (__method) (formal_parameters (__binding "o"))) unique (__def (__method))'
-      - '(record_component %record_overrides)': '(__def (__defname @$ROOT) (__method) (formal_parameters)) unique (__def (__method) (formal_parameters !(__binding)))'
-      - '(record_component $T:__ssa_typed)': '(__def (__defname @$ROOT) (__method) (__ssa_return_type @$T) (formal_parameters)) unique (__def (__method) (formal_parameters !(__binding))) #value=true'
-      - '(record_component)': '(__def (__defname @$ROOT) (__method) (formal_parameters)) unique (__def (__method) (formal_parameters !(__binding))) #value=true'
+      - '(record_component "/^equals$/")': '(__def (__defname @$ROOT) (__method) (formal_parameters (__binding "o"))) unique (__def $ROOT:__defname (__method) (formal_parameters (__binding)))'
+      - '(record_component %record_overrides)': '(__def (__defname @$ROOT) (__method) (formal_parameters)) unique (__def $ROOT:__defname (__method) (formal_parameters !(__binding)))'
+      - '(record_component $T:__ssa_typed)': '(__def (__defname @$ROOT) (__method) (__ssa_return_type @$T) (formal_parameters)) unique (__def $ROOT:__defname (__method) (formal_parameters !(__binding))) #value=true'
+      - '(record_component)': '(__def (__defname @$ROOT) (__method) (formal_parameters)) unique (__def $ROOT:__defname (__method) (formal_parameters !(__binding))) #value=true'
   - use: ssa_cleanup
   - stage: tag-defs
     rewrite:

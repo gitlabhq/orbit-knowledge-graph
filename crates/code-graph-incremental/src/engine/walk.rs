@@ -595,29 +595,60 @@ fn first_of_kind<S: Store>(tree: &Tree<S>, at: u32, kind: u16) -> u32 {
         .map_or(at, |n| n.index())
 }
 
-/// Whether a sibling of `target` matching `unique` has the built node's key.
+/// Whether a sibling of `target` matching `unique` has the built node's key:
+/// the text of the node `$ROOT` holds, `depth` levels under the matched node.
 fn taken(
     tree: &Tree<Mutable>,
     lang: &Lang,
     target: NodeId,
     built: Option<NodeId>,
-    unique: &(Pat, u16, usize),
+    unique: &(Pat, u8, u16, usize),
 ) -> bool {
-    let (pat, kind, slots) = unique;
+    let (pat, depth, kind, slots) = unique;
     let Some(built) = built else {
         return false;
     };
-    let key = tree.cursor(Tree::to_raw(built)).child_sym_of_kind(*kind);
+    let key = |at: u32| {
+        let mut keyed = Vec::new();
+        keyed_under(tree, at, *depth, *kind, &mut keyed);
+        keyed
+    };
+    let wanted: Vec<_> = key(Tree::to_raw(built))
+        .into_iter()
+        .map(|k| tree.cursor(k).sym_opt())
+        .collect();
     let mut caps: Vec<Cap<NodeId>> = vec![SmallVec::new(); *slots];
     target.parent(&tree.storage.0).is_some_and(|parent| {
         parent
             .children(&tree.storage.0)
             .filter(|&c| c != target)
             .any(|c| {
-                pattern::matches(tree, lang, c, None, pat, &mut caps, &[])
-                    && tree.cursor(Tree::to_raw(c)).child_sym_of_kind(*kind) == key
+                key(Tree::to_raw(c)).into_iter().any(|k| {
+                    wanted.contains(&tree.cursor(k).sym_opt())
+                        && pattern::matches(
+                            tree,
+                            lang,
+                            c,
+                            Some(tree.storage.id(k)),
+                            pat,
+                            &mut caps,
+                            &[],
+                        )
+                })
             })
     })
+}
+
+fn keyed_under(tree: &Tree<Mutable>, at: u32, depth: u8, kind: u16, out: &mut Vec<u32>) {
+    if depth == 0 {
+        if tree.cursor(at).kind() == kind {
+            out.push(at);
+        }
+        return;
+    }
+    for kid in tree.cursor(at).children() {
+        keyed_under(tree, kid.index(), depth - 1, kind, out);
+    }
 }
 
 /// One tree's piece of the declared index `id`: each match filed under its
