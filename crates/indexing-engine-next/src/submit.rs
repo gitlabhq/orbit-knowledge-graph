@@ -1,6 +1,6 @@
 use anyhow::bail;
 
-use crate::event::TaskStep;
+use crate::event::ProtocolEvent;
 use crate::pending::PendingWrite;
 use crate::ports::Ports;
 use crate::task::{TaskId, TaskMessage};
@@ -23,13 +23,15 @@ pub(crate) async fn submit_task(ports: &Ports, message: TaskMessage) -> anyhow::
             (message, false)
         }
     };
-    let submitted = TaskStep::Submitted { found_pending };
-    ports.observer.observe(&pending.build_event(now, submitted));
+    let submitted = ProtocolEvent::Submitted {
+        task: pending.task,
+        found_pending,
+    };
+    ports.log.record(now, submitted);
 
     let task = pending.task;
     let now = ports.clock.now().await;
-    let published = pending.build_event(now, TaskStep::Published);
     ports.queue.publish(pending).await?;
-    ports.observer.observe(&published);
+    ports.log.record(now, ProtocolEvent::Published(task));
     Ok(task)
 }
