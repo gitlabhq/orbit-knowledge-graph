@@ -1,4 +1,11 @@
 define:
+  file_dir(ROOT): >-
+    select(project, '(__dir)' by tree_path($ROOT), $ROOT | file | regex_replace("/?[^/]*$", ""))
+    or select(project, '(__root)')
+  source_root(ROOT):
+    '(_ (__source_root))': '$ROOT'
+    '$P:(_ $ROOT)': 'source_root($P)'
+  source_root_rel(ROOT): '$ROOT | file | strip(tree_path(source_root(file_dir($ROOT))) or "") | strip("/")'
   child(ROOT, KIND):
     '(_ $C:(KIND "/(?s)./"))': '$C'
   up_child(ROOT, KIND):

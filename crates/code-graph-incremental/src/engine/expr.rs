@@ -373,15 +373,6 @@ impl<'s> Parser<'s, '_> {
                             args.push(Expr::Lit(Val::Sym(region)));
                             regions += 1;
                         }
-                        Arg::TreeSet => {
-                            self.space();
-                            let name = self.ident();
-                            let set =
-                                self.scope.lang.tree_set(name).ok_or_else(|| {
-                                    self.error(&format!("{name} is not a tree set"))
-                                })?;
-                            args.push(Expr::Lit(Val::Sym(set as u32)));
-                        }
                         Arg::EdgeKey => {
                             self.space();
                             let name = self.ident();

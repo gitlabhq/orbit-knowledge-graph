@@ -148,7 +148,6 @@ static FUNCTIONS: &[Function<Text>] = &[
         o,
         &format!("{}:{}", c.start(), c.end())
     )),
-    function!(Pure, "file_dir", [one, tree_set], |cx, a| file_dir(cx, a)),
 ];
 
 const MAX_REGEX_LOOP_PASSES: usize = 64;
@@ -195,6 +194,23 @@ fn lit(lang: &Lang, v: Val) -> &str {
     }
 }
 
+/// The call's arguments with each node after the first read as its text,
+/// since a text function's parameters are texts; copied only when needed.
+fn params<'a, S: Store>(cx: &Cx<'_, '_, Text, S>, a: &'a [Vals]) -> Cow<'a, [Vals]> {
+    let node = |v: &Val| matches!(v, Val::Node(_) | Val::Type(_));
+    if !a.iter().skip(1).any(|vals| vals.iter().any(node)) {
+        return Cow::Borrowed(a);
+    }
+    let text = |v: Val| match node(&v) {
+        true => cx.text(v).map_or(v, Val::Sym),
+        false => v,
+    };
+    let rest = a[1..]
+        .iter()
+        .map(|vals| vals.iter().map(|&v| text(v)).collect());
+    Cow::Owned(std::iter::once(a[0].clone()).chain(rest).collect())
+}
+
 fn opts<'t: 's, 's, S: Store>(cx: &Cx<'_, 't, Text, S>, args: &'s [Vals]) -> Opts<'s> {
     Opts {
         lang: cx.lang(),
@@ -211,31 +227,6 @@ fn text<'t, S: Store>(cx: &Cx<'_, 't, Text, S>, v: Val) -> Option<&'t str> {
     }
 }
 
-/// The directory of set `a[1]`'s tree that holds a file tree, by its path.
-fn file_dir<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals]) -> Vals {
-    let set = a[1].first().map_or(0, |v| match v {
-        Val::Sym(s) => *s as usize,
-        _ => 0,
-    });
-    let (Some(loc), Some(mut at)) = (a[0][0].loc(), cx.roots(set).next()) else {
-        return Vals::new();
-    };
-    let syms = &cx.lang().syms;
-    let dir_kind = cx.kinds()[0];
-    let label = &cx.jump(loc).tree().label;
-    let dirs = label.rsplit_once('/').map_or("", |(dirs, _)| dirs);
-    for segment in dirs.split('/').filter(|s| !s.is_empty()) {
-        let Some(dir) = at
-            .children()
-            .find(|c| c.is(dir_kind) && syms.resolve(c.sym()) == segment)
-        else {
-            return Vals::new();
-        };
-        at = dir;
-    }
-    one(Val::Node(at.into()))
-}
-
 fn sym(lang: &Lang, s: &str) -> Vals {
     match s.is_empty() {
         true => Vals::new(),
@@ -247,7 +238,8 @@ type Edit = for<'s> fn(&'s str, &Opts<'s>) -> Cow<'s, str>;
 
 fn edit<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals], f: Edit) -> Vals {
     let lang = cx.lang();
-    let o = Opts { lang, args: a };
+    let args = params(cx, a);
+    let o = Opts { lang, args: &args };
     match text(cx, a[0][0]) {
         Some(s) if !s.is_empty() => sym(lang, &f(s, &o)),
         _ => Vals::new(),
@@ -262,9 +254,10 @@ fn at<'t, S: Store>(
     let Some(loc) = a[0][0].loc() else {
         return Vals::new();
     };
+    let args = params(cx, a);
     let o = Opts {
         lang: cx.lang(),
-        args: a,
+        args: &args,
     };
     match f(cx.jump(loc), &o) {
         Some(Val::Sym(0)) | None => Vals::new(),

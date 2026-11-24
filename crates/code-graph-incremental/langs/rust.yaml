@@ -222,10 +222,12 @@ project:
       - '(__dir (__file "main.rs"))': '+ (__source_root)'
 
 display:
+  - stage: module
+    rewrite:
+      - '$M:__source_file': '#entity=File #file_path=@$M #language=@$M | split_last(".") | map("rs:rust") #module_path=$M | source_root_rel | regex_replace("\.rs$", "") | regex_replace("(^|/)(mod|lib|main)$", "") | replace("/", "::")'
   - stage: fqn
     rewrite:
-      - '$M:__source_file': '#entity=File #file_path=@$M #language=@$M | split_last(".") | map("rs:rust") #module_path=$M | tag("source_root_rel") | regex_replace("\.rs$", "") | regex_replace("(^|/)(mod|lib|main)$", "") | replace("/", "::")'
-      - '$M:__source_file': '#fqn=$M | file_dir(project) | inherited_tag("crate") | concat("::", $M | tag("module_path")) | keep_last("::", 64, 4096)'
+      - '$M:__source_file': '#fqn=$M | file_dir | inherited_tag("crate") | concat("::", $M | tag("module_path")) | keep_last("::", 64, 4096)'
       - use: def_fqn_colons
   - stage: def_type
     rewrite:
