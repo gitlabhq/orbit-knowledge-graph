@@ -60,6 +60,8 @@ define:
     '(__binding $R:__rhs)': '$R | tail | producing or $ROOT | type'
     '(__binding $T:__ssa_typed)': '$T | type'
     '_': '$ROOT | type'
+  annotated(ROOT):
+    '(__binding $T:__ssa_typed)': '$T | type | unique'
   dispatched(ROOT, contract, M):
     '_ when contract_impls($ROOT, contract)': 'declared(contract_impls($ROOT, contract), M, "callable") or declared(contract, M, "callable")'
   contract_impls(ROOT, contract): '$ROOT | other_parts | implements(contract)'
@@ -95,6 +97,10 @@ resolve:
         calls: { to: '$ROOT | follow(type_flow, site) | producing | member($M) or $O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee $M:(__member $O:(__object (__qualifier)))))':
         calls: { to: '$O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
+    - '(__call (__callee $M:(__member $O:(__object !(__call) !(__member) !(__object) !(__qualifier) !(__ivar)))))':
+        calls:
+          - { to: '$O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
+          - { to: '$ROOT | follow(type_flow, site) | producing | member($M) or $ROOT | follow(type_flow, site) | annotated | member($M)', site: $ROOT }
     - '(__call (__callee $M:(__member $O:__object)))':
         calls:
           - { to: '$O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
