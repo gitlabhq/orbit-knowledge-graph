@@ -62,8 +62,6 @@ impl DslLanguage for GoDsl {
                 .map(|rule| rule.when(field_kind("result", &["pointer_type"]))),
         );
         scopes.extend([
-            // Unconditional fallback first — reverse iteration means conditional
-            // rules (Struct, Interface) are checked before the fallback.
             scope("type_spec", "Type").def_kind(DefKind::Other),
             scope("type_spec", "Struct")
                 .def_kind(DefKind::Class)
@@ -208,8 +206,6 @@ fn go_callable_scopes(result: Extract) -> [ScopeRule; 3] {
                     ),
                 ),
             ),
-        // Interface method specs — nested inside the interface scope,
-        // so they get FQNs like Repository.Get.
         scope("method_elem", "Method")
             .def_kind(DefKind::Method)
             .no_scope()
