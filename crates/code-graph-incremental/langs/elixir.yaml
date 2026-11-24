@@ -18,13 +18,18 @@ data:
     fetch!, filter, find, find_index, flat_map, frequencies, group_by, into, join, map, max, min, reduce,
     reject, reverse, sort, sort_by, split, sum, take, to_list, uniq, uniq_by, unzip, with_index, zip]
 
+define:
+  imported_name(name, at): >-
+    select(under(file(at)), '(__import $ROOT:__name)' by local_name($ROOT), name) | target_of
+    or parent(at) | follow(imports, site) | follow(imports, from) | exported(name)
+
 canonicalize:
   - stage: imports
     rewrite:
       - '(call target: (identifier "alias") (arguments (dot left: $L:alias right: (tuple $$$M:alias))))': '(__import (__source @$L) (__source_path @$L | replace(".", "/")) $$$M->__name) #import_type=Alias'
       - '(call target: (identifier "alias") (arguments $A:alias (keywords (pair value: $T:alias))))': '(__import (__source @$A | regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A | regex_replace("(^|\.)[^.]+$", "") | replace(".", "/")) (__name @$A | split_last(".") (__alias @$T))) #import_type=Alias'
       - '(call target: (identifier "alias") (arguments $A:alias))': '(__import (__source @$A | regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A | replace(".", "/")) (__name @$A | split_last("."))) #import_type=Alias'
-      - '(call target: (identifier "import") (arguments $A:alias $$$R))': '(__import (__source @$A) (__source_path @$A | replace(".", "/")) (__name @$A (__ssa_hint "*"))) #import_type=Import'
+      - '(call target: (identifier "import") (arguments $A:alias $$$R))': '(__import (__source @$A) (__source_path @$A | replace(".", "/")) (__name @$A (__ssa_hint "*"))) #import_type=Import #callable=true'
       - '(call target: (identifier "require") (arguments $A:alias $$$R))': '(__import (__source @$A | regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A | replace(".", "/")) (__name @$A | split_last("."))) #import_type=Require'
       - '(call target: (identifier "use") (arguments $A:alias $$$R))': '(__import (__source @$A | regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A | replace(".", "/")) (__name @$A | split_last("."))) #import_type=Use'
   - stage: defs
@@ -54,7 +59,7 @@ canonicalize:
     rewrite:
       - '(call target: (dot left: $M:alias right: $F:identifier) $A:arguments)': '(ex_ref (__import (__source @$M) (__source_path @$M | replace(".", "/")) (__name @$M | split_last("."))) (__call (__callee (__member @$F (__object @$M | split_last(".") $M))) $A)) #import_type@__import=Module'
       - '(call target: (dot left: $M:identifier right: $F:identifier) $A:arguments)': '(__call (__callee %member_text($F, $M)) $A)'
-      - '(call target: $F:identifier $A:arguments $$$B)': '(__call (__callee @$F $F) $A $$$B)'
+      - '(call target: $F:identifier $A:arguments $$$B)': '(__call (__callee @$F $F) $A $$$B) #implicit_self=true'
   - stage: lexical-scopes
     rewrite:
       - '(do_block $$$B)': '(__scope $$$B) #hoisted=true'

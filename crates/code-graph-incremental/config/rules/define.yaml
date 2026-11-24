@@ -67,6 +67,7 @@ define:
     '(__call)': none
     '_': "last(select(under(def), '(__binding)' by $ROOT, $ROOT) | rhs_callee) or $ROOT"
   value(ROOT):
+    '(__ssa_branch $$$A:__ssa_arm) when $A': '$A | tail | arm_leaf'
     '(%opaque_nodes)': 'opaque'
     '(__call)': '$ROOT'
     '(__ivar)': '$ROOT | ivar or opaque'
@@ -86,8 +87,11 @@ define:
     '_ when value_of($ROOT)': '$ROOT'
     '_ when value(tail($ROOT))': none
     '_ when minus(read(tail($ROOT)), opaque)': '$ROOT'
+  arm_leaf(ROOT):
+    '(__ssa_branch)': none
+    '_': 'value($ROOT)'
   ends_flow(ROOT):
-    '(__ssa_branch)': '$ROOT'
+    '(__ssa_branch !(__ssa_arm))': '$ROOT'
     '(__ssa_return)': '$ROOT'
   receiver_calls(ROOT):
     '(__member (__dispatch $O:__object))': 'read($O) | produced'
@@ -171,10 +175,27 @@ define:
   read_target(ROOT, implicit):
     '_ when implicit': 'named_value($ROOT)'
     '(_)': '$ROOT'
+  impl_member(ROOT):
+    '_ when boundary($ROOT) | is_impl': '$ROOT'
+  impl_targets(ROOT):
+    '(__call $K:(__callee "/./")) when in("true", %impl_calls)': 'members(scope($ROOT) | class | is_impl, $K, cursor_role($ROOT))'
+  bound_as(ROOT): >-
+    first(ancestors($ROOT), a => select(under(a), '(__binding)' by $ROOT, @$ROOT))
+  components(ROOT):
+    '(__def (__positional $$$C:__def))': '$C'
+  source_class(ROOT): '$ROOT | bound_as | annotated or $ROOT | bound_as | producing | type_node | type or $ROOT | bound_as | producing'
+  unbound(ROOT):
+    '(_ "/./") when read($ROOT)': none
+    '(_ "/./") when in(@$ROOT, %builtins)': none
+    '(__object "/./")': '$ROOT'
+    '(__decorator "/./")': '$ROOT'
+  wildcards_for(ROOT, call): 'call | mod.ssa.wildcards'
   unresolved(ROOT, implicit):
     '(__call $K:__callee) when read($K)': none
     '_ when implicit_targets($ROOT, implicit)': none
     '(__call (__callee "/^[^\s()\[\]{}<>*&,;\x27\x22=+/%^|~]+$/"))': '$ROOT'
+  unbound_receiver(ROOT):
+    '_': none
   implicit_targets(ROOT, implicit):
     '_ when implicit': 'targets($ROOT, true)'
   site_role(ROOT):
@@ -187,6 +208,7 @@ define:
   member_for(ROOT, site):
     '_ when instances($ROOT)': '$ROOT'
     '(__def) when keeps($ROOT, cursor_role(site))': '$ROOT'
+    '(__def #constructor)': 'first(ancestors($ROOT), a => is_class(a))'
     '(__def $N:__defname)': 'class_member($ROOT, $N, cursor_role(site), site) or $ROOT'
     '_': '$ROOT'
   keeps(ROOT, role):
@@ -306,6 +328,8 @@ define:
     '_': '$ROOT | ivar | meaning($ROOT)'
   member(ROOT, M):
     '(__def (__type_alias) $T:__ssa_typed)': 'minus($T | type, $ROOT) | member($M) or visible(@$T, boundary($ROOT)) | member($M)'
+    '(__def (__enum_variant))': 'lookup($M, $M, $ROOT) or lookup($M, $M, first(ancestors($ROOT), a => is_class(a)))'
+    '(__def $B:__binding) when stored_typed($ROOT, $B)': 'lookup($M, $M, $ROOT) or lookup($M, $M, $B | type_node | type)'
     '(__def)': 'lookup($M, $M, $ROOT)'
     '(__name)': 'none'
     '_': '$ROOT | type_node | type | member($M)'
@@ -356,9 +380,15 @@ define:
   local_name(ROOT): '$ROOT | child("__alias") or $ROOT | child("__ssa_hint") or $ROOT'
   declared_in(name, at): >-
     first(enclose(at), s => select(owned(s), '(__def $N:__defname)', name))
+  class_in(name, at): >-
+    first(enclose(at), s => select(owned(s), '(__def $N:__defname)', name) | is_class)
   target_of(ROOT): 'declared_in(@ROOT, ROOT) or $ROOT | follow(imports, from)'
   resolved(ROOT):
+    '$D:(__def $ROOT:__supertype)': 'class_in(@ROOT, $D) or visible(@ROOT, $D)'
+    '$D:(__def (__binding #outer (__rhs (__call $ROOT:__callee))))': 'class_in(@ROOT, $D) or visible(@ROOT, $D)'
     '(__call (__type) $ROOT)': 'declared_in(@ROOT, ROOT) | is_class or imported_name(@ROOT, ROOT) or visible(@ROOT, ROOT)'
+    '(__ssa_typed)': 'class_in(@ROOT, ROOT) or visible(@ROOT, ROOT)'
+    '(__ssa_return_type)': 'class_in(@ROOT, ROOT) or visible(@ROOT, ROOT)'
     '_': 'visible(@ROOT, ROOT)'
   supertypes(ROOT):
     '(__def $$$S:__supertype)': '$S | type | is_def'

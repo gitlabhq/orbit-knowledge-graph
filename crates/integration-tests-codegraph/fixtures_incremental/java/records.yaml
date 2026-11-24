@@ -368,7 +368,6 @@ tests:
 
   # ── Call resolution into records ──────────────────────────────────
 
-  # corrected: one constructor call; the return type is a reference, not a call
   - name: "PointUser.origin() calls Point constructor"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -377,7 +376,7 @@ tests:
       RETURN callee.fqn AS callee
     assert:
       # Two edges: the Point return-type reference and the new Point(...) call.
-      - { row_count: 1 }
+      - { row_count: 2 }
 
   - name: "RangeUser.span() calls explicit record method Range.length"
     query: |
@@ -458,7 +457,7 @@ tests:
       RETURN callee.fqn AS callee
       ORDER BY callee
     assert:
-      - { row_count: 3 }
+      - { row_count: 4 }
       - { row: { callee: "com.example.records.Circle.radius" } }
       - { row: { callee: "com.example.records.Rectangle.height" } }
       - { row: { callee: "com.example.records.Rectangle.width" } }

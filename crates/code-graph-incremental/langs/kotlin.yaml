@@ -24,6 +24,7 @@ data:
     floor, hypot, ln, ln1p, log, log10, log2, max, min, round, sign, sin, sinh, sqrt, tan, tanh, truncate]
   params: [class_parameter, parameter]
   loops: [for_statement, while_statement, do_while_statement]
+  impl_calls: ['true']
 
 canonicalize:
   - stage: imports
@@ -123,6 +124,7 @@ canonicalize:
   - stage: tag-defs
     rewrite:
       - '(__def (__class) (modifiers (class_modifier "data")))': '#flavor=data'
+      - '(__binding (__ivar "super"))': '#outer=true'
       - '(__def (__property))': '#callable=true #value=true #scoped=true'
       - use: function_def_tags
       - use: type_def_tags

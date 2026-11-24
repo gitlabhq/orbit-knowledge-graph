@@ -45,10 +45,13 @@ fn from_tree_sitter(
     let ts_root = ts_tree.root_node();
     let mut cursor = ts_root.walk();
 
-    let kind = kind_map
-        .get(cursor.node().kind_id() as usize)
-        .copied()
-        .unwrap_or(0);
+    let kind = match ts_root.is_error() {
+        true => lang.tree_kinds().source_file,
+        false => kind_map
+            .get(cursor.node().kind_id() as usize)
+            .copied()
+            .unwrap_or(0),
+    };
     let sp = cursor.node().start_position();
     let ep = cursor.node().end_position();
     let root_sym = if !label.is_empty() {

@@ -15,6 +15,8 @@ pub enum Expr {
     Data(u16),
     Union(Box<[Expr]>),
     Def(u16, Box<[Expr]>),
+    /// A redefinition's call of the shared definition it replaces.
+    Super(u16, Box<[Expr]>),
     Call(FnId, Box<[Expr]>),
     Or(Box<Expr>, Box<Expr>),
     First(Box<Expr>, u16, Box<Expr>),
@@ -75,7 +77,7 @@ impl Expr {
                 f(Ok(*id), args);
                 each(args, f);
             }
-            Expr::Def(def, args) => {
+            Expr::Def(def, args) | Expr::Super(def, args) => {
                 f(Err(*def), args);
                 each(args, f);
             }
@@ -250,7 +252,7 @@ impl<'s> Parser<'s, '_> {
                     .ok_or_else(|| self.error("super outside a redefinition"))?;
                 let args = self.args(piped)?;
                 return match args.len() == arity {
-                    true => Ok(Expr::Def(def, args.into())),
+                    true => Ok(Expr::Super(def, args.into())),
                     false => Err(self.error(&format!("super takes {arity} arguments"))),
                 };
             }

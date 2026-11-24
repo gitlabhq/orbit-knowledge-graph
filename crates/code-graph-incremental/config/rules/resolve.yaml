@@ -4,7 +4,7 @@ data:
 define:
   file_at(path):
     '_ when path | regex_match("(^|/)[*]$")': >-
-      select(files, '(__source_file)' by $ROOT | regex_replace("^([^/]*)$", "./$1") | regex_replace("/?[^/]*$", ""), path | regex_replace("^[*]$", "./*") | regex_replace("/?[*]$", ""))
+      select(files, '(__source_file)' by $ROOT | regex_replace("[^/]*$", "."), path | regex_replace("(^|/)[*]$", "$1."))
       or select(files, '(__source_file $P:__package)' by package_path($P), path | regex_replace("/?[*]$", ""))
     '_': >-
       select(files, '(__source_file)' by $ROOT | stem, path)
@@ -12,6 +12,12 @@ define:
       or select(files, '(__source_file)' by $ROOT | collapse_index(%index_files), path)
       or file(select(files, '(__source_file $P:__package (__def $ROOT:__defname))' by package_path($P) | concat("/", $ROOT), path))
       or file(select(files, '(__source_file (__def $ROOT:__defname))' by package_path($ROOT), path))
+  called(ROOT):
+    '(__def $K:__callable)': 'members(nodes($ROOT), $K, "callable")'
+    '(__def (__class))': none
+    '(__def)': '$ROOT | callable'
+  receiver_imports(ROOT):
+    '_': none
   package_path(ROOT): '$ROOT | regex_replace("[.]|::|[\\\\]", "/")'
   roots(at): >-
     select(project, '(__dir $D:__source_root)') | tree_path
@@ -22,7 +28,9 @@ define:
     '_ when in(place, "roots")': 'file_at(path) or first(roots(path), r => file_at(r | concat("/", path)))'
   outside(path, names):
     '_ when in(path | split_first("/"), names)': 'opaque'
-  modules(ROOT): 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
+  modules(ROOT):
+    '(__import (__source_path "/^[.]/"))': 'aliased($ROOT) or locate("roots", $ROOT | tag("resolved_source"))'
+    '_': 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
   aliased(ROOT): >-
     first(union(governing($ROOT) | config_aliases, select(project, '(__alias)')) | longest_first,
       a => alias_files(a, $ROOT))
@@ -45,7 +53,14 @@ define:
     or select(owned(module), '(__module_export $ROOT:__name)' by local_name($ROOT), name) | target_of
     or select(owned(module), '(%import_kinds $ROOT:(__name "*" $A:__alias))' by $A, name) | namespace_module
     or select(owned(module), '(%import_kinds $ROOT:__name)' by local_name($ROOT), name) | reexported(name) | is_def
+    or unique(select(owned(module), '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | star_defined(name))
     or unique(select(owned(module), '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def)
+  star_defined(ROOT, N):
+    '$I:(%import_kinds $ROOT:(__name "*"))': 'defined($I | modules, $N)'
+    '$I:(%import_kinds $ROOT:__name)': 'defined($I | modules, $N)'
+  defined(module, name): >-
+    select(owned(module), '(__def $N:__defname)', name) | is_def
+    or select(under(module), '(__def $N:__defname)', name) | is_def
   namespace_module(ROOT):
     '$I:(%import_kinds $ROOT)': '$I | modules'
   namespace_name(ROOT): >-
@@ -66,6 +81,8 @@ define:
     '(__binding $R:__rhs)': '$R | tail | producing or $ROOT | type'
     '(__binding $T:__ssa_typed)': '$T | type'
     '_': '$ROOT | type'
+  annotated(ROOT):
+    '(__binding $T:__ssa_typed)': '$T | type | unique'
   dispatched(ROOT, contract, M):
     '_ when contract_impls($ROOT, contract)': 'declared(contract_impls($ROOT, contract), M, "callable") or declared(contract, M, "callable")'
   contract_impls(ROOT, contract): '$ROOT | other_parts | implements(contract)'
@@ -77,9 +94,12 @@ define:
     '(__def (__ssa_return_type $A:__type_arg))': '$A | type'
   returned(ROOT):
     '_ when $ROOT | returns | is_class': '$ROOT | returns'
-    '_': 'visible($ROOT | returns, $ROOT)'
+    '_': 'visible($ROOT | returns, $ROOT | returns)'
 
 resolve:
+  destructure:
+    - '(__destructure $S:__rhs $ROOT:__binding)':
+        calls: { to: 'aligned($S | source_class | components, $ROOT)', site: $ROOT }
   link:
     - '(__link $A:__anchor) when linked_section($ROOT, $A)':
         links: { from: 'file($ROOT)', to: 'linked_section($ROOT, $A)' }
@@ -103,16 +123,32 @@ resolve:
         calls: { to: '$ROOT | follow(type_flow, site) | producing | member($M) or $O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee $M:(__member $O:(__object (__qualifier)))))':
         calls: { to: '$O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
+    - '(__call (__callee $M:(__member $O:(__object !(__call) !(__member) !(__object) !(__qualifier) !(__ivar)))))':
+        calls:
+          - { to: '$O | type | member($M) | elsewhere(file($ROOT)) or $O | type | member($M) | impl_member', site: $ROOT }
+          - { to: 'lub($ROOT, $ROOT | follow(type_flow, site) | producing) | member($M) or $ROOT | follow(type_flow, site) | producing | member($M) or $ROOT | follow(type_flow, site) | annotated | member($M)', site: $ROOT }
     - '(__call (__callee $M:(__member $O:__object)))':
         calls:
-          - { to: '$O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
-          - { to: '$ROOT | follow(type_flow, site) | producing | member($M)', site: $ROOT }
+          - { to: '$O | type | member($M) | elsewhere(file($ROOT)) or $O | type | member($M) | impl_member', site: $ROOT }
+          - { to: 'lub($ROOT, $ROOT | follow(type_flow, site) | producing) | member($M) or $ROOT | follow(type_flow, site) | producing | member($M)', site: $ROOT }
     - '(__call (__type) (__callee $I:__ivar))':
         calls: { to: '$I | ivar | type_node | type | callable | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee $I:__ivar))':
         calls: { to: 'lookup(@$I, $ROOT, scope($ROOT) | class) | elsewhere(file($ROOT))', site: $ROOT }
+    - '(__call #implicit_self (__callee "/./"))':
+        calls: { to: 'targets($ROOT, true) | callable | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee "/./"))':
-        calls: { to: 'targets($ROOT, false) | callable | elsewhere(file($ROOT))', site: $ROOT }
+        calls:
+          - { to: 'targets($ROOT, false) | callable | elsewhere(file($ROOT))', site: $ROOT }
+          - { to: '$ROOT | impl_targets | callable', site: $ROOT }
+
+  imported_receiver:
+    - '(__call (__callee (__member $O:__object))) when receiver_imports($ROOT)':
+        calls: { to: 'receiver_imports($ROOT) | follow(imports, from) | callable | elsewhere(file($ROOT))', site: $ROOT }
+
+  produced_call:
+    - '(__call (__callee "/./")) when $ROOT | follow(type_flow, site) | producing':
+        calls: { to: '$ROOT | follow(type_flow, site) | producing | called', site: $ROOT }
 
   bound_import_call:
     - '(__call (__callee "/./")) when $ROOT | follow(type_flow, site) | follow(imports, site)':
@@ -125,7 +161,7 @@ resolve:
 
   decorator:
     - '$D:(__def $ROOT:__decorator)':
-        calls: { from: $D, to: '$ROOT | type | callable | elsewhere(file($ROOT))' }
+        calls: { from: $D, to: '$ROOT | type | is_def | elsewhere(file($ROOT))' }
 
   supertype:
     - '$D:(__def $ROOT:__supertype)':
