@@ -307,6 +307,7 @@ define:
     '_': '$ROOT | ivar | meaning($ROOT)'
   member(ROOT, M):
     '(__def (__type_alias) $T:__ssa_typed)': 'minus($T | type, $ROOT) | member($M) or visible(@$T, boundary($ROOT)) | member($M)'
+    '(__def (__enum_variant))': 'lookup($M, $M, $ROOT) or lookup($M, $M, first(ancestors($ROOT), a => is_class(a)))'
     '(__def)': 'lookup($M, $M, $ROOT)'
     '(__name)': 'none'
     '_': '$ROOT | type_node | type | member($M)'
