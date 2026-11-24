@@ -21,6 +21,23 @@ data:
   - [Cargo.toml, toml]
   diverging_macros: [panic, unreachable, todo, unimplemented]
 
+define:
+  impl_alias_source(ROOT): >-
+    select(under(file($ROOT)), '(__import $ROOT:(__name (__alias)))' by $ROOT | child("__alias"), $ROOT | child("__defname"))
+    | import_source
+  import_source(ROOT):
+    '$I:(__import $ROOT:__name)': '$I | child("__source")'
+  impl_trait(ROOT): 'first(ancestors($ROOT), a => is_def(a)) | trait_of_impl'
+  trait_of_impl(ROOT):
+    '(__def (__impl) $T:__supertype)': '$T'
+  trait_clash(ROOT):
+    '_ when minus(fqn_twins($ROOT), fqn_twins($ROOT) | in_trait_impl)': none
+    '_ when impl_trait($ROOT)': 'fqn_twins($ROOT)'
+  fqn_twins(ROOT): "minus(select(under(file($ROOT)), '(__def)' by member_fqn($ROOT), member_fqn($ROOT)), $ROOT)"
+  member_fqn(ROOT): '$ROOT | tag_up("fqn") | concat("::", $ROOT | child("__defname"))'
+  in_trait_impl(ROOT):
+    '_ when impl_trait($ROOT)': '$ROOT'
+
 canonicalize:
   - stage: normalize
     rewrite:

@@ -30,6 +30,8 @@ pub enum Expr {
 pub struct IndexSpec {
     pub pattern: String,
     pub key: Option<String>,
+    /// The language whose definitions the key may call.
+    pub lang: Option<u8>,
 }
 
 pub struct Scope<'a> {
@@ -39,6 +41,10 @@ pub struct Scope<'a> {
     pub lang: &'a Lang,
     pub data: &'a HashMap<String, u16>,
     pub defs: &'a HashMap<String, (u16, usize)>,
+    /// Per language: its own definitions, found before shared ones.
+    pub locals: &'a [HashMap<String, (u16, usize)>],
+    /// The language whose rules compile, if any.
+    pub owner: Option<u8>,
     pub indexes: &'a RefCell<Vec<IndexSpec>>,
     /// Each row shape's id and value names, by shape name.
     pub tables: &'a HashMap<String, (u16, Vec<String>)>,
@@ -252,7 +258,11 @@ impl<'s> Parser<'s, '_> {
             "union" => return Ok(Expr::Union(self.args(piped)?.into())),
             _ => {}
         }
-        if let Some(&(def, arity)) = self.scope.defs.get(word) {
+        let local = self.scope.owner.map(|l| &self.scope.locals[usize::from(l)]);
+        let def = local
+            .and_then(|l| l.get(word))
+            .or_else(|| self.scope.defs.get(word));
+        if let Some(&(def, arity)) = def {
             let args = self.args(piped)?;
             if args.len() != arity {
                 return Err(self.error(&format!("{word} takes {arity} arguments")));
@@ -490,7 +500,11 @@ impl<'s> Parser<'s, '_> {
             true => Some("\"\"".to_owned()),
             false => key,
         };
-        let spec = IndexSpec { pattern, key };
+        let spec = IndexSpec {
+            pattern,
+            key,
+            lang: self.scope.owner,
+        };
         let mut indexes = self.scope.indexes.borrow_mut();
         let id = match indexes.iter().position(|i| *i == spec) {
             Some(at) => at,

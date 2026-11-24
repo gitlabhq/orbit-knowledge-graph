@@ -519,7 +519,9 @@ fn indexers(loader: &Loader, files: &RuleFiles) -> Result<Vec<Indexer>, LoadErro
                 .matcher(&index.pattern, None, owner, &[])
                 .map_err(|e| LoadError(format!("index {}: {}", index.pattern, e.0)))?;
             let key = match &index.key {
-                Some(src) => loader.parse(src, &RefCell::new(at.slots.clone()), false)?,
+                Some(src) => {
+                    loader.parse(src, &RefCell::new(at.slots.clone()), false, index.lang)?
+                }
                 None if at.slots.len() > 1 => Expr::Var(1),
                 None => Expr::Var(0),
             };
@@ -671,6 +673,7 @@ struct Loader<'a> {
     modules: Vec<String>,
     names: &'a HashMap<String, u16>,
     defs: HashMap<String, (u16, usize)>,
+    locals: Vec<HashMap<String, (u16, usize)>>,
     data: &'a BTreeMap<String, DataSpec>,
     lang_data: Vec<BTreeMap<String, DataSpec>>,
     lang: &'a Lang,
@@ -696,11 +699,25 @@ impl<'a> Loader<'a> {
                 return Err(LoadError(format!("{}: define {} twice", d.origin, d.name)));
             }
         }
+        let mut next = files.shared.defs.len();
+        let mut locals = Vec::new();
+        for file in &files.langs {
+            let mut own = HashMap::new();
+            for d in file.iter().flat_map(|f| &f.defs) {
+                let id = (next as u16, d.params.len());
+                if !defs.contains_key(&d.name) && own.insert(d.name.clone(), id).is_some() {
+                    return Err(LoadError(format!("{}: define {} twice", d.origin, d.name)));
+                }
+                next += 1;
+            }
+            locals.push(own);
+        }
         Ok(Self {
             registry,
             modules: registry.modules.iter().map(|m| m.name.to_owned()).collect(),
             names,
             defs,
+            locals,
             data: &files.shared.data,
             lang_data: merged_data(files),
             lang,
@@ -714,6 +731,7 @@ impl<'a> Loader<'a> {
         slots: &'s RefCell<Slots>,
         effects: bool,
         shared: Option<(u16, usize)>,
+        lang: Option<u8>,
     ) -> Scope<'s> {
         Scope {
             slots,
@@ -722,6 +740,8 @@ impl<'a> Loader<'a> {
             lang: self.lang,
             data: self.names,
             defs: &self.defs,
+            locals: &self.locals,
+            owner: lang,
             indexes: self.indexes,
             tables: self.tables,
             effects,
@@ -738,8 +758,14 @@ impl<'a> Loader<'a> {
         Expr::Call(id, args.into())
     }
 
-    fn parse(&self, src: &str, slots: &RefCell<Slots>, effects: bool) -> Result<Expr, LoadError> {
-        Expr::parse(src, &self.scope(slots, effects, None))
+    fn parse(
+        &self,
+        src: &str,
+        slots: &RefCell<Slots>,
+        effects: bool,
+        lang: Option<u8>,
+    ) -> Result<Expr, LoadError> {
+        Expr::parse(src, &self.scope(slots, effects, None, lang))
     }
 
     fn edge_step(
@@ -794,7 +820,7 @@ impl<'a> Loader<'a> {
             None => pattern.into(),
         };
         let guard = when
-            .map(|src| self.parse(src, &RefCell::new(slots.clone()), true))
+            .map(|src| self.parse(src, &RefCell::new(slots.clone()), true, lang))
             .transpose()?;
         let m = Match {
             src,
@@ -808,9 +834,9 @@ impl<'a> Loader<'a> {
         Ok((m, guard))
     }
 
-    /// The shared definitions, then each language's redefinitions, with the
-    /// module states each depends on; and per language, which shared
-    /// definition its own replaces.
+    /// The shared definitions, then each language's own, in the order
+    /// `new` numbered them; and per language, which shared definition its
+    /// own replaces.
     fn defs(&self, files: &RuleFiles) -> Result<(Vec<Def>, Vec<HashMap<u16, u16>>), LoadError> {
         let mut defs = Vec::new();
         for d in &files.shared.defs {
@@ -820,12 +846,10 @@ impl<'a> Loader<'a> {
         for (at, file) in files.langs.iter().enumerate() {
             let mut own = HashMap::new();
             for d in file.iter().flat_map(|f| &f.defs) {
-                let &(shared, arity) = self.defs.get(&d.name).ok_or_else(|| {
-                    LoadError(format!(
-                        "{}: define {} redefines nothing shared",
-                        d.origin, d.name
-                    ))
-                })?;
+                let Some(&(shared, arity)) = self.defs.get(&d.name) else {
+                    defs.push(self.def(d, Some(at as u8), None)?);
+                    continue;
+                };
                 if arity != d.params.len() {
                     return Err(LoadError(format!(
                         "{}: define {} takes {arity} parameters",
@@ -854,7 +878,7 @@ impl<'a> Loader<'a> {
         let (body, slots) = match &d.body {
             DefBody::Expr(src) => {
                 let cell = RefCell::new(Slots::params(&d.params));
-                let expr = Expr::parse(src, &self.scope(&cell, false, shared)).map_err(at)?;
+                let expr = Expr::parse(src, &self.scope(&cell, false, shared, lang)).map_err(at)?;
                 let slots = cell.borrow().len();
                 (DefImpl::Expr(expr), slots)
             }
@@ -877,7 +901,7 @@ impl<'a> Loader<'a> {
                             }
                         };
                         let cell = RefCell::new(own);
-                        let scope = self.scope(&cell, false, shared);
+                        let scope = self.scope(&cell, false, shared, lang);
                         let guard = when
                             .as_deref()
                             .map(|src| Expr::parse(src, &scope))
@@ -959,14 +983,14 @@ impl<'a> Loader<'a> {
             && !head.is_empty()
             && head.chars().all(|c| c.is_ascii_lowercase() || c == '_')
         {
-            return self.parse(value, slots, true);
+            return self.parse(value, slots, true, m.lang);
         }
         let (body, notes) = split_notes(value);
         let (body, unique) = match body.find(" unique ") {
             Some(i) => (body[..i].trim(), Some(body[i + " unique ".len()..].trim())),
             None => (body.trim(), None),
         };
-        let scope = self.scope(slots, false, None);
+        let scope = self.scope(slots, false, None, m.lang);
         let mut text = |src: &str| Expr::parse(src, &scope);
         let (replace, tpls): (bool, Vec<Tpl<Expr>>) = match body.strip_prefix('+') {
             _ if body.is_empty() => (false, Vec::new()),
@@ -1082,7 +1106,7 @@ impl<'a> Loader<'a> {
                         })
                         .transpose()
                         .map_err(err)?;
-                    let mut value = self.group_value(&pair.value, &cell).map_err(err)?;
+                    let mut value = self.group_value(&pair.value, &cell, owner).map_err(err)?;
                     if let Some(((kind, lacking), target)) = step {
                         m.edge = Some((kind, lacking));
                         m.src = pair.pattern.as_str().into();
@@ -1106,7 +1130,12 @@ impl<'a> Loader<'a> {
     }
 
     /// nothing and stops the group.
-    fn edges(&self, value: &Value, slots: &RefCell<Slots>) -> Result<Expr, LoadError> {
+    fn edges(
+        &self,
+        value: &Value,
+        slots: &RefCell<Slots>,
+        lang: Option<u8>,
+    ) -> Result<Expr, LoadError> {
         let map = match value {
             Value::Object(map) => map,
             Value::String(s) if s == "none" => return Ok(Expr::Empty),
@@ -1120,10 +1149,10 @@ impl<'a> Loader<'a> {
             match spec {
                 Value::Array(items) => {
                     for item in items {
-                        out.push(self.edge(kind, item, slots)?);
+                        out.push(self.edge(kind, item, slots, lang)?);
                     }
                 }
-                one => out.push(self.edge(kind, one, slots)?),
+                one => out.push(self.edge(kind, one, slots, lang)?),
             }
         }
         Ok(union(out))
@@ -1135,6 +1164,7 @@ impl<'a> Loader<'a> {
         kind: EdgeKind,
         value: &Value,
         slots: &RefCell<Slots>,
+        lang: Option<u8>,
     ) -> Result<Expr, LoadError> {
         let declared = self.lang.edge_attributes();
         let mut attrs: Vec<Option<&str>> = vec![None; declared.len()];
@@ -1164,9 +1194,9 @@ impl<'a> Loader<'a> {
                 ));
             }
         };
-        let to = self.parse(to, slots, true)?;
+        let to = self.parse(to, slots, true, lang)?;
         let from = match from {
-            Some(f) => self.parse(f, slots, true)?,
+            Some(f) => self.parse(f, slots, true, lang)?,
             None => self.core("scope", vec![Expr::Var(0)]),
         };
         let literal = |name: &str| name.chars().all(|c| c.is_ascii_lowercase() || c == '_');
@@ -1182,7 +1212,7 @@ impl<'a> Loader<'a> {
                 Some(name) if !attribute.node && literal(name) => {
                     Expr::Lit(Val::Sym(self.lang.syms.intern(name)))
                 }
-                Some(src) => self.parse(src, slots, true)?,
+                Some(src) => self.parse(src, slots, true, lang)?,
             });
         }
         let kind = number(u32::from(kind.0));
@@ -1203,23 +1233,33 @@ impl<'a> Loader<'a> {
 
     /// A group pair's value by its shape: a map from edge kinds to targets,
     /// or expressions.
-    fn group_value(&self, value: &Value, slots: &RefCell<Slots>) -> Result<Expr, LoadError> {
+    fn group_value(
+        &self,
+        value: &Value,
+        slots: &RefCell<Slots>,
+        lang: Option<u8>,
+    ) -> Result<Expr, LoadError> {
         match value {
-            Value::Object(_) => self.edges(value, slots),
-            _ => self.expressions(value, slots),
+            Value::Object(_) => self.edges(value, slots, lang),
+            _ => self.expressions(value, slots, lang),
         }
     }
 
     /// An expression, or a list of them for their union; `none` writes
     /// nothing and stops the group.
-    fn expressions(&self, value: &Value, slots: &RefCell<Slots>) -> Result<Expr, LoadError> {
+    fn expressions(
+        &self,
+        value: &Value,
+        slots: &RefCell<Slots>,
+        lang: Option<u8>,
+    ) -> Result<Expr, LoadError> {
         match value {
             Value::String(s) if s == "none" => Ok(Expr::Empty),
-            Value::String(src) => self.parse(src, slots, true),
+            Value::String(src) => self.parse(src, slots, true, lang),
             Value::Array(items) => {
                 let parts = items
                     .iter()
-                    .map(|item| self.expressions(item, slots))
+                    .map(|item| self.expressions(item, slots, lang))
                     .collect::<Result<_, _>>()?;
                 Ok(union(parts))
             }

@@ -149,6 +149,18 @@ pub fn load(sources: &Sources) -> Result<RuleFiles, LoadError> {
                 }
             }
         }
+        for d in &file.defs {
+            if shared.defs.iter().any(|s| s.name == d.name) {
+                continue;
+            }
+            if family.defs.iter().any(|f| f.name == d.name) {
+                return Err(err(format!(
+                    "{}: define {}: another family member defines it too",
+                    d.origin, d.name
+                )));
+            }
+            family.defs.push(d.clone());
+        }
         for (phase, stages) in &file.phases {
             family
                 .phases
