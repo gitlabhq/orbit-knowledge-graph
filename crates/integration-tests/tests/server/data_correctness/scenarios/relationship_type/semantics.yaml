@@ -19,8 +19,11 @@ cases:
           - [1, 2001]
         APPROVED:
           - [1, 2002]
-      gql_columns:
-        kind: ['"AUTHORED"', '"AUTHORED"', '"APPROVED"']
+      format:
+        gql:
+          value:
+            columns:
+              kind: ['"AUTHORED"', '"AUTHORED"', '"APPROVED"']
 
   - name: columns_follow_return
     description: Two type() columns, written as TYPE(r2) and type(r1), keep their written names and follow
@@ -43,10 +46,13 @@ cases:
         IN_PROJECT:
           - [2000, 1000]
           - [2001, 1000]
-      gql_column_names: [TYPE(r2), mr, type(r1), u, p]
-      gql_columns:
-        TYPE(r2): ['"IN_PROJECT"', '"IN_PROJECT"']
-        type(r1): ['"AUTHORED"', '"AUTHORED"']
+      format:
+        gql:
+          value:
+            header: [TYPE(r2), mr, type(r1), u, p]
+            columns:
+              TYPE(r2): ['"IN_PROJECT"', '"IN_PROJECT"']
+              type(r1): ['"AUTHORED"', '"AUTHORED"']
 
   - name: double_not
     description: NOT NOT type(r) = 'APPROVED' cancels and narrows the relationship to APPROVED
@@ -120,8 +126,11 @@ cases:
       edges:
         SCANS:
           - [8500, 1000]
-      gql_columns:
-        type(r): ['"SCANS"']
+      format:
+        gql:
+          value:
+            columns:
+              type(r): ['"SCANS"']
 
   - name: gql_column_ordered
     description: RETURN type(r) with ORDER BY type(r) adds a type(r) column to the gql table, sorted by
@@ -143,8 +152,11 @@ cases:
           - [1, 2001]
         APPROVED:
           - [1, 2002]
-      gql_columns:
-        type(r): ['"APPROVED"', '"AUTHORED"', '"AUTHORED"']
+      format:
+        gql:
+          value:
+            columns:
+              type(r): ['"APPROVED"', '"AUTHORED"', '"AUTHORED"']
 
   - name: keeps_fk_hop
     description: RETURN type(r) on a hop that the planner answers from a foreign key still returns its edges
@@ -168,8 +180,11 @@ cases:
         IN_PROJECT:
           - [2000, 1000]
           - [2001, 1000]
-      gql_columns:
-        type(r): ['"IN_PROJECT"', '"IN_PROJECT"']
+      format:
+        gql:
+          value:
+            columns:
+              type(r): ['"IN_PROJECT"', '"IN_PROJECT"']
 
   - name: neighbors_filter
     description: Neighbors with WHERE type(r) = 'MEMBER_OF' returns the same edges as <-[:MEMBER_OF]-
@@ -243,8 +258,11 @@ cases:
         REOPENED: []
         REVIEWER: []
         UPDATED_BY: []
-      gql_columns:
-        type(r): ['"APPROVED"']
+      format:
+        gql:
+          value:
+            columns:
+              type(r): ['"APPROVED"']
 
   - name: not_equal
     description: type(r) <> 'AUTHORED' is the same complement as NOT type(r) = 'AUTHORED'
@@ -288,8 +306,11 @@ cases:
         AUTHORED:
           - [1, 2000]
           - [1, 2001]
-      gql_columns:
-        type(r): ['"AUTHORED"', '"AUTHORED"']
+      format:
+        gql:
+          value:
+            columns:
+              type(r): ['"AUTHORED"', '"AUTHORED"']
 
   - name: not_with_property_not
     description: NOT type(r) combines with a negated property group on the same query
@@ -315,8 +336,11 @@ cases:
         REOPENED: []
         REVIEWER: []
         UPDATED_BY: []
-      gql_columns:
-        type(r): ['"AUTHORED"']
+      format:
+        gql:
+          value:
+            columns:
+              type(r): ['"AUTHORED"']
 
   - name: ordered_pages
     description: ORDER BY type(r) pages through every edge once, in edge-type order
@@ -478,14 +502,16 @@ cases:
           - [1, 2001]
         APPROVED:
           - [1, 2002]
-      gql_column_names: [mr, rel, type(r), u]
-      gql_columns:
-        rel: ["[:APPROVED]", "[:AUTHORED]", "[:AUTHORED]"]
-        type(r): ['"APPROVED"', '"AUTHORED"', '"AUTHORED"']
+      format:
+        gql:
+          value:
+            header: [mr, rel, type(r), u]
+            columns:
+              rel: ["[:APPROVED]", "[:AUTHORED]", "[:AUTHORED]"]
+              type(r): ['"APPROVED"', '"AUTHORED"', '"AUTHORED"']
 
-  - name: variable_returns_edges
-    description: RETURN r in a traversal is accepted; the edges table lists its edges and the gql table
-      adds an r column
+  - name: traversal_returns_edges
+    description: A JSON traversal over a relationship returns both endpoints and the edges between them
     query:
       json: |
         {
@@ -497,6 +523,21 @@ cases:
           "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
           "limit": 50
         }
+    expect:
+      node_count: 3
+      referential_integrity: true
+      nodes:
+        MergeRequest:
+          ids: [2000, 2001]
+      edges:
+        AUTHORED:
+          - [1, 2000]
+          - [1, 2001]
+
+  - name: variable_returns_edges
+    description: RETURN r in a traversal is accepted; the edges table lists its edges and the gql table
+      adds an r column
+    query:
       gql: |
         MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN u, r, mr.title LIMIT 50
     expect:
@@ -509,5 +550,8 @@ cases:
         AUTHORED:
           - [1, 2000]
           - [1, 2001]
-      gql_columns:
-        r: ["[:AUTHORED]", "[:AUTHORED]"]
+      format:
+        gql:
+          value:
+            columns:
+              r: ["[:AUTHORED]", "[:AUTHORED]"]

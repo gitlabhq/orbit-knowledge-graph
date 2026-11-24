@@ -19,6 +19,7 @@ pub struct BillingInputs {
     pub root_namespace_id: Option<i64>,
     pub deployment_type: Option<String>,
     pub is_gitlab_team_member: Option<bool>,
+    pub orbit_quota_exempt: Option<bool>,
     pub coding_agent: Option<String>,
     pub has_license_checksum: bool,
 }

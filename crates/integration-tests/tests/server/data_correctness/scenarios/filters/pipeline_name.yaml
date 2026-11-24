@@ -1,0 +1,45 @@
+description: Pipelines filter by the name property joined from ci_pipeline_metadata
+
+config:
+  redaction:
+    allow:
+      ci_pipeline: [99010, 99011, 99012]
+  extra_seed:
+    gl_pipeline:
+      - { id: 99010, traversal_path: "1/100/1000/", project_id: 1000, name: "" }
+      - { id: 99011, traversal_path: "1/100/1000/", project_id: 1000, name: "Ruby 3.3.11 MR [tier:3]" }
+      - { id: 99012, traversal_path: "1/100/1000/", project_id: 1000, name: "Ruby 3.3.11 MR [tier:2]" }
+
+cases:
+  - name: exact_name_selects_one_pipeline
+    description: An exact name match returns only the pipeline with that name
+    query:
+      gql: |
+        MATCH (p:Pipeline)
+        WHERE p.id IN [99010, 99011, 99012] AND p.name = 'Ruby 3.3.11 MR [tier:3]'
+        RETURN p.id, p.name
+    expect:
+      node_count: 1
+      nodes:
+        Pipeline:
+          ids: [99011]
+          absent: [99010, 99012]
+          rows:
+            - { id: 99011, name: "Ruby 3.3.11 MR [tier:3]" }
+
+  - name: empty_name_pipeline_is_indexed
+    description: A pipeline with no metadata row is indexed with an empty name and returns when unfiltered
+    query:
+      gql: |
+        MATCH (p:Pipeline)
+        WHERE p.id IN [99010, 99011, 99012]
+        RETURN p.id, p.name
+    expect:
+      node_count: 3
+      nodes:
+        Pipeline:
+          ids: [99010, 99011, 99012]
+          rows:
+            - { id: 99010, name: "" }
+            - { id: 99011, name: "Ruby 3.3.11 MR [tier:3]" }
+            - { id: 99012, name: "Ruby 3.3.11 MR [tier:2]" }

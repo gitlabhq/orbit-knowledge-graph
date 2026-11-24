@@ -11,21 +11,33 @@
 //!
 //! # Usage
 //!
-//! ```ignore
-//! use etl_engine::nats::{NatsBroker, NatsConfiguration};
+//! ```no_run
+//! use indexer::nats::NatsBroker;
+//! use orbit_server_config::NatsConfiguration;
 //!
-//! let config = AppConfig::load(None)?.nats;
+//! # async fn connect(config: NatsConfiguration) -> Result<(), Box<dyn std::error::Error>> {
 //! let broker = NatsBroker::connect(&config).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Handlers
 //!
-//! ```ignore
+//! ```
+//! use indexer::handler::{Handler, HandlerContext, HandlerError};
+//! use indexer::types::{Envelope, Subscription};
+//!
+//! # struct UserTableHandler;
+//! # #[async_trait::async_trait]
 //! impl Handler for UserTableHandler {
 //!     fn subscription(&self) -> Subscription {
 //!         Subscription::new("siphon_db", "tables.users")
 //!             .manage_stream(false)
 //!     }
+//! #   fn name(&self) -> &str { "user-table" }
+//! #   async fn handle(&self, _: HandlerContext, _: Envelope) -> Result<(), HandlerError> {
+//! #       Ok(())
+//! #   }
 //! }
 //! ```
 //!

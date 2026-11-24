@@ -26,7 +26,7 @@ expect:
       traversal_path: "1/100/1000/"
       count: 1
       source_tags:
-        5002: ["failure_reason:null", "protected:null", "source:parent_pipeline", "status:success", "tag:false"]
+        5002: ["source:parent_pipeline", "tag:false"]
       target_tags:
-        5001: ["failure_reason:null", "protected:null", "source:push", "status:success", "tag:false"]
+        5001: ["source:push", "tag:false"]
     - { kind: TRIGGERS_PIPELINE, from: Job, to: Pipeline, traversal_path: "1/100/1000/", count: 1 }

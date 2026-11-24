@@ -27,6 +27,7 @@ pub enum SupportLang {
     Lua,
     Yaml,
     Zig,
+    Dockerfile,
 }
 
 impl fmt::Display for SupportLang {
@@ -144,6 +145,11 @@ impl LanguageExt for SupportLang {
             Self::Yaml => tree_sitter_yaml::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-yaml"))]
             Self::Yaml => panic!("tree-sitter-yaml feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-containerfile")]
+            Self::Dockerfile => tree_sitter_containerfile::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-containerfile"))]
+            Self::Dockerfile => panic!("tree-sitter-containerfile feature not enabled"),
 
             #[cfg(feature = "tree-sitter-zig")]
             Self::Zig => tree_sitter_zig::LANGUAGE.into(),

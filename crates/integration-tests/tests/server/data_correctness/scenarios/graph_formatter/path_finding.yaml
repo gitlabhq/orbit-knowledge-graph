@@ -1,0 +1,113 @@
+config:
+  security: { paths: ["1/600/"] }
+  redaction:
+    allow:
+      user: [1, 2, 3, 4, 5]
+      group: [100, 101, 102, 200, 300]
+      project: [1000, 1001, 1002]
+      merge_request: [2000, 2001, 2002]
+      note: [3000, 3001, 3002, 3003, 9000]
+  seed: graph_formatter
+
+cases:
+  - name: path_finding_exact_path
+    description: The shortest User to Project path goes through Group 100 with sequential steps and no internal path column
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+    expect:
+      node_count: 3
+      nodes:
+        User:
+          ids: [1]
+          prop_absent: [_orbit_path]
+        Group:
+          ids: [100]
+          prop_absent: [_orbit_path]
+        Project:
+          ids: [1000]
+          prop_absent: [_orbit_path]
+      path_edges:
+        - - { from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 100, step: 0 }
+          - { from: Group, from_id: 100, type: CONTAINS, to: Project, to_id: 1000, step: 1 }
+
+  - name: path_finding_redaction_blocks_path
+    description: A path through an unauthorized group is removed
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: []
+          project: [1000]
+          merge_request: []
+          note: []
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+    expect:
+      node_count: 0
+      total_edge_count: 0
+
+  - name: path_finding_max_depth_too_short
+    description: The two-hop path from user 1 to project 1000 is not found with max_depth 1
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+    expect:
+      node_count: 0
+      total_edge_count: 0
+
+  - name: path_finding_max_depth_reaches
+    description: The same two-hop path is found with max_depth 2
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+    expect:
+      path_count: 1
+      path_destinations: { Project: [1000] }
+      path_edges:
+        - - { from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 100, step: 0 }
+          - { from: Group, from_id: 100, type: CONTAINS, to: Project, to_id: 1000, step: 1 }
+
+  - name: path_finding_with_rel_types
+    description: The project is unreachable with only MEMBER_OF edges
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF"]}
+        }
+    expect:
+      node_count: 0

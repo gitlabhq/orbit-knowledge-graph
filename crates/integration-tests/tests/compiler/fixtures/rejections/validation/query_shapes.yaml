@@ -1,0 +1,109 @@
+cases:
+  - name: Several nodes without relationships name the traversal shapes instead of the oneOf keyword
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","node_ids":[2]}],"limit":5}
+      gql: |
+        MATCH (u:User {id: 1}), (mr:MergeRequest {id: 2}) RETURN u.username, mr LIMIT 5
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: gql_parse }
+          reason: schema
+          contains:
+            json: [Multi-node traversal requires nodes + relationships]
+            gql: [all declared nodes must belong to one connected pattern]
+          not_contains: [oneOf]
+
+  - name: A non-numeric id bound says the value is invalid
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","columns":["name"],"id_range":{"start":"abc","end":5}}],"limit":5}
+      gql: |
+        MATCH (p:Project) WHERE p.id >= 'abc' AND p.id <= 5 RETURN p.name LIMIT 5
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: validate }
+          reason: schema
+          contains:
+            json: ["invalid value at /nodes/0/id_range/start: Start of ID range (inclusive)"]
+            gql: ['filter on "id" for Project: value is a string, not an integer']
+
+  - name: An aggregation entry with two function keys is rejected
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}}],"aggregations":[{"count":"mr","sum":"mr.added_lines"}],"limit":1}
+    missing_frontends:
+      gql: Each GQL aggregate is one function call, so one entry cannot name two functions.
+    physical:
+      clickhouse:
+        rejected:
+          phase: json_dsl_parse
+          reason: schema
+          contains: [at /aggregations/0]
+
+  - name: An aggregation entry without a function key shows the single function key form
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}}],"aggregations":[{"as":"total"}],"limit":1}
+    missing_frontends:
+      gql: A GQL alias always follows an expression, so an aggregate cannot omit its function.
+    physical:
+      clickhouse:
+        rejected:
+          phase: json_dsl_parse
+          reason: schema
+          contains: ["invalid value at /aggregations/0: Single function key"]
+
+  - name: Path finding rejects an empty rel_types list
+    query:
+      json: |
+        {"query_type":"path_finding","nodes":[{"id":"start","entity":"User","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[278964]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":2,"rel_types":[]}}
+    missing_frontends:
+      gql: GQL has no syntax for an empty relationship type list.
+    physical:
+      clickhouse:
+        rejected:
+          phase: json_dsl_parse
+          reason: schema
+          contains: [at /path/rel_types]
+
+  - name: An aggregation with a node-to-node comparison says comparisons need a traversal
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) WHERE g.id = p.id RETURN count(p) AS c LIMIT 20
+    missing_frontends:
+      json: The JSON frontend does not expose property-to-property comparisons.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: [cross-node property comparisons are only supported in traversal queries]
+
+  - name: An aggregation with the comparison written the other way says comparisons need a traversal
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) WHERE p.id = g.id RETURN count(p) AS c LIMIT 20
+    missing_frontends:
+      json: The JSON frontend does not expose property-to-property comparisons.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: [cross-node property comparisons are only supported in traversal queries]
+
+  - name: Text that is not JSON is rejected
+    query:
+      json: |
+        not valid json
+    missing_frontends:
+      gql: The case checks the JSON parser.
+    physical:
+      clickhouse:
+        rejected:
+          phase: json_dsl_parse
+          reason: parse
+          contains: ["parse error: expected ident at line 1 column 2"]

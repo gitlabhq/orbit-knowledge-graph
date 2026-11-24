@@ -1,0 +1,132 @@
+name: "Ruby: begin ... rescue ... ensure bindings"
+
+fixtures:
+  - path: lib/client.rb
+    content: |
+      class Client
+        def get; end
+        def close; end
+      end
+
+  - path: lib/other.rb
+    content: |
+      class Other
+        def get; end
+      end
+
+  - path: lib/third.rb
+    content: |
+      class Third
+        def get; end
+      end
+
+  - path: rescue_ensure.rb
+    content: |
+      class RescueEnsureValue
+        def run
+          x = begin
+            Client.new
+          rescue
+            Other.new
+          ensure
+            Third.new
+          end
+          x.get
+        end
+
+        def setup
+          @x ||= begin
+            Client.new
+          rescue
+            Other.new
+          ensure
+            Third.new
+          end
+        end
+
+        def run_ivar
+          @x.get
+        end
+      end
+
+  - path: rescue_ensure_bindings.rb
+    content: |
+      class RescueEnsureBindings
+        def run
+          begin
+            x = Client.new
+          rescue
+            x = Other.new
+          ensure
+            Third.new
+          end
+          x.get
+        end
+      end
+
+  - path: ensure_reads.rb
+    content: |
+      class EnsureReads
+        def run
+          begin
+            conn = Client.new
+            conn.get
+          ensure
+            conn.close
+          end
+        end
+      end
+
+  - path: ensure_rebinding.rb
+    content: |
+      class EnsureRebinding
+        def body_rebinds
+          c = Other.new
+          begin
+            c = Client.new
+          ensure
+            c.close
+          end
+        end
+
+        def ensure_rebinds
+          c = Other.new
+          begin
+            c.get
+          ensure
+            c = Client.new
+          end
+        end
+      end
+
+tests:
+  - name: "begin ... rescue ... ensure is typed from the body and rescue arms, not the ensure clause"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN ['rescue_ensure.rb', 'rescue_ensure_bindings.rb'] AND callee.name = 'get'
+      RETURN caller.fqn AS caller, callee.fqn AS target
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: RescueEnsureValue::run, target: Client::get } }
+      - { row: { caller: RescueEnsureValue::run, target: Other::get } }
+      - { row: { caller: RescueEnsureBindings::run, target: Client::get } }
+      - { row: { caller: RescueEnsureBindings::run, target: Other::get } }
+
+  - name: "A read in ensure sees bindings assigned in the body"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'ensure_reads.rb' AND callee.name = 'close'
+      RETURN caller.fqn AS caller, callee.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: EnsureReads::run, target: Client::close } }
+
+  - name: "Statement-position begin ... ensure keeps source order for rebinding"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'ensure_rebinding.rb' AND callee.name IN ['close', 'get']
+      RETURN caller.fqn AS caller, callee.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: EnsureRebinding::body_rebinds, target: Client::close } }
+      - { row: { caller: EnsureRebinding::ensure_rebinds, target: Other::get } }

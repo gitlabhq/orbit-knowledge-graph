@@ -1,5 +1,5 @@
 config:
-  duckdb: true
+  backends: [clickhouse, duckdb]
   extra_seed:
     gl_definition:
       - { id: 9701, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: "negation::alice", name: alice, definition_type: active, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5 }

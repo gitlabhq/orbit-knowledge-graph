@@ -290,6 +290,12 @@ async fn reconcile_tombstones_old_path_after_move() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
 
+    // A merge would collapse a row with its tombstone and change the stored row counts.
+    for table in [t("gl_project"), t("gl_edge")] {
+        context
+            .execute(&format!("SYSTEM STOP MERGES {table}"))
+            .await;
+    }
     seed_duplicated_across_old_and_new_path(&context).await;
     seed_routes_after_transfer(&context).await;
 
@@ -304,10 +310,26 @@ async fn reconcile_tombstones_old_path_after_move() {
     assert_active_id_count(&context, TRANSFERRED_PROJECT_ID, 1).await;
     assert_active_id_count(&context, CONTROL_PROJECT_ID, 1).await;
 
+    let rows_after_first_run = stored_row_counts(&context).await;
+
     reconcile_root(&context, &ontology, ROOT_PATH).await;
 
     assert_active_id_count(&context, TRANSFERRED_PROJECT_ID, 1).await;
     assert_active_id_count(&context, CONTROL_PROJECT_ID, 1).await;
+    assert_eq!(
+        stored_row_counts(&context).await,
+        rows_after_first_run,
+        "a second reconcile must not write tombstones for rows that are already deleted"
+    );
+}
+
+async fn stored_row_counts(context: &TestContext) -> Vec<usize> {
+    let mut counts = Vec::new();
+    for table in [t("gl_project"), t("gl_edge")] {
+        let result = context.query(&format!("SELECT 1 FROM {table}")).await;
+        counts.push(result.iter().map(|batch| batch.num_rows()).sum());
+    }
+    counts
 }
 
 const LARGE_ROOT_PATH: &str = "1/400/";

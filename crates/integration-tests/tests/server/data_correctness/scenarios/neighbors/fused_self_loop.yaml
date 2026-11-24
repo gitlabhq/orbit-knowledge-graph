@@ -1,0 +1,45 @@
+config:
+  backends: [clickhouse, duckdb]
+  extra_seed:
+    gl_file:
+      - { id: 14101, traversal_path: 1/100/1000/, project_id: 1000, branch: main, name: a, extension: rs, language: Rust, path: src/a.rs }
+      - { id: 14102, traversal_path: 1/100/1000/, project_id: 1000, branch: main, name: b, extension: rs, language: Rust, path: src/b.rs }
+      - { id: 14103, traversal_path: 1/100/1000/, project_id: 1000, branch: main, name: c, extension: rs, language: Rust, path: src/c.rs }
+    gl_code_edge:
+      - { traversal_path: 1/100/1000/, project_id: 1000, branch: main, source_id: 14101, source_kind: File, relationship_kind: IMPORTS, target_id: 14102, target_kind: File }
+      - { traversal_path: 1/100/1000/, project_id: 1000, branch: main, source_id: 14103, source_kind: File, relationship_kind: IMPORTS, target_id: 14101, target_kind: File }
+      - { traversal_path: 1/100/1000/, project_id: 1000, branch: main, source_id: 14101, source_kind: File, relationship_kind: IMPORTS, target_id: 14101, target_kind: File }
+    gl_edge:
+      - { traversal_path: 1/100/1000/, source_id: 14101, source_kind: File, relationship_kind: IMPORTS, target_id: 14102, target_kind: File }
+      - { traversal_path: 1/100/1000/, source_id: 14103, source_kind: File, relationship_kind: IMPORTS, target_id: 14101, target_kind: File }
+      - { traversal_path: 1/100/1000/, source_id: 14101, source_kind: File, relationship_kind: IMPORTS, target_id: 14101, target_kind: File }
+
+cases:
+  - name: single_center
+    description: Both-direction neighbors of one center return its outgoing edge, its incoming edge, and its self-loop
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"f","entity":"File","node_ids":[14101]}],"neighbors":{"direction":"both","rel_types":["IMPORTS"]}}
+      gql: |
+        MATCH (f:File {id: 14101})-[:IMPORTS]-(n) RETURN f, n
+
+    expect:
+      nodes:
+        File:
+          ids: [14101, 14102, 14103]
+      edges:
+        IMPORTS: [[14101, 14102], [14103, 14101], [14101, 14101]]
+
+  - name: fused_centers
+    description: Fused both-direction neighbors of two centers return every edge of each, including the self-loop
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"f","entity":"File","node_ids":[14101,14102]}],"neighbors":{"direction":"both","rel_types":["IMPORTS"]}}
+      gql: |
+        MATCH (f:File)-[:IMPORTS]-(n) WHERE f.id IN [14101, 14102] RETURN f, n
+    expect:
+      nodes:
+        File:
+          ids: [14101, 14102, 14103]
+      edges:
+        IMPORTS: [[14101, 14102], [14103, 14101], [14101, 14101]]

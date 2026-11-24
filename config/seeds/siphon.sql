@@ -773,6 +773,27 @@ ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id, partition_id)
 ORDER BY (traversal_path, id, partition_id);
 
+-- Siphon source table for CI pipeline metadata (pipeline name)
+CREATE TABLE IF NOT EXISTS siphon_ci_pipeline_metadata
+(
+    `project_id` Int64,
+    `pipeline_id` Int64,
+    `name` Nullable(String),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC'),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE,
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY pipeline_id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, pipeline_id)
+ORDER BY (traversal_path, pipeline_id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
 -- Siphon source tables for CI stages
 CREATE TABLE IF NOT EXISTS siphon_p_ci_stages
 (
@@ -1009,6 +1030,7 @@ CREATE TABLE IF NOT EXISTS siphon_merge_requests_closing_issues
     `created_at` DateTime64(6, 'UTC'),
     `updated_at` DateTime64(6, 'UTC'),
     `from_mr_description` Bool DEFAULT true,
+    `link_type` Int8 DEFAULT 0,
     `project_id` Int64,
     `traversal_path` String DEFAULT '0/',
     `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC'),

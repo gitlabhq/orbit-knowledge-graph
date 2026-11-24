@@ -1,11 +1,13 @@
 query GraphStatus($fullPath: ID!) {
   group(fullPath: $fullPath) {
-    orbit @gl_introduced(version: "19.4.0") {
+    id
+    orbit @gl_introduced(version: "19.3.0") {
       ...OrbitStatus
     }
   }
   project(fullPath: $fullPath) {
-    orbit @gl_introduced(version: "19.4.0") {
+    id
+    orbit @gl_introduced(version: "19.3.0") {
       ...OrbitStatus
     }
   }

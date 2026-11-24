@@ -1,0 +1,82 @@
+cases:
+  - name: Search keeps requested columns and adds node identity columns
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username","state"]}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u.username, u.state LIMIT 10
+    logical:
+      expect: ["(Project u.username, u.state (_))"]
+    physical:
+      clickhouse:
+        final_ast:
+          expect: ["(Limit 11 (Project Concat ? AS u_username, u.state AS u_state, u.id AS _orbit_u_id, 'User' AS _orbit_u_type (...)))"]
+        hydration: none
+
+  - name: Wildcard search projects every column and adds node identity columns
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":"*"}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1}) RETURN properties(u) LIMIT 10
+    logical:
+      expect: ["(Project u.id, u.username, u.created_at, u.user_type, ... (_))"]
+    physical:
+      clickhouse:
+        final_ast:
+          expect: ["(Project u.id AS u_id, u.id AS _orbit_u_id, 'User' AS _orbit_u_type, ... (...))"]
+        hydration: none
+
+  - name: Traversal adds identity columns for both endpoints
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"CONTAINS","from":"u","to":"p"}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1})-[:CONTAINS]->(p:Project) RETURN u.username, p.name LIMIT 10
+    physical:
+      clickhouse:
+        final_ast:
+          expect: ["(Project _orbit_edge_0.source_id AS _orbit_u_id, 'User' AS _orbit_u_type, _orbit_edge_0.target_id AS _orbit_p_id, 'Project' AS _orbit_p_type, ... (...))"]
+        result_context:
+          query_type: traversal
+          nodes:
+            $exact:
+              u: { entity_type: User, id_column: _orbit_u_id, type_column: _orbit_u_type }
+              p: { entity_type: Project, id_column: _orbit_p_id, type_column: _orbit_p_type }
+
+  - name: Aggregation adds identity columns only for the grouped node
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":["u"],"aggregations":[{"count":"mr","as":"mr_count"}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u{.username}, count(mr) AS mr_count LIMIT 10
+    logical:
+      expect: ["(Aggregate group u AS u, COUNT(mr) AS mr_count (_))"]
+    physical:
+      clickhouse:
+        final_ast:
+          expect: ["(Aggregate group u.username, group u.id, COUNT() AS mr_count, u.id AS _orbit_u_id, 'User' AS _orbit_u_type, ... (_))"]
+        sql:
+          not_contains: [_orbit_mr_id, _orbit_mr_type]
+
+  - name: Definition identity uses its project ID for redaction
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[1],"columns":["name","project_id"]}],"limit":10}
+      gql: |
+        MATCH (d:Definition {id: 1}) RETURN d.name, d.project_id LIMIT 10
+    physical:
+      clickhouse:
+        final_ast:
+          expect: ["(Project d.project_id AS d_project_id, d.id AS _orbit_d_pk, d.project_id AS _orbit_d_id, 'Definition' AS _orbit_d_type, ... (...))"]
+
+  - name: Project identity uses its own ID for redaction
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1],"columns":["name"]}],"limit":10}
+      gql: |
+        MATCH (p:Project {id: 1}) RETURN p.name LIMIT 10
+    physical:
+      clickhouse:
+        final_ast:
+          expect: ["(Project p.id AS _orbit_p_id, 'Project' AS _orbit_p_type, ... (...))"]

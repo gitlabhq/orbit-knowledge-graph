@@ -9,7 +9,7 @@ use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::EntityAuthConfig;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct RedactionNode {
     pub alias: String,
     pub entity_type: String,
@@ -18,7 +18,7 @@ pub struct RedactionNode {
     pub type_column: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct EdgeMeta {
     pub column_prefix: String,
     pub path_column: Option<String>,
@@ -33,12 +33,25 @@ pub struct EdgeMeta {
     pub relationship: usize,
 }
 
-#[derive(Debug, Clone, Default)]
+fn entity_and_id<S: serde::Serializer>(
+    center: &Option<(String, i64)>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    use serde::Serialize;
+    center
+        .as_ref()
+        .map(|(entity, id)| serde_json::json!({"entity": entity, "id": id}))
+        .serialize(serializer)
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct ResultContext {
     pub query_type: Option<QueryType>,
     nodes: HashMap<String, RedactionNode>,
+    #[serde(skip)]
     entity_auth: HashMap<String, EntityAuthConfig>,
     edges: Vec<EdgeMeta>,
+    #[serde(serialize_with = "entity_and_id")]
     neighbors_center: Option<(String, i64)>,
     labels: HashMap<String, String>,
 }

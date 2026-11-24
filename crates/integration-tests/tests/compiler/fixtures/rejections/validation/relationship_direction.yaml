@@ -1,0 +1,179 @@
+cases:
+  - name: A reversed AUTHORED arrow names the declared direction
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED]->(u:User) RETURN mr, u
+    missing_frontends:
+      json: JSON relationships do not validate the declared direction.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate_relationships
+          reason: schema
+          contains: ["AUTHORED goes from User to MergeRequest; reverse the arrow: (u)-[:AUTHORED]->(mr)"]
+
+  - name: A reversed incoming AUTHORED arrow in an aggregation names the declared direction
+    query:
+      gql: |
+        MATCH (u:User)<-[a:AUTHORED]-(mr:MergeRequest {project_id: 1}) RETURN count(mr)
+    missing_frontends:
+      json: JSON relationships do not validate the declared direction.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate_relationships
+          reason: schema
+          contains: ["AUTHORED goes from User to MergeRequest; reverse the arrow: (u)-[:AUTHORED]->(mr)"]
+
+  - name: A relationship type between unrelated entities says so
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED]->(p:Project) RETURN mr, p
+    missing_frontends:
+      json: JSON relationships do not validate the declared direction.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate_relationships
+          reason: schema
+          contains: ["AUTHORED does not connect MergeRequest and Project in either direction"]
+
+  - name: Each alternative that cannot match is named
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED|CLOSES]->(u:User) RETURN mr, u
+    missing_frontends:
+      json: JSON relationships do not validate the declared direction.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate_relationships
+          reason: schema
+          contains: ["AUTHORED goes from User to MergeRequest; reverse the arrow: (u)-[:AUTHORED]->(mr); CLOSES does not connect MergeRequest and User"]
+
+  - name: Alternatives that connect neither way are named together
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED|CLOSES]->(p:Project) RETURN mr, p
+    missing_frontends:
+      json: JSON relationships do not validate the declared direction.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate_relationships
+          reason: schema
+          contains: ["AUTHORED|CLOSES does not connect MergeRequest and Project in either direction"]
+
+  - name: An uppercase relationship variable that names a type points to the type form
+    query:
+      gql: |
+        MATCH (p:Project {id: 1})<-[IN_PROJECT]-(mr:MergeRequest) RETURN count(mr)
+    missing_frontends:
+      json: JSON relationships do not validate the declared direction.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains: ["[IN_PROJECT] declares a variable, not a relationship type; write [:IN_PROJECT]"]
+
+  - name: An uppercase relationship variable to a neighbors endpoint points to the type form
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {id: 1})-[IN_MILESTONE]->(m) RETURN m
+    missing_frontends:
+      json: JSON relationships do not validate the declared direction.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains: ["[IN_MILESTONE] declares a variable, not a relationship type; write [:IN_MILESTONE]"]
+
+  - name: An AUTHORED arrow in the declared direction is accepted
+    query:
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {project_id: 1}) RETURN mr, u
+    missing_frontends:
+      json: The source test supplies only GQL.
+    logical:
+      expect: ["(EdgeScan AUTHORED u->mr AS e0)"]
+    physical:
+      clickhouse: {}
+
+  - name: An incoming AUTHORED arrow in the declared direction is accepted
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {project_id: 1})<-[:AUTHORED]-(u:User) RETURN count(mr)
+    missing_frontends:
+      json: The source test supplies only GQL.
+    logical:
+      expect: ["(EdgeScan AUTHORED u->mr AS e0)"]
+    physical:
+      clickhouse: {}
+
+  - name: Alternatives are accepted when one of them connects the entities
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED|IN_PROJECT]->(p:Project) RETURN mr, p
+    missing_frontends:
+      json: The source test supplies only GQL.
+    logical:
+      expect: ["(EdgeScan AUTHORED|IN_PROJECT mr->p AS e0)"]
+    physical:
+      clickhouse: {}
+
+  - name: A hop range over a type that connects the entities is accepted
+    query:
+      gql: |
+        MATCH (g:Group {id: 1})-[:CONTAINS*1..2]->(p:Project) RETURN p
+    missing_frontends:
+      json: The source test supplies only GQL.
+    logical:
+      expect: ["(EdgeScan CONTAINS g->p AS e0 HOPS 1..2)"]
+    physical:
+      clickhouse: {}
+
+  - name: A lowercase untyped relationship variable is accepted
+    query:
+      gql: |
+        MATCH (p:Project {id: 1})<-[r]-(mr:MergeRequest) RETURN count(mr)
+    missing_frontends:
+      json: The source test supplies only GQL.
+    logical:
+      expect: ["(EdgeScan IN_PROJECT|SOURCE_PROJECT mr->p AS e0)"]
+    physical:
+      clickhouse: {}
+
+  - name: A one-letter uppercase untyped relationship variable is accepted
+    query:
+      gql: |
+        MATCH (p:Project {id: 1})<-[R]-(mr:MergeRequest) RETURN count(mr)
+    missing_frontends:
+      json: The source test supplies only GQL.
+    logical:
+      expect: ["(EdgeScan IN_PROJECT|SOURCE_PROJECT mr->p AS e0)"]
+    physical:
+      clickhouse: {}
+
+  - name: A typed relationship to a neighbors endpoint is accepted
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {id: 1})-[:IN_MILESTONE]->(m) RETURN m
+    missing_frontends:
+      json: The source test supplies only GQL.
+    logical:
+      expect: ["(Input neighbors (...))"]
+    physical:
+      clickhouse: {}
+
+  - name: JSON accepts a relationship against the declared direction
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"u","entity":"User"}],"relationships":[{"type":"AUTHORED","from":"mr","to":"u"}]}
+    missing_frontends:
+      gql: GQL rejects the reversed arrow, as the first case shows.
+    logical:
+      expect: ["(EdgeScan AUTHORED mr->u AS e0)"]
+    physical:
+      clickhouse: {}

@@ -148,12 +148,9 @@ fn query_executed_event() -> StructuredEvent {
         environment: Some("staging".parse().expect("environment")),
         correlation_id: Some("corr-it-1".parse().expect("correlation_id")),
         instance_id: Some("inst-it".parse().expect("instance_id")),
-        unique_instance_id: None,
-        host_name: None,
         organization_id: Some(42),
         root_namespace_ids: Some(vec![99]),
-        coding_agent: None,
-        schema_version: None,
+        ..orbit_common::OrbitCommon::default()
     });
 
     let query = OrbitQueryContext::new(orbit_query::OrbitQuery {

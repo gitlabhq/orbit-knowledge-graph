@@ -1,0 +1,420 @@
+description: Path finding drops a path when any node on it is denied, and keeps the edge kinds of every surviving path
+
+config:
+  security: { paths: ["1/700/"] }
+  seed: redaction
+
+cases:
+  - name: user_to_project_all_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [701, 702, 703]
+          project: [7100, 7101, 7102, 7103, 7104]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [7100]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 7100}) RETURN p
+    expect:
+      referential_integrity: true
+      path_count: 1
+      nodes:
+        User:
+          ids: [1]
+        Group:
+          ids: [701]
+        Project:
+          ids: [7100]
+      path_edges:
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 701, step: 0 }, { from: Group, from_id: 701, type: CONTAINS, to: Project, to_id: 7100, step: 1 }]
+
+  - name: no_authorization_returns_nothing
+    config:
+      redaction: none
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [7100]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 7100}) RETURN p
+    expect:
+      node_count: 0
+      path_count: 0
+
+  - name: denied_start_node_filters_all_paths
+    config:
+      redaction:
+        allow:
+          group: [701, 702, 703]
+          project: [7100, 7101, 7102, 7103, 7104]
+        deny:
+          user: [1]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [7100]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 7100}) RETURN p
+    expect:
+      node_count: 0
+      path_count: 0
+
+  - name: denied_intermediates_filter_all_paths
+    config:
+      redaction:
+        allow:
+          user: [1]
+          project: [7100]
+        deny:
+          group: [701, 702, 703]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [7100]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 7100}) RETURN p
+    expect:
+      node_count: 0
+      path_count: 0
+
+  - name: three_destinations_all_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [701, 702, 703]
+          project: [7100, 7101, 7102, 7103, 7104]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [7100, 7102, 7104]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [7100, 7102, 7104] RETURN p
+    expect:
+      referential_integrity: true
+      path_count: 3
+      path_destinations:
+        Project: [7100, 7102, 7104]
+      path_edges:
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 701, step: 0 }, { from: Group, from_id: 701, type: CONTAINS, to: Project, to_id: 7100, step: 1 }]
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 701, step: 0 }, { from: Group, from_id: 701, type: CONTAINS, to: Project, to_id: 7102, step: 1 }]
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 703, step: 0 }, { from: Group, from_id: 703, type: CONTAINS, to: Project, to_id: 7104, step: 1 }]
+
+  - name: denied_intermediate_filters_its_path
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: [701]
+          project: [7100, 7102, 7104]
+        deny:
+          group: [703]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [7100, 7102, 7104]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [7100, 7102, 7104] RETURN p
+    expect:
+      referential_integrity: true
+      path_count: 2
+      nodes:
+        Group:
+          ids: [701]
+          absent: [703]
+        Project:
+          ids: [7100, 7102]
+          absent: [7104]
+      path_destinations:
+        Project: [7100, 7102]
+      path_edges:
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 701, step: 0 }, { from: Group, from_id: 701, type: CONTAINS, to: Project, to_id: 7100, step: 1 }]
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 701, step: 0 }, { from: Group, from_id: 701, type: CONTAINS, to: Project, to_id: 7102, step: 1 }]
+
+  - name: denied_intermediate_with_all_projects_allowed
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: [701]
+          project: [7100, 7101, 7102, 7103, 7104]
+        deny:
+          group: [703]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [7100, 7102, 7104]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [7100, 7102, 7104] RETURN p
+    expect:
+      path_count: 2
+      nodes:
+        Group:
+          ids: [701]
+          absent: [703]
+      path_destinations:
+        Project: [7100, 7102]
+      path_edges:
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 701, step: 0 }, { from: Group, from_id: 701, type: CONTAINS, to: Project, to_id: 7100, step: 1 }]
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 701, step: 0 }, { from: Group, from_id: 701, type: CONTAINS, to: Project, to_id: 7102, step: 1 }]
+
+  - name: two_starts_two_ends_all_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [701, 702, 703]
+          project: [7100, 7101, 7102, 7103, 7104]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1, 2]},
+            {"id": "end", "entity": "Project", "node_ids": [7100, 7102]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User)-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE start.id IN [1, 2] AND `end`.id IN [7100, 7102] RETURN p
+    expect:
+      referential_integrity: true
+      path_count: 4
+      nodes:
+        User:
+          ids: [1, 2]
+        Group:
+          ids: [701]
+        Project:
+          ids: [7100, 7102]
+      path_destinations:
+        Project: [7100, 7102]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 701 }
+          - { from: User, from_id: 2, to: Group, to_id: 701 }
+        CONTAINS:
+          - { from: Group, from_id: 701, to: Project, to_id: 7100 }
+          - { from: Group, from_id: 701, to: Project, to_id: 7102 }
+
+  - name: two_destinations_all_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [701, 702, 703]
+          project: [7100, 7101, 7102, 7103, 7104]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [7100, 7102]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [7100, 7102] RETURN p
+    expect:
+      path_count: 2
+      path_destinations:
+        Project: [7100, 7102]
+      path_edges:
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 701, step: 0 }, { from: Group, from_id: 701, type: CONTAINS, to: Project, to_id: 7100, step: 1 }]
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 701, step: 0 }, { from: Group, from_id: 701, type: CONTAINS, to: Project, to_id: 7102, step: 1 }]
+
+  - name: denied_end_node_filters_its_path
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: [701, 702, 703]
+          project: [7100]
+        deny:
+          project: [7102]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [7100, 7102]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [7100, 7102] RETURN p
+    expect:
+      path_count: 1
+      nodes:
+        Project:
+          ids: [7100]
+          absent: [7102]
+      path_destinations:
+        Project: [7100]
+      path_edges:
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 701, step: 0 }, { from: Group, from_id: 701, type: CONTAINS, to: Project, to_id: 7100, step: 1 }]
+
+  - name: paths_authorized_independently
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: [701]
+          project: [7100]
+        deny:
+          project: [7102]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [7100, 7102]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [7100, 7102] RETURN p
+    expect:
+      path_count: 1
+      nodes:
+        Project:
+          ids: [7100]
+          absent: [7102]
+      path_destinations:
+        Project: [7100]
+      path_edges:
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 701, step: 0 }, { from: Group, from_id: 701, type: CONTAINS, to: Project, to_id: 7100, step: 1 }]
+
+  - name: two_starts_all_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [701, 702, 703]
+          project: [7100, 7101, 7102, 7103, 7104]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1, 2]},
+            {"id": "end", "entity": "Project", "node_ids": [7100]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User)-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 7100}) WHERE start.id IN [1, 2] RETURN p
+    expect:
+      path_count: 2
+      nodes:
+        User:
+          ids: [1, 2]
+      path_destinations:
+        Project: [7100]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 701 }
+          - { from: User, from_id: 2, to: Group, to_id: 701 }
+        CONTAINS:
+          - { from: Group, from_id: 701, to: Project, to_id: 7100 }
+
+  - name: shared_intermediate_keeps_allowed_start
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: [701]
+          project: [7100]
+        deny:
+          user: [2]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1, 2]},
+            {"id": "end", "entity": "Project", "node_ids": [7100]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User)-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 7100}) WHERE start.id IN [1, 2] RETURN p
+    expect:
+      path_count: 1
+      nodes:
+        User:
+          ids: [1]
+          absent: [2]
+      path_edges:
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 701, step: 0 }, { from: Group, from_id: 701, type: CONTAINS, to: Project, to_id: 7100, step: 1 }]
+
+  - name: no_path_exists_returns_empty
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [701, 702, 703]
+          project: [7100, 7101, 7102, 7103, 7104]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [99999]},
+            {"id": "end", "entity": "Project", "node_ids": [99999]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 99999})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 99999}) RETURN p
+    expect:
+      node_count: 0
+      path_count: 0

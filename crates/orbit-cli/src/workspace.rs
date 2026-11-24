@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::OnceLock;
 
 use crate::database::{GraphReader, IncompleteRevision, schema::graph_lacks_commit};
 use anyhow::{Context, Result};
-use gitalisk_core::repository::gitalisk_repository::CoreGitaliskRepository;
+use gitalisk_core::repository::gitalisk_repository::{
+    CoreGitaliskRepository, FileStatusInfo, GetStatusOptions, StatusCode,
+};
 use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFolder;
 
 pub struct Workspace {
@@ -226,8 +228,7 @@ pub fn open_indexed_without_indexing(
 
 fn locate_graph(repo: Option<PathBuf>, db: &Option<PathBuf>) -> Result<(GitInfo, PathBuf)> {
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
-    let top_level = git_toplevel(&repo_path)
-        .with_context(|| format!("failed to find git top-level for {}", repo_path.display()))?;
+    let top_level = git_toplevel(&repo_path)?;
     let git = git_info(&top_level)
         .with_context(|| format!("failed to read git info for {}", top_level.display()))?;
     let db_path = resolve_db_path(db.clone(), &git)?;
@@ -242,49 +243,24 @@ pub fn edited_since_index(repo: &Path, files: &[&str]) -> std::collections::BTre
     if files.is_empty() {
         return edited;
     }
-    let git_list = |args: &[&str]| -> Option<Vec<String>> {
-        let output = Command::new("git")
-            .arg("--literal-pathspecs")
-            .arg("-C")
-            .arg(repo)
-            .args(args)
-            .arg("--")
-            .args(files)
-            .stderr(Stdio::null())
-            .output()
-            .ok()
-            .filter(|output| output.status.success())?;
-        Some(
-            String::from_utf8_lossy(&output.stdout)
-                .split('\0')
-                .filter(|field| !field.is_empty())
-                .map(str::to_string)
-                .collect(),
-        )
+    let repository = repository_at(repo);
+    let options = GetStatusOptions {
+        ignore_submodules: true,
+        pathspecs: files.iter().map(PathBuf::from).collect(),
+        ..Default::default()
     };
-    let Some(status) = git_list(&[
-        "status",
-        "--porcelain=v1",
-        "-z",
-        "--untracked-files=no",
-        "--ignore-submodules=all",
-    ]) else {
+    let Ok(status) = repository.get_status_with(&options) else {
         return edited;
     };
-    let mut changed = std::collections::HashSet::new();
-    let mut fields = status.into_iter();
-    while let Some(entry) = fields.next() {
-        let (Some(code), Some(path)) = (entry.get(..2), entry.get(3..)) else {
-            continue;
-        };
-        if code.contains(['R', 'C']) {
-            fields.next();
-        }
-        changed.insert(path.to_string());
-    }
-    let tracked: std::collections::HashSet<String> = git_list(&["ls-files", "-z"])
+    let changed: std::collections::HashSet<String> = status
+        .iter()
+        .filter_map(|info| repo_relative(repo, &info.path))
+        .collect();
+    let tracked: std::collections::HashSet<String> = repository
+        .tracked_files(files)
         .unwrap_or_default()
-        .into_iter()
+        .iter()
+        .filter_map(|path| repo_relative(repo, path))
         .collect();
     edited.extend(
         files
@@ -401,26 +377,19 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
 /// [`GitInfo::parent_repo_path`], which for a worktree points at the origin
 /// repo instead of this checkout's own root.
 pub fn git_toplevel(path: &Path) -> Result<PathBuf> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(path)
-        .output()
-        .with_context(|| format!("failed to run git in {}", path.display()))?;
+    let top = repository_at(path)
+        .toplevel()
+        .with_context(|| format!("failed to find git top-level for {}", path.display()))?;
+    dunce::canonicalize(&top).with_context(|| format!("failed to canonicalize {}", top.display()))
+}
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!(
-            "git rev-parse --show-toplevel failed in {}: {}",
-            path.display(),
-            stderr.trim()
-        );
-    }
+pub(crate) fn repository_at(path: &Path) -> CoreGitaliskRepository {
+    let path = path.to_string_lossy().to_string();
+    CoreGitaliskRepository::new(path.clone(), path)
+}
 
-    let top = String::from_utf8(output.stdout)
-        .context("git output is not valid UTF-8")?
-        .trim()
-        .to_string();
-    dunce::canonicalize(&top).with_context(|| format!("failed to canonicalize {top}"))
+fn repo_relative(root: &Path, path: &Path) -> Option<String> {
+    path.strip_prefix(root).ok()?.to_str().map(str::to_string)
 }
 
 #[derive(Default)]
@@ -434,6 +403,25 @@ impl GitChanges {
         self.changed.iter().chain(&self.removed)
     }
 
+    fn from_statuses(root: &Path, statuses: &[FileStatusInfo]) -> Self {
+        let mut changes = Self::default();
+        for info in statuses {
+            let path = repo_relative(root, &info.path);
+            let original = info
+                .original_path
+                .as_deref()
+                .and_then(|original| repo_relative(root, original));
+            let status = info.status;
+            let gone = [status.index, status.worktree].contains(&StatusCode::Deleted);
+            changes.removed.extend(original);
+            match gone {
+                true => changes.removed.extend(path),
+                false => changes.changed.extend(path),
+            }
+        }
+        changes.settled()
+    }
+
     pub fn settled(mut self) -> Self {
         for list in [&mut self.changed, &mut self.removed] {
             list.sort();
@@ -445,66 +433,40 @@ impl GitChanges {
 }
 
 pub fn git_committed_changes(repo_path: &Path, base_sha: &str) -> Result<GitChanges> {
-    let committed = git_stdout(
-        repo_path,
-        &["diff", "--name-status", "-z", base_sha, "HEAD"],
-    )?;
-    let mut changes = GitChanges::default();
-    parse_name_status(&committed, &mut changes);
-    Ok(changes.settled())
+    let committed = repository_at(repo_path)
+        .changes_since(base_sha)
+        .with_context(|| format!("failed to diff {base_sha} in {}", repo_path.display()))?;
+    Ok(GitChanges::from_statuses(repo_path, &committed))
 }
 
 pub fn git_working_changes(repo_path: &Path) -> Result<GitChanges> {
-    let mut changes = GitChanges::default();
-    parse_porcelain(&git_status(repo_path)?, &mut changes);
-    Ok(changes.settled())
+    let working = repository_at(repo_path)
+        .get_status()
+        .with_context(|| format!("failed to read git status in {}", repo_path.display()))?;
+    Ok(GitChanges::from_statuses(repo_path, &working))
 }
 
-fn git_status(repo_path: &Path) -> Result<String> {
-    git_stdout(
+/// Names that are not UTF-8 are left out, since the graph cannot hold them.
+pub fn git_tracked_ignored(repo_path: &Path) -> Result<Vec<String>> {
+    let listed = git_output(
         repo_path,
-        &["status", "--porcelain", "-z", "--untracked-files=all"],
-    )
+        &[
+            "ls-files",
+            "-z",
+            "--cached",
+            "--ignored",
+            "--exclude-standard",
+        ],
+    )?;
+    Ok(listed
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .filter_map(|path| std::str::from_utf8(path).ok())
+        .map(str::to_string)
+        .collect())
 }
 
-fn parse_name_status(output: &str, changes: &mut GitChanges) {
-    let mut fields = output.split('\0').filter(|f| !f.is_empty());
-    while let Some(status) = fields.next() {
-        let Some(path) = fields.next() else { break };
-        match status.chars().next() {
-            Some('D') => changes.removed.push(path.to_string()),
-            Some('R' | 'C') => {
-                changes.removed.push(path.to_string());
-                if let Some(new_path) = fields.next() {
-                    changes.changed.push(new_path.to_string());
-                }
-            }
-            _ => changes.changed.push(path.to_string()),
-        }
-    }
-}
-
-fn parse_porcelain(output: &str, changes: &mut GitChanges) {
-    let mut fields = output.split('\0').filter(|f| !f.is_empty());
-    while let Some(entry) = fields.next() {
-        let Some((status, path)) = entry.split_at_checked(3) else {
-            break;
-        };
-        let status = status.trim_end();
-        if status.contains('D') {
-            changes.removed.push(path.to_string());
-        } else {
-            changes.changed.push(path.to_string());
-        }
-        if (status.starts_with('R') || status.starts_with('C'))
-            && let Some(old_path) = fields.next()
-        {
-            changes.removed.push(old_path.to_string());
-        }
-    }
-}
-
-fn git_stdout(repo_path: &Path, args: &[&str]) -> Result<String> {
+fn git_output(repo_path: &Path, args: &[&str]) -> Result<Vec<u8>> {
     let output = Command::new("git")
         .args(args)
         .current_dir(repo_path)
@@ -518,7 +480,7 @@ fn git_stdout(repo_path: &Path, args: &[&str]) -> Result<String> {
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    String::from_utf8(output.stdout).context("git output is not valid UTF-8")
+    Ok(output.stdout)
 }
 
 /// Mask clears the sign bit so the result is always a positive i64.
@@ -538,13 +500,7 @@ fn is_ignored_by_enclosing_repo(repo: &Path) -> bool {
     let Some(enclosing) = repo.parent().and_then(|parent| git_toplevel(parent).ok()) else {
         return false;
     };
-    Command::new("git")
-        .args(["check-ignore", "--quiet"])
-        .arg(repo)
-        .current_dir(enclosing)
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+    repository_at(&enclosing).is_ignored(repo)
 }
 
 fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
@@ -570,6 +526,7 @@ fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::git;
 
     fn init_repo(path: &Path) {
         std::fs::create_dir_all(path).unwrap();
@@ -741,5 +698,134 @@ mod tests {
 
         let top = git_toplevel(&subdir).unwrap();
         assert_eq!(top, dunce::canonicalize(&repo).unwrap());
+    }
+
+    fn commit_all(dir: &Path, message: &str) -> String {
+        git(dir, &["add", "-A"]);
+        git(dir, &["commit", "-m", message]);
+        git_info(dir).unwrap().commit_sha
+    }
+
+    fn committed_repo() -> (tempfile::TempDir, PathBuf, String) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let repo = dunce::canonicalize(temp.path()).unwrap();
+        git(&repo, &["init"]);
+        std::fs::write(repo.join("keep.rs"), "fn keep() {}\n").unwrap();
+        std::fs::write(repo.join("edit.rs"), "fn edit() {}\n").unwrap();
+        std::fs::write(repo.join("drop.rs"), "fn drop_me() {}\n").unwrap();
+        std::fs::write(
+            repo.join("move_me.rs"),
+            "fn moved() { /* padding */ }\n".repeat(8),
+        )
+        .unwrap();
+        let base = commit_all(&repo, "base");
+        (temp, repo, base)
+    }
+
+    #[test]
+    fn git_committed_changes_reports_edits_removals_and_renames() {
+        let (_temp, repo, base) = committed_repo();
+        std::fs::write(repo.join("edit.rs"), "fn edit() { 1 }\n").unwrap();
+        std::fs::remove_file(repo.join("drop.rs")).unwrap();
+        std::fs::rename(repo.join("move_me.rs"), repo.join("moved.rs")).unwrap();
+        std::fs::write(repo.join("new.rs"), "fn new() {}\n").unwrap();
+        commit_all(&repo, "change");
+
+        let changes = git_committed_changes(&repo, &base).unwrap();
+
+        assert_eq!(changes.changed, ["edit.rs", "moved.rs", "new.rs"]);
+        assert_eq!(changes.removed, ["drop.rs", "move_me.rs"]);
+    }
+
+    #[test]
+    fn git_working_changes_reports_edits_removals_untracked_and_renames() {
+        let (_temp, repo, _base) = committed_repo();
+        std::fs::write(repo.join("edit.rs"), "fn edit() { 1 }\n").unwrap();
+        std::fs::remove_file(repo.join("drop.rs")).unwrap();
+        std::fs::write(repo.join("untracked.rs"), "fn u() {}\n").unwrap();
+        git(&repo, &["mv", "move_me.rs", "moved.rs"]);
+
+        let changes = git_working_changes(&repo).unwrap();
+
+        assert_eq!(changes.changed, ["edit.rs", "moved.rs", "untracked.rs"]);
+        assert_eq!(changes.removed, ["drop.rs", "move_me.rs"]);
+    }
+
+    #[test]
+    fn git_working_changes_treats_an_unstaged_move_as_removal_plus_change() {
+        let (_temp, repo, _base) = committed_repo();
+        std::fs::rename(repo.join("move_me.rs"), repo.join("moved.rs")).unwrap();
+
+        let changes = git_working_changes(&repo).unwrap();
+
+        assert_eq!(changes.changed, ["moved.rs"]);
+        assert_eq!(changes.removed, ["move_me.rs"]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn git_working_changes_skips_names_that_are_not_utf8() {
+        use std::os::unix::ffi::OsStrExt;
+        let (_temp, repo, _base) = committed_repo();
+        std::fs::write(repo.join(std::ffi::OsStr::from_bytes(b"bad\xff.rs")), "x").unwrap();
+        std::fs::write(repo.join("good.rs"), "x").unwrap();
+
+        let changes = git_working_changes(&repo).unwrap();
+
+        assert_eq!(changes.changed, ["good.rs"]);
+    }
+
+    #[test]
+    fn edited_since_index_flags_modified_and_untracked_files_only() {
+        let (_temp, repo, _base) = committed_repo();
+        std::fs::write(repo.join("edit.rs"), "fn edit() { 1 }\n").unwrap();
+        std::fs::write(repo.join("untracked.rs"), "x").unwrap();
+
+        let edited = edited_since_index(&repo, &["keep.rs", "edit.rs", "untracked.rs", "drop.rs"]);
+
+        assert_eq!(
+            edited.into_iter().collect::<Vec<_>>(),
+            ["edit.rs", "untracked.rs"]
+        );
+    }
+
+    #[test]
+    fn edited_since_index_is_empty_outside_a_repository() {
+        let temp = tempfile::TempDir::new().unwrap();
+        assert!(edited_since_index(temp.path(), &["a.rs"]).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn edited_since_index_treats_pathspecs_literally() {
+        let (_temp, repo, _base) = committed_repo();
+        std::fs::write(repo.join(":odd.rs"), "fn odd() {}\n").unwrap();
+        std::fs::write(repo.join("odd.rs"), "fn odd() {}\n").unwrap();
+        commit_all(&repo, "odd");
+        std::fs::write(repo.join("odd.rs"), "fn odd() { 1 }\n").unwrap();
+
+        let edited = edited_since_index(&repo, &[":odd.rs"]);
+
+        assert!(edited.is_empty(), "{edited:?}");
+    }
+
+    #[test]
+    fn git_toplevel_fails_outside_a_repository() {
+        let temp = tempfile::TempDir::new().unwrap();
+        assert!(git_toplevel(temp.path()).is_err());
+    }
+
+    #[test]
+    fn locate_graph_reports_a_missing_repository_once() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let Err(err) = locate_graph(Some(temp.path().to_path_buf()), &None) else {
+            panic!("locate_graph succeeded outside a repository");
+        };
+        let rendered = format!("{err:#}");
+        assert_eq!(
+            rendered.matches("failed to find git top-level").count(),
+            1,
+            "{rendered}"
+        );
     }
 }

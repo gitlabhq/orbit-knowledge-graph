@@ -134,6 +134,8 @@ pub fn run_yaml_suite(yaml: &str) {
                 faults: Mutex::new(Vec::new()),
                 file_timings: Mutex::new(Vec::new()),
                 language_timings: Mutex::new(Vec::new()),
+                file_links: Mutex::new(Vec::new()),
+                inventory: None,
             });
             let (tx, rx) = crossbeam_channel::unbounded();
             let on_batch = {

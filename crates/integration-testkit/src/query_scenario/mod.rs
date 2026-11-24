@@ -2,8 +2,11 @@
 //! tests but exercises the full query path: compile, execute, redact,
 //! hydrate, paginate, format, assert.
 
+pub mod coverage;
+mod datasets;
 mod duckdb;
 mod format;
+mod output_format;
 mod pagination;
 #[cfg(test)]
 mod regression;
@@ -13,13 +16,14 @@ use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::Path;
 use std::sync::Arc;
 
+use datasets::{Database, Datasets};
 use futures::FutureExt;
 use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
 use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ResultContext,
     SecurityContext,
 };
-use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter};
+use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineStage, QueryPipelineContext, TypeMap,
 };
@@ -39,10 +43,12 @@ use crate::{
 };
 
 pub use duckdb::run_duckdb_dir;
+pub(crate) use format::rejection_reason;
 pub use format::{
     PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, QueryStep, RedactionConfig,
     ScenarioConfig, SecurityOverride,
 };
+pub(crate) use response::shown_private_detail;
 
 use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage};
 use orbit_server::redaction::QueryResult;
@@ -56,16 +62,22 @@ pub fn validate_parse(root: &str) {
     scenario::discover(root, &mut files);
     assert!(!files.is_empty(), "no files found under {}", root.display());
     for file in &files {
-        scenario::read_cases::<QueryScenario>(file);
+        for (name, scenario) in read_scenarios(root, file) {
+            scenario.into_steps(&name);
+        }
     }
 }
 
 fn read_scenarios(root: &Path, file: &Path) -> Vec<(String, QueryScenario)> {
     let name = scenario::scenario_name(root, file);
-    scenario::read_cases(file)
+    scenario::read_cases::<serde_json::Value>(file)
         .into_iter()
         .map(|(case, scenario)| {
             let name = case.map_or_else(|| name.clone(), |case| format!("{name}/{case}"));
+            let mut generated = scenario::generate::expand(scenario, &["rows"])
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            let scenario = serde_json::from_value(generated.remove(0))
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
             (name, scenario)
         })
         .collect()
@@ -88,32 +100,6 @@ fn seed_preset(presets_dir: &Path, name: &str) -> Seed {
         .unwrap_or_else(|| panic!("unknown seed preset '{name}'"))
 }
 
-pub async fn run_query(
-    ctx: &TestContext,
-    frontend: Frontend,
-    query: &str,
-    security: &SecurityContext,
-    redaction: &MockRedactionService,
-) -> ResponseView {
-    let ontology = load_ontology();
-    let data_model = derive_clickhouse_data_model(&ontology);
-    let compiled = compile_like_server(query, frontend, (&data_model, &ontology), security)
-        .await
-        .expect("query should compile");
-    let output = execute_output(
-        ctx,
-        frontend,
-        &compiled,
-        (&data_model, &ontology),
-        security,
-        redaction,
-    )
-    .await;
-    assert_pagination(&output, "run_query");
-    let response = validate_response(&compiled.input, GraphFormatter.format(&output), "run_query");
-    ResponseView::for_query(&compiled.input, response)
-}
-
 pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let root = Path::new(root);
     let presets: Arc<Path> = Arc::from(Path::new(presets));
@@ -123,6 +109,12 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let mut scenarios: Vec<_> = files
         .iter()
         .flat_map(|file| read_scenarios(root, file))
+        .filter(|(_, scenario)| {
+            scenario
+                .config
+                .backends
+                .contains(&format::Backend::Clickhouse)
+        })
         .collect();
     assert!(
         !scenarios.is_empty(),
@@ -150,18 +142,31 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
         .unwrap_or(8);
     let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
     let ctx = Arc::new(ctx.clone());
+    let scenarios: Vec<_> = scenarios
+        .into_iter()
+        .map(|(name, scenario)| {
+            let (config, steps) = scenario.into_steps(&name);
+            let database = Database::for_scenario(&config, &steps, &name);
+            (name, config, steps, database)
+        })
+        .collect();
+    let datasets = Arc::new(Datasets::new(
+        scenarios.iter().map(|(.., database)| database),
+    ));
 
     let mut handles = Vec::new();
-    for (name, scenario) in scenarios {
+    for (name, config, steps, database) in scenarios {
         let semaphore = Arc::clone(&semaphore);
         let ctx = Arc::clone(&ctx);
         let presets = Arc::clone(&presets);
+        let datasets = Arc::clone(&datasets);
         let task_name = name.clone();
         let handle = tokio::task::spawn(async move {
             let _permit = semaphore.acquire_owned().await.unwrap();
             let started = std::time::Instant::now();
             eprintln!("--- {task_name}");
-            run_scenario(&ctx, scenario, &task_name, &presets).await;
+            let scenario = (config, steps, database);
+            run_scenario(&ctx, &datasets, scenario, &task_name, &presets).await;
             eprintln!("    {task_name} {:.2?}", started.elapsed());
         });
         handles.push((name, handle));
@@ -170,28 +175,38 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     collect_subtest_results(handles).await;
 }
 
-async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, presets: &Path) {
-    let (config, steps) = scenario.into_steps();
-    let database = (!config.extra_seed.is_empty()
-        || config.ontology_overlay.is_some()
-        || steps.iter().any(|step| !step.seed.is_empty()))
-    .then(|| scenario::database_name(name));
-    let outcome = AssertUnwindSafe(run_case(
-        ctx,
-        &config,
-        &steps,
-        name,
-        presets,
-        database.as_deref(),
-    ))
+async fn run_scenario(
+    ctx: &TestContext,
+    datasets: &Datasets,
+    (config, steps, database): (ScenarioConfig, Vec<QueryStep>, Database),
+    name: &str,
+    presets: &Path,
+) {
+    let outcome = AssertUnwindSafe(async {
+        let ctx = match &database {
+            Database::Base => ctx.clone(),
+            Database::Shared(dataset) => {
+                datasets
+                    .acquire(
+                        dataset,
+                        datasets::prepare(ctx, &config, dataset, presets, name),
+                    )
+                    .await
+            }
+            Database::Private(fork) => datasets::prepare(ctx, &config, fork, presets, name).await,
+        };
+        run_case(&ctx, &config, &steps, name, presets).await;
+    })
     .catch_unwind()
     .await;
-    let cleanup = if let Some(database) = database {
-        AssertUnwindSafe(ctx.drop_fork(&database))
-            .catch_unwind()
-            .await
-    } else {
-        Ok(())
+    let cleanup = match &database {
+        Database::Base => Ok(()),
+        Database::Shared(dataset) => {
+            AssertUnwindSafe(datasets.release(ctx, dataset))
+                .catch_unwind()
+                .await
+        }
+        Database::Private(fork) => AssertUnwindSafe(ctx.drop_fork(fork)).catch_unwind().await,
     };
     if let Err(failure) = outcome.and(cleanup) {
         resume_unwind(failure);
@@ -204,61 +219,7 @@ async fn run_case(
     steps: &[QueryStep],
     name: &str,
     presets: &Path,
-    database: Option<&str>,
 ) {
-    let ctx = if let Some(database) = database {
-        let forked = ctx.fork(database).await;
-        if let Some(overlay) = &cfg.ontology_overlay {
-            let ontology = crate::load_ontology_overlay(overlay);
-            let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology).unwrap();
-            let credentials = orbit_migrations::schema::DictionaryCredentials {
-                database: forked.config.database.clone(),
-                user: forked.config.username.clone(),
-                password: forked.config.password.clone(),
-            };
-            orbit_migrations::execute::create_all_versioned_tables(
-                &forked.create_client(),
-                &schema,
-                &credentials,
-                &crate::TABLE_PREFIX,
-            )
-            .await
-            .unwrap();
-        }
-        let columns = crate::scenario::seed::fetch_table_columns(&forked).await;
-        let mut settings = Default::default();
-        if cfg.unmerged_seed {
-            for table in cfg.extra_seed.keys() {
-                let table = crate::scenario::seed::prefix_graph_table(table);
-                assert!(
-                    columns.contains_key(&table),
-                    "{name}: unknown table '{table}'"
-                );
-                forked.execute(&format!("SYSTEM STOP MERGES {table}")).await;
-            }
-            settings = std::collections::BTreeMap::from([(
-                "optimize_on_insert".to_string(),
-                serde_json::json!(0),
-            )]);
-        }
-        if cfg.unmerged_seed {
-            for (table, rows) in &cfg.extra_seed {
-                for row in rows {
-                    let seed = Seed::from([(table.clone(), vec![row.clone()])]);
-                    crate::scenario::seed::apply_seed(&forked, &seed, &settings, &columns, name)
-                        .await;
-                }
-            }
-        } else {
-            crate::scenario::seed::apply_seed(&forked, &cfg.extra_seed, &settings, &columns, name)
-                .await;
-            forked.optimize_if_needed().await;
-        }
-        forked
-    } else {
-        ctx.clone()
-    };
-
     let security_override = resolve_preset("security", &cfg.security, presets, name);
     let redaction_with_default = cfg
         .redaction
@@ -280,15 +241,9 @@ async fn run_case(
 
     for (index, step) in steps.iter().enumerate() {
         if !step.seed.is_empty() {
-            let columns = crate::scenario::seed::fetch_table_columns(&ctx).await;
-            crate::scenario::seed::apply_seed(
-                &ctx,
-                &step.seed,
-                &Default::default(),
-                &columns,
-                name,
-            )
-            .await;
+            let columns = crate::scenario::seed::fetch_table_columns(ctx).await;
+            crate::scenario::seed::apply_seed(ctx, &step.seed, &Default::default(), &columns, name)
+                .await;
             ctx.optimize_if_needed().await;
         }
         let name = &step_label(name, index, steps.len());
@@ -297,7 +252,7 @@ async fn run_case(
                 .parse::<Frontend>()
                 .unwrap_or_else(|_| panic!("{name}: unknown query language '{frontend_key}'"));
             run_frontend(
-                (&ctx, &data_model, &ontology),
+                (ctx, &data_model, &ontology),
                 (frontend, frontend_key),
                 query_str,
                 &security,
@@ -335,7 +290,8 @@ async fn run_frontend(
     expect.validate_pages_exclusive(label);
 
     let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
-    let Some(compiled) = assert_compilation(compiled, expect, frontend_key, label) else {
+    let Some(compiled) = assert_compilation(compiled, expect, ("clickhouse", frontend_key), label)
+    else {
         return;
     };
 
@@ -363,11 +319,11 @@ async fn run_frontend(
         redaction,
     )
     .await;
-    let baseline = assert_output(&output, frontend, expect, label);
+    let baseline = assert_output(&output, expect, label);
     let count = repeat_count(expect, label);
     for run in 2..=count {
         let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
-        let compiled = assert_compilation(compiled, expect, frontend_key, label)
+        let compiled = assert_compilation(compiled, expect, ("clickhouse", frontend_key), label)
             .expect("repeated query should compile");
         let output = execute_output(
             ctx,
@@ -378,7 +334,7 @@ async fn run_frontend(
             redaction,
         )
         .await;
-        let rerun = assert_output(&output, frontend, expect, label);
+        let rerun = assert_output(&output, expect, label);
         assert_repeated_response(&baseline, &rerun, run, label);
     }
 }
@@ -416,7 +372,7 @@ async fn run_pages(
             redaction,
         )
         .await;
-        let response = assert_output(&output, frontend, page_expect, &page_label);
+        let response = assert_output(&output, page_expect, &page_label);
         let response = serde_json::from_value(response).expect("response should deserialize");
         collected.push(&response);
         assert_page_bounds(&response, i, expect.pages.len(), &page_label);
@@ -567,27 +523,6 @@ fn assert_response(input: &Input, response: serde_json::Value, expect: &QueryExp
     expect.validate_response_type(input.query_type, label);
     let response = validate_response(input, response, label);
     apply_expect(&ResponseView::for_query(input, response), expect, label);
-}
-
-fn assert_gql_table(output: &PipelineOutput, expect: &QueryExpect, label: &str) {
-    if expect.gql_columns.is_empty() && expect.gql_column_names.is_empty() {
-        return;
-    }
-    let (header, rows) = GqlFormatter.table(output);
-    if !expect.gql_column_names.is_empty() {
-        assert_eq!(
-            header, expect.gql_column_names,
-            "{label}: gql column names mismatch"
-        );
-    }
-    for (name, values) in &expect.gql_columns {
-        let index = header
-            .iter()
-            .position(|column| column == name)
-            .unwrap_or_else(|| panic!("{label}: gql table has no column {name}: {header:?}"));
-        let actual: Vec<&str> = rows.iter().map(|row| row[index].as_str()).collect();
-        assert_eq!(actual, *values, "{label}: gql column {name} mismatch");
-    }
 }
 
 fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
@@ -779,6 +714,31 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     if expect.empty_aggregation {
         view.assert_empty_aggregation();
     }
+    if let Some(columns) = &expect.aggregation_columns {
+        assert_eq!(
+            view.response.columns.as_deref().unwrap_or_default(),
+            columns.as_slice(),
+            "{label}: aggregation columns mismatch"
+        );
+    }
+    for field in &expect.edge_prop_absent {
+        assert!(
+            ["depth", "path_id", "step"].contains(&field.as_str()),
+            "{label}: edge_prop_absent takes depth, path_id, or step, got {field}"
+        );
+        for edge in view.edges() {
+            let present = match field.as_str() {
+                "depth" => edge.depth.is_some(),
+                "path_id" => edge.path_id.is_some(),
+                _ => edge.step.is_some(),
+            };
+            assert!(
+                !present,
+                "{label}: {} edge {} {} -> {} {} has {field}",
+                edge.edge_type, edge.from, edge.from_id, edge.to, edge.to_id
+            );
+        }
+    }
     for (name, node_dot_prop) in &expect.group_columns {
         let (node, property) = node_dot_prop.split_once('.').unwrap_or_else(|| {
             panic!("{label}: group_columns value must be 'node.property', got '{node_dot_prop}'")
@@ -904,7 +864,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     if let Some(n) = expect.row_count {
         view.assert_row_count(n);
     }
-    view.assert_row_values(&expect.row_values, label);
+    view.assert_row_values(&expect.row_values);
     if let Some(expected) = expect.has_more {
         let pagination = view.response.pagination.as_ref();
         assert!(
@@ -950,6 +910,9 @@ fn eval_filter_predicate(
             "in" => n
                 .prop(field)
                 .is_some_and(|actual| value.as_array().unwrap().contains(actual)),
+            "max_chars" => n.prop_str(field).is_some_and(|text| {
+                text.chars().count() <= value.as_u64().expect("max_chars takes a count") as usize
+            }),
             "is_null" if value == &serde_json::Value::Bool(true) => {
                 n.properties.get(field) == Some(&serde_json::Value::Null)
             }
@@ -985,7 +948,7 @@ fn try_expand_repeat(obj: &serde_json::Map<String, serde_json::Value>) -> Option
     let pattern = obj.get("repeat")?.as_str()?;
     let count = obj.get("count")?.as_u64()? as usize;
     let suffix = obj.get("suffix").and_then(|v| v.as_str()).unwrap_or("");
-    Some(format!("{}{suffix}", pattern.repeat(count)))
+    Some(scenario::repeat_text(pattern, count, suffix))
 }
 
 fn assert_property(
