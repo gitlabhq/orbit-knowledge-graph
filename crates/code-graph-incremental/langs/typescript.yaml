@@ -37,6 +37,16 @@ data:
   loops: [for_statement, for_in_statement, while_statement, do_statement]
 
 define:
+  written(ROOT):
+    '(__name "default" #cjs_require)': '"%require"'
+    '_': 'super(ROOT)'
+
+  exported(module, name):
+    '_ when in(name, "%require")': >-
+      select(owned(module), '(__def $N:__default_export)', "default")
+      or select(owned(module), '(__module_export (__default_export))' by $ROOT | child("__default_export"), "default") | target_of
+    '_': 'super(module, name)'
+
   modules(ROOT):
     '(_ (__source_path "^."))': 'aliased($ROOT) or file_at($ROOT | tag("resolved_source"))'
     '_': 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
@@ -100,7 +110,7 @@ canonicalize:
       - '(import_statement (import_clause (namespace_import $N:identifier)) source: (string $S:string_fragment))': '(__import (__source @$S) (__source_path @$S) (__name "*" (__alias @$N)))'
       - '(import_statement (import_clause $N:identifier) source: (string $S:string_fragment))': '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
       - '(variable_declarator name: (object_pattern $$$E:shorthand_property_identifier_pattern|pair_pattern) value: (__call (__callee "require") (arguments (string $S:string_fragment))))': '(__import (__source @$S) (__source_path @$S) $$$E->cjs_entry)'
-      - '(variable_declarator name: $N:identifier value: (__call (__callee "require") (arguments (string $S:string_fragment))))': '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N))) #import_type@__name=CjsRequire'
+      - '(variable_declarator name: $N:identifier value: (__call (__callee "require") (arguments (string $S:string_fragment))))': '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N))) #import_type@__name=CjsRequire #cjs_require@__name=true'
       - '(expression_statement (assignment_expression left: $P:__member **/(__object "exports") right: (function_expression name: $N body: $B)))': '(__def (__defname @$N) (__function) $B) #exports=@$P'
       - '(expression_statement (assignment_expression left: $P:__member **/(__object "module.exports") right: (function_expression name: $N body: $B)))': '(__def (__defname @$N) (__function) $B) #exports=@$P'
       - '(expression_statement (assignment_expression left: $P:__member **/(__object "exports") right: (function_expression body: $B)))': '(__def (__defname @$P $P) (__function) $B) #exports=@$P'
