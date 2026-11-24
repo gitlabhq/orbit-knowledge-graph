@@ -173,6 +173,8 @@ define:
     '(_)': '$ROOT'
   impl_member(ROOT):
     '_ when boundary($ROOT) | is_impl': '$ROOT'
+  impl_targets(ROOT):
+    '(__call $K:(__callee "/./")) when in("true", %impl_calls)': 'members(scope($ROOT) | class | is_impl, $K, cursor_role($ROOT))'
   unbound(ROOT):
     '(_ "/./") when read($ROOT)': none
     '(_ "/./") when in(@$ROOT, %builtins)': none

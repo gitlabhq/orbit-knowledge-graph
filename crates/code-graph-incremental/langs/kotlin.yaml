@@ -24,6 +24,7 @@ data:
     floor, hypot, ln, ln1p, log, log10, log2, max, min, round, sign, sin, sinh, sqrt, tan, tanh, truncate]
   params: [class_parameter, parameter]
   loops: [for_statement, while_statement, do_while_statement]
+  impl_calls: ['true']
 
 canonicalize:
   - stage: imports

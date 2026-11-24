@@ -13,6 +13,7 @@ data:
   frameworks: []
   parse_files: []
   merge_same_named_types: false
+  impl_calls: []
   blocks: []
   branches: []
   call_wrappers: []
