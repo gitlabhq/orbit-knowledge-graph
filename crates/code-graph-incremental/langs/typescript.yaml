@@ -41,6 +41,15 @@ define:
     '(_ (__source_path "^."))': 'aliased($ROOT) or file_at($ROOT | tag("resolved_source"))'
     '_': 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
 
+  missing_export(ROOT):
+    '_ when $ROOT | follow(imports, from) | is_def': none
+    '_ when $ROOT | follow(imports, from)': '$ROOT'
+
+resolve:
+  missing_export:
+    - '(__call (__callee "/./"))':
+        fallbacks: { to: '$ROOT | follow(imports, site) | missing_export', site: $ROOT }
+
 canonicalize:
   - stage: normalize
     rewrite:
