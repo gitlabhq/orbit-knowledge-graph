@@ -99,6 +99,8 @@ resolve:
         calls:
           - { to: '$O | type | member($M) | elsewhere(file($ROOT))', site: $ROOT }
           - { to: '$ROOT | follow(type_flow, site) | producing | member($M)', site: $ROOT }
+    - '(__call (__type) (__callee $I:__ivar))':
+        calls: { to: '$I | ivar | type_node | type | callable | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee $I:__ivar))':
         calls: { to: 'lookup(@$I, $ROOT, scope($ROOT) | class) | elsewhere(file($ROOT))', site: $ROOT }
     - '(__call (__callee "/./"))':
