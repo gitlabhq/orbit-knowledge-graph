@@ -249,6 +249,8 @@ define:
     '(__scope)': '$ROOT'
   same(a, b): 'minus(a, minus(a, b))'
   fills(ROOT, role):
+    '(__def #callable) when in(role, "callable")': '$ROOT'
+    '(__def #value) when in(role, "value")': '$ROOT'
     '(__def (%callable_kinds)) when in(role, "callable")': '$ROOT'
     '(__def (%value_kinds)) when in(role, "value")': '$ROOT'
     '(__def (%type_kinds)) when in(role, "type")': '$ROOT'
