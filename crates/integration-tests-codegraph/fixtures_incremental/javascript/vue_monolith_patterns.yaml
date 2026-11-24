@@ -222,8 +222,7 @@ tests:
       - { row: { fqn: "ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue" } }
 
   - name: jh_else_ce Vue default import targets the primary export proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+    skip: false
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'

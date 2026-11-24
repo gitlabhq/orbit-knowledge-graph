@@ -331,8 +331,7 @@ tests:
       - { row: { path: "ee/security_inventory/utils", name: "buildSeverityPath", target: "buildSeverityPath" } }
 
   - name: direct ee Vue imports target the component definition
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
+    skip: false
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/spec/frontend/oncall_schedule/direct_form_spec.ts'
