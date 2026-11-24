@@ -171,6 +171,11 @@ define:
   read_target(ROOT, implicit):
     '_ when implicit': 'named_value($ROOT)'
     '(_)': '$ROOT'
+  unbound(ROOT):
+    '(__object "/./") when read($ROOT)': none
+    '(__object "/./") when in(@$ROOT, %builtins)': none
+    '(__object "/./")': '$ROOT'
+  wildcards_for(ROOT, call): 'call | mod.ssa.wildcards'
   unresolved(ROOT, implicit):
     '(__call $K:__callee) when read($K)': none
     '_ when implicit_targets($ROOT, implicit)': none
