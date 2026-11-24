@@ -50,7 +50,7 @@ canonicalize:
       - '(function_declaration name: $N:identifier $P:parameters type:? $RT:identifier body: $B:block)': '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
       - '(function_declaration name: $N:identifier $P:parameters $$$R)': '(__def (__defname @$N) (__function) $P)'
       - '(test_declaration (string $S:string_content) $B:block)': '(__def (__defname @$S) (__function) $B) #flavor=test'
-      - '(test_declaration $B:block)': '(__def (__defname "test") (__function) $B) #flavor=test'
+      - '(test_declaration $B:block)': '(__def (__defname @$ROOT | position("start_line") | prepend("test@L")) (__function) $B) #flavor=test'
   - stage: ssa-cleanup
     rewrite:
       - '(block $$$B)': '(__scope $$$B)'
