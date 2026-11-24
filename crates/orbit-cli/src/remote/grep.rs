@@ -87,7 +87,7 @@ impl Budget {
         let mut granted = 0;
         let _ = self
             .0
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |sent| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |sent| {
                 granted = wanted.min(Self::QUERIES.saturating_sub(sent));
                 Some(sent + granted)
             });
@@ -99,7 +99,7 @@ impl Budget {
     fn refund(&self) {
         let _ = self
             .0
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |sent| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |sent| {
                 sent.checked_sub(1)
             });
     }

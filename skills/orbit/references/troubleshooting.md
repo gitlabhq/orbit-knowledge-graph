@@ -81,7 +81,7 @@ Common causes: a malformed `--file` request envelope, an unreachable hostname (c
 
 ## Named-query catalog
 
-The catalog lists parameterless named queries. `raw_query` is GQL text. There is no language field. The catalog binds caller identity, so do not reuse another caller's response. Missing entries can require client parameters or depend on entities unavailable in the active schema.
+The catalog lists parameterless named queries filtered to the caller's access, so do not reuse another caller's response. Missing entries can require client parameters or depend on entities unavailable in the active schema.
 
 ## Query errors
 
@@ -89,7 +89,7 @@ For empty results and validation errors, use the query troubleshooting reference
 
 ## Service unavailable
 
-`glab orbit status` reports service health. It prints the `system` health object and exits 2 when your user has no Orbit access (see [Exit 2](#exit-2-feature-flag-off-or-old-glab)). On GitLab 19.1 and later the API wraps the response as `{ "user": {...}, "system": {...} | null }` and always returns 200. The CLI unwraps it for you.
+`glab orbit status` reports service health. It prints the health of each component and exits 2 when your user has no Orbit access (see [Exit 2](#exit-2-feature-flag-off-or-old-glab)).
 
 If any component is unhealthy, retry with exponential backoff. If it persists, escalate in the team Slack channel.
 

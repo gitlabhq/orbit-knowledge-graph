@@ -1,0 +1,301 @@
+name: "Ruby: ||= bindings"
+
+fixtures:
+  - path: lib/client.rb
+    content: |
+      class Client
+        def get; end
+      end
+
+  - path: lib/other.rb
+    content: |
+      class Other
+        def get; end
+      end
+
+  - path: local.rb
+    content: |
+      class LocalMemo
+        def run
+          c = nil
+          c ||= Client.new
+          c.get
+        end
+      end
+
+  - path: ivar.rb
+    content: |
+      class IvarMemo
+        def run
+          @client ||= Client.new
+          @client.get
+        end
+      end
+
+  - path: ivar_across_methods.rb
+    content: |
+      class IvarAcrossMethods
+        def initialize
+          @client ||= Client.new
+        end
+
+        def run
+          @client.get
+        end
+      end
+
+  - path: prior_value.rb
+    content: |
+      class PriorValue
+        def run
+          c = Other.new
+          c ||= Client.new
+          c.get
+        end
+      end
+
+  - path: plus_assign.rb
+    content: |
+      class PlusAssign
+        def run
+          c = Client.new
+          c += Other.new
+          c.get
+        end
+      end
+
+  - path: plus_assign_ivar.rb
+    content: |
+      class PlusAssignIvar
+        def bump
+          @c += Other.new
+        end
+
+        def run
+          @c.get
+        end
+      end
+
+  - path: memo_begin.rb
+    content: |
+      class MemoBegin
+        def setup
+          @single ||= begin
+            Client.new
+          end
+          @multi ||= begin
+            Other.new
+            Client.new
+          end
+          @chain ||= begin
+            Other.new.get
+            Client.new
+          end
+        end
+
+        def run_single
+          @single.get
+        end
+
+        def run_multi
+          @multi.get
+        end
+
+        def run_chain
+          @chain.get
+        end
+
+        def run_local
+          c = nil
+          c ||= begin
+            Other.new
+            Client.new
+          end
+          c.get
+        end
+      end
+
+  - path: memo_ensure.rb
+    content: |
+      class MemoEnsure
+        def setup
+          @c ||= begin
+            Client.new
+          ensure
+            Other.new
+          end
+        end
+
+        def run
+          @c.get
+        end
+
+        def run_local
+          c = nil
+          c ||= begin
+            Client.new
+          ensure
+            Other.new
+          end
+          c.get
+        end
+      end
+
+  - path: memo_ensure_wrapped.rb
+    content: |
+      class ParenEnsure
+        def setup
+          @c ||= (begin; Client.new; ensure; Other.new; end)
+        end
+
+        def run
+          @c.get
+        end
+
+        def run_local
+          c = nil
+          c ||= (begin; Client.new; ensure; Other.new; end)
+          c.get
+        end
+      end
+
+      class NestedEnsure
+        def setup
+          @c ||= begin
+            begin
+              Client.new
+            ensure
+              Other.new
+            end
+          end
+        end
+
+        def run
+          @c.get
+        end
+
+        def run_local
+          c = nil
+          c ||= begin
+            begin
+              Client.new
+            ensure
+              Other.new
+            end
+          end
+          c.get
+        end
+      end
+
+  - path: memo_rescue_modifier.rb
+    content: |
+      class RescueModifier
+        def setup
+          @c ||= Client.new rescue Other.new
+        end
+
+        def run
+          @c.get
+        end
+
+        def run_local
+          c = nil
+          c ||= Client.new rescue Other.new
+          c.get
+        end
+      end
+
+      class RescueModifierNil
+        def setup
+          @c ||= Client.new rescue nil
+        end
+
+        def run
+          @c.get
+        end
+
+        def run_local
+          c = nil
+          c ||= Client.new rescue nil
+          c.get
+        end
+      end
+
+tests:
+  - name: "A local assigned with ||= keeps the new value's type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'local.rb' AND callee.name = 'get'
+      RETURN callee.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: Client::get } }
+
+  - name: "An instance variable assigned with ||= keeps the new value's type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN ['ivar.rb', 'ivar_across_methods.rb'] AND callee.name = 'get'
+      RETURN caller.file_path AS file, callee.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { file: ivar.rb, target: Client::get } }
+      - { row: { file: ivar_across_methods.rb, target: Client::get } }
+
+  - name: "A local that was already set keeps its old type after ||="
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'prior_value.rb' AND callee.name = 'get'
+      RETURN callee.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { target: Other::get } }
+      - { row: { target: Client::get } }
+
+  - name: "Control: += does not rebind the variable"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN ['plus_assign.rb', 'plus_assign_ivar.rb'] AND callee.name = 'get'
+      RETURN caller.file_path AS file, callee.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { file: plus_assign.rb, target: Client::get } }
+
+  - name: "||= with begin ... end takes the body's last expression"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'memo_begin.rb' AND caller.name <> 'setup' AND callee.name = 'get'
+      RETURN caller.name AS caller, callee.fqn AS target
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: run_single, target: Client::get } }
+      - { row: { caller: run_chain, target: Client::get } }
+      - { row: { caller: run_multi, target: Client::get } }
+      - { row: { caller: run_local, target: Client::get } }
+
+  - name: "||= with begin ... ensure or a rescue modifier is typed from the body, however it is wrapped"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN ['memo_ensure.rb', 'memo_ensure_wrapped.rb', 'memo_rescue_modifier.rb']
+        AND callee.fqn = 'Client::get'
+      RETURN caller.file_path AS file, caller.fqn AS caller
+    assert:
+      - { row_count: 10 }
+      - { row: { file: memo_ensure.rb, caller: MemoEnsure::run } }
+      - { row: { file: memo_ensure.rb, caller: MemoEnsure::run_local } }
+      - { row: { file: memo_ensure_wrapped.rb, caller: ParenEnsure::run } }
+      - { row: { file: memo_ensure_wrapped.rb, caller: ParenEnsure::run_local } }
+      - { row: { file: memo_ensure_wrapped.rb, caller: NestedEnsure::run } }
+      - { row: { file: memo_ensure_wrapped.rb, caller: NestedEnsure::run_local } }
+      - { row: { file: memo_rescue_modifier.rb, caller: RescueModifier::run } }
+      - { row: { file: memo_rescue_modifier.rb, caller: RescueModifier::run_local } }
+      - { row: { file: memo_rescue_modifier.rb, caller: RescueModifierNil::run } }
+      - { row: { file: memo_rescue_modifier.rb, caller: RescueModifierNil::run_local } }
+
+  - name: "||= with begin ... ensure or a rescue modifier is not typed from the ensure or rescue side"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN ['memo_ensure.rb', 'memo_ensure_wrapped.rb', 'memo_rescue_modifier.rb']
+        AND callee.fqn = 'Other::get'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 0 }

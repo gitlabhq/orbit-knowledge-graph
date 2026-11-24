@@ -90,6 +90,8 @@ pub struct ResolveConfig {
     /// Same-named class defs in one package are parts of one type, keyed by
     /// generic arity. True for C#, where a non-partial duplicate cannot compile.
     pub merge_same_named_types: bool,
+    /// An imported name can be a module file under the imported module (Rust).
+    pub submodule_imports: bool,
 }
 
 impl ResolveConfig {
@@ -115,6 +117,7 @@ impl ResolveConfig {
             }
         }
         self.merge_same_named_types |= other.merge_same_named_types;
+        self.submodule_imports |= other.submodule_imports;
     }
 }
 
@@ -149,6 +152,8 @@ struct ResolveSettingsSection {
     parse_files: Vec<ParseFileEntry>,
     #[serde(default)]
     merge_same_named_types: bool,
+    #[serde(default)]
+    submodule_imports: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -294,6 +299,7 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
             .map(parse_file)
             .collect::<Result<_, _>>()?,
         merge_same_named_types: r.merge_same_named_types,
+        submodule_imports: r.submodule_imports,
     };
     Ok(Config { link, resolve })
 }

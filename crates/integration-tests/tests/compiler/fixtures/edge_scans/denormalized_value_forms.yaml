@@ -1,0 +1,20 @@
+name: Denormalized singleton sets and boolean filters retain value tokens
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","node_ids":[1]},{"id":"p","entity":"Pipeline","filters":{"source":{"in":["push"]},"tag":true}}],"relationships":[{"type":"TRIGGERS_PIPELINE","from":"j","to":"p"}]}
+  gql: |
+    MATCH (j:Job {id: 1})-[:TRIGGERS_PIPELINE]->(p:Pipeline)
+    WHERE p.source IN ['push'] AND p.tag = true
+    RETURN j, p
+
+logical:
+  expect: ["(Filter p.source IN ['push'], p.tag = true (_))"]
+
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Filter _orbit_edge_0.target_tags HAS ANY ['source:push'], _orbit_edge_0.target_tags HAS ANY ['tag:true'], ... (_))"]
+    emitted:
+      expect: ["(Filter ArrayContains(_orbit_edge_0.target_tags, 'source:push'), ArrayContains(_orbit_edge_0.target_tags, 'tag:true'), ... (_))"]
+      reject: ["(CTE _orbit_nf_p (_))", "(Filter ArrayContains(_orbit_edge_0.target_tags, 'tag:'), ... (_))"]

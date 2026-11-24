@@ -151,6 +151,8 @@ pub struct ClickHouse {
     >,
     #[prost(message, optional, tag = "8")]
     pub profiling: ::core::option::Option<Profiling>,
+    #[prost(string, optional, tag = "9")]
+    pub compatibility: ::core::option::Option<::prost::alloc::string::String>,
 }
 impl ::prost::Name for ClickHouse {
     const NAME: &'static str = "ClickHouse";
@@ -465,7 +467,7 @@ pub struct Engine {
     pub handlers: ::core::option::Option<Handlers>,
     #[prost(message, optional, tag = "5")]
     pub datalake_retry: ::core::option::Option<DatalakeRetry>,
-    #[prost(enumeration = "IndexerModule", repeated, tag = "6")]
+    #[prost(enumeration = "IndexerModule", repeated, packed = "false", tag = "6")]
     pub modules: ::prost::alloc::vec::Vec<i32>,
 }
 impl ::prost::Name for Engine {
@@ -642,6 +644,23 @@ impl ::prost::Name for NamespaceFreshness {
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GraphStats {
+    #[prost(string, optional, tag = "1")]
+    pub cron: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(uint64, optional, tag = "2")]
+    pub run_timeout_secs: ::core::option::Option<u64>,
+}
+impl ::prost::Name for GraphStats {
+    const NAME: &'static str = "GraphStats";
+    const PACKAGE: &'static str = "orbit.config.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "orbit.config.v1.GraphStats".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/orbit.config.v1.GraphStats".into()
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ScheduledTasks {
     #[prost(message, optional, tag = "1")]
     pub global: ::core::option::Option<GlobalDispatcher>,
@@ -661,6 +680,8 @@ pub struct ScheduledTasks {
     pub stale_edge_reconciliation: ::core::option::Option<StaleEdgeReconciliation>,
     #[prost(message, optional, tag = "9")]
     pub namespace_freshness: ::core::option::Option<NamespaceFreshness>,
+    #[prost(message, optional, tag = "10")]
+    pub graph_stats: ::core::option::Option<GraphStats>,
 }
 impl ::prost::Name for ScheduledTasks {
     const NAME: &'static str = "ScheduledTasks";
@@ -737,6 +758,8 @@ pub struct Grpc {
     pub stream_window_size: ::core::option::Option<u32>,
     #[prost(uint64, optional, tag = "6")]
     pub concurrency_limit: ::core::option::Option<u64>,
+    /// An explicit null turns the maximum connection age off. Leaving the key out
+    /// keeps the default from config/default.yaml.
     #[prost(uint64, optional, tag = "7")]
     pub max_connection_age_secs: ::core::option::Option<u64>,
     #[prost(uint64, optional, tag = "8")]
@@ -745,6 +768,7 @@ pub struct Grpc {
     pub stream_timeout_secs: ::core::option::Option<u64>,
     #[prost(uint32, optional, tag = "10")]
     pub max_header_list_size_bytes: ::core::option::Option<u32>,
+    /// GitLab Rails rejects gRPC messages over 8 MiB.
     #[prost(uint64, optional, tag = "11")]
     pub result_chunk_bytes: ::core::option::Option<u64>,
     #[prost(uint64, optional, tag = "12")]

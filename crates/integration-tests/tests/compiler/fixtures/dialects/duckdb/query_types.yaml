@@ -1,0 +1,163 @@
+cases:
+  - name: DuckDB search has no security filter and no ClickHouse functions
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[1],"columns":["name"]}],"limit":10}
+      gql: |
+        MATCH (d:Definition {id: 1}) RETURN d.name LIMIT 10
+    physical:
+      duckdb:
+        emitted:
+          expect: ["(Filter d.id = 1 (Deduplicate Final (Scan Table(gl_definition) AS d)))"]
+        duckdb_codegen:
+          output:
+            sql:
+              contains: ["gl_definition"]
+              not_contains: [startsWith, starts_with, "traversal_path,", "traversal_path)", arrayConcat, " has("]
+
+  - name: DuckDB traversal filters edges by relationship kind and fetches one probe row
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1],"columns":["name"]},{"id":"b","entity":"Definition","columns":["name"]}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"limit":25}
+      gql: |
+        MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) RETURN a.name, b.name LIMIT 25
+    physical:
+      duckdb:
+        planned:
+          expect: ["(Filter _orbit_edge_0.relationship_kind = 'CALLS', ... (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_0)))"]
+        emitted:
+          expect: ["(Limit 26 (_))"]
+
+  - name: DuckDB aggregation counts per group
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"group_by":["a"],"aggregations":[{"count":"b","as":"callees"}],"limit":10}
+      gql: |
+        MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) RETURN a, count(b) AS callees LIMIT 10
+    physical:
+      duckdb:
+        emitted:
+          expect: ["(Limit 11 (Aggregate group a.id, COUNT() FILTER ? AS callees, ... (_)))"]
+
+  - name: DuckDB path finding scans the edge table and orders the paths
+    query:
+      json: |
+        {"query_type":"path_finding","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","node_ids":[100]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":3,"rel_types":["CALLS"]}}
+      gql: |
+        MATCH p = ANY SHORTEST (a:Definition {id: 1})-[:CALLS*1..3]->(b:Definition {id: 100}) RETURN p
+    physical:
+      duckdb:
+        planned:
+          expect: ["(PathFinding a->b depth=3 forward=2 backward=1 scoped=true tables=[gl_edge] relationships=[CALLS] (_) (_))"]
+        emitted:
+          expect: ["(Sort ... (...))", "(Scan Table(gl_edge) AS _orbit_e1)"]
+
+  - name: DuckDB neighbors scan the edge table and fetch one probe row
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"d","entity":"Definition","node_ids":[1]}],"neighbors":{"direction":"outgoing"},"limit":10}
+      gql: |
+        MATCH (d:Definition {id: 1})-[]->(neighbor) RETURN d, neighbor LIMIT 10
+    physical:
+      duckdb:
+        emitted:
+          expect: ["(Limit 11 (Project ... (Filter _orbit_neighbor_edge.source_id = 1, ... (Scan Table(gl_edge) AS _orbit_neighbor_edge))))"]
+
+  - name: DuckDB expands pinned node IDs into an IN list
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[1,2,3]}],"limit":10}
+      gql: |
+        MATCH (d:Definition) WHERE d.id IN [1, 2, 3] RETURN d LIMIT 10
+    physical:
+      duckdb:
+        emitted:
+          expect: ["(Filter d.id IN [1, 2, 3] (Deduplicate Final (Scan Table(gl_definition) AS d)))"]
+        duckdb_codegen:
+          output:
+            sql:
+              contains: ["d.id IN (1, 2, 3)"]
+              not_contains: ["Array("]
+
+  - name: DuckDB accepts an untyped relationship variable
+    query:
+      gql: |
+        MATCH (a:Definition {id: 1})-[e]->(b:Definition) RETURN b.name
+    missing_frontends:
+      json: The source test supplies only GQL.
+    logical:
+      expect: ["(EdgeScan CALLS|DEFINES|EXTENDS|IMPORTS a->b AS e0)"]
+    physical:
+      duckdb: {}
+
+  - name: DuckDB projects properties of both endpoints
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1],"columns":["name"]},{"id":"b","entity":"Definition","columns":["fqn"]}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
+      gql: |
+        MATCH (a:Definition {id: 1})-[e:CALLS]->(b:Definition) RETURN a.name, b.fqn
+    physical:
+      duckdb:
+        duckdb_codegen:
+          output:
+            sql:
+              contains: [a_name, b_fqn]
+
+  - name: DuckDB scans a node without pinned ids
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","columns":["name"]}]}
+      gql: |
+        MATCH (d:Definition) RETURN d.name
+    physical:
+      duckdb:
+        emitted:
+          expect: ["(Scan Table(gl_definition) AS d)"]
+
+  - name: DuckDB counts a node without pinned ids
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition"}],"aggregations":[{"count":"d","as":"n"}]}
+      gql: |
+        MATCH (d:Definition) RETURN count(d) AS n
+    physical:
+      duckdb:
+        emitted:
+          expect: ["(Aggregate COUNT() AS n, ... (_))"]
+
+  - name: DuckDB sorts by a property of the traversal target
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","columns":["name"]}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"order_by":"b.name"}
+      gql: |
+        MATCH (a:Definition {id: 1})-[e:CALLS]->(b:Definition) RETURN b.name ORDER BY b.name
+    physical:
+      duckdb:
+        emitted:
+          expect: ["(Sort b.name (_))"]
+
+  - name: DuckDB compares two properties of one node
+    query:
+      gql: |
+        MATCH (a:Definition {id: 1})-[e:CALLS]->(b:Definition) WHERE a.name <> a.fqn RETURN a.name
+    missing_frontends:
+      json: The JSON frontend does not expose property-to-property comparisons.
+    physical:
+      duckdb:
+        duckdb_codegen:
+          output:
+            sql:
+              contains: [a.name != a.fqn]
+
+  - name: DuckDB binds filter values as positional parameters
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[1],"columns":["name"],"filters":{"name":"main"}}],"limit":10}
+      gql: |
+        MATCH (d:Definition {id: 1, name: 'main'}) RETURN d.name LIMIT 10
+    physical:
+      duckdb:
+        duckdb_codegen:
+          output:
+            parameterized_sql: { contains: ["d.name = $"], not_contains: [main] }
+            params: [{ value: main, data_type: String }]

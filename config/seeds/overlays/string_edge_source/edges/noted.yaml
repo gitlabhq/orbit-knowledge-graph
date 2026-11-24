@@ -1,0 +1,6 @@
+description: Fixture relationship stored with a string source_id
+table: gl_string_edge
+variants:
+  - from_node: {type: User, id: id}
+    to_node: {type: Note, id: id}
+    description: "User noted a note."

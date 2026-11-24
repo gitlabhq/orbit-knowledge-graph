@@ -1,5 +1,5 @@
 use orbit_server_config::{
-    AnalyticsConfig, AppConfig, ClickHouseConfiguration, EngineConfigError, EngineConfiguration,
+    AnalyticsConfig, AppConfig, ClickHouseConfiguration, EngineConfiguration,
     GitlabClientConfiguration, NatsConfiguration, ScheduleConfig, SchemaConfig,
 };
 use thiserror::Error;
@@ -55,12 +55,6 @@ pub enum IndexerError {
     #[error("Schema readiness wait failed: {0}")]
     SchemaWait(#[from] crate::schema::version::SchemaWaitError),
 
-    #[error("Invalid configuration: {0}")]
-    InvalidConfig(#[from] orbit_server_config::SchemaConfigError),
-
-    #[error("Invalid engine configuration: {0}")]
-    InvalidEngineConfig(#[from] EngineConfigError),
-
     #[error("Invalid graph ClickHouse configuration: {0}")]
     InvalidGraphConfig(#[from] orbit_server_config::ConfigurationError),
 
@@ -75,6 +69,8 @@ pub struct DispatcherConfig {
     pub datalake: ClickHouseConfiguration,
     pub schedule: ScheduleConfig,
     pub schema: SchemaConfig,
+    pub gitlab: Option<GitlabClientConfiguration>,
+    pub analytics: AnalyticsConfig,
 }
 
 impl From<&AppConfig> for DispatcherConfig {
@@ -85,6 +81,8 @@ impl From<&AppConfig> for DispatcherConfig {
             datalake: config.datalake.clone(),
             schedule: config.schedule.clone(),
             schema: config.schema.clone(),
+            gitlab: config.gitlab_client_config(),
+            analytics: config.analytics.clone(),
         }
     }
 }
@@ -110,4 +108,10 @@ pub enum DispatcherError {
 
     #[error("schema migration error: {0}")]
     Migration(#[from] crate::schema::migration::DispatcherMigrationError),
+
+    #[error("analytics tracker initialization failed: {0}")]
+    Analytics(#[from] labkit_events::Error),
+
+    #[error("GitLab client initialization failed: {0}")]
+    GitlabClient(#[from] HandlerInitError),
 }

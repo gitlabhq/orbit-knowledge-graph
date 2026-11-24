@@ -1030,17 +1030,21 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         if edge_tables.is_empty() {
             edge_tables = model.relationship_tables(&relationship.types);
         }
-        let mut types = edge_tables
+        let types: Vec<_> = edge_tables
             .iter()
-            .map(|table| model.table_column_type(table, prop));
-        let data_type = types.next().flatten();
-        let Some(data_type) =
-            data_type.filter(|first| types.all(|data_type| data_type == Some(*first)))
-        else {
+            .map(|table| model.table_column_type(table, prop))
+            .collect();
+        let kinds = relationship.types.join("|");
+        let Some(data_type) = types.iter().find_map(|data_type| *data_type) else {
             return Err(QueryError::Validation(format!(
-                "relationship[{index}] filter on unknown edge column \"{prop}\" or incompatible column types across tables {edge_tables:?}"
+                "relationship[{index}] {kinds} has no filterable column \"{prop}\""
             )));
         };
+        if types.iter().any(|other| *other != Some(data_type)) {
+            return Err(QueryError::Validation(format!(
+                "relationship[{index}] {kinds} column \"{prop}\" is missing or has a different type for some endpoint pairs"
+            )));
+        }
         for filter in filters {
             check_condition_column(("", prop), filter)?;
             if filter.rhs_column.is_some() {
@@ -1225,7 +1229,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             {
                 let hint = wide_id_range_hint(input.nodes.iter().any(has_wide_id_range));
                 let negation_hint = if input.has_negation() {
-                    " (NOT conditions do not count)"
+                    " (NOT and OR conditions do not count)"
                 } else {
                     ""
                 };
@@ -1740,68 +1744,10 @@ mod tests {
         }
     }
     use crate::input::parse_input;
-    use ontology::{DataType, FieldSource, VirtualSource};
-    use std::collections::BTreeMap;
-
-    fn test_ontology() -> Ontology {
-        Ontology::new()
-            .with_nodes(["User", "Project", "Note"])
-            .with_edges(["AUTHORED", "CONTAINS"])
-            .with_fields(
-                "User",
-                [
-                    ("username", DataType::String),
-                    ("created_at", DataType::DateTime),
-                    ("user_type", DataType::Enum),
-                ],
-            )
-            .with_fields(
-                "Note",
-                [
-                    ("confidential", DataType::Bool),
-                    ("noteable_id", DataType::Int),
-                ],
-            )
-            .with_fields(
-                "Project",
-                [
-                    ("name", DataType::String),
-                    ("visibility_level", DataType::Enum),
-                ],
-            )
-            .with_edge_columns([
-                ("traversal_path", DataType::String),
-                ("relationship_kind", DataType::String),
-                ("source_id", DataType::Int),
-                ("source_kind", DataType::String),
-                ("target_id", DataType::Int),
-                ("target_kind", DataType::String),
-            ])
-            .modify_field("User", "user_type", |field| {
-                field.enum_values = Some(BTreeMap::from([
-                    (0, "human".into()),
-                    (6, "project_bot".into()),
-                ]));
-            })
-            .unwrap()
-            .modify_field("Project", "visibility_level", |field| {
-                field.enum_values = Some(BTreeMap::from([
-                    (0, "private".into()),
-                    (20, "public".into()),
-                ]));
-            })
-            .unwrap()
-    }
-
-    fn assert_ok(json: &str) {
-        let input = parse_input(json).unwrap();
-        let ontology = test_ontology();
-        validator(&ontology).check_references(&input).unwrap();
-    }
 
     fn assert_rejects(json: &str, expected: &str) {
         let input = parse_input(json).unwrap();
-        let ontology = test_ontology();
+        let ontology = Ontology::load_embedded().unwrap();
         let err = validator(&ontology).check_references(&input).unwrap_err();
         assert!(
             err.to_string().contains(expected),
@@ -1820,91 +1766,8 @@ mod tests {
     }
 
     #[test]
-    fn selectivity_error_mentions_id_range_cap_only_for_wide_ranges() {
-        let ontology = test_ontology();
-        let error_for = |json: &str| {
-            let input = parse_input(json).unwrap();
-            validator(&ontology)
-                .check_references(&input)
-                .unwrap_err()
-                .to_string()
-        };
-
-        let plain =
-            error_for(r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}]}"#);
-        assert!(plain.ends_with("or WHERE mr.project_id = 42"), "{plain}");
-
-        let neighbors = error_for(
-            r#"{"query_type": "neighbors", "nodes": [{"id": "u", "entity": "User"}],
-                "neighbors": {"node": "u", "direction": "both"}}"#,
-        );
-        assert!(
-            neighbors.ends_with("on the center node to avoid scanning all edges"),
-            "{neighbors}"
-        );
-
-        let wide_neighbors = error_for(
-            r#"{"query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}],
-                "neighbors": {"node": "u", "direction": "both"}}"#,
-        );
-        assert!(
-            wide_neighbors.ends_with(
-                "avoid scanning all edges (an id_range counts only with a span of at most 100000)"
-            ),
-            "{wide_neighbors}"
-        );
-    }
-
-    #[test]
-    fn node_filter_cap_counts_property_keys_not_entries() {
-        let ontology = test_ontology();
-        let validator = validator(&ontology);
-
-        let two_props_many_entries = parse_input(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{
-                    "id": "u", "entity": "User",
-                    "filters": {
-                        "created_at": [
-                            {"gte": "2020-01-01"}, {"lt": "2020-02-01"},
-                            {"gte": "2020-03-01"}, {"lt": "2020-04-01"},
-                            {"gte": "2020-05-01"}, {"lt": "2020-06-01"}
-                        ],
-                        "username": [
-                            {"contains": "a"}, {"contains": "b"},
-                            {"contains": "c"}, {"contains": "d"},
-                            {"contains": "e"}, {"contains": "f"}
-                        ]
-                    }
-                }]
-            }"#,
-        )
-        .unwrap();
-        assert!(validator.check_depth(&two_props_many_entries).is_ok());
-
-        let eleven_props: String = (0..=10)
-            .map(|i| format!("\"p{i}\": true"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let over_key_cap = parse_input(&format!(
-            r#"{{
-                "query_type": "traversal",
-                "nodes": [{{"id": "u", "entity": "User", "filters": {{{eleven_props}}}}}]
-            }}"#
-        ))
-        .unwrap();
-        let err = validator.check_depth(&over_key_cap).unwrap_err();
-        assert!(
-            err.to_string().contains("filter property count (11)"),
-            "got: {err}"
-        );
-    }
-
-    #[test]
     fn per_property_filter_entry_cap_rejects_overlong_and_chains() {
-        let ontology = test_ontology();
+        let ontology = Ontology::load_embedded().unwrap();
         let validator = validator(&ontology);
 
         let eleven_conditions: String = (0..11)
@@ -1926,146 +1789,7 @@ mod tests {
     }
 
     #[test]
-    fn cross_reference_validation() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}]
-            }"#,
-        );
-
-        assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-                "group_by": ["u"],
-                "aggregations": [{
-                    "count": "n",
-                    "as": "note_count"
-                }]
-            }"#,
-        );
-
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
-                "order_by": "u.username"
-            }"#,
-        );
-
-        assert_ok(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "node_ids": [1]},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
-        );
-
-        assert_ok(
-            r#"{
-                "query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "neighbors": {"direction": "both"}
-            }"#,
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "relationships": [{"type": "AUTHORED", "from": "ghost", "to": "u"}]
-            }"#,
-            "undefined node \"ghost\"",
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "relationships": [{"type": "AUTHORED", "from": "u", "to": "ghost"}]
-            }"#,
-            "undefined node \"ghost\"",
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{
-                    "count": "missing",
-                    "as": "c"
-                }]
-            }"#,
-            "undefined node \"missing\"",
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "group_by": ["missing"],
-                "aggregations": [{
-                    "count": "u",
-                    "as": "c"
-                }]
-            }"#,
-            "undefined node \"missing\"",
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{
-                    "sum": "u.nonexistent",
-                    "as": "total"
-                }]
-            }"#,
-            "invalid property",
-        );
-
-        assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": ["p.visibility_level"],
-                "aggregations": [{"count": "p", "as": "project_count"}]
-            }"#,
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": ["missing.visibility_level"],
-                "aggregations": [{"count": "p", "as": "project_count"}]
-            }"#,
-            "undefined node \"missing\"",
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": ["p.not_real"],
-                "aggregations": [{"count": "p", "as": "project_count"}]
-            }"#,
-            "invalid property",
-        );
-
+    fn rejects_group_by_on_traversal() {
         assert_rejects(
             r#"{
                 "query_type": "traversal",
@@ -2073,299 +1797,6 @@ mod tests {
                 "group_by": ["p.visibility_level"]
             }"#,
             "only supported for aggregation",
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": [
-                  "p.visibility_level",
-                  "p.visibility_level"
-                ],
-                "aggregations": [{
-                    "count": "p",
-                    "as": "project_count"
-                }]
-            }"#,
-            "duplicate group_by output column",
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": ["p.visibility_level"],
-                "aggregations": [{"count": "p", "as": "p_visibility_level"}]
-            }"#,
-            "conflicts with another output column",
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "order_by": "missing.username"
-            }"#,
-            "undefined node \"missing\"",
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "order_by": "u.nonexistent"
-            }"#,
-            "does not exist",
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "node_ids": [1]},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "ghost", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
-            "undefined node \"ghost\"",
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "node_ids": [1]},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "ghost", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
-            "undefined node \"ghost\"",
-        );
-    }
-
-    #[test]
-    fn rejects_duplicate_node_ids() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "u", "entity": "Project"}
-                ]
-            }"#,
-            "duplicate node id \"u\"",
-        );
-    }
-
-    #[test]
-    fn accepts_unique_node_ids() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn rejects_virtual_group_by_property() {
-        let input = parse_input(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": ["p.name"],
-                "aggregations": [{"count": "p", "as": "project_count"}]
-            }"#,
-        )
-        .unwrap();
-        let ontology = test_ontology()
-            .modify_field("Project", "name", |field| {
-                field.source = FieldSource::Virtual(VirtualSource {
-                    service: "example".into(),
-                    lookup: "project_name".into(),
-                    disabled: false,
-                    depends_on: vec![],
-                    allowed_ops: VirtualSource::DEFAULT_ALLOWED_OPS
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect(),
-                });
-            })
-            .unwrap();
-        let err = validator(&ontology).check_references(&input).unwrap_err();
-        assert!(
-            err.to_string().contains("field is virtual"),
-            "expected virtual field rejection, got: {err}"
-        );
-    }
-
-    #[test]
-    fn rejects_a_disabled_virtual_field() {
-        let ontology = test_ontology()
-            .modify_field("Project", "name", |field| {
-                field.source = FieldSource::Virtual(VirtualSource {
-                    service: "example".into(),
-                    lookup: "project_name".into(),
-                    disabled: true,
-                    depends_on: vec![],
-                    allowed_ops: VirtualSource::DEFAULT_ALLOWED_OPS
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect(),
-                });
-            })
-            .unwrap();
-
-        let err = validator(&ontology)
-            .check_field("Project", "name")
-            .unwrap_err();
-
-        assert!(
-            err.to_string().contains("does not exist"),
-            "expected the disabled field to be rejected, got: {err}"
-        );
-    }
-
-    #[test]
-    fn rejects_unreferenced_traversal_node() {
-        // 3 nodes but 1 relationship: n-1 check fires before the orphan check
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "p", "entity": "Project"},
-                    {"id": "orphan", "entity": "Note"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
-            }"#,
-            "n-1 relationships",
-        );
-    }
-
-    #[test]
-    fn accepts_aggregation_node_referenced_only_by_target() {
-        assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "aggregations": [{"count": "p", "as": "total"}]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn rejects_collect_aggregation() {
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{
-                    "collect": "u.username",
-                    "as": "usernames"
-                }]
-            }"#,
-            "\"collect\" is not supported",
-        );
-    }
-
-    #[test]
-    fn accepts_distinct_count_and_rejects_it_on_other_functions() {
-        assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{"count": "u.username", "distinct": true, "as": "n"}]
-            }"#,
-        );
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{"sum": "u.id", "distinct": true, "as": "n"}]
-            }"#,
-            "\"distinct\" works only with \"count\"",
-        );
-    }
-
-    #[test]
-    fn rejects_property_less_sum_avg_min_max() {
-        for func in ["sum", "avg", "min", "max"] {
-            let json = format!(
-                r#"{{
-                    "query_type": "aggregation",
-                    "nodes": [{{"id": "u", "entity": "User", "node_ids": [1]}}],
-                    "aggregations": [{{
-                        "{func}": "u",
-                        "as": "result"
-                    }}]
-                }}"#
-            );
-            let err = parse_input(&json).unwrap_err().to_string();
-            assert!(err.contains("node.property"), "{func}: got {err}");
-        }
-        assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{"count": "u", "as": "total"}]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn rejects_sum_on_string_property() {
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{
-                    "sum": "u.username",
-                    "as": "username_sum"
-                }]
-            }"#,
-            "requires a numeric property",
-        );
-    }
-
-    #[test]
-    fn rejects_avg_on_string_property() {
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{
-                    "avg": "u.username",
-                    "as": "username_avg"
-                }]
-            }"#,
-            "requires a numeric property",
-        );
-    }
-
-    #[test]
-    fn accepts_top_level_group_by_for_all_aggregations() {
-        assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "g", "entity": "Group"}
-                ],
-                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-                "group_by": ["u"],
-                "aggregations": [
-                    {"count": "u", "as": "total"},
-                    {"count": "g", "as": "group_count"}
-                ]
-            }"#,
         );
     }
 
@@ -2387,29 +1818,6 @@ mod tests {
     }
 
     #[test]
-    fn accepts_single_node_aggregation_without_group_by() {
-        assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [
-                    {"count": "u", "as": "total"}
-                ]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn accepts_string_filter_on_string_column() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"username": "alice"}}]
-            }"#,
-        );
-    }
-
-    #[test]
     fn rejects_aggregation_direction_both() {
         assert_rejects(
             r#"{
@@ -2426,417 +1834,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn accepts_int_filter_on_int_column() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": 42}}]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn accepts_bool_filter_on_bool_column() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "n", "entity": "Note", "filters": {"confidential": true}}]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn accepts_string_in_filter() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{
-                    "id": "u", "entity": "User",
-                    "filters": {"username": {"in": ["alice", "bob"]}}
-                }]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn accepts_int_in_filter() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{
-                    "id": "n", "entity": "Note",
-                    "filters": {"noteable_id": {"in": [1, 2, 3]}}
-                }]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn accepts_is_null_without_value_check() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{
-                    "id": "u", "entity": "User",
-                    "filters": {"username": {"is_null": true}}
-                }]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn rejects_int_on_string_column() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"username": 42}}]
-            }"#,
-            "expected String",
-        );
-    }
-
-    #[test]
-    fn rejects_string_on_int_column() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": "abc"}}]
-            }"#,
-            "expected Int",
-        );
-    }
-
-    #[test]
-    fn rejects_string_on_bool_column() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "n", "entity": "Note", "filters": {"confidential": "yes"}}]
-            }"#,
-            "expected Bool",
-        );
-    }
-
-    #[test]
-    fn rejects_mixed_type_in_array() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{
-                    "id": "n", "entity": "Note",
-                    "filters": {"noteable_id": {"in": [1, "two", 3]}}
-                }]
-            }"#,
-            "element [1]",
-        );
-    }
-
-    #[test]
-    fn rejects_float_on_int_column() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": 3.14}}]
-            }"#,
-            "is a float, not an integer",
-        );
-    }
-
-    #[test]
-    fn accepts_int_on_float_column() {
-        // Integers are valid for float columns (widening).
-        let ontology = Ontology::new()
-            .with_nodes(["Metric"])
-            .with_fields("Metric", [("score", DataType::Float)]);
-
-        let input = parse_input(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "m", "entity": "Metric", "filters": {"score": 42}}]
-            }"#,
-        )
-        .unwrap();
-        validator(&ontology).check_references(&input).unwrap();
-    }
-
-    #[test]
-    fn accepts_string_on_enum_column() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"user_type": "human"}}]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn accepts_int_on_enum_column() {
-        // Int-based enums pass validation; normalization coerces to string later.
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"user_type": 0}}]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn rejects_bool_on_enum_column() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"user_type": true}}]
-            }"#,
-            "not a string or integer",
-        );
-    }
-
-    #[test]
-    fn filter_type_mismatch_fails_closed() {
-        let ontology = test_ontology();
-        let validator = validator(&ontology);
-
-        let input = parse_input(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": "bad"}}]
-            }"#,
-        )
-        .unwrap();
-        assert!(
-            validator.check_references(&input).is_err(),
-            "scalar type mismatch must reject the query"
-        );
-
-        let input = parse_input(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{
-                    "id": "n", "entity": "Note",
-                    "filters": {"noteable_id": {"in": [1, "bad", 3]}}
-                }]
-            }"#,
-        )
-        .unwrap();
-        assert!(
-            validator.check_references(&input).is_err(),
-            "IN filter with a mismatched element must reject the query"
-        );
-    }
-
-    #[test]
-    fn accepts_int_filter_on_edge_source_id() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"source_id": 42}
-                }]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn accepts_string_filter_on_edge_relationship_kind() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"source_kind": "User"}
-                }]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn accepts_is_null_on_edge_column() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"target_kind": {"is_null": true}}
-                }]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn accepts_in_filter_on_edge_int_column() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"target_id": {"in": [1, 2, 3]}}
-                }]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn rejects_string_on_edge_int_column() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"source_id": "not-a-number"}
-                }]
-            }"#,
-            "expected Int",
-        );
-    }
-
-    #[test]
-    fn rejects_int_on_edge_string_column() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"target_kind": 123}
-                }]
-            }"#,
-            "expected String",
-        );
-    }
-
-    #[test]
-    fn rejects_unknown_edge_column_filter() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"bogus_column": 42}
-                }]
-            }"#,
-            "unknown edge column \"bogus_column\"",
-        );
-    }
-
-    #[test]
-    fn rejects_mixed_types_in_edge_in_filter() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"source_id": {"in": [1, "bad", 3]}}
-                }]
-            }"#,
-            "element [1]",
-        );
-    }
-
-    #[test]
-    fn edge_filter_type_comes_from_ontology_not_hardcoded() {
-        // Build an ontology where source_id is String instead of Int.
-        // If types were hardcoded in Rust, this test would FAIL (the hardcoded
-        // type is Int, so integer filters would pass). If types are YAML-driven,
-        // the Validator reads String and correctly rejects the integer.
-        let ontology = ontology::Ontology::new()
-            .with_nodes(["User", "Note"])
-            .with_edges(["AUTHORED"])
-            .with_edge_columns([
-                ("traversal_path", DataType::String),
-                ("relationship_kind", DataType::String),
-                ("source_id", DataType::String), // deliberately wrong: String instead of Int
-                ("source_kind", DataType::String),
-                ("target_id", DataType::Int),
-                ("target_kind", DataType::String),
-            ]);
-        let validator = validator(&ontology);
-
-        let input = parse_input(r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "n", "entity": "Note"}],
-            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "filters": {"source_id": 42}}]
-        }"#)
-        .unwrap();
-
-        let result = validator.check_references(&input);
-        assert!(
-            result.is_err(),
-            "integer filter on String source_id should fail"
-        );
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("source_id"),
-            "error should mention source_id, got: {err}"
-        );
-    }
-
-    #[test]
-    fn edge_filter_passes_with_correct_ontology_types() {
-        let ontology = ontology::Ontology::new()
-            .with_nodes(["User", "Note"])
-            .with_edges(["AUTHORED"])
-            .with_edge_columns([
-                ("traversal_path", DataType::String),
-                ("relationship_kind", DataType::String),
-                ("source_id", DataType::Int),
-                ("source_kind", DataType::String),
-                ("target_id", DataType::Int),
-                ("target_kind", DataType::String),
-            ]);
-        let validator = validator(&ontology);
-
-        let input = parse_input(r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "n", "entity": "Note"}],
-            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "filters": {"source_id": 42}}]
-        }"#)
-        .unwrap();
-
-        let result = validator.check_references(&input);
-        assert!(
-            result.is_ok(),
-            "integer filter on Int source_id should pass, got: {:?}",
-            result
-        );
-    }
-
-    /// Verify the Identifier regex in graph_query.schema.json only matches ASCII.
-    /// This is a defense against homoglyph attacks — the regex engine treats
-    /// [a-zA-Z] as ASCII-only, but this test makes the assumption explicit.
-    /// The pattern is loaded from the schema to prevent staleness.
     #[test]
     fn identifier_regex_rejects_non_ascii() {
         let schema: serde_json::Value = serde_json::from_str(BASE_SCHEMA_JSON).unwrap();
@@ -2856,512 +1853,97 @@ mod tests {
     }
 
     #[test]
-    fn selectivity_guards() {
-        assert_ok(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "node_ids": [1]},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
-        );
-        assert_ok(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "User", "filters": {"username": "alice"}},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
-        );
-        assert_ok(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "User", "id_range": {"start": 1, "end": 100}},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
-        );
-        assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
-            "endpoint \"a\"",
-        );
-        assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "User"},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
-            "endpoint \"a\"",
-        );
-        assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "node_ids": [1]},
-                    {"id": "b", "entity": "User"}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
-            "endpoint \"b\"",
-        );
-        assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "User", "filters": {"username": "alice"}},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
-            }"#,
-            "require named relationship types",
-        );
-        assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "node_ids": [1]},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
-            }"#,
-            "require named relationship types",
-        );
-
-        assert_ok(
-            r#"{
-                "query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "neighbors": {"direction": "both"}
-            }"#,
-        );
-        assert_ok(
-            r#"{
-                "query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"username": "root"}}],
-                "neighbors": {"direction": "both"}
-            }"#,
-        );
-        assert_rejects(
-            r#"{
-                "query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User"}],
-                "neighbors": {"direction": "both"}
-            }"#,
-            "center node",
-        );
-
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"username": "root"}}]
-            }"#,
-        );
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}]
-            }"#,
-        );
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User"}]
-            }"#,
-            "filters or node_ids to at least one node",
-        );
-
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
-            }"#,
-        );
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "p", "entity": "Project", "filters": {"name": "gitlab"}}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
-            }"#,
-        );
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
-            }"#,
-            "filters or node_ids to at least one node",
-        );
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "hops": [1, 2]}]
-            }"#,
-        );
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "hops": [1, 2]}]
-            }"#,
-            "filters or node_ids to at least one node",
-        );
-
-        assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User", "filters": {"username": "root"}},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
-                "group_by": ["p"],
-                "aggregations": [{"count": "u", "as": "c"}]
-            }"#,
-        );
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
-                "group_by": ["p"],
-                "aggregations": [{"count": "u", "as": "c"}]
-            }"#,
-            "filters or node_ids to at least one node",
-        );
-
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}}]
-            }"#,
-        );
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}]
-            }"#,
-            "add filters or node_ids to at least one node, such as \
-             (p:Project {full_path: 'group/project'}) or WHERE mr.project_id = 42 \
-             (an id_range counts only with a span of at most 100000)",
-        );
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
-            }"#,
-        );
-        assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
-                "group_by": ["p"],
-                "aggregations": [{"count": "u", "as": "c"}]
-            }"#,
-        );
-        assert_ok(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "id_range": {"start": 1, "end": 100}},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
-        );
-        assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "id_range": {"start": 1, "end": 1000}},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
-            "endpoint \"a\"",
-        );
-    }
-
-    fn ontology_with_sensitive_field() -> Ontology {
-        Ontology::new()
-            .with_nodes(["User"])
-            .with_edges(["AUTHORED"])
-            .with_fields(
-                "User",
-                [("username", DataType::String), ("email", DataType::String)],
-            )
-            .modify_field("User", "email", |f| f.like_allowed = false)
-            .unwrap()
-    }
-
-    fn ontology_with_unfilterable_field() -> Ontology {
-        Ontology::new()
-            .with_nodes(["Group"])
-            .with_edges(["CONTAINS"])
-            .with_fields(
-                "Group",
-                [
-                    ("name", DataType::String),
-                    ("private_note", DataType::String),
-                    ("traversal_path", DataType::String),
-                ],
-            )
-            .modify_field("Group", "private_note", |f| f.filterable = false)
-            .unwrap()
-            .modify_field("Group", "traversal_path", |f| f.filterable = false)
-            .unwrap()
-    }
-
-    #[test]
-    fn rejects_short_like_pattern() {
-        let ont = test_ontology();
-        let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"username": {"contains": "ab"}}}],
-            "limit": 10
-        }"#,
-        )
-        .unwrap();
-
-        let err = validator.check_references(&input).unwrap_err();
+    fn native_predicate_trees_are_bounded_before_planning() {
+        use crate::input::{BooleanExpression, Condition, InputFilter, PredicateTarget};
+        let ontology = Ontology::load_embedded().unwrap();
+        let validator = validator(&ontology);
+        let mut input =
+            crate::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
+        let leaf = |target| {
+            BooleanExpression::Leaf(Condition {
+                target,
+                property: "id".into(),
+                filter: InputFilter {
+                    op: Some(FilterOp::In),
+                    value: Some(serde_json::json!([1])),
+                    ..Default::default()
+                },
+            })
+        };
+        let mut deep = leaf(PredicateTarget::Node("u".into()));
+        for _ in 0..1024 {
+            deep = BooleanExpression::Not(Box::new(deep));
+        }
+        input.predicates = vec![deep];
+        let error = validator.check_shape(&input).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("search pattern must be at least 3 characters"),
-            "expected min length error, got: {err}"
+            error.to_string().contains("must not nest deeper than 32"),
+            "{error}"
         );
-    }
-
-    #[test]
-    fn rejects_like_on_disallowed_field() {
-        let ont = ontology_with_sensitive_field();
-        let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"email": {"contains": "example"}}}],
-            "limit": 10
-        }"#,
-        )
-        .unwrap();
-
-        let err = validator.check_references(&input).unwrap_err();
+        input.predicates = vec![BooleanExpression::Not(Box::new(leaf(
+            PredicateTarget::Relationship(7),
+        )))];
+        let error = validator.check_shape(&input).unwrap_err();
         assert!(
-            err.to_string().contains("string operators"),
-            "expected like_allowed rejection, got: {err}"
+            error.to_string().contains("undefined relationship"),
+            "{error}"
         );
     }
 
     #[test]
-    fn rejects_like_on_non_text_field() {
-        let ont = Ontology::new()
-            .with_nodes(["User"])
-            .with_edges(["AUTHORED"])
-            .with_fields(
-                "User",
-                [
-                    ("created_at", DataType::DateTime),
-                    ("state", DataType::Enum),
-                ],
+    fn native_conditions_need_a_column() {
+        use crate::input::{BooleanExpression, InputFilter};
+        let base = crate::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
+        let mut empty_group = base.clone();
+        empty_group.predicates = vec![BooleanExpression::Not(Box::new(BooleanExpression::And(
+            vec![],
+        )))];
+        let mut empty_property = base;
+        empty_property.nodes[0].filters.insert(
+            String::new(),
+            vec![InputFilter {
+                value: Some(serde_json::json!(1)),
+                ..Default::default()
+            }],
+        );
+        let ontology = std::sync::Arc::new(Ontology::load_embedded().unwrap());
+        for input in [empty_group, empty_property] {
+            let error = crate::compile_input(
+                input,
+                Default::default(),
+                &ontology,
+                &crate::testkit::non_admin_ctx(),
             )
-            .modify_field("User", "state", |field| {
-                field.enum_values = Some(BTreeMap::from([(0, "active".into())]));
+            .unwrap_err();
+            assert!(error.to_string().contains(CONDITION_COLUMN_RULE), "{error}");
+        }
+    }
+
+    #[test]
+    fn rejects_a_disabled_virtual_field() {
+        let ontology = Ontology::load_embedded()
+            .unwrap()
+            .modify_field("Project", "name", |field| {
+                field.source = ontology::FieldSource::Virtual(ontology::VirtualSource {
+                    service: "example".into(),
+                    lookup: "project_name".into(),
+                    disabled: true,
+                    depends_on: vec![],
+                    allowed_ops: ontology::VirtualSource::DEFAULT_ALLOWED_OPS
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
+                });
             })
             .unwrap();
-        let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"created_at": {"contains": "2024"}}}],
-            "limit": 10
-        }"#,
-        )
-        .unwrap();
 
-        let err = validator.check_references(&input).unwrap_err();
-        assert!(
-            err.to_string().contains("require a text field"),
-            "expected non-text rejection, got: {err}"
-        );
-
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"state": {"contains": "act"}}}],
-            "limit": 10
-        }"#,
-        )
-        .unwrap();
-        assert!(validator.check_references(&input).is_ok());
-    }
-
-    #[test]
-    fn accepts_equality_on_like_disallowed_field() {
-        let ont = ontology_with_sensitive_field();
-        let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"email": "test@example.com"}}],
-            "limit": 10
-        }"#,
-        )
-        .unwrap();
+        let err = validator(&ontology)
+            .check_field("Project", "name")
+            .unwrap_err();
 
         assert!(
-            validator.check_references(&input).is_ok(),
-            "equality filter on like_allowed:false field should pass"
-        );
-    }
-
-    #[test]
-    fn rejects_filter_on_unfilterable_field() {
-        let ont = ontology_with_unfilterable_field();
-        let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "g", "entity": "Group",
-                     "filters": {"private_note": "secret"}}],
-            "limit": 10
-        }"#,
-        )
-        .unwrap();
-
-        let err = validator.check_references(&input).unwrap_err();
-        assert!(
-            err.to_string().contains("not filterable"),
-            "expected filterable rejection, got: {err}"
-        );
-    }
-
-    #[test]
-    fn rejects_group_by_property_on_unfilterable_field() {
-        let ont = ontology_with_unfilterable_field();
-        let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "aggregation",
-            "nodes": [{"id": "g", "entity": "Group", "node_ids": [1]}],
-            "group_by": ["g.private_note"],
-            "aggregations": [{"count": "g", "as": "group_count"}],
-            "limit": 10
-        }"#,
-        )
-        .unwrap();
-
-        let err = validator.check_references(&input).unwrap_err();
-        assert!(
-            err.to_string().contains("not filterable"),
-            "expected group_by filterable rejection, got: {err}"
-        );
-    }
-
-    #[test]
-    fn accepts_filter_on_filterable_field() {
-        let ont = ontology_with_unfilterable_field();
-        let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "g", "entity": "Group",
-                     "filters": {"name": "Public Group"}}],
-            "limit": 10
-        }"#,
-        )
-        .unwrap();
-
-        assert!(
-            validator.check_references(&input).is_ok(),
-            "filter on filterable:true field should pass"
-        );
-    }
-
-    #[test]
-    fn accepts_multi_filter_range() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User",
-                         "node_ids": [1],
-                         "filters": {"created_at": [
-                             {"gte": "2026-04-01T00:00:00Z"},
-                             {"lt": "2026-05-01T00:00:00Z"}
-                         ]}}]
-            }"#,
-        );
-    }
-
-    #[test]
-    fn rejects_multi_filter_type_mismatch() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User",
-                         "node_ids": [1],
-                         "filters": {"created_at": [
-                             {"gte": "2026-04-01T00:00:00Z"},
-                             {"lt": 12345}
-                         ]}}]
-            }"#,
-            "not a string",
+            err.to_string().contains("does not exist"),
+            "expected the disabled field to be rejected, got: {err}"
         );
     }
 }

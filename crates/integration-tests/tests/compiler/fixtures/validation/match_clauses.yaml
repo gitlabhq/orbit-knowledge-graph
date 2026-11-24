@@ -1,0 +1,37 @@
+logical:
+  exact: |
+    (Limit 5
+      (Input traversal
+        (Project mr.iid
+          (Filter mr.state = 'merged'
+            (NodeScan MergeRequest AS mr)))
+        (Project p.id, p.full_path, p.name, p.visibility_level
+          (Filter p.id IN [1]
+            (NodeScan Project AS p)))
+        (Project u.username
+          (Filter u.username = 'a'
+            (NodeScan User AS u)))
+        (EdgeScan IN_PROJECT mr->p AS e0)
+        (EdgeScan AUTHORED u->mr AS e1)))
+
+missing_frontends:
+  json: The source test compares GQL MATCH forms with each other.
+
+physical:
+  clickhouse: {}
+
+cases:
+  - name: Two patterns in one MATCH clause
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}), (u:User)-[:AUTHORED]->(mr) WHERE mr.state = 'merged' AND u.username = 'a' RETURN mr.iid, u.username LIMIT 5
+
+  - name: Two MATCH clauses with one WHERE compile like one pattern
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) MATCH (u:User)-[:AUTHORED]->(mr) WHERE mr.state = 'merged' AND u.username = 'a' RETURN mr.iid, u.username LIMIT 5
+
+  - name: Two MATCH clauses with a WHERE each compile like one pattern
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) WHERE mr.state = 'merged' MATCH (u:User)-[:AUTHORED]->(mr) WHERE u.username = 'a' RETURN mr.iid, u.username LIMIT 5

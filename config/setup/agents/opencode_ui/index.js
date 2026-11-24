@@ -357,14 +357,15 @@ class Lexer {
   }
   redirectOperator() {
     const operator = this.src[this.pos] === "<" ? "<" : ">";
-    this.pos += operator === "<" && this.src.startsWith("<<<", this.pos) ? 3 : 1;
+    const hereString = operator === "<" && this.src.startsWith("<<<", this.pos);
+    this.pos += hereString ? 3 : 1;
     if (operator === ">") {
       if (this.src[this.pos] === ">")
         this.pos++;
       if (this.src[this.pos] === "|" || this.src[this.pos] === "&")
         this.pos++;
     }
-    this.tokens.push({ kind: "redirect", operator });
+    this.tokens.push(hereString ? { kind: "redirect", operator, hereString } : { kind: "redirect", operator });
   }
   heredocOperator() {
     const stripTabs = this.src[this.pos + 2] === "-";
@@ -448,6 +449,7 @@ function redirectTarget(tokens, from) {
   const token = tokens[at];
   return token?.kind === "word" ? { target: token.text, end: at } : { end: from - 1 };
 }
+var BARE_CAT = /^cat(?: -)?$/;
 function groupCommands(tokens) {
   const commands = [];
   let current = emptyCommand(false);
@@ -463,15 +465,18 @@ function groupCommands(tokens) {
       const { target, end } = redirectTarget(tokens, i + 1);
       if (token.operator === "<") {
         current.readsInput = true;
-        current.stdin = "";
+        current.stdin = token.hereString ? target ?? "" : "";
       } else if (target !== undefined)
         current.writes.push(target);
       current.substitutes ||= tokens.slice(i + 1, end + 1).some((skipped) => skipped.kind === "substitution");
       i = end;
     } else if (token?.kind === "separator") {
+      const previous = current;
       if (!isEmpty(current))
         commands.push(current);
       current = emptyCommand(token.pipe);
+      if (token.pipe && BARE_CAT.test(previous.words.join(" ")))
+        current.stdin = previous.stdin;
     }
   }
   if (!isEmpty(current))

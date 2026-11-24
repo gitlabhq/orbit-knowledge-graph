@@ -1,0 +1,34 @@
+cases:
+  - name: Covered node filters use edge tags without node scans
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"definition_type":"function"}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
+      gql: |
+        MATCH (a:Definition {definition_type: 'function'})-[:CALLS]->(b:Definition) RETURN a, b
+    logical:
+      expect: ["(Filter a.definition_type = 'function' (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter _orbit_edge_0._deleted = false, _orbit_edge_0.source_tags HAS ANY ['definition_type:function'] (Bind _orbit_edge_0 (Filter ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))))"]
+        emitted:
+          expect: ["(Filter ArrayContains(_orbit_edge_0.source_tags, 'definition_type:function'), ... (_))"]
+          ctes:
+            absent: true
+
+  - name: A covered target filter in a count reads edge tags without the target node table
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"j","entity":"Job","node_ids":[1]},{"id":"p","entity":"Pipeline","filters":{"source":{"eq":"push"}}}],"relationships":[{"type":"TRIGGERS_PIPELINE","from":"j","to":"p"}],"group_by":["j"],"aggregations":[{"count":"p","as":"n"}],"limit":10}
+      gql: |
+        MATCH (j:Job {id: 1})-[:TRIGGERS_PIPELINE]->(p:Pipeline {source: 'push'}) RETURN j, count(p) AS n LIMIT 10
+    logical:
+      expect: ["(Aggregate group j AS j, COUNT(p) AS n (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter _orbit_edge_0.target_tags HAS ANY ['source:push'], ... (Scan Table(gl_ci_edge) AS _orbit_edge_0))"]
+          reject: ["(Scan Table(gl_pipeline) ...)"]
+        emitted:
+          expect: ["(Filter ArrayContains(_orbit_edge_0.target_tags, 'source:push'), ... (_))"]
+          reject: ["(Scan Table(gl_pipeline) ...)"]

@@ -1,0 +1,111 @@
+physical:
+  clickhouse: {}
+
+cases:
+  - name: An id list keeps an extra id equality
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2],"filters":{"id":{"eq":2}}}]}
+      gql: |
+        MATCH (u:User) WHERE u.id IN [1, 2] AND u.id = 2 RETURN u
+    logical:
+      expect: ["(Filter u.id = 2, u.id IN [1, 2] (NodeScan User AS u))"]
+
+  - name: An id list keeps an extra id list
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2],"filters":{"id":{"in":[2,3]}}}]}
+      gql: |
+        MATCH (u:User) WHERE u.id IN [1, 2] AND u.id IN [2, 3] RETURN u
+    logical:
+      expect: ["(Filter u.id IN [2, 3], u.id IN [1, 2] (NodeScan User AS u))"]
+
+  - name: An id list keeps surrounding id bounds and an equality
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2],"filters":{"id":[{"gte":1},{"lte":3},{"eq":2}]}}]}
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id IN [1, 2] AND u.id <= 3 AND u.id = 2 RETURN u
+    logical:
+      expect: ["(Filter u.id >= 1, u.id <= 3, u.id = 2, u.id IN [1, 2] (NodeScan User AS u))"]
+
+  - name: An inline id keeps an id list and id bounds
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"id":[{"in":[2,3]},{"gte":1},{"lte":3}]}}]}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.id IN [2, 3] AND u.id >= 1 AND u.id <= 3 RETURN u
+    logical:
+      expect: ["(Filter u.id IN [2, 3], u.id >= 1, u.id <= 3, u.id IN [1] (NodeScan User AS u))"]
+
+  - name: An inline id keeps an id list
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"id":{"in":[2,3]}}}]}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.id IN [2, 3] RETURN u
+    logical:
+      expect: ["(Filter u.id IN [2, 3], u.id IN [1] (NodeScan User AS u))"]
+
+  - name: An inline id keeps an id equality
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"id":{"eq":2}}}]}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.id = 2 RETURN u
+    logical:
+      expect: ["(Filter u.id = 2, u.id IN [1] (NodeScan User AS u))"]
+
+  - name: Strict id bounds become an inclusive id range
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":2,"end":9}}]}
+      gql: |
+        MATCH (u:User) WHERE u.id > 1 AND u.id < 10 RETURN u
+    logical:
+      expect: ["(Filter u.id >= 2, u.id <= 9 (NodeScan User AS u))"]
+
+  - name: An inline id keeps an inclusive id range
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"id_range":{"start":1,"end":10000}}]}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.id >= 1 AND u.id <= 10000 RETURN u
+    logical:
+      expect: ["(Filter u.id IN [1], u.id >= 1, u.id <= 10000 (NodeScan User AS u))"]
+
+  - name: Grouped substring conditions on one property stay separate
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":[{"contains":"abc"},{"contains":"def"}]}}]}
+      gql: |
+        MATCH (u:User) WHERE (u.username CONTAINS 'abc' AND u.username CONTAINS 'def') RETURN u
+    logical:
+      expect: ["(Filter contains(u.username, 'abc'), contains(u.username, 'def') (NodeScan User AS u))"]
+
+  - name: A digit string id selects the numeric id
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":["7"]}]}
+      gql: |
+        MATCH (u:User) WHERE u.id IN ['7'] RETURN u
+    logical:
+      expect: ["(Filter u.id IN [7] (NodeScan User AS u))"]
+
+  - name: Ids above 2^53 and negative ids keep their exact values from integers and digit strings
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,"9007199254740993",-42]}]}
+      gql: |
+        MATCH (u:User) WHERE u.id IN [1, '9007199254740993', -42] RETURN u
+    logical:
+      expect: ["(Filter u.id IN [1, 9007199254740993, -42] (NodeScan User AS u))"]
+
+  - name: An id range takes an integer or a digit string above 2^53 at either end
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":9007199254740900,"end":"9007199254740993"}}]}
+      gql: |
+        MATCH (u:User) WHERE u.id >= 9007199254740900 AND u.id <= 9007199254740993 RETURN u
+    logical:
+      expect: ["(Filter u.id >= 9007199254740900, u.id <= 9007199254740993 (NodeScan User AS u))"]

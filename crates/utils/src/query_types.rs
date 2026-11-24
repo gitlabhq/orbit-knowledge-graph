@@ -89,10 +89,18 @@ impl From<ScalarType> for SqlType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct ParamValue {
+    #[serde(serialize_with = "serialize_type_name")]
     pub data_type: SqlType,
     pub value: Value,
+}
+
+fn serialize_type_name<S: serde::Serializer>(
+    data_type: &SqlType,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&crate::clickhouse::type_name(*data_type))
 }
 
 #[derive(Debug, Default)]

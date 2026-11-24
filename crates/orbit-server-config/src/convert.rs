@@ -11,10 +11,10 @@ use crate::clickhouse_setup::ClickHouseSetupConfig;
 use crate::engine::{
     CodeBackfillSweepConfig, CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig,
     CronSchedule, DatalakeRetryConfig, EngineConfiguration, EntityHandlerConfig,
-    GlobalDispatcherConfig, HandlersConfiguration, IndexerModule, MigrationCompletionConfig,
-    NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, NamespaceFreshnessConfig,
-    ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
-    StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
+    GlobalDispatcherConfig, GraphStatsConfig, HandlersConfiguration, IndexerModule,
+    MigrationCompletionConfig, NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig,
+    NamespaceFreshnessConfig, ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration,
+    SiphonRouterConfig, StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
 };
 use crate::features::{Feature, FeatureScope, FeaturesConfig};
 use crate::gitlab::{GitlabConfig, JwtConfig};
@@ -143,6 +143,7 @@ fn clickhouse(value: proto::ClickHouse) -> ClickHouseConfiguration {
         url: present(value.url),
         username: present(value.username),
         password: value.password,
+        compatibility: present(value.compatibility),
         session_settings: value.session_settings,
         replicated: present(value.replicated),
         insert_settings: value.insert_settings,
@@ -301,6 +302,7 @@ fn schedule_config(value: proto::Schedule) -> Result<ScheduleConfig> {
     let migration_completion = present(tasks.migration_completion);
     let stale_edge = present(tasks.stale_edge_reconciliation);
     let namespace_freshness = present(tasks.namespace_freshness);
+    let graph_stats = present(tasks.graph_stats);
 
     Ok(ScheduleConfig {
         tasks: ScheduledTasksConfiguration {
@@ -366,6 +368,13 @@ fn schedule_config(value: proto::Schedule) -> Result<ScheduleConfig> {
                     present(namespace_freshness.cron),
                     present(namespace_freshness.run_timeout_secs),
                     "namespace-freshness",
+                )?,
+            },
+            graph_stats: GraphStatsConfig {
+                schedule: cron(
+                    present(graph_stats.cron),
+                    present(graph_stats.run_timeout_secs),
+                    "graph-stats",
                 )?,
             },
         },
@@ -456,7 +465,7 @@ fn grpc(value: proto::Grpc) -> Result<GrpcConfig> {
         connection_window_size: present(value.connection_window_size),
         stream_window_size: present(value.stream_window_size),
         concurrency_limit: present(value.concurrency_limit) as usize,
-        max_connection_age_secs: present(value.max_connection_age_secs),
+        max_connection_age_secs: value.max_connection_age_secs,
         max_connection_age_grace_secs: present(value.max_connection_age_grace_secs),
         stream_timeout_secs: present(value.stream_timeout_secs),
         max_header_list_size_bytes: present(value.max_header_list_size_bytes),

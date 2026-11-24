@@ -174,7 +174,11 @@ stages:
         replace: '(rb_super (__supertype @$S|strip=::|split_last("::") $S) (__import (__source @$S|regex_replace("(::)?[^:]+$", "")) (__source_path @$S|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$S|strip=::|split_last("::"))))'
         tag: { import_type: Autoload }
         tag_on: __import
-      # Parameters
+      # Parameters: a default value types the parameter
+      - match: '(optional_parameter name: $N:identifier value: $V)'
+        replace: '(__binding @$N (__rhs $V))'
+      - match: '(keyword_parameter name: $N:identifier value: $V)'
+        replace: '(__binding @$N (__rhs $V))'
       - match: '(optional_parameter name: $N:identifier)'
         replace: '(__binding @$N)'
       - match: '(splat_parameter name: $N:identifier)'
@@ -186,7 +190,7 @@ stages:
       - match: '(block_parameter name: $N:identifier)'
         replace: '(__binding @$N)'
       - match: '(method_parameters $$$P)'
-        replace: '(method_parameters $$$P=>__binding)'
+        replace: '(method_parameters $$$P:_*_named->__binding)'
       - match: '(block_parameters $$$P)'
         replace: '(block_parameters $$$P=>block_local)'
       - match: '(lambda_parameters $$$P)'
@@ -241,6 +245,11 @@ stages:
         replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
       - match: '(assignment left: $L:instance_variable right: $R:rb_ref)'
         replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
+      # begin ... end and ( ... ) stand for their last expression
+      - match: '(assignment left: $L:instance_variable right: $R:begin)'
+        replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
+      - match: '(assignment left: $L:instance_variable right: $R:parenthesized_statements)'
+        replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
       - match: '(assignment left: $L:instance_variable right: $R:constant)'
         replace: '(__binding (__ivar @$L|strip=@) (__rhs (__call (__callee @$R))))'
       - match: '(assignment left: $L:instance_variable right: $R)'
@@ -251,6 +260,10 @@ stages:
         replace: '(__binding @$L (__rhs $R))'
       - match: '(assignment left: $L:identifier right: $R:__ssa_branch)'
         replace: '(__binding @$L (__rhs $R))'
+      - match: '(assignment left: $L:identifier right: $R:begin)'
+        replace: '(__binding @$L (__rhs $R))'
+      - match: '(assignment left: $L:identifier right: $R:parenthesized_statements)'
+        replace: '(__binding @$L (__rhs $R))'
       - match: '(assignment left: $L:identifier right: $R:constant)'
         replace: '(__binding @$L (__rhs (__call (__callee @$R))))'
       - match: '(assignment left: $L:identifier right: $R:identifier)'
@@ -259,6 +272,12 @@ stages:
         tag_on: __call
       - match: '(assignment left: $L:identifier right: $R)'
         replace: '(__binding @$L (__rhs @$R $R))'
+      # @x ||= v binds only v, ivar types are collected per class
+      - match: '(operator_assignment left: $L:instance_variable ("||=") right: $R)'
+        replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
+      # x ||= v leaves a set x alone, so x is its old value or v
+      - match: '(operator_assignment left: $L:identifier ("||=") right: $R)'
+        replace: '(__binding @$L (__rhs (__ssa_branch (__ssa_arm (__call (__callee @$L))) (__ssa_arm $R))))'
 
       # Control flow
       - match: '(if condition: $C consequence:? $Q alternative:? $A)'
@@ -275,6 +294,13 @@ stages:
         replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm $A))'
       - match: '(case value:? $V $$$W:when|else)'
         replace: '(__ssa_branch $V $$$W->__ssa_arm)'
+      # ensure clauses never supply the value; rescue modifier handlers are not typed on purpose, so x rescue y types from x
+      - match: '(begin $$$BODY $R:rescue $$$ALTS $E:ensure)'
+        replace: '(begin (__ssa_branch (__ssa_arm $$$BODY) (__ssa_arm $R) $$$ALTS->__ssa_arm) (__side_effect $E))'
+      - match: '(begin $$$BODY $E:ensure)'
+        replace: '(begin $$$BODY (__side_effect $E))'
+      - match: '(rescue_modifier body: $B handler: $H)'
+        replace: '(begin $B (__side_effect $H))'
       - match: '(begin $$$BODY $R:rescue $$$ALTS)'
         replace: '(__ssa_branch (__ssa_arm $$$BODY) (__ssa_arm $R) $$$ALTS->__ssa_arm)'
       - match: '(body_statement $$$BODY $R:rescue $$$ALTS)'
@@ -309,6 +335,8 @@ stages:
       # Remaining bare constants: references
       - match: '(constant)'
         replace: '(__call (__callee @$ROOT))'
+      - match: '(instance_variable)'
+        replace: '(__ivar @$ROOT|strip=@)'
       - match: '(scope_resolution)'
         replace: '(__call (__callee (__member @$ROOT|split_last("::") (__object @$ROOT|strip=::|regex_replace("::[^:]+$", "")))))'
 

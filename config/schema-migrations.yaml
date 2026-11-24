@@ -16,13 +16,60 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
-- version: 120
-  scope: none
+- version: 127
+  scope: sdlc
+  entities:
+  - Pipeline
   note: >-
-    Observability virtual properties on Pipeline and Job. The fingerprint hashes the
-    node YAML, so declaring them reads as drift, but every one is disabled and
-    resolved at query time: no stored column, no DDL, no extract SQL, and every
-    indexed row is byte-identical.
+    Pipeline gains a name property, left-joined from siphon_ci_pipeline_metadata in
+    a new pipeline.sql.j2 extract. The extract selects the page of pipelines first,
+    then reads metadata only for those pipelines. Only gl_pipeline changes shape (new
+    name column and text index), so only the Pipeline entity re-indexes.
+- version: 126
+  scope: "*"
+  note: >-
+    BLOCKS is a new WorkItem edge from issue links with link_type 1. RELATED_TO
+    keeps only link_type 0, so a blocking link no longer reads as relates to. Edge files
+    drop the properties blocks that the loader never read. The rebuild removes the
+    blocking links already stored as RELATED_TO.
+- version: 125
+  scope: "*"
+  note: >-
+    Link-table edges copy only immutable endpoint properties into their tags. A
+    link row does not change when its endpoint does, so a copied state went stale. Nodes
+    keep only immutable enrichment_props, and link-table edges stop enriching
+    MergeRequest and WorkItem endpoints. Queries stop trusting the stale copies at once;
+    the rebuild clears them.
+- version: 124
+  scope: sdlc
+  entities:
+  - CLOSES
+- version: 123
+  scope: "*"
+  note: >-
+    MergeRequest takes merge_user_id from the metrics merger, falls back to the MR
+    field, and sets it only for merged MRs, so manual merges get a MERGED edge.
+    AUTHORED and author_id become mutable on WorkItem, MergeRequest, Note and
+    Vulnerability, so the stale-edge sweep drops the old edge after GitLab moves a deleted user's
+    records to the Ghost user. The rebuild fixes the rows already indexed.
+- version: 122
+  scope: code
+  note: >-
+    Markdown links under a heading also emit Definition(Section) IMPORTS File and
+    Definition(Section) IMPORTS Definition(Section) edges from their innermost
+    section; re-index code to backfill them.
+- version: 121
+  scope: code
+  note: >-
+    Markdown links emit File IMPORTS File and File IMPORTS Definition(Section)
+    edges; re-index code to backfill them.
+- version: 120
+  scope: code
+  note: >-
+    Definition gains twelve front_matter_* columns holding Markdown front matter
+    values (Agent Skills fields, GitLab docs title, stage, group and info, plus version
+    and category). Only FrontMatter rows carry values; every other row stores ''.
+    Code tables are re-derived so existing FrontMatter rows pick the values up.
 - version: 119
   scope: none
   note: "Finding declares extract.partition_count: 5 so its first full load splits into five id ranges, as Job does. The partition count only changes how the indexer pages the datalake, not the rows it writes, so no table DDL or indexed row changes."

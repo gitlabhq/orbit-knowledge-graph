@@ -6,7 +6,6 @@ description: A work item representing an issue, epic, task, incident, or other t
 label: title
 destination_table: gl_work_item
 default_columns: [id, iid, title, state, work_item_type]
-enrichment_props: [state, work_item_type, confidential]
 
 style:
   size: 32
@@ -126,7 +125,6 @@ properties:
     type: int64
     source: author_id
     nullable: true
-    mutable: false
     description: "Author user ID."
 
   milestone_id:
@@ -175,6 +173,7 @@ pipelines:
             field: id
             kind: WorkItem
           label: AUTHORED
+          mutable: true
         - from:
             field: id
             kind: WorkItem

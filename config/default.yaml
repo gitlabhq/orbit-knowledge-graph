@@ -48,8 +48,12 @@ datalake:
   database: default
   username: default
   # password: ""
+  # Oldest supported ClickHouse version. Keep in step with the version requirements docs.
+  compatibility: "26.6"
   replicated: false
-  session_settings: {}
+  session_settings:
+    # Must stay 0 to avoid a ClickHouse 26.6 bug that skips the Siphon watermark index and scans whole tables.
+    use_skip_indexes_on_data_read: "0"
   insert_settings: {}
   profiling:
     enabled: false
@@ -63,6 +67,8 @@ graph:
   database: default
   username: default
   # password: ""
+  # Oldest supported ClickHouse version. Keep in step with the version requirements docs.
+  compatibility: "26.6"
   replicated: false
   # Universal graph defaults, also set by the Helm chart in production.
   session_settings:
@@ -183,6 +189,9 @@ schedule:
     namespace-freshness:
       cron: "0 */5 * * * *"
       run_timeout_secs: 1800
+    graph-stats:
+      cron: "0 30 4 * * *"
+      run_timeout_secs: 1800
 
 health_check:
   bind_address: "0.0.0.0:4201"
@@ -195,7 +204,7 @@ grpc:
   connection_window_size: 2097152   # 2MB
   stream_window_size: 1048576       # 1MB
   concurrency_limit: 256
-  max_connection_age_secs: 300      # 5 min, for L4 ILB rebalancing
+  max_connection_age_secs: 300      # 5 min, for L4 ILB rebalancing; null turns it off (behind the Orbit Gateway)
   max_connection_age_grace_secs: 30 # graceful drain window; paired with max_connection_age_secs to avoid tonic 0.14.5 panic (hyperium/tonic#2522)
   stream_timeout_secs: 60
   max_header_list_size_bytes: 65536 # 64 KiB; tonic/hyper default of 16 KiB is too small for GitLab JWTs carrying many traversal IDs

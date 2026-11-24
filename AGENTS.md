@@ -1,13 +1,19 @@
 # AGENTS.md
 
+## Public repository
+
+This repository is public. Do not put customer names, tenant names, incident
+details, credentials, or other sensitive data in code, commits, MRs, or public
+issues. Put them only in a confidential issue or an internal note.
+
 ## Tooling
 
-Use mise for all tasks.
+Use mise for all tasks. Run `mise tasks ls` for the full list.
 
 | Goal | Command |
 | --- | --- |
 | Build | `mise build` |
-| Fast tests | `mise test:fast` |
+| Unit tests | `mise test` |
 | Local tests | `mise test:local` |
 | Integration tests | `mise test:integration` |
 | Code-graph integration tests | `mise test:integration:codegraph` |
@@ -18,13 +24,7 @@ Use mise for all tasks.
 | Validate ontology | `mise ontology:validate` |
 | Start or dispatch the server | `mise server:start`, `mise server:dispatch` |
 
-`docs-locale/` is generated. Never read, edit, or reference it.
-
-Open agent-authored Draft MRs with `[skip ci]` at the end of the Conventional
-Commits title and keep it there through review.
-
-When ready for CI, remove `[skip ci]` from the title, then start a pipeline.
-Editing the title alone starts no pipeline. When the MR is ready to be reviewed, add the `~workflow::ready for review` label.
+The translated locale docs are generated. Never read, edit, or reference them.
 
 After you create a worktree, run `mise trust`. Then set the shared hooks path:
 
@@ -34,26 +34,49 @@ git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"
 
 ## Where to find things
 
-List these directories and read the relevant owner before you act:
+Read the owning guide before you act:
 
-- `docs/pages/engineering/architecture/` for the architecture overview and the contract of each area, and `docs/pages/engineering/adr/` for the ADRs.
-- `docs/pages/engineering/development/` for runbooks, the crate map, and the reference index.
-- Before working in a crate, check for and read `crates/<crate>/AGENTS.md`.
-- `docs/pages/engineering/adr/020_billing_sox_scope.md` documents the SOX scope for billing emission. Read it before touching `crates/orbit-billing/`, `billing_adapter.rs`, or the hook points enumerated in `.gitlab/CODEOWNERS`.
-- **SOX billing surface:** files controlling billing emission, delivery, payloads, or quota checks are in scope, including files outside `crates/orbit-billing/`. If you add or move such a file, add it to `.gitlab/CODEOWNERS` under the SOX-scoped rules.
+- The engineering docs hold the architecture overview, the contract of each
+  area, the ADRs, the runbooks, the crate map, and the reference index.
+- Before you work in a crate, read its `AGENTS.md` if it has one.
+- Read `CONTRIBUTING.md` for engineering, documentation, issue, and MR
+  conventions.
+- Read `CONTEXT.md` for domain terms.
+- Before you change billing, read the SOX billing ADR. Every file that controls
+  billing emission, delivery, payloads, or quota checks is in SOX scope, even
+  outside the billing crate. If you add or move such a file, add it to the
+  SOX-scoped rules in `CODEOWNERS`.
 
-Do not change any file under `docs/` in an MR that changes code. Change it only when a CI or build check fails without it.
-Do not create a GitLab issue or epic until the author approves the draft.
-Read `CONTRIBUTING.md` for engineering, documentation, issue, and MR
-conventions. Before you open an MR, fill every section of
-`.gitlab/merge_request_templates/Default.md`, including the Agent context block.
-Copy one `type::` label, the `orbit::<area>` label, and the milestone from the linked
-issue. Read `CONTEXT.md` for domain terms.
+## Issues and MRs
 
-## Writing or changing a skill
+- Do not create a GitLab issue or epic until the author approves the draft.
+- Before you open an MR, fill every section of the default MR template,
+  including the Agent context block.
+- Copy one `type::` label, the `orbit::<area>` label, and the milestone from
+  the linked issue.
+- Do not change docs in an MR that changes code. The exception is a docs change
+  that a CI or build check needs. The `docs-in-code-mr-check` job enforces this.
 
-Before you create or edit a skill, follow the [`authoring-skills`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/authoring-skills/SKILL.md) guide; shipped skills live in `skills/`, repo-only skills in `.agents/skills/`.
+Agent-authored MRs follow these steps:
 
-## Writing docs
+1. Open a Draft MR with `[skip ci]` at the end of the Conventional Commits
+   title. Keep it there through review.
+2. When the MR is ready for CI, remove `[skip ci]` from the title. Then start a
+   pipeline. A title edit does not start one.
+3. When the MR is ready for review, add the `~workflow::ready for review` label.
 
-For user docs (`docs/docs-gitlab-com/`), follow the [`gitlab-docs-change`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/gitlab-docs-change/SKILL.md) skill.
+Docs MRs that the docs-write flow opens (branches `docs-write/mr-*`) open as Draft
+but never carry `[skip ci]`. The flow waits for a green pipeline.
+
+## Skills and docs
+
+- Before you create or edit a skill, follow the
+  [`authoring-skills`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/authoring-skills/SKILL.md)
+  guide.
+- For user docs, follow the
+  [`gitlab-docs-change`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/gitlab-docs-change/SKILL.md)
+  skill.
+- The docs-write flow (`.gitlab/duo/catalog/flows/`) follows the `docs-write`
+  and `docs-review` skills from
+  [`gitlab-org/orbit/team/skills`](https://gitlab.com/gitlab-org/orbit/team/skills)
+  instead.

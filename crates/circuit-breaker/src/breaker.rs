@@ -10,7 +10,7 @@ use crate::state::{AcquireResult, Circuit};
 
 /// Circuit breaker for a single service. Clones share one circuit (`Arc`).
 ///
-/// ```ignore
+/// ```text
 /// self.db.call(|| async { client.execute(query).await }).await?;
 /// ```
 #[derive(Clone)]

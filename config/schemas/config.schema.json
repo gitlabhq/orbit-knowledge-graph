@@ -278,6 +278,9 @@
             "null"
           ]
         },
+        "compatibility": {
+          "type": "string"
+        },
         "session_settings": {
           "type": "object",
           "additionalProperties": {
@@ -305,6 +308,7 @@
         "database",
         "url",
         "username",
+        "compatibility",
         "replicated",
         "profiling"
       ]
@@ -867,6 +871,9 @@
         },
         "namespace-freshness": {
           "$ref": "#/$defs/NamespaceFreshnessConfig"
+        },
+        "graph-stats": {
+          "$ref": "#/$defs/GraphStatsConfig"
         }
       },
       "additionalProperties": false,
@@ -879,7 +886,8 @@
         "namespace-deletion",
         "migration-completion",
         "stale-edge-reconciliation",
-        "namespace-freshness"
+        "namespace-freshness",
+        "graph-stats"
       ]
     },
     "GlobalDispatcherConfig": {
@@ -1057,6 +1065,25 @@
     },
     "NamespaceFreshnessConfig": {
       "description": "Records how far indexed SDLC data trails the datalake for every enabled namespace.",
+      "type": "object",
+      "properties": {
+        "cron": {
+          "$ref": "#/$defs/CronSchedule"
+        },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cron",
+        "run_timeout_secs"
+      ]
+    },
+    "GraphStatsConfig": {
+      "description": "Sends the daily `orbit_graph_stats` snapshot. Runs when analytics is on, or on self-managed when `local_collector_url` is set.",
       "type": "object",
       "properties": {
         "cron": {
@@ -1421,14 +1448,18 @@
           "minimum": 0
         },
         "max_connection_age_secs": {
-          "type": "integer",
+          "description": "Connection age at which the server closes a connection so clients\nreconnect and spread across pods behind an L4 load balancer. Defaults to\n300. Set it to `null` to turn the maximum age off: behind the Orbit\nGateway, which balances each request, the closes rebalance nothing and\ncan end running queries.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint64",
-          "minimum": 0
+          "minimum": 1
         },
         "max_connection_age_grace_secs": {
           "type": "integer",
           "format": "uint64",
-          "minimum": 0
+          "minimum": 1
         },
         "stream_timeout_secs": {
           "type": "integer",
@@ -1460,7 +1491,6 @@
         "connection_window_size",
         "stream_window_size",
         "concurrency_limit",
-        "max_connection_age_secs",
         "max_connection_age_grace_secs",
         "stream_timeout_secs",
         "max_header_list_size_bytes",

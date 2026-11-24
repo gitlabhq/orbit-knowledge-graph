@@ -1,0 +1,95 @@
+name: "Rust: use crate:: imports of modules stay in the importing crate"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [workspace]
+      members = ["crates/a", "crates/b"]
+      resolver = "2"
+
+  - path: crates/a/Cargo.toml
+    content: |
+      [package]
+      name = "a"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: crates/a/src/lib.rs
+    content: |
+      pub mod app;
+      pub mod net;
+      pub mod utils;
+
+  - path: crates/a/src/net.rs
+    content: |
+      pub fn connect() {}
+
+  - path: crates/a/src/utils.rs
+    content: |
+      pub fn parse() {}
+
+  - path: crates/a/src/app.rs
+    content: |
+      use crate::net;
+      use crate::utils::parse;
+
+      pub fn via_module() {
+          net::connect();
+      }
+
+      pub fn via_item() {
+          parse();
+      }
+
+  - path: crates/b/Cargo.toml
+    content: |
+      [package]
+      name = "b"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: crates/b/src/lib.rs
+    content: |
+      pub mod app;
+      pub mod net;
+      pub mod utils;
+
+  - path: crates/b/src/net.rs
+    content: |
+      pub fn connect() {}
+
+  - path: crates/b/src/utils.rs
+    content: |
+      pub mod parse;
+
+  - path: crates/b/src/utils/parse.rs
+    content: |
+      pub fn run() {}
+
+  - path: crates/b/src/app.rs
+    content: |
+      use crate::net;
+
+      pub fn via_module() {
+          net::connect();
+      }
+
+tests:
+  - name: "use crate::module resolves in the importing crate"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'via_module'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 2 }
+      - { row: { src: "crates/a/src/app.rs", tgt: "crates/a/src/net.rs" } }
+      - { row: { src: "crates/b/src/app.rs", tgt: "crates/b/src/net.rs" } }
+
+  - name: "An item import is not replaced by another crate's module file"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'via_item'
+      RETURN callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { tgt: "crates/a/src/utils.rs" } }

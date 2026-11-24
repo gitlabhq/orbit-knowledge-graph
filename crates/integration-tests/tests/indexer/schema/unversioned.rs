@@ -25,6 +25,7 @@ async fn creates_namespace_storage_table_and_refreshable_view() {
     for name in namespace_storage_table_and_view_names() {
         assert_eq!(scenario.get_table_or_view_count(&name).await, 1, "{name}");
     }
+    scenario.assert_view_pins_session_compatibility().await;
 }
 
 #[tokio::test]
@@ -326,6 +327,24 @@ impl NamespaceStorageSnapshotScenario {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         panic!("{view_name} refresh did not finish");
+    }
+
+    async fn assert_view_pins_session_compatibility(&self) {
+        let compatibility = orbit_server_config::AppConfig::embedded_defaults()
+            .graph
+            .compatibility;
+        let view_name = t("namespace_storage_snapshot_refresh");
+        let pinned = self
+            .query_first_i64_or_zero(&format!(
+                "SELECT toInt64(count()) FROM system.tables \
+                 WHERE database = currentDatabase() AND name = '{view_name}' \
+                 AND create_table_query LIKE '%SETTINGS compatibility = \\'{compatibility}\\'%'"
+            ))
+            .await;
+        assert_eq!(
+            pinned, 1,
+            "the refresh query must carry compatibility {compatibility}"
+        );
     }
 
     async fn get_table_or_view_count(&self, name: &str) -> i64 {

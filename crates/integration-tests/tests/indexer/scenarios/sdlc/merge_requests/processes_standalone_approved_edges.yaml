@@ -1,4 +1,4 @@
-description: Approval rows produce APPROVED edges with merge-request target tags
+description: Approval rows produce APPROVED edges
 scope: { namespace: 100 }
 
 seed:
@@ -19,6 +19,3 @@ expect:
       to: MergeRequest
       traversal_path: "1/100/"
       count: 3
-      target_tags:
-        10: ["discussion_locked:null", "draft:false", "merge_status:merged", "squash:false", "state:merged"]
-        20: ["discussion_locked:null", "draft:false", "merge_status:merged", "squash:false", "state:merged"]

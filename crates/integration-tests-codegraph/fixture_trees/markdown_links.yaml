@@ -1,0 +1,65 @@
+- path: docs/index.md
+  content: |
+    # Index
+
+    See the [guide](guide.md) and [install](guide.md#install-1).
+    The [numbered install](./guide.md#install-1-1) and [café](guide.md#caf%C3%A9-%C3%BCber).
+    A [broken anchor](other.md#nope) still links the page.
+    The [entry point](/src/main.py) and [notes](my%20notes.md).
+    The [question](faq.md#question) moves in an edit.
+
+    ## Assets
+
+    ![logo](../assets/logo.png "Logo")
+    ![logo anchor](../assets/diagram.svg#part)
+
+    Skipped: [web](https://example.com/guide.md), [mail](mailto:docs@example.com),
+    [cdn](//cdn.example.com/guide.md), [self](#index), [self file](index.md#index),
+    [missing](missing.md), [outside](../../outside.md).
+
+- path: docs/guide.md
+  content: |
+    ---
+    title: Guide
+    ---
+
+    # Guide
+
+    > ## Install
+
+    ## Install
+
+    ## Install 1
+
+    ## Café über
+
+- path: docs/other.md
+  content: |
+    Before any heading, the [guide](guide.md).
+
+    # Other
+
+    See the [notes](my%20notes.md#nope).
+
+- path: docs/faq.md
+  content: |
+    # FAQ
+
+    ## Question
+
+- path: docs/my notes.md
+  content: |
+    # Notes
+
+    Back to the [index](index.md#index).
+
+- path: assets/logo.png
+  content: "png"
+
+- path: assets/diagram.svg
+  content: "<svg/>"
+
+- path: src/main.py
+  content: |
+    def main():
+        pass

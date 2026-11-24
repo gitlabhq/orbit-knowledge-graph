@@ -1,0 +1,21 @@
+name: A variable-hop union projects edge tags and filters the anchor by its tags
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Pipeline","filters":{"source":{"eq":"push"}},"columns":["iid"]},{"id":"b","entity":"Pipeline","columns":["iid"]}],"relationships":[{"type":"CHILD_OF","from":"a","to":"b","hops":[1,2]}],"limit":50}
+  gql: |
+    MATCH (a:Pipeline {source: 'push'})-[:CHILD_OF*1..2]->(b:Pipeline) RETURN a.iid, b.iid LIMIT 50
+
+logical:
+  expect: ["(EdgeScan CHILD_OF a->b AS e0 HOPS 1..2)"]
+
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Union ALL AS _orbit_edge_0 (_) (_))
+        - (Project _orbit_e1.source_tags AS source_tags, _orbit_e1.target_tags AS target_tags, 1 AS _orbit_depth, ... (Filter _orbit_e1._deleted = false, _orbit_e1.source_tags HAS ANY ['source:push'] (_)))
+        - (Project _orbit_depth_1.source_tags AS source_tags, _orbit_e2.target_tags AS target_tags, 2 AS _orbit_depth, ... (_))
+    emitted:
+      expect:
+        - (Filter _orbit_e1._deleted = false, ArrayContains(_orbit_e1.source_tags, 'source:push') (_))

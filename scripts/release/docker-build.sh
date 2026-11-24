@@ -26,6 +26,12 @@ fi
 if [ -n "$ORBIT_BILLING_ENFORCED" ]; then
   BUILD_ARGS="$BUILD_ARGS --build-arg ORBIT_BILLING_ENFORCED=$ORBIT_BILLING_ENFORCED"
 fi
+CACHE_REF="${CI_REGISTRY_IMAGE}/cache/${IMAGE_NAME}:${PLATFORM##*/}"
+CACHE_TO=""
+if [ "${CI_COMMIT_REF_PROTECTED:-}" = "true" ]; then
+  BUILD_ARGS="$BUILD_ARGS --build-arg SCCACHE_GCS_RW_MODE=READ_WRITE"
+  CACHE_TO="--cache-to type=registry,mode=max,compression=zstd,oci-mediatypes=true,ref=${CACHE_REF}"
+fi
 
 SECRET_ARGS=""
 if [ -n "$SCCACHE_GCS_KEY" ] && [ -f "$SCCACHE_GCS_KEY" ]; then
@@ -47,8 +53,8 @@ docker buildx build \
   --platform "$PLATFORM" \
   --push \
   --metadata-file "$METADATA_FILE" \
-  --cache-from "type=registry,ref=${CI_REGISTRY_IMAGE}/cache/${IMAGE_NAME}:${PLATFORM##*/}" \
-  --cache-to   "type=registry,mode=max,compression=zstd,oci-mediatypes=true,ref=${CI_REGISTRY_IMAGE}/cache/${IMAGE_NAME}:${PLATFORM##*/}" \
+  --cache-from "type=registry,ref=${CACHE_REF}" \
+  $CACHE_TO \
   --label "com.gitlab/ci-pipeline-url=${CI_PIPELINE_URL}" \
   --label "com.gitlab/ci-job-url=${CI_JOB_URL}" \
   --label "com.gitlab/commit-sha=${CI_COMMIT_SHA}" \

@@ -1,22 +1,12 @@
 # config/ontology/edges/related_to.yaml
 
-description: Related or blocking relationship between work items
-
-properties:
-  link_type:
-    type: enum
-    source: link_type
-    nullable: false
-    description: "Type of relationship between work items."
-    values:
-      0: relates_to
-      1: blocks
+description: A work item relates to another work item
 
 variants:
   - from_node: { type: WorkItem, id: id }
     to_node: { type: WorkItem, id: id }
     scope: prune_to_source
-    description: "Work item is related to another work item."
+    description: "Work item relates to another work item. Blocking links are BLOCKS edges."
 
 indexer:
   reindex: [siphon_issue_links]
@@ -27,13 +17,11 @@ pipelines:
       tables: [siphon_issue_links]
       fields: [source_id, target_id]
       order_by: [traversal_path, source_id, id]
+      filter: "link_type = 0"
       query: generated
-      lookups:
-        - { node: WorkItem, id: source_id }
-        - { node: WorkItem, id: target_id }
     transform:
       type: datafusion
       edges:
-        - from: { field: source_id, kind: WorkItem, enrich: true }
-          to: { field: target_id, kind: WorkItem, enrich: true }
+        - from: { field: source_id, kind: WorkItem }
+          to: { field: target_id, kind: WorkItem }
           label: RELATED_TO

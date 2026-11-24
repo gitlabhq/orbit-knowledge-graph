@@ -8,7 +8,7 @@ Documentation       NOT predicates end to end through Rails. Seeds a top-level g
 ...                 roles are group memberships, as in 05_role_scoped_authz. No user may see an
 ...                 issue that the GitLab REST API hides from that user, the Reporter sees exactly
 ...                 the open issues that REST shows, NOT must not reopen the vulnerability
-...                 aggregation oracle from issue #347, and the rejected forms (OR,
+...                 aggregation oracle from issue #347, and the rejected forms (XOR,
 ...                 administrator-only fields, traversal_path under NOT) must fail with the same
 ...                 message whether or not hidden data exists. MCP is not covered here because it
 ...                 needs an OAuth token (see 09_api_surface).
@@ -84,14 +84,11 @@ Hidden And Missing Issues Return The Same Empty Result
     Should Be Equal As Integers    ${hidden["row_count"]}    0
     Should Be Equal    ${hidden["result"]}    ${missing["result"]}
 
-OR And XOR Reject With A Hint
+XOR Rejects With A Hint
     [Tags]    negation
     ${message}=    Orbit Query Rejected
-    ...    MATCH (w:WorkItem) WHERE w.id = ${NEG_ISSUE_OPEN} OR w.id = ${NEG_ISSUE_CLOSED} RETURN w.id
-    Should Contain    ${message}    OR and XOR are not supported
-    ${message}=    Orbit Query Rejected
     ...    MATCH (w:WorkItem {id: ${NEG_ISSUE_OPEN}}) WHERE NOT (w.state = 'closed' XOR w.title = '${NEG_PRIVATE_TITLE}') RETURN w.id
-    Should Contain    ${message}    OR and XOR are not supported
+    Should Contain    ${message}    XOR is not supported
     Should Not Contain    ${message}    ${NEG_PRIVATE_TITLE}
 
 Traversal Path Under NOT Rejects Without Echoing The Path
@@ -190,6 +187,7 @@ Seed Negated Predicate Fixture
     ...    MATCH (w:WorkItem) WHERE w.id IN [${ids}] AND NOT w.state = 'closed' RETURN w.id, w.title
     ...    MATCH (w:WorkItem) WHERE w.id IN [${ids}] AND NOT w.title IN ['e2e-neg-closed-${suffix}'] RETURN w.id, w.title
     ...    MATCH (w:WorkItem) WHERE w.id IN [${ids}] AND NOT (w.state = 'closed' AND w.title STARTS WITH 'e2e-neg') RETURN w.id, w.title
+    ...    MATCH (w:WorkItem) WHERE w.id IN [${ids}] AND (w.state = 'opened' OR w.title = 'e2e-neg-open-${suffix}') RETURN w.id, w.title
     Set Suite Variable    ${NEG_OPEN_QUERIES}    ${queries}
     ${oracle}=    Create List    NOT v.severity = 'low'    NOT v.severity IN ['low', 'info']
     ...    NOT v.id < ${vulnerability["id"]}    NOT (v.id >= 1 AND v.id <= ${{int($vulnerability["id"]) - 1}})

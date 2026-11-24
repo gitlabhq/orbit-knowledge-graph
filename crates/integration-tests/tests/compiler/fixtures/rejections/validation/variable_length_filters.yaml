@@ -1,0 +1,25 @@
+missing_frontends:
+  json: JSON accepts relationship filters on hop ranges, so only GQL rejects this shape.
+
+physical:
+  clickhouse:
+    rejected:
+      phase: gql_parse
+      reason: schema
+      contains: [property filters on variable-length relationships are unsupported]
+
+cases:
+  - name: An inline property on an exact hop count is rejected
+    query:
+      gql: |
+        MATCH (a:Group {id: 1})-[:CONTAINS*2 {source_id: 1}]->(b:Group) RETURN a, b
+
+  - name: An inline property on a hop range is rejected
+    query:
+      gql: |
+        MATCH (a:Group {id: 1})-[:CONTAINS*1..2 {source_id: 1}]->(b:Group) RETURN a, b
+
+  - name: An inline property on a named incoming hop range is rejected
+    query:
+      gql: |
+        MATCH (a:Group {id: 1})<-[r:CONTAINS*2..3 {target_id: 1}]-(b:Group) RETURN a, b

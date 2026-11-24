@@ -1,0 +1,18 @@
+name: "Dockerfile: COPY --from links a stage defined later"
+
+fixtures:
+  - path: Dockerfile
+    content: |
+      FROM alpine:3.19 AS app
+      COPY --from=assets /out /srv
+      FROM node:20 AS assets
+
+tests:
+  - name: "a COPY --from calls a stage that comes later in the file"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.definition_type = 'Class' AND b.definition_type = 'Class'
+      RETURN a.name AS from_stage, b.name AS to_stage
+    assert:
+      - { row_count: 1 }
+      - { row: { from_stage: "app", to_stage: "assets" } }

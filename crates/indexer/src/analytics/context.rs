@@ -24,7 +24,7 @@ pub(crate) enum TriggerType {
 
 /// Clamp to `i64::MAX` so an over-range count can't wrap to a negative,
 /// schema-invalid value (the Iglu schemas cap these fields at `i64::MAX`).
-fn saturating_i64(value: u64) -> i64 {
+pub(crate) fn saturating_i64(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
@@ -44,14 +44,11 @@ pub(crate) fn build_common(
                 .parse::<orbit_common::OrbitCommonEnvironment>()
                 .map_err(validation("environment"))?,
         ),
-        correlation_id: None,
         instance_id: parse_opt(&instance.instance_id, "instance_id")?,
         unique_instance_id: parse_opt(&instance.unique_instance_id, "unique_instance_id")?,
         host_name: parse_opt(&instance.host_name, "host_name")?,
-        organization_id: None,
         root_namespace_ids: root_namespace_id.map(|id| vec![id]),
-        coding_agent: None,
-        schema_version: None,
+        ..orbit_common::OrbitCommon::default()
     }))
 }
 

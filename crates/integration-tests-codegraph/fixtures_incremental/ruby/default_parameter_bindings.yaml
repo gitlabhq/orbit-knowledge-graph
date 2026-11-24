@@ -1,0 +1,122 @@
+name: "Ruby: parameters typed from their default values"
+
+fixtures:
+  - path: lib/client.rb
+    content: |
+      class Client
+        def get; end
+      end
+
+  - path: lib/other.rb
+    content: |
+      class Other
+        def get; end
+      end
+
+  - path: optional.rb
+    content: |
+      class Optional
+        def run(client = Client.new)
+          client.get
+        end
+      end
+
+  - path: keyword.rb
+    content: |
+      class Keyword
+        def run(retries: 1, client: Client.new)
+          client.get
+        end
+      end
+
+  - path: singleton.rb
+    content: |
+      class Singleton
+        def self.run(client = Client.new)
+          client.get
+        end
+      end
+
+  - path: reassigned.rb
+    content: |
+      class Reassigned
+        def run(client = Other.new)
+          client = Client.new
+          client.get
+        end
+      end
+
+  - path: required.rb
+    content: |
+      class Required
+        def run(client)
+          client.get
+        end
+      end
+
+  - path: default_call.rb
+    content: |
+      class DefaultCall
+        def build_client; end
+
+        def run(c = build_client)
+        end
+      end
+
+  - path: mixed.rb
+    content: |
+      class Mixed
+        def log; end
+
+        def run(a, b = 1, *rest, c:, d: 2, **opts, &blk)
+          log
+        end
+      end
+
+tests:
+  - name: "Optional and keyword parameters take their default value's type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN ['optional.rb', 'keyword.rb', 'singleton.rb'] AND callee.name = 'get'
+      RETURN caller.file_path AS file, callee.fqn AS target
+    assert:
+      - { row_count: 3 }
+      - { row: { file: optional.rb, target: Client::get } }
+      - { row: { file: keyword.rb, target: Client::get } }
+      - { row: { file: singleton.rb, target: Client::get } }
+
+  - name: "A reassignment in the body replaces the default's type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'reassigned.rb' AND callee.name = 'get'
+      RETURN callee.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: Client::get } }
+
+  - name: "Control: a parameter without a default stays untyped"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'required.rb' AND callee.name = 'get'
+      RETURN callee.fqn AS target
+    assert:
+      - { row_count: 0 }
+
+  - name: "Control: every parameter kind still parses and the body links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'Mixed::run'
+      RETURN callee.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: Mixed::log } }
+
+  - name: "The call in a default value is indexed, since Ruby runs it inside the method"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN ['optional.rb', 'default_call.rb'] AND callee.name IN ['Client', 'build_client']
+      RETURN caller.file_path AS file, callee.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { file: optional.rb, target: Client } }
+      - { row: { file: default_call.rb, target: DefaultCall::build_client } }

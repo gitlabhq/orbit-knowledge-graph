@@ -1,0 +1,58 @@
+cases:
+  - name: type() on a node variable rejects and says it takes a relationship variable
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(u) = 'AUTHORED' RETURN u LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains:
+            - type() takes a relationship variable, such as r in -[r]->, but u is a node
+
+  - name: ORDER BY a relationship property rejects and points to node properties or type(r), instead of reporting an undefined node
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN mr ORDER BY r.source_id LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains:
+            - ORDER BY cannot sort by a relationship property; sort by a node property or by type(r)
+          not_contains:
+            - undefined node
+
+  - name: type(r) on the right side of a property comparison rejects and names the supported forms
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) WHERE mr.title = type(r) RETURN u, mr.title LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains:
+            - "function type() is not supported: type() takes one relationship variable and works in WHERE type(r) = 'CLOSES'"
+
+  - name: WHERE type(r) on a variable-length relationship rejects and points to the typed pattern form
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r*1..2]->(p:Project) WHERE type(r) = 'MEMBER_OF' RETURN u, p LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains:
+            - r has a variable length and binds a list
