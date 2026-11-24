@@ -25,7 +25,7 @@ GitLab Orbit needs these versions or later:
 | GitLab CLI (`glab`) | 1.126.0 |
 | GitLab Orbit CLI (`orbit`) | 0.163.0 |
 | GitLab Orbit Helm chart | 7.0.0 |
-| GitLab Self-Managed | TBD |
+| GitLab Self-Managed | See [Version requirements](self-managed/version-requirements.md#gitlab). |
 
 If `glab` installed a GitLab Orbit CLI earlier than 0.163.0, `glab` 1.126.0 and later install the latest version.
 To update the GitLab Orbit CLI, run `glab orbit --update`.
@@ -58,9 +58,8 @@ Charts earlier than 3.0.0 do not work with GitLab Orbit 0.143.0 or later.
 
 ## Query language
 
-GitLab 19.6 removed the JSON query DSL.
+GitLab 19.4.7, 19.5.5, and 19.6 removed the JSON query DSL.
 GitLab.com removed it first.
-GitLab 19.4 and 19.5 still accept JSON queries.
 Write your queries in [GQL](queries/query-language.md).
 
 To convert your JSON queries, tell your agent to load the `orbit-gql-migration` skill with `glab orbit skills get orbit-gql-migration`.

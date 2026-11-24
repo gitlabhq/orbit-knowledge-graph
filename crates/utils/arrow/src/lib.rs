@@ -5,8 +5,8 @@ use rustc_hash::FxHashMap;
 
 use arrow::array::{
     Array, ArrayBuilder, ArrayRef, BooleanArray, BooleanBuilder, Date32Array, Date64Array,
-    Float64Array, Int8Array, Int16Array, Int32Array, Int64Array, Int64Builder, LargeStringArray,
-    ListArray, PrimitiveArray, Scalar, StringArray, StringBuilder, StructArray,
+    Decimal128Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array, Int64Builder,
+    LargeStringArray, ListArray, PrimitiveArray, Scalar, StringArray, StringBuilder, StructArray,
     TimestampMicrosecondArray, TimestampMicrosecondBuilder, TimestampMillisecondArray,
     TimestampNanosecondArray, TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array,
     UInt64Array, new_null_array,
@@ -267,6 +267,13 @@ impl ArrowUtils {
         downcast!(StringArray, v => ColumnValue::String(v.to_string()));
         downcast!(LargeStringArray, v => ColumnValue::String(v.to_string()));
         downcast!(Float64Array, v => ColumnValue::Float64(v));
+        if let Some(arr) = array.as_any().downcast_ref::<Decimal128Array>() {
+            let value = arr.value(idx);
+            return match (arr.scale(), i64::try_from(value)) {
+                (0, Ok(value)) => ColumnValue::Int64(value),
+                (scale, _) => ColumnValue::Float64(value as f64 / 10f64.powi(i32::from(scale))),
+            };
+        }
         downcast!(BooleanArray, v => ColumnValue::Bool(v));
 
         if let Some(arr) = array.as_any().downcast_ref::<TimestampSecondArray>() {
@@ -553,9 +560,11 @@ impl ColRef<'_> {
 /// column builders and produces a RecordBatch. No opinions about which
 /// columns exist or their order -- the caller controls the full schema.
 ///
-/// ```ignore
+/// ```
 /// use orbit_arrow::{BatchBuilder, ColumnSpec, ColumnType};
 ///
+/// # struct Node { id: i64, path: String, name: String }
+/// # fn example(nodes: Vec<Node>) -> Result<(), Box<dyn std::error::Error>> {
 /// let specs = vec![
 ///     ColumnSpec { name: "id".into(), col_type: ColumnType::Int, nullable: false },
 ///     ColumnSpec { name: "path".into(), col_type: ColumnType::Str, nullable: false },
@@ -568,6 +577,8 @@ impl ColRef<'_> {
 ///         b.col("name")?.push_str(&n.name)?;
 ///         Ok(())
 ///     })?;
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug)]
 pub struct BatchBuilder {
@@ -713,7 +724,7 @@ impl BatchBuilder {
 /// project ID, branch) that aren't part of the domain struct.
 /// Defaults to `()` for types that don't need external context.
 ///
-/// ```ignore
+/// ```text
 /// let specs = ontology.local_entity_specs("File");
 /// let batch = FileNode::to_record_batch(&nodes, &specs, &ctx)?;
 /// ```
@@ -944,6 +955,30 @@ mod tests {
             ArrowUtils::extract_row(&batch, 0).get("ts"),
             Some(&ColumnValue::String("2024-01-01T00:00:00Z".to_string())),
         );
+    }
+
+    #[test]
+    fn decimal_values_read_as_integers_or_floats() {
+        for (scale, value, expected) in [
+            (0, 42, ColumnValue::Int64(42)),
+            (0, -7, ColumnValue::Int64(-7)),
+            (2, 12345, ColumnValue::Float64(123.45)),
+            (3, -1500, ColumnValue::Float64(-1.5)),
+            (
+                0,
+                i128::from(i64::MAX) + 1,
+                ColumnValue::Float64(9_223_372_036_854_775_808.0),
+            ),
+        ] {
+            let array = Decimal128Array::from(vec![value])
+                .with_precision_and_scale(38, scale)
+                .unwrap();
+            assert_eq!(
+                ArrowUtils::extract_value(&array, 0),
+                expected,
+                "{value} at scale {scale}"
+            );
+        }
     }
 
     #[test]

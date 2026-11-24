@@ -20,3 +20,7 @@ expect:
       filters:
         note: { ends_with: tail }
       prop_present: [note, discussion_id]
+      rows:
+        - id: 3002
+          note: { repeat: "🙂", count: 10000, suffix: "tail" }
+          discussion_id: { repeat: "🙂", count: 2048 }

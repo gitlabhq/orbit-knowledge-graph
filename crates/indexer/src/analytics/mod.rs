@@ -3,6 +3,7 @@
 //! attribution and throughput baselines (see issue #750).
 
 mod context;
+mod graph_stats;
 mod observer;
 
 use std::sync::Arc;
@@ -18,6 +19,7 @@ use orbit_server_config::{
 };
 
 use crate::observer::IndexingObserver;
+pub use graph_stats::{GraphStats, GraphStatsReporter, NamespaceGraphStats};
 pub use observer::SnowplowIndexingObserver;
 
 #[derive(Clone)]
@@ -60,6 +62,24 @@ impl IndexingAnalytics {
     }
 
     pub fn observer(&self) -> Option<Box<dyn IndexingObserver>> {
+        let tracker = self.composed_tracker()?;
+        Some(Box::new(SnowplowIndexingObserver::new(
+            tracker,
+            Arc::clone(&self.config),
+            self.instance.clone(),
+        )))
+    }
+
+    pub fn graph_stats_reporter(&self) -> Option<GraphStatsReporter> {
+        let tracker = self.composed_tracker()?;
+        Some(GraphStatsReporter::new(
+            tracker,
+            Arc::clone(&self.config),
+            self.instance.clone(),
+        ))
+    }
+
+    fn composed_tracker(&self) -> Option<Arc<dyn AnalyticsTracker>> {
         if !self.is_enabled() {
             return None;
         }
@@ -74,12 +94,7 @@ impl IndexingAnalytics {
         if let Some(local) = &self.local {
             trackers.push(Arc::new(local.clone()));
         }
-        let tracker = ComposedAnalyticsTracker::new(trackers);
-        Some(Box::new(SnowplowIndexingObserver::new(
-            Arc::new(tracker),
-            Arc::clone(&self.config),
-            self.instance.clone(),
-        )))
+        Some(Arc::new(ComposedAnalyticsTracker::new(trackers)))
     }
 
     pub fn watch_gitlab_instance(&self, client: Arc<GitlabClient>) {

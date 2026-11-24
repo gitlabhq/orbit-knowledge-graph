@@ -1,0 +1,44 @@
+cases:
+  - name: An aggregate with an unsupported argument says where it works and in what form
+    query:
+      gql: |
+        MATCH (u:User) RETURN count(*)
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains:
+            - "function count() is not supported: count() takes one variable or property, as in count(mr) or sum(mr.added_lines), and belongs in RETURN with an alias: count(mr) AS n"
+          not_contains:
+            - WHERE cannot filter
+
+  - name: An aggregate in WHERE says that WHERE cannot filter on an aggregate
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:AUTHORED]->(m:MergeRequest) WHERE count(m) > 1 RETURN u LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains:
+            - WHERE cannot filter on an aggregate
+
+  - name: A token function outside WHERE says it works only in WHERE
+    query:
+      gql: |
+        MATCH (m:MergeRequest) RETURN token_match(m.title, 'login') LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains:
+            - token_match() works only in WHERE, with a property and a string

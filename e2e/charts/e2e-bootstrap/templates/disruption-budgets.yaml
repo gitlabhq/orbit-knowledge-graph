@@ -1,0 +1,15 @@
+{{- $namespaces := list .Release.Namespace .Values.namespaces.nats .Values.namespaces.clickhouse .Values.namespaces.siphon }}
+{{- if not .Values.externalGitlab }}
+{{- $namespaces = append $namespaces .Values.namespaces.gitlab }}
+{{- end }}
+{{- range $namespaces }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: e2e-no-disruption
+  namespace: {{ . }}
+spec:
+  maxUnavailable: 0
+  selector: {}
+{{- end }}

@@ -8,7 +8,7 @@ title: GitLab Orbit quickstart
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
+- Tier: [Premium, Ultimate](https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/#trials-and-purchases)
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -19,6 +19,7 @@ about your GitLab data.
 ## Prerequisites
 
 - Access to GitLab Orbit for the top-level group.
+  GitLab Orbit is a [separate purchase](https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/#trials-and-purchases) for Premium and Ultimate.
   To get access, start a [free trial on GitLab.com](trial.md), or [contact sales](https://about.gitlab.com/sales/).
 - Reporter, Security Manager, Developer, Maintainer, or Owner role for the group.
 - GitLab Duo, or an agent that [setup supports](agents/_index.md#setup-options), such as Claude Code, Codex, or OpenCode.

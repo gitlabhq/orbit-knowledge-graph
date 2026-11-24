@@ -8,7 +8,7 @@ title: GitLab Orbit security
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
+- Tier: [Premium, Ultimate](https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/#trials-and-purchases)
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -56,6 +56,9 @@ GitLab Orbit enforces access in two layers:
 
 The graph is read-only.
 It reads changes from GitLab and never writes back.
+
+GitLab Orbit does not run a language model or send your data to a model provider.
+When an agent sends a query, the results reach a model only if the agent adds them to its context.
 
 ### Access through shared groups
 

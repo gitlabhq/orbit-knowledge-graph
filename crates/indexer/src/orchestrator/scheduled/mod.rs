@@ -3,6 +3,7 @@ mod metrics;
 pub mod backfill_sweep;
 pub mod code_stale_sweep;
 pub mod global;
+pub mod graph_stats;
 pub mod migration_completion;
 pub mod namespace;
 pub mod namespace_deletion;
@@ -12,6 +13,7 @@ pub mod table_cleanup;
 pub use backfill_sweep::CodeBackfillSweep;
 pub use code_stale_sweep::CodeStaleSweep;
 pub use global::GlobalDispatcher;
+pub use graph_stats::GraphStatsSnapshot;
 pub use metrics::ScheduledTaskMetrics;
 pub use migration_completion::MigrationCompletionChecker;
 pub use namespace::{NamespaceDispatcher, NamespaceFreshness};
@@ -31,6 +33,7 @@ use tracing::Instrument;
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsServices, NatsServicesImpl};
 use crate::orchestrator::{Trigger, TriggerError};
+use crate::retry::RetryExhausted;
 use orbit_server_config::NatsConfiguration;
 use orbit_server_config::ScheduleConfiguration;
 
@@ -41,6 +44,12 @@ pub struct TaskError(String);
 impl TaskError {
     pub fn new(error: impl std::fmt::Display) -> Self {
         Self(error.to_string())
+    }
+}
+
+impl From<RetryExhausted> for TaskError {
+    fn from(error: RetryExhausted) -> Self {
+        Self::new(error)
     }
 }
 

@@ -20,7 +20,7 @@ Shared test infrastructure for integration tests that need a real ClickHouse ins
   output.
 - **`query_scenario`**: Runs YAML query scenarios through the full query pipeline.
 - **`scenario`**: Runs YAML indexer scenarios: seeds source rows, runs handlers, and checks the graph.
-- **`plan_shape`**: Compiles plan-shape fixtures and checks the selected plan.
+- **`compiler`**: Compiles compiler fixtures and checks the state that pipeline phases leave behind.
 
 ## Prerequisites
 
@@ -108,9 +108,9 @@ can intermittently miss freshly-written data.
 Read-only subtests receive a shared `&TestContext` and only query:
 
 ```rust
-async fn search_returns_correct_values(ctx: &TestContext) {
-    let resp = run_query(ctx, "...", &allow_all()).await;
-    resp.assert_node_count(5);
+async fn seeded_users_are_visible(ctx: &TestContext) {
+    let batches = ctx.query("SELECT id FROM gl_user").await;
+    assert_eq!(batches.iter().map(|batch| batch.num_rows()).sum::<usize>(), 5);
 }
 ```
 
@@ -121,7 +121,7 @@ Mutating subtests call their own seed and do additional writes. They go in the
 async fn writes_extra_data_then_queries(ctx: &TestContext) {
     seed(ctx).await;
     ctx.execute("INSERT INTO gl_note ...").await;
-    let resp = run_query(ctx, "...", &allow_all()).await;
+    let batches = ctx.query("SELECT id FROM gl_note").await;
     // ...
 }
 ```
@@ -153,16 +153,11 @@ every field they list when they cover every returned node of the entity.
 
 ### Example: single-entity traversal with filter and ordering
 
-```rust
-async fn search_filter_eq(ctx: &TestContext) {
-    let resp = run_query(ctx, r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User",
-                 "filters": {"state": "blocked"}}],
-        "order_by": "u.id",
-        "limit": 10
-    }"#, &allow_all()).await;
+Query scenarios build the view and run the assertions from YAML. Direct
+assertions take a view made with `for_query`:
 
+```rust
+fn search_filter_eq(resp: &ResponseView) {
     resp.assert_filter("User", "state", |n| {
         n.prop_str("state") == Some("blocked")
     });
@@ -173,17 +168,7 @@ async fn search_filter_eq(ctx: &TestContext) {
 ### Example: traversal with edges
 
 ```rust
-async fn traversal_edges(ctx: &TestContext) {
-    let resp = run_query(ctx, r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "g", "entity": "Group"}
-        ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-        "limit": 10
-    }"#, &allow_all()).await;
-
+fn traversal_edges(resp: &ResponseView) {
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_referential_integrity();
 }
@@ -273,16 +258,32 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `query` | map | one of `query`/`steps` | Query strings keyed by frontend (`json`, `gql`) |
 | `expect` | `QueryExpect` | with `query` | Assertions on the result |
 | `steps` | [`QueryStep`] | one of `query`/`steps` | Ordered steps, each with an optional `seed` (rows inserted before the step runs), a `query` map, and an `expect`. Use it when a later query must observe a write made after an earlier one |
+| `generate` | generator or [generators] | no | Seed rows built before the scenario runs (below) |
+
+`generate` takes one generator or a list. `kind: rows` appends `count` copies
+of `row` to the list at the dotted path `into`, such as a seed table or a
+redaction allow list. In each copy, a string that is exactly `$i` becomes the
+integer `start + index`, and `$i` inside a longer string becomes that number as
+text. `start` defaults to 0.
+
+```yaml
+generate:
+  - {kind: rows, into: config.extra_seed.gl_project, count: 900, start: 20001, row: {id: $i, traversal_path: "1/100/$i/"}}
+  - {kind: rows, into: config.redaction.allow.project, count: 900, start: 20001, row: $i}
+```
 
 #### `config` — `ScenarioConfig`
 
 | Field | Type | Description |
 |---|---|---|
-| `extra_seed` | `Seed` | Additional rows to insert; triggers a DB fork |
+| `seed` | string | A named dataset in `presets/seed.yaml`. The scenario runs on a database that holds only that dataset, without the base seed |
+| `extra_seed` | `Seed` | Additional rows to insert on top of the base seed or `seed` |
 | `unmerged_seed` | bool | Default `false`. For extra seed rows, stop background merges on their tables, disable insert optimization, insert each row as its own part, and skip `OPTIMIZE`. Uses physical table names, such as `gl_project`. |
 | `security` | preset name or inline `SecurityOverride` | Authorization context |
 | `redaction` | preset name or inline `RedactionConfig` | Entity-level redaction |
-| `duckdb` | bool | Default `false`. Also run the scenario in local mode on an embedded DuckDB, through `run_duckdb_dir` in `cargo test --test local`. The runner creates the local tables from the ontology, inserts the preset and `extra_seed` rows of those tables, and applies the same `expect`. Local mode has no security or redaction, so use it only for scenarios on local entities, such as `Definition` and `File`, with CALLS rows in `gl_edge`. |
+| `backends` | [`clickhouse`, `duckdb`] | Default `[clickhouse]`. The backends that run the scenario, each once. `duckdb` runs it in local mode on an embedded DuckDB, through `run_duckdb_dir` in `cargo test --test local`. The runner creates the local tables from the ontology and `ontology_overlay`, inserts the preset and `extra_seed` rows of those tables, and applies the same `expect`. Local mode has no security or redaction, so use it only for scenarios on local entities, such as `Definition` and `File`, with code edge rows in `gl_edge`. List only `duckdb` when ClickHouse behaves differently by an open bug. After the DuckDB scenarios run, every function, aggregate, time bucket unit, and construct that the DuckDB code generator renders must have appeared in some scenario's compiled query, except the entries of `EXCLUDED` in `query_scenario/coverage.rs`, which no DuckDB pipeline emits. An exclusion that a scenario or a DuckDB compiler fixture reaches, or that DuckDB no longer renders, fails the run. |
+
+Scenarios with the same `seed`, `extra_seed`, `unmerged_seed`, and `ontology_overlay` share one database. The runner builds it for the first case and drops it after the last. A scenario whose steps add seed rows gets its own database.
 
 #### `config.security` — `SecurityOverride`
 
@@ -313,11 +314,10 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `edges` | {TYPE: [[from, to]]} | Exact edge set |
 | `edge_exists` | {TYPE: [edge]} | Subset check; each edge is an ID pair or a typed object |
 | `edge_absent` | {TYPE: [edge]} | Negative check; each edge is an ID pair or a typed object |
+| `edge_prop_absent` | [depth / path_id / step] | No edge in the response has any listed field |
 | `edge_count` | {TYPE: N} | Per-type edge count |
 | `referential_integrity` | bool | All edge endpoints have nodes |
 | `has_more` | bool | Pagination flag |
-| `gql_columns` | {column: [cell]} | Exact cells of a `gql` format table column, in row order |
-| `gql_column_names` | [column] | Exact `gql` format table header, in order |
 
 Typed edge objects use `{from: User, from_id: 1, to: Group, to_id: 100}`.
 They check endpoint types as well as IDs. Pair arrays such as `[1, 100]` check
@@ -331,7 +331,8 @@ only IDs and the relationship type.
 | `group_columns` | {name: "node.property"} | Group column metadata |
 | `empty_aggregation` | bool | Assert empty aggregation result |
 | `row_count` | N | Ungrouped aggregation row count |
-| `row_values` | [{col: val}] | Ungrouped aggregation values by index |
+| `row_values` | [{col: val}] | Aggregation row values by index; numbers, strings, lists, and null compare exactly |
+| `aggregation_columns` | [{name, function, target, property}] | The exact, ordered aggregation `columns`; a missing `property` means the column has none |
 
 **Paths:**
 
@@ -342,13 +343,25 @@ only IDs and the relationship type.
 | `path_edges` | `[[{from, from_id, type, to, to_id, step}]]` | Per-path edge structure (all fields optional) |
 | `path_endpoint_absent` | [Entity] | Entities excluded from path edges |
 
+**Formats:**
+
+`format` maps an output format, `toon` or `gql`, to checks on that encoding of the result:
+
+| Field | Type | Description |
+|---|---|---|
+| `contains` | [string] | The encoded text contains every fragment |
+| `ends_with` | string | The encoded text ends with this suffix |
+| `absent` | [key] | The decoded value has none of these top-level keys |
+| `value` | object | A partial match on the decoded value: objects may have extra keys, arrays match item by item |
+
+Each format also checks its format name and version. TOON decodes to its JSON value, must be the canonical encoding, and, for queries other than aggregations, must have the same node and edge counts as the graph response. GQL decodes to `{header, rows, columns}` from its result table: `header` lists the column names, `rows` holds the cells by row, and `columns` maps each column name to its cells. Every format runs for every query language of the case, because a JSON query can also ask for GQL output. A new format is one module in `src/query_scenario/output_format/` that implements `Encoding`, plus one `OutputFormat` variant.
+
 **Compilation:**
 
 | Field | Type | Description |
 |---|---|---|
-| `compile_error` | bool / string / {frontend: string} | Expect compile failure |
-| `compile_error_contains` | [string] / {frontend: [string]} | Error must contain every listed fragment |
-| `compile_error_not_contains` | [string] / {frontend: [string]} | Error must NOT contain |
+| `compile_error` | reason / {key: reason} | Expect the compiler to reject the query for this reason. A key is a backend (`clickhouse`, `duckdb`) or a frontend (`json`, `gql`); a backend key wins. Reasons: `parse`, `schema`, `reference`, `ontology`, `authorization`, `restrict`, `ontology_internal`, `depth`, `limit`, `security`, `lowering`, `codegen`, `pipeline` |
+| `compile_error_not_contains` | [regex] | The error message must not match any listed regex, for a literal from this query. Requires `compile_error`. Every compile error is also checked for a traversal path, an email address, a physical table name, and the fixtures' private markers |
 
 **Pagination:**
 
@@ -377,7 +390,8 @@ only IDs and the relationship type.
 | `rows` | `[{id, prop: val}]` | Per-node property assertions |
 
 Filter operators: `eq`, `in`, `starts_with`, `contains`, `ends_with`, `is_null`,
-`is_not_null`, `gte`, `lte`, `lt`.
+`is_not_null`, `gte`, `lte`, `lt`, and `max_chars`, which bounds the length of a
+text value in characters.
 
 Row values support `{repeat: str, count: N, suffix: str}` for expansion.
 

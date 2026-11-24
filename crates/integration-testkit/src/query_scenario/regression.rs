@@ -4,6 +4,10 @@ use serde_json::{Value, json};
 use super::run_duckdb_dir;
 
 fn run_suite(query: Value, expect: &str) {
+    run_suite_with(json!({"backends": ["duckdb"]}), query, expect);
+}
+
+fn run_suite_with(config: Value, query: Value, expect: &str) {
     let suite = tempfile::tempdir().unwrap();
     let presets = tempfile::tempdir().unwrap();
     let definitions: Vec<_> = ["alpha", "beta", "gamma", "delta"].iter().enumerate().map(|(index, name)| json!({
@@ -23,9 +27,15 @@ fn run_suite(query: Value, expect: &str) {
         .collect();
     std::fs::write(
         presets.path().join("seed.yaml"),
-        json!({"local": {
-            "gl_definition": definitions, "gl_edge": edges,
-        }})
+        json!({
+            "local": {"gl_definition": definitions, "gl_edge": edges},
+            "solo": {"gl_definition": [{
+                "id": 9, "project_id": 1000, "traversal_path": "1/100/1000/", "branch": "main",
+                "commit_sha": "abc123", "file_path": "src/solo.rs", "fqn": "solo", "name": "solo",
+                "definition_type": "Function", "start_line": 1, "end_line": 2, "start_byte": 0,
+                "end_byte": 10, "start_char": 0, "end_char": 5,
+            }]},
+        })
         .to_string(),
     )
     .unwrap();
@@ -33,7 +43,7 @@ fn run_suite(query: Value, expect: &str) {
     std::fs::write(
         suite.path().join("contract.yaml"),
         json!({
-            "config": {"duckdb": true}, "query": query, "expect": expect,
+            "config": config, "query": query, "expect": expect,
         })
         .to_string(),
     )
@@ -126,27 +136,198 @@ fn typed_edges_check_endpoint_types_and_keep_pair_support() {
 }
 
 #[test]
-fn compile_errors_require_all_fragments_and_frontend_configuration() {
+fn compile_errors_assert_the_rejection_reason() {
     let query = json!({"gql": "CREATE (d:Definition)"});
+    run_suite(query.clone(), "compile_error: schema");
+    run_suite(query.clone(), "compile_error: {duckdb: schema, gql: parse}");
+    rejects(
+        query.clone(),
+        "compile_error: parse",
+        "rejected as schema, expected parse",
+    );
+    rejects(
+        query.clone(),
+        "compile_error: {json: schema}",
+        "compile_error names neither backend 'duckdb' nor frontend 'gql'",
+    );
+    rejects(
+        query.clone(),
+        "compile_error: syntax",
+        "unknown rejection reason 'syntax'",
+    );
+    rejects(
+        query.clone(),
+        "compile_error: {cypher: parse}",
+        "compile_error key 'cypher'",
+    );
+    rejects(
+        json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"}),
+        "compile_error: schema",
+        "expected a schema rejection but the query compiled",
+    );
     run_suite(
         query.clone(),
-        "compile_error_contains: {gql: ['Orbit query syntax', 'line 1, column 1']}\ncompile_error_not_contains: [CREATE]",
+        "compile_error: schema\ncompile_error_not_contains: [MERGE, DROP]",
     );
     rejects(
         query.clone(),
-        "compile_error: true\ncompile_error_contains: ['Orbit query syntax', impossible-message]",
-        "does not contain 'impossible-message'",
+        "compile_error: schema\ncompile_error_not_contains: ['Orbit query sy.tax']",
+        "compile error shows /Orbit query sy.tax/",
     );
     rejects(
         query.clone(),
-        "compile_error: {json: error}",
-        "compile_error missing frontend 'gql'",
+        "compile_error_not_contains: [CREATE]",
+        "compile_error_not_contains requires compile_error",
     );
     rejects(
         query,
-        "compile_error: true\ncompile_error_not_contains: {json: []}",
-        "expectation missing frontend 'gql'",
+        "compile_error: schema\ncompile_error_not_contains: ['(']",
+        "regex parse error",
     );
+}
+
+#[test]
+fn compile_errors_never_show_private_details() {
+    super::response::assert_no_private_details(
+        "invalid value at /nodes/0/filters: IN requires 1-100 values; every gl_* alias",
+        "safe",
+    );
+    for (message, shows) in [
+        ("scope \"1/100/1000/\" is hidden", "a traversal path"),
+        ("no access to 2/", "a traversal path"),
+        ("user victim@example.com", "an email address"),
+        ("reading v2_gl_user", "a physical table name"),
+        ("reading gl_merge_request", "a physical table name"),
+        ("value private-query-literal", "a private fixture literal"),
+        ("type NOPE_PRIVATE_TYPE", "a private fixture type"),
+    ] {
+        assert_panics(
+            || super::response::assert_no_private_details(message, "leak"),
+            &format!("compile error shows {shows}"),
+        );
+    }
+}
+
+#[test]
+fn edge_prop_absent_checks_every_edge() {
+    let traversal =
+        json!({"gql": "MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) RETURN a, b"});
+    run_suite(
+        traversal.clone(),
+        "edges: {CALLS: [[1, 2]]}\nedge_prop_absent: [path_id, step, depth]",
+    );
+    rejects(
+        traversal,
+        "edges: {CALLS: [[1, 2]]}\nedge_prop_absent: [weight]",
+        "edge_prop_absent takes depth, path_id, or step, got weight",
+    );
+    rejects(
+        json!({"json": r#"{"query_type": "path_finding",
+            "nodes": [{"id": "a", "entity": "Definition", "node_ids": [1]}, {"id": "b", "entity": "Definition", "node_ids": [3]}],
+            "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3, "rel_types": ["CALLS"]}}"#}),
+        "path_count: 1\nedge_prop_absent: [path_id]",
+        "CALLS edge Definition 1 -> Definition 2 has path_id",
+    );
+}
+
+#[test]
+fn aggregation_columns_match_exactly_and_in_order() {
+    let query =
+        json!({"gql": "MATCH (d:Definition) WHERE d.id >= 1 AND d.id <= 4 RETURN count(d) AS n"});
+    let rows = "row_values: [{n: 4}]\n";
+    run_suite(
+        query.clone(),
+        &format!("{rows}aggregation_columns: [{{name: n, function: count, target: d}}]"),
+    );
+    for columns in [
+        "[{name: n, function: sum, target: d}]",
+        "[{name: n, function: count, target: d, property: id}]",
+        "[{name: n, function: count, target: d}, {name: m, function: count, target: d}]",
+    ] {
+        rejects(
+            query.clone(),
+            &format!("{rows}aggregation_columns: {columns}"),
+            "aggregation columns mismatch",
+        );
+    }
+}
+
+#[test]
+fn toon_expectations_check_text_value_and_absent_keys() {
+    let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
+    let base = "nodes: {Definition: {ids: [1]}}\nformat:\n  toon:\n";
+    run_suite(
+        query.clone(),
+        &format!(
+            "{base}    contains: [\"Definition[1]{{id,name}}:\"]\n    ends_with: \"truncated: false\\n\"\n    absent: [edges]\n    value: {{nodes: {{Definition: [{{id: 1, name: alpha}}]}}}}"
+        ),
+    );
+    rejects(
+        query.clone(),
+        &format!("{base}    value: {{nodes: {{Definition: [{{name: beta}}]}}}}"),
+        "toon.nodes.Definition[0].name is \"alpha\", expected \"beta\"",
+    );
+    rejects(
+        query.clone(),
+        &format!("{base}    value: {{nodes: {{Definition: [{{id: 1}}, {{id: 2}}]}}}}"),
+        "toon.nodes.Definition has 1 items, expected 2",
+    );
+    rejects(
+        query.clone(),
+        &format!("{base}    contains: [absent-fragment]"),
+        "toon output lacks \"absent-fragment\"",
+    );
+    rejects(
+        query.clone(),
+        &format!("{base}    absent: [nodes]"),
+        "toon output has nodes",
+    );
+    rejects(query, &format!("{base}    exact: true"), "unknown field");
+}
+
+#[test]
+fn gql_format_expectations_also_run_for_json_queries() {
+    let query = json!({"json": r#"{"query_type": "traversal", "nodes": [{"id": "d", "entity": "Definition", "node_ids": [1]}], "limit": 1}"#});
+    let base = "nodes: {Definition: {ids: [1]}}\nformat:\n  gql:\n";
+    run_suite(query.clone(), &format!("{base}    value: {{header: [d]}}"));
+    rejects(
+        query,
+        &format!("{base}    value: {{header: [e]}}"),
+        "gql.header[0] is \"d\", expected \"e\"",
+    );
+}
+
+#[test]
+fn gql_format_expectations_check_text_and_table() {
+    let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
+    let base = "nodes: {Definition: {ids: [1]}}\nformat:\n  gql:\n";
+    run_suite(
+        query.clone(),
+        &format!(
+            "{base}    contains: [\"(:Definition {{id: 1, name: \\\"alpha\\\"}})\"]\n    value: {{header: [d], rows: [[\"(:Definition {{id: 1, name: \\\"alpha\\\"}})\"]]}}"
+        ),
+    );
+    rejects(
+        query.clone(),
+        &format!("{base}    value: {{header: [e]}}"),
+        "gql.header[0] is \"d\", expected \"e\"",
+    );
+    rejects(
+        query,
+        "nodes: {Definition: {ids: [1]}}\nformat: {csv: {}}",
+        "unknown variant `csv`",
+    );
+}
+
+#[test]
+fn seed_presets_replace_the_base_dataset() {
+    let query = json!({"gql": "MATCH (d:Definition) WHERE d.id >= 1 AND d.id <= 10 RETURN d.name"});
+    run_suite_with(
+        json!({"backends": ["duckdb"], "seed": "solo"}),
+        query.clone(),
+        "nodes: {Definition: {ids: [9]}}",
+    );
+    run_suite(query, "nodes: {Definition: {ids: [1, 2, 3, 4]}}");
 }
 
 #[test]
@@ -279,13 +460,28 @@ fn repeated_nodes_preserve_order_within_each_entity_type() {
 }
 
 #[test]
+fn top_level_result_fields_are_rejected_next_to_pages() {
+    let query = json!({"gql": "MATCH (d:Definition) RETURN d.name SKIP 0 LIMIT 2"});
+    for field in [
+        "edge_prop_absent: [path_id]",
+        "aggregation_columns: [{name: n, function: count, target: d}]",
+    ] {
+        rejects(
+            query.clone(),
+            &format!("{field}\npages: [{{}}]"),
+            "pages is set alongside top-level result assertions",
+        );
+    }
+}
+
+#[test]
 fn page_expectations_reject_fields_that_are_not_executed() {
     let query = json!({"gql": "MATCH (d:Definition) RETURN d.name SKIP 0 LIMIT 2"});
     for field in [
         "repeat_count: 2",
-        "compile_error: true",
-        "compile_error_contains: [error]",
-        "compile_error_not_contains: [error]",
+        "compile_error: parse",
+        "compile_error_not_contains: [secret]",
+        "format: {toon: {absent: [edges]}}",
         "pages: [{}]",
         "all_pages: {page_count: 1}",
     ] {

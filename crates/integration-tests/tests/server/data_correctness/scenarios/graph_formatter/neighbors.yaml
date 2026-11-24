@@ -1,0 +1,206 @@
+config:
+  security: { paths: ["1/600/"] }
+  redaction:
+    allow:
+      user: [1, 2, 3, 4, 5]
+      group: [100, 101, 102, 200, 300]
+      project: [1000, 1001, 1002]
+      merge_request: [2000, 2001, 2002]
+      note: [3000, 3001, 3002, 3003, 9000]
+  seed: graph_formatter
+
+cases:
+  - name: neighbors_both_direction_edges_correct
+    description: Both-direction neighbors of a user keep MEMBER_OF edges pointing out of the user
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+          "neighbors": {"direction": "both"}
+        }
+    expect:
+      edges:
+        MEMBER_OF: [[1, 100], [1, 101]]
+        AUTHORED: [[1, 2000]]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 100 }
+          - { from: User, from_id: 1, to: Group, to_id: 101 }
+
+  - name: neighbors_both_direction_mixed_entity
+    description: Both-direction neighbors of an MR keep each edge's true source
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000]}],
+          "neighbors": {"direction": "both"}
+        }
+    expect:
+      edges:
+        AUTHORED: [[1, 2000]]
+        HAS_NOTE: [[2000, 3000], [2000, 3002], [2000, 3003]]
+      edge_exists:
+        AUTHORED:
+          - { from: User, from_id: 1, to: MergeRequest, to_id: 2000 }
+        HAS_NOTE:
+          - { from: MergeRequest, from_id: 2000, to: Note, to_id: 3000 }
+          - { from: MergeRequest, from_id: 2000, to: Note, to_id: 3002 }
+          - { from: MergeRequest, from_id: 2000, to: Note, to_id: 3003 }
+
+  - name: neighbors_dynamic_columns_all
+    description: dynamic_columns star hydrates neighbor group properties
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+          "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
+          "options": {"dynamic_columns": "*"}
+        }
+    expect:
+      nodes:
+        User:
+          ids: [1]
+        Group:
+          ids: [100, 101]
+          prop_present: [name]
+          rows:
+            - { id: 100, name: Public Group }
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 100 }
+          - { from: User, from_id: 1, to: Group, to_id: 101 }
+      edge_count:
+        MEMBER_OF: 2
+
+  - name: neighbors_redaction
+    description: Redaction removes unauthorized neighbors and their edges
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: [100]
+          project: []
+          merge_request: []
+          note: []
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+          "neighbors": {"direction": "outgoing"}
+        }
+    expect:
+      nodes:
+        User:
+          ids: [1]
+        Group:
+          ids: [100]
+          absent: [101, 102]
+      edges:
+        MEMBER_OF: [[1, 100]]
+
+  - name: neighbors_outgoing_exact
+    description: Outgoing neighbors of a user are its groups and authored MR, with no path metadata on edges
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+          "neighbors": {"direction": "outgoing"}
+        }
+    expect:
+      nodes:
+        User:
+          ids: [1]
+        Group:
+          ids: [100, 101]
+        MergeRequest:
+          ids: [2000]
+      edges:
+        MEMBER_OF: [[1, 100], [1, 101]]
+        AUTHORED: [[1, 2000]]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 100 }
+          - { from: User, from_id: 1, to: Group, to_id: 101 }
+        AUTHORED:
+          - { from: User, from_id: 1, to: MergeRequest, to_id: 2000 }
+      edge_prop_absent: [path_id, step, depth]
+
+  - name: neighbors_incoming_exact
+    description: Incoming neighbors of group 101 are exactly its two members, with no path metadata on edges
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "g", "entity": "Group", "node_ids": [101]}],
+          "neighbors": {"direction": "incoming"}
+        }
+    expect:
+      nodes:
+        Group:
+          ids: [101]
+        User:
+          ids: [1, 2]
+          absent: [3, 4, 5]
+      edges:
+        MEMBER_OF: [[1, 101], [2, 101]]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 101 }
+          - { from: User, from_id: 2, to: Group, to_id: 101 }
+      edge_prop_absent: [path_id, step, depth]
+
+  - name: neighbors_both_exact
+    description: Both-direction neighbors of group 100 are its members and project; the parent group is not returned because its edge is stored outside the center's subtree
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+          "neighbors": {"direction": "both"}
+        }
+    expect:
+      nodes:
+        Group:
+          ids: [100]
+        User:
+          ids: [1, 5]
+        Project:
+          ids: [1000]
+      edges:
+        MEMBER_OF: [[1, 100], [5, 100]]
+        CONTAINS: [[100, 1000]]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 100 }
+          - { from: User, from_id: 5, to: Group, to_id: 100 }
+        CONTAINS:
+          - { from: Group, from_id: 100, to: Project, to_id: 1000 }
+      edge_prop_absent: [path_id, step, depth]
+
+  - name: neighbors_with_rel_types_filter
+    description: rel_types AUTHORED keeps only the authored MR and drops group neighbors
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+          "neighbors": {"direction": "outgoing", "rel_types": ["AUTHORED"]}
+        }
+    expect:
+      node_count: 2
+      nodes:
+        User:
+          ids: [1]
+        MergeRequest:
+          ids: [2000]
+      edges:
+        AUTHORED: [[1, 2000]]
+      edge_exists:
+        AUTHORED:
+          - { from: User, from_id: 1, to: MergeRequest, to_id: 2000 }
+      edge_prop_absent: [path_id, step, depth]

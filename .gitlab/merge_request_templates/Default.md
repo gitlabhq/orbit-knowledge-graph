@@ -11,6 +11,9 @@ considered, full benchmark tables, raw logs, and agent reasoning.
 
 Agents: if you feel the urge to write a wall of text, write it inside the
 Agent context block. The top sections stay terse.
+
+This project is public. Do not put customer names, tenant names, incident
+details, credentials, or other sensitive data anywhere in this MR.
 -->
 
 ### What does this MR do and why?
@@ -51,6 +54,12 @@ context block.
 If the change alters what a user sees (CLI output, skill text, MCP tool
 descriptions, rendered docs), paste the before and after output here.
 A screenshot works too.
+
+If the change alters what Orbit stores or returns, paste one short code
+block of real before and after rows from a tiny fixture. Stored data means
+indexed rows, edges, properties, and schema. Returned data means query and
+tool output. Never invent rows or paste production data. Skip the block
+when no data changes (docs, CI, pure refactors).
 -->
 
 ### Performance Analysis
@@ -90,7 +99,7 @@ inside a comment do not run):
 /label ~"type::maintenance"
 
 Also add the matching orbit::<area> label when the area is obvious. The 14
-areas are listed in .gitlab/issue_templates/Default.md. Add ~documentation
+areas are listed in the Default issue template. Add ~documentation
 on docs MRs. For example:
 /label ~"orbit::indexing"
 

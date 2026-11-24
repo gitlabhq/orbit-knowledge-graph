@@ -4,6 +4,7 @@
 
 mod expect;
 mod format;
+pub(crate) mod generate;
 pub(crate) mod seed;
 
 use std::collections::HashMap;
@@ -262,4 +263,60 @@ pub(crate) fn database_name(scenario_name: &str) -> String {
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect()
+}
+
+pub(crate) const EXACT_KEYS: &str = "$exact";
+
+pub(crate) fn subset_mismatch(
+    path: &str,
+    expected: &serde_json::Value,
+    actual: &serde_json::Value,
+) -> Option<String> {
+    match (expected, actual) {
+        (serde_json::Value::Object(expected), serde_json::Value::Object(actual)) => {
+            if expected.contains_key(EXACT_KEYS) && expected.len() > 1 {
+                return Some(format!(
+                    "{path}: {EXACT_KEYS} cannot share a map with other keys"
+                ));
+            }
+            let (listed, exact) = match expected.get(EXACT_KEYS) {
+                Some(serde_json::Value::Object(listed)) => (listed, true),
+                _ => (expected, false),
+            };
+            let extra = actual
+                .keys()
+                .find(|key| exact && !listed.contains_key(*key))
+                .map(|key| format!("{path}.{key} is not listed in {EXACT_KEYS}"));
+            extra.or_else(|| {
+                listed
+                    .iter()
+                    .find_map(|(key, value)| match actual.get(key) {
+                        Some(found) => subset_mismatch(&format!("{path}.{key}"), value, found),
+                        None => Some(format!("{path}.{key} is missing")),
+                    })
+            })
+        }
+        (serde_json::Value::Array(expected), serde_json::Value::Array(actual))
+            if expected.len() == actual.len() =>
+        {
+            expected
+                .iter()
+                .zip(actual)
+                .enumerate()
+                .find_map(|(index, (value, found))| {
+                    subset_mismatch(&format!("{path}[{index}]"), value, found)
+                })
+        }
+        (serde_json::Value::Array(expected), serde_json::Value::Array(actual)) => Some(format!(
+            "{path} has {} items, expected {}",
+            actual.len(),
+            expected.len()
+        )),
+        _ if expected == actual => None,
+        _ => Some(format!("{path} is {actual}, expected {expected}")),
+    }
+}
+
+pub(crate) fn repeat_text(text: &str, count: usize, suffix: &str) -> String {
+    format!("{}{suffix}", text.repeat(count))
 }

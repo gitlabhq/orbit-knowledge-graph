@@ -199,18 +199,11 @@ fn build_cli_context() -> OrbitCliContext {
 
 fn build_common_context(coding_agent: Option<&str>) -> OrbitCommonContext {
     OrbitCommonContext::new(orbit_common::OrbitCommon {
-        deployment_type: None,
         surface: Some(orbit_common::OrbitCommonSurface::Cli),
-        environment: None,
         coding_agent: coding_agent
             .and_then(|a| a.parse::<orbit_common::OrbitCommonCodingAgent>().ok()),
         correlation_id: invocation_id().parse().ok(),
-        instance_id: None,
-        unique_instance_id: None,
-        host_name: None,
-        organization_id: None,
-        root_namespace_ids: None,
-        schema_version: None,
+        ..orbit_common::OrbitCommon::default()
     })
 }
 

@@ -215,8 +215,11 @@ Merge The MR
     ${headers}=    GitLab Auth Headers
     # gitlab@master requires the sha guard on the merge API (400 "SHA must be
     # provided when merging" without it), so pass the current head sha.
+    ${params}=    Create Dictionary    with_merge_status_recheck=true
     ${mr}=    GET    ${GITLAB_URL}/api/v4/projects/${project_id}/merge_requests/${iid}
-    ...    headers=${headers}    expected_status=200
+    ...    headers=${headers}    params=${params}    expected_status=200
+    Should Be Equal    ${mr.json()["detailed_merge_status"]}    mergeable
+    ...    MR ${iid} is ${mr.json()["detailed_merge_status"]}    values=False
     ${body}=    Create Dictionary    sha=${mr.json()["sha"]}
     ${resp}=    PUT    ${GITLAB_URL}/api/v4/projects/${project_id}/merge_requests/${iid}/merge
     ...    headers=${headers}    json=${body}    expected_status=200

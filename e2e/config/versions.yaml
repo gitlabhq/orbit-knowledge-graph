@@ -3,10 +3,10 @@
 # CI can override GKG image via E2E_GKG_IMAGE / E2E_GKG_TAG env vars.
 
 siphon:
-  chart: "2.1.0"
+  chart: "2.4.2"
   image:
     repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
-    tag: "0.0.153-beta"
+    tag: "0.0.163-beta"
 gitlab:
   # Devel (nightly) chart from gitlab-devel/gitlab. The chart version,
   # gitlab-org/gitlab ref, and CNG image digests below are all bumped
@@ -37,31 +37,31 @@ gitlab:
       digest: "sha256:0820d6d00b1a5bed7dc0cfd52fda41db306351f1d5a0a93d37c49d83cec03828"
 gitlab_lanes:
   "19-4":
-    chart: "10.4.3"
-    ref: "2d90d3471a3e6a21d6cacf252f21aecdd5c5bfcf"
+    chart: "10.4.8"
+    ref: "a3fe633a55aded6ad956cd005e05c102b4e83d11"
     images:
       webservice:
-        digest: "sha256:849b1a873a60d101b5605732a661a0d8ee413949784872c908149a15d85e4511"
+        digest: "sha256:ca224f067efb7348540587057ded858b6e5a7c4d4e54016e9d204d294b64694d"
       workhorse:
-        digest: "sha256:250e71813d5002340771d0e5c9f4119ae54d7c7998caec4bbafd057e27164fab"
+        digest: "sha256:3379d2f946a91b29101c5dee737a6678c11232b212fdcc663c2bbdf3e1a5091a"
       sidekiq:
-        digest: "sha256:4d06a48cda65933e248badaa2ef1a7590968957f94ec056520c8f65f1f2d8277"
+        digest: "sha256:52fe064f12c1def60a8aa78bc5ac9cd96ee08e0bc2d9924ce72525402beff4dd"
       toolbox:
-        digest: "sha256:16d0a2d9b9d71dc0a02cb8cdbb2d320f260eaa0e9a4b923ca8ad3fd8a29872ff"
-    repository: registry.gitlab.com/gitlab-org/build/cng-mirror
+        digest: "sha256:3c2cf7211ce1d735a601c3f09c9aa253585c413ecbcf450298ce8cff7b6fc52b"
+    repository: registry.gitlab.com/gitlab-org/build/cng
   "19-5":
-    chart: "10.5.1"
-    ref: "bb72babf5fe6b72e6f1608ac32709cca896a81a8"
+    chart: "10.5.6"
+    ref: "9f5ce6eb71a591964fbb62739a1db7f3bcf409ae"
     images:
       webservice:
-        digest: "sha256:b5ff38be437efae409973f13de609c9c05099ed4f7216857767932943ed1138e"
+        digest: "sha256:947fdf49335c720bfc074fb76b86b49fddeb7a39afb1705f2ed9c4ca20bbb21e"
       workhorse:
-        digest: "sha256:9d5f2a44d3c0c7ebf3e537164b123576450b83d11a5e72d667b55b60aa5626ca"
+        digest: "sha256:12f97030bb61531ae9e186c6553b53db0744b2efcc0ef6b844ea502c1f6037d7"
       sidekiq:
-        digest: "sha256:24f97ac7a208bbc591aa2ab6f5ee119a685b182ed882e6269480da7a69557dab"
+        digest: "sha256:8d2923e7ed5ca151346687cb659a83f9969812a99d86cda141b0df65816c50b0"
       toolbox:
-        digest: "sha256:dd7a6853ce45c09d11af0aa061ab2fc0a39e3017f17af05397d8ae02d24d8b73"
-    repository: registry.gitlab.com/gitlab-org/build/cng-mirror
+        digest: "sha256:41c700ed5c395341972a8e198ed544748ea0a7c14fd658842af4aec3103e27d0"
+    repository: registry.gitlab.com/gitlab-org/build/cng
 gkg:
   chart: "4.1.0"
   image:

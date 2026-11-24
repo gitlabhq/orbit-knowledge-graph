@@ -1,0 +1,9 @@
+id: indexing-engine-next-no-domain-terms
+valid:
+  - 'fn key(input: &Doc) -> Key { Key::new("doc", input.id) }'
+  - 'let lane = Lane::new("big");'
+invalid:
+  - 'fn key(project: &ProjectRef) -> Key { Key::new("item", project.id) }'
+  - 'struct Scope { namespace_id: u64 }'
+  - 'let pool = ctx.pool("gitaly_archives");'
+  - 'use crate::ontology::Ontology;'

@@ -1,0 +1,92 @@
+name: "Rust: use crate:: in a package with both lib.rs and main.rs"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_lib_and_main_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod core;
+
+      pub fn helper() {}
+
+  - path: src/core.rs
+    content: |
+      use crate::helper;
+
+      pub fn lib_run() {
+          helper();
+      }
+
+  - path: src/main.rs
+    content: |
+      mod cli;
+      mod net;
+
+      use rust_lib_and_main_fixture::core;
+
+      pub fn helper() {}
+
+      fn main() {
+          cli::run();
+      }
+
+  - path: src/cli.rs
+    content: |
+      pub mod args;
+
+      use crate::helper;
+      use crate::net;
+
+      pub fn run() {
+          helper();
+      }
+
+      pub fn bin_module() {
+          net::connect();
+      }
+
+  - path: src/cli/args.rs
+    content: |
+      use crate::helper;
+
+      pub fn nested_run() {
+          helper();
+      }
+
+  - path: src/net.rs
+    content: |
+      pub fn connect() {}
+
+tests:
+  - name: "Modules of the binary crate resolve crate:: through main.rs"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['run', 'nested_run'] AND callee.name = 'helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 2 }
+      - { row: { src: "src/cli.rs", tgt: "src/main.rs" } }
+      - { row: { src: "src/cli/args.rs", tgt: "src/main.rs" } }
+
+  - name: "Control: a module only main.rs declares still resolves"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'bin_module'
+      RETURN callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { tgt: "src/net.rs" } }
+
+  - name: "Control: a module of the library crate still resolves through lib.rs"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'lib_run'
+      RETURN callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { tgt: "src/lib.rs" } }

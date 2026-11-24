@@ -3,6 +3,7 @@ pub mod c;
 pub mod c_family;
 pub mod cpp;
 pub mod csharp;
+pub mod dockerfile;
 pub mod elixir;
 pub mod go;
 pub mod hcl;

@@ -5,8 +5,8 @@ query:
     {
         "query_type": "traversal",
         "nodes": [
-            {"id": "p", "entity": "Project", "node_ids": [1000, 1004], "columns": ["name"]},
-            {"id": "mr", "entity": "MergeRequest", "columns": ["iid"]}
+            {"id": "mr", "entity": "MergeRequest", "columns": ["iid"]},
+            {"id": "p", "entity": "Project", "node_ids": [1000, 1004], "columns": ["name"]}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
         "limit": 10

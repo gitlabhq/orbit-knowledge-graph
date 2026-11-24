@@ -405,7 +405,7 @@ mod tests {
             .collect();
         for immutable in [
             "IN_PROJECT",
-            "AUTHORED",
+            "SOURCE_PROJECT",
             "HAS_JOB",
             "IN_PIPELINE",
             "MERGED_AT_COMMIT",

@@ -74,8 +74,8 @@ LINE_MARKER = re.compile(r"//[/!]?|#")
 EXIT_ERROR = 2
 EXIT_FLAGGED = 3
 
-RULE = "Comments explain why. Do not narrate what the code shows."
-RULE_LINK = "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/CONTRIBUTING.md#engineering-conventions"
+RULE = "Default to no code comments. Write a comment only for a business requirement that the code cannot make clear."
+RULE_LINK = "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/CONTRIBUTING.md#code"
 
 _parsers: dict = {}
 
@@ -241,7 +241,7 @@ def report(findings: list[tuple[str, int, str]], code: str) -> None:
     for path, line, text in findings:
         print(f"  {path}:{line}  {first_content_line(text)[:100]}")
     print(
-        f'\nCONTRIBUTING.md, "Engineering conventions": "{RULE}"\n{RULE_LINK}\n'
+        f'\nCONTRIBUTING.md, "Code": "{RULE}"\n{RULE_LINK}\n'
         "For each comment above: delete it if the code or a better name says the same\n"
         "thing; keep it only for a constraint, invariant, gotcha, or workaround.\n"
         f"If every comment above is essential, re-run with COMMENTS_OK={code}\n"

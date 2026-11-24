@@ -144,6 +144,10 @@ deploymentProfiles:
 deployments:
   postgres-producer:
     profile: producer
+    probes:
+      readiness:
+        httpGet:
+          path: /health/live
     appConfig:
       application_identifier: e2e_siphon_1
       primary_database:
