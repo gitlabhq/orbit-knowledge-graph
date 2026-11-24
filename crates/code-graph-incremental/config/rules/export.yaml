@@ -76,6 +76,7 @@ tables:
 
 define:
   dangling(ROOT):
+    '(__name "*" (__alias)) when $ROOT | follow(imports, from)': none
     '(__name "*") when $ROOT | follow(imports, from) | is_def': none
     '(__name "*")': '$ROOT'
     '_ when $ROOT | follow(imports, from) | settled': none
