@@ -63,3 +63,57 @@ layers:
   - name: "code-graph's generic languages do not depend on its custom ones"
     from: ["crates/code-graph/src/v2/langs/generic/**"]
     deny: ["crates/code-graph/src/v2/langs/custom/**"]
+
+
+# Data flow: which code may write the graph, run DDL, or reach a store.
+forbid:
+  # indexer/src/lib.rs also calls DDL, in run_dispatcher. It stays out of
+  # only_in because the same file holds run, the indexer-mode entry point.
+  # The gate fails only on new uses, so that existing call does not fail it.
+  - name: "DDL runs only in dispatcher-mode code: schema::migration and migration completion GC (crates/indexer/AGENTS.md: indexers do not run DDL)"
+    symbols:
+      - "orbit_migrations::execute::create_all_versioned_tables"
+      - "orbit_migrations::execute::create_tables_with_selective_cloning"
+      - "orbit_migrations::execute::create_unversioned_definitions"
+      - "orbit_migrations::execute::replace_refreshable_views"
+      - "orbit_migrations::execute::drop_versioned_refreshable_views"
+      - "orbit_migrations::execute::drop_all_version_entities"
+      - "orbit_migrations::garbage_collection::drop_entities"
+      - "orbit_migrations::version::mark_version_dropped"
+      - "create_all_versioned_tables"
+      - "create_tables_with_selective_cloning"
+      - "create_unversioned_definitions"
+      - "replace_refreshable_views"
+      - "drop_versioned_refreshable_views"
+      - "drop_all_version_entities"
+    paths: ["crates/indexer/src/**", "crates/orbit-server/src/**", "crates/query-engine/**"]
+    only_in:
+      - "crates/indexer/src/schema/migration.rs"
+      - "crates/indexer/src/orchestrator/scheduled/migration_completion.rs"
+      - "crates/orbit-server/src/clickhouse_setup.rs"
+  - name: "only the indexer writes graph tables; the server, query engine, and CLI read (architecture/README.md, ADR 023)"
+    symbols:
+      - "indexer::clickhouse::ClickHouseWriter"
+      - "indexer::clickhouse::writer"
+      - "clickhouse_client::ArrowClickHouseClient::insert_arrow"
+      - "clickhouse_client::ArrowClickHouseClient::insert_arrow_streaming"
+      - "clickhouse_client::ArrowClickHouseClient::insert_query"
+      - "ClickHouseWriter"
+    paths: ["crates/orbit-server/src/**", "crates/query-engine/**", "crates/orbit-cli/src/**"]
+  - name: "query reads reach ClickHouse only through the execution and hydration stages, after security and compilation (architecture/querying/query-lifecycle.md)"
+    symbols:
+      - "crate::pipeline::stages::execution::execute_query"
+      - "orbit_server::pipeline::stages::execution::execute_query"
+      - "crate::pipeline::stages::hydration"
+      - "orbit_server::pipeline::stages::hydration"
+    paths:
+      - "crates/orbit-server/src/grpc/**"
+      - "crates/orbit-server/src/tools/**"
+      - "crates/orbit-server/src/content/**"
+      - "crates/orbit-server/src/pipeline/stages/routing.rs"
+      - "crates/orbit-server/src/pipeline/stages/security.rs"
+      - "crates/orbit-server/src/pipeline/stages/authorization.rs"
+      - "crates/orbit-server/src/pipeline/stages/redaction.rs"
+  - name: "the query compiler does not open a store connection; it only renders SQL (architecture/querying/query-engine.md)"
+    symbols: ["clickhouse_client", "duckdb_client", "duckdb::"]
+    paths: ["crates/query-engine/compiler/src/**"]
