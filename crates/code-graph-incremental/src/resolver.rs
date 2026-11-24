@@ -97,8 +97,6 @@ pub struct ImportReq {
     pub target_fi: u32,
     pub anchor: u32,
     pub target_path: String,
-    /// The path that matched when `target_path` found nothing and the import
-    /// was retried through the lookup prefixes.
     pub fallback_path: Option<String>,
 }
 
