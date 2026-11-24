@@ -34,7 +34,7 @@ impl<'t, S: Store> Indexed<'t, S> {
             trees,
             engine,
             budget,
-            family: (0..phase.index_count)
+            family: (0..phase.index_count * engine.lang.tree_sets().len())
                 .map(|_| std::sync::OnceLock::new())
                 .collect(),
         }
@@ -60,10 +60,10 @@ impl<'t, S: Store> Indexed<'t, S> {
             })
     }
 
-    pub(super) fn family(&self, id: u32) -> &FxHashMap<u32, Vec<Loc>> {
-        self.family[id as usize].get_or_init(|| {
+    pub(super) fn family(&self, set: usize, id: u32) -> &FxHashMap<u32, Vec<Loc>> {
+        self.family[set * self.phase.index_count + id as usize].get_or_init(|| {
             let mut map: FxHashMap<u32, Vec<Loc>> = FxHashMap::default();
-            for fi in 0..self.trees.files() {
+            for fi in self.trees.range(set) {
                 for (&(anchor, key), nodes) in self.piece(fi, id) {
                     if anchor == WHOLE {
                         map.entry(key)

@@ -9,7 +9,9 @@ use rayon::prelude::*;
 pub use repository::{Options, WORKER_STACK_BYTES, repository};
 pub use state::{SNAPSHOT_VERSION, SourceFile, State};
 
-use crate::engine::{self, Engine, Outputs, Phase, Trees};
+use smallvec::SmallVec;
+
+use crate::engine::{self, Around, Engine, Outputs, Phase, TreeSets, Trees};
 use crate::error::Error;
 use crate::language::SupportLang;
 use crate::sentinel::{Killed, Sentinel};
@@ -138,7 +140,8 @@ fn one_file(
     let mut at = Stage::new(tree, canonical);
     for phase in phases {
         let started = Instant::now();
-        let (found, _) = at.run(phase, None, engine, run)?;
+        let around = Around::alone(engine.lang.input_set());
+        let (found, _) = at.run(phase, around, None, engine, run)?;
         edges.extend(found);
         if *engine::profile::ON {
             engine::profile::phase(&phase.name, started);
@@ -166,20 +169,33 @@ impl Stage {
         }
     }
 
+    /// Runs `phase` on the tree, Mutable while the phases so far build it;
+    /// a phase that builds reads no other tree.
     fn run(
         &mut self,
         phase: &Phase,
+        around: Around<'_, Compact>,
         rules: Option<usize>,
         engine: &Engine,
         budget: &Sentinel,
     ) -> Result<(Vec<Edge>, engine::Outputs), Killed> {
         if !phase.builds() {
             let tree = self.compact(engine);
-            return engine::run_tree(phase, tree, None, rules, engine, budget);
+            return engine::run_tree(phase, tree, around, rules, engine, budget);
         }
         match &mut self.tree {
-            Storage::Mutable(tree) => engine::run_tree(phase, tree, None, rules, engine, budget),
+            Storage::Mutable(tree) => {
+                let around = Around::alone(around.set);
+                engine::run_tree(phase, tree, around, rules, engine, budget)
+            }
             _ => unreachable!("the pipeline builds a tree only before it turns Compact"),
+        }
+    }
+
+    fn compacted(&self) -> &Tree<Compact> {
+        match &self.tree {
+            Storage::Compact(tree) => tree,
+            _ => unreachable!("a stage a phase reads is Compact"),
         }
     }
 
@@ -226,46 +242,73 @@ pub fn finish(
     report: &mut Report,
 ) -> Result<(), Error> {
     let (_, rest) = engine.pipeline.split();
+    let input = engine.lang.input_set();
     let paths: Vec<&str> = state
         .trees
         .iter()
         .map(|tree| tree.label.as_str())
         .chain(state.configs.iter().map(|file| file.path.as_str()))
         .collect();
-    let built = engine.project.build(&paths, &state.configs, &engine.lang);
-    let mut project = Stage::new(built, |_, tree| tree.compact_and_remap());
-    let project_fi = state.trees.len() as u32;
+    let mut whole: Vec<Option<Stage>> = engine
+        .sets
+        .iter()
+        .map(|frontend| {
+            let built = frontend
+                .as_ref()?
+                .build(&paths, &state.configs, &engine.lang);
+            Some(Stage::new(built, |_, tree| tree.compact_and_remap()))
+        })
+        .collect();
     for phase in rest {
         run.check()?;
         let started = Instant::now();
+        let seen = TreeSets(phase.walks.0 | phase.reads.0);
+        let walked = phase.walks.iter().next().expect("a phase walks a tree set");
+        let alone = (!phase.shared() && walked != input).then(|| whole[walked].take());
+        for set in seen.iter() {
+            if let Some(stage) = whole.get_mut(set).and_then(Option::as_mut) {
+                stage.compact(engine);
+            }
+        }
         if phase.shared() {
-            let reads = phase.walks.project || phase.reads.project;
-            let trees = Trees {
-                files: &state.trees,
-                project: reads.then(|| &*project.compact(engine)),
-            };
-            let walk: Vec<u32> = (0..project_fi)
-                .filter(|_| phase.walks.files)
-                .chain(phase.walks.project.then_some(project_fi))
+            let parts = parts(&state.trees, &whole, input);
+            let trees = Trees::Sets(&parts, seen.0);
+            let walk: Vec<u32> = phase
+                .walks
+                .iter()
+                .flat_map(|set| trees.range(set))
                 .collect();
             let ran = engine::run_shared(phase, trees, &walk, &state.edges, engine, run)?;
             report.skipped.extend(ran.stopped);
             report.outputs.merge(ran.outputs);
             state.edges.extend(ran.edges);
-        } else if phase.walks.project {
-            for rules in engine.file_rules() {
-                let (edges, outputs) = project.run(phase, Some(rules), engine, run)?;
-                report.outputs.merge(outputs);
-                state
-                    .edges
-                    .extend(edges.into_iter().map(|e| e.in_file(project_fi)));
+        } else if let Some(mut stage) = alone.flatten() {
+            let fi = first_index(engine, state, walked);
+            {
+                let parts = parts(&state.trees, &whole, input);
+                let around = Around {
+                    sets: &parts,
+                    set: walked,
+                    reads: phase.reads.0,
+                };
+                for rules in engine.file_rules() {
+                    let (edges, outputs) = stage.run(phase, around, Some(rules), engine, run)?;
+                    report.outputs.merge(outputs);
+                    state.edges.extend(edges.into_iter().map(|e| e.in_file(fi)));
+                }
             }
+            whole[walked] = Some(stage);
         } else {
-            let project = phase.reads.project.then(|| &*project.compact(engine));
+            let parts = parts(&[], &whole, input);
+            let around = Around {
+                sets: &parts,
+                set: input,
+                reads: phase.reads.0,
+            };
             let done = state
                 .trees
                 .par_iter_mut()
-                .map(|tree| engine::run_tree(phase, tree, project, None, engine, run))
+                .map(|tree| engine::run_tree(phase, tree, around, None, engine, run))
                 .collect::<Result<Vec<_>, Killed>>()?;
             for (fi, (edges, outputs)) in done.into_iter().enumerate() {
                 report.outputs.merge(outputs);
@@ -278,8 +321,43 @@ pub fn finish(
             engine::profile::phase(&phase.name, started);
         }
     }
-    state.project = Some(project.into_compact(engine));
+    state.sets = whole
+        .into_iter()
+        .map(|stage| {
+            stage
+                .map(|s| vec![s.into_compact(engine)])
+                .unwrap_or_default()
+        })
+        .collect();
     Ok(())
+}
+
+/// Each tree set's trees, the files in the set they parse into.
+fn parts<'a>(
+    files: &'a [Tree<Compact>],
+    whole: &'a [Option<Stage>],
+    input: usize,
+) -> SmallVec<[&'a [Tree<Compact>]; 4]> {
+    whole
+        .iter()
+        .enumerate()
+        .map(|(set, stage)| match (set == input, stage) {
+            (true, _) => files,
+            (false, Some(stage)) => std::slice::from_ref(stage.compacted()),
+            (false, None) => &[][..],
+        })
+        .collect()
+}
+
+/// The file index of the first tree of set `set`, every set's trees numbered
+/// in order.
+fn first_index(engine: &Engine, state: &State, set: usize) -> u32 {
+    (0..set)
+        .map(|at| match &engine.sets[at] {
+            Some(_) => 1,
+            None => state.trees.len() as u32,
+        })
+        .sum()
 }
 
 /// The family's source files and manifests, read; unreadable ones are reported.
@@ -311,7 +389,7 @@ fn sources(
     let mut bytes = 0u64;
     let mut configs = Vec::new();
     for file in repository.files().filter(|file| file.keeps()) {
-        if !engine.project.reads(&file.path) {
+        if !engine.set_reads(&file.path) {
             continue;
         }
         bytes = bytes.saturating_add(file.size);

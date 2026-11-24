@@ -107,11 +107,7 @@ pub(super) fn split(
 /// Whether a family's project frontend reads the file at a path.
 fn manifest_reader(family: SupportLang) -> impl Fn(&str) -> bool {
     let engine = code_graph_incremental::Engine::family(family).build().ok();
-    move |path| {
-        engine
-            .as_ref()
-            .is_some_and(|engine| engine.project.reads(path))
-    }
+    move |path| engine.as_ref().is_some_and(|engine| engine.set_reads(path))
 }
 
 pub(super) fn readers(

@@ -415,10 +415,8 @@ pub fn export(
     scope: &Scope,
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
     envelope.check(tables)?;
-    let trees = Trees {
-        files: &state.trees,
-        project: state.project.as_ref(),
-    };
+    let parts = state.parts(engine.lang.input_set());
+    let trees = Trees::Sets(&parts, u64::MAX);
     Sink {
         engine,
         trees,

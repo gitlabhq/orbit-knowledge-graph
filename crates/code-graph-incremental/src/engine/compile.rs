@@ -16,7 +16,7 @@ use super::program::{
 };
 use super::{FnId, Kind, Registration, Registry, Val, Vals};
 use crate::error::LoadError;
-use crate::intern::Lang;
+use crate::intern::{Lang, TreeSet};
 use crate::tree::{EDGE_ATTRIBUTES, EdgeAttribute, EdgeKind};
 
 #[derive(serde::Deserialize)]
@@ -26,6 +26,7 @@ struct PipelineSpec {
     edges: Vec<String>,
     #[serde(default)]
     edge_attributes: BTreeMap<String, String>,
+    tree_sets: BTreeMap<String, String>,
     kinds: Vec<String>,
     #[serde(default)]
     modules: BTreeMap<String, ModuleSpec>,
@@ -74,6 +75,7 @@ impl Pipeline {
             lang.edges.intern(edge);
         }
         let _ = lang.edge_attributes.set(edge_attributes(&spec)?);
+        let _ = lang.tree_sets.set(declared_tree_sets(&spec)?);
         for kind in &spec.kinds {
             lang.vocabulary.intern(kind);
             lang.intern_kind(kind);
@@ -122,7 +124,8 @@ impl Pipeline {
             settings,
         };
         let (_, rest) = pipeline.split();
-        if let Some(late) = rest.iter().find(|p| p.walks.files && p.builds()) {
+        let input = lang.input_set();
+        if let Some(late) = rest.iter().find(|p| p.walks.has(input) && p.builds()) {
             return Err(LoadError(format!(
                 "phase {} builds files after a phase that reads more than one tree",
                 late.name
@@ -318,39 +321,49 @@ fn edge_attributes(spec: &PipelineSpec) -> Result<Vec<EdgeAttribute>, LoadError>
         .collect()
 }
 
-fn tree_sets(spec: &PhaseSpec, names: &[String]) -> Result<TreeSets, LoadError> {
+fn tree_sets(lang: &Lang, spec: &PhaseSpec, names: &[String]) -> Result<TreeSets, LoadError> {
     let mut sets = TreeSets::default();
     for name in names {
-        match name.as_str() {
-            "files" => sets.files = true,
-            "project" => sets.project = true,
-            other => {
-                return Err(LoadError(format!(
-                    "phase {}: unknown tree set: {other}",
-                    spec.name
-                )));
-            }
-        }
+        let set = lang
+            .tree_set(name)
+            .ok_or_else(|| LoadError(format!("phase {}: unknown tree set: {name}", spec.name)))?;
+        sets.0 |= 1 << set;
     }
     Ok(sets)
 }
 
+/// The tree sets pipeline.yaml declares; exactly one is per file.
+fn declared_tree_sets(spec: &PipelineSpec) -> Result<Vec<TreeSet>, LoadError> {
+    let sets = spec
+        .tree_sets
+        .iter()
+        .map(|(name, kind)| match kind.as_str() {
+            "per_file" | "whole" => Ok(TreeSet {
+                name: name.clone(),
+                per_file: kind == "per_file",
+            }),
+            other => Err(LoadError(format!("tree set {name}: unknown kind {other}"))),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    match sets.iter().filter(|s| s.per_file).count() {
+        1 => Ok(sets),
+        _ => Err(LoadError(
+            "pipeline.yaml declares one per_file tree set".into(),
+        )),
+    }
+}
+
 fn check_walks(phase: &Phase) -> Result<(), LoadError> {
     let err = |why: &str| Err(LoadError(format!("phase {}: {why}", phase.name)));
-    if phase.walks == TreeSets::default() {
-        return err("walks no trees");
-    }
     let writes = phase.builds() || phase.passes.iter().any(|p| !p.tag_keys.is_empty());
-    match (phase.shared(), writes) {
-        (true, true) => err("writes trees that its other walks read"),
-        (true, false) => Ok(()),
-        (false, _) if phase.walks.files && phase.walks.project => {
-            err("writes trees, so it walks files or the project tree, not both")
+    match (phase.walks.iter().count(), phase.shared(), writes) {
+        (0, _, _) => err("walks no trees"),
+        (_, true, true) => err("writes trees that its other walks read"),
+        (2.., false, _) => err("writes trees, so it walks one tree set"),
+        _ if phase.builds() && phase.reads != TreeSets::default() => {
+            err("builds trees, so it reads no other tree set")
         }
-        (false, _) if phase.reads.files => {
-            err("writes trees, so it reads only the project tree besides its own")
-        }
-        (false, _) => Ok(()),
+        _ => Ok(()),
     }
 }
 
@@ -432,8 +445,9 @@ fn compile_phase(
         name: spec.name.clone(),
         label: Box::leak(label.into_boxed_str()),
         budget: spec.budget.clone(),
-        walks: tree_sets(spec, &spec.walks)?,
-        reads: tree_sets(spec, &spec.reads)?,
+        walks: tree_sets(loader.lang, spec, &spec.walks)?,
+        reads: tree_sets(loader.lang, spec, &spec.reads)?,
+        input: loader.lang.input_set(),
         until_stable,
         modules: used,
         links,

@@ -272,8 +272,11 @@ impl crate::engine::Engine {
             .flat_map(|m| LANG_CONFIG.languages[m].embeds.iter().copied())
             .filter(|l| !members.contains(l))
             .collect();
+        let project = Box::new(crate::frontend::project::ProjectTree::default());
         let builder = members.into_iter().fold(
-            crate::engine::Engine::builder().pipeline(source),
+            crate::engine::Engine::builder()
+                .pipeline(source)
+                .set_frontend("project", project),
             |builder, member| {
                 builder.frontend(crate::frontend::for_language(member), lang_yaml(member))
             },

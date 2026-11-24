@@ -85,6 +85,15 @@ pub struct Lang {
     /// The kinds the engine's own tree builders use, bound in pipeline.yaml.
     pub tree: std::sync::OnceLock<crate::tree::TreeKinds>,
     pub edge_attributes: std::sync::OnceLock<Vec<crate::edge::EdgeAttribute>>,
+    pub tree_sets: std::sync::OnceLock<Vec<TreeSet>>,
+}
+
+/// A set of trees phases walk and read: one tree per input file, or the
+/// trees a set frontend builds from the whole input.
+#[derive(Clone, Debug)]
+pub struct TreeSet {
+    pub name: String,
+    pub per_file: bool,
 }
 
 impl Lang {
@@ -136,6 +145,22 @@ impl Lang {
 
     pub fn edge_attributes(&self) -> &[crate::edge::EdgeAttribute] {
         self.edge_attributes.get().map_or(&[], Vec::as_slice)
+    }
+
+    pub fn tree_sets(&self) -> &[TreeSet] {
+        self.tree_sets.get().map_or(&[], Vec::as_slice)
+    }
+
+    pub fn tree_set(&self, name: &str) -> Option<usize> {
+        self.tree_sets().iter().position(|s| s.name == name)
+    }
+
+    /// The set input files parse into.
+    pub fn input_set(&self) -> usize {
+        self.tree_sets()
+            .iter()
+            .position(|s| s.per_file)
+            .expect("the pipeline declares a per-file tree set")
     }
 
     pub fn edge_attribute(&self, name: &str) -> Option<usize> {

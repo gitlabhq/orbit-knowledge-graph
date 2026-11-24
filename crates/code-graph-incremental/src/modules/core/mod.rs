@@ -2,7 +2,7 @@
 //! and declared indexes, and the writes a rule makes. Literal arguments
 //! (edge kinds, index, row shape and template ids) arrive as numbers.
 
-use crate::engine::{Cx, FILES, Function, Loc, Module, Store, Val, Vals, WHOLE, Write, one};
+use crate::engine::{Cx, Function, Loc, Module, SETS, Store, Val, Vals, WHOLE, Write, one};
 use crate::modules::function;
 use crate::tree::{Edge, EdgeKind};
 
@@ -36,10 +36,6 @@ static FUNCTIONS: &[Function<Core>] = &[
     )),
     function!(Inline, "last", [set], |_, a| {
         a[0].last().map_or_else(Vals::new, |&v| one(v))
-    }),
-    function!(Inline, "project", [], |cx, _| {
-        cx.project()
-            .map_or_else(Vals::new, |root| one(Val::Node(root.into())))
     }),
     function!(Inline, "file", [set], |_, a| {
         set(nodes(&a[0]).map(|at| Val::Node(Loc { fi: at.fi, node: 0 })))
@@ -152,17 +148,15 @@ static FUNCTIONS: &[Function<Core>] = &[
     }),
 ];
 
-/// Matches of a declared index under each node of the first set, by each
-/// key of the third: in the node's own scope, or anywhere under it.
 /// The matches of index `a[2]` for keys `a[3]`: owned by a node of `a[0]`,
-/// under one, or in any file the walk reads, as region `a[1]` says.
+/// under one, or in the trees of a set the walk reads, as region `a[1]` says.
 fn select<S: Store>(cx: &mut Cx<'_, '_, Core, S>, a: &[Vals]) -> Vals {
     let (region, id) = (number(&a[1]), number(&a[2]));
     let mut out = Vals::new();
-    if region == FILES {
+    if let Some(set) = region.checked_sub(SETS) {
         for key in a[3].iter().filter_map(|&k| cx.text(k)) {
             for &found in cx
-                .family(id)
+                .family(set as usize, id)
                 .and_then(|f| f.get(&key))
                 .into_iter()
                 .flatten()

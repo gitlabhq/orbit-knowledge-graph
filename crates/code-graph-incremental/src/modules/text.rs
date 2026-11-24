@@ -156,7 +156,7 @@ static FUNCTIONS: &[Function<Text>] = &[
     on_node!("tree_root", [one], |c, _| Some(Val::Node(
         c.jump(c.fi(), 0).into()
     ))),
-    function!(Pure, "file_dir", [one], |cx, a| file_dir(cx, a)),
+    function!(Pure, "file_dir", [one, tree_set], |cx, a| file_dir(cx, a)),
 ];
 
 const MAX_REGEX_LOOP_PASSES: usize = 64;
@@ -226,9 +226,13 @@ fn text<'t, S: Store>(cx: &Cx<'_, 't, Text, S>, v: Val) -> Option<&'t str> {
     }
 }
 
-/// The project tree's directory that holds a file tree, found by its path.
+/// The directory of set `a[1]`'s tree that holds a file tree, by its path.
 fn file_dir<S: Store>(cx: &Cx<'_, '_, Text, S>, a: &[Vals]) -> Vals {
-    let (Some(loc), Some(mut at)) = (a[0][0].loc(), cx.project()) else {
+    let set = a[1].first().map_or(0, |v| match v {
+        Val::Sym(s) => *s as usize,
+        _ => 0,
+    });
+    let (Some(loc), Some(mut at)) = (a[0][0].loc(), cx.roots(set).next()) else {
         return Vals::new();
     };
     let syms = &cx.lang().syms;

@@ -348,30 +348,39 @@ impl<'s> Parser<'s, '_> {
                         Arg::Region => {
                             self.space();
                             let name = self.ident();
-                            let region = ["owned", "under", "files"]
-                                .iter()
-                                .position(|&r| r == name)
-                                .ok_or_else(|| {
-                                    self.error(&format!(
-                                        "{name} is not owned(x), under(x) or files"
-                                    ))
-                                })?;
-                            let of = match name {
-                                "files" => Expr::Empty,
-                                _ => {
-                                    let of = match self.eat("(") {
-                                        true => self.expr()?,
-                                        false => return Err(self.error(&format!("{name}(x)"))),
-                                    };
+                            let lang = self.scope.lang;
+                            let (of, region) = match name {
+                                "owned" | "under" => {
+                                    if !self.eat("(") {
+                                        return Err(self.error(&format!("{name}(x)")));
+                                    }
+                                    let of = self.expr()?;
                                     if !self.eat(")") {
                                         return Err(self.error("expected )"));
                                     }
-                                    of
+                                    (of, u32::from(name == "under"))
                                 }
+                                _ => match lang.tree_set(name) {
+                                    Some(set) => (Expr::Empty, super::SETS + set as u32),
+                                    None => {
+                                        return Err(self.error(&format!(
+                                            "{name} is not owned(x), under(x) or a tree set"
+                                        )));
+                                    }
+                                },
                             };
                             args.push(of);
-                            args.push(Expr::Lit(Val::Sym(region as u32)));
+                            args.push(Expr::Lit(Val::Sym(region)));
                             regions += 1;
+                        }
+                        Arg::TreeSet => {
+                            self.space();
+                            let name = self.ident();
+                            let set =
+                                self.scope.lang.tree_set(name).ok_or_else(|| {
+                                    self.error(&format!("{name} is not a tree set"))
+                                })?;
+                            args.push(Expr::Lit(Val::Sym(set as u32)));
                         }
                         Arg::EdgeKey => {
                             self.space();

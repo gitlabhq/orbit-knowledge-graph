@@ -8,9 +8,11 @@ pub enum Step<R> {
     Out(R),
 }
 
-pub struct Trees<'a, S: Storage = Mutable> {
-    pub files: &'a [Tree<S>],
-    pub project: Option<&'a Tree<S>>,
+/// The trees a walk reaches by file index: every tree set's trees, in the
+/// pipeline's order and numbered across the sets, and which sets it reads.
+pub enum Trees<'a, S: Storage = Mutable> {
+    One(&'a Tree<S>),
+    Sets(&'a [&'a [Tree<S>]], u64),
 }
 
 impl<S: Storage> Copy for Trees<'_, S> {}
@@ -21,28 +23,32 @@ impl<S: Storage> Clone for Trees<'_, S> {
 }
 
 impl<'a, S: Storage> Trees<'a, S> {
-    pub fn of(files: &'a [Tree<S>]) -> Self {
-        Self {
-            files,
-            project: None,
-        }
-    }
-
     pub fn get(self, fi: u32) -> &'a Tree<S> {
-        match self.files.get(fi as usize) {
-            Some(tree) => tree,
-            None => self
-                .project
-                .expect("a file index names a file or the project tree"),
+        match self {
+            Trees::One(tree) => tree,
+            Trees::Sets(sets, _) => {
+                let mut at = fi as usize;
+                for set in sets {
+                    match set.get(at) {
+                        Some(tree) => return tree,
+                        None => at -= set.len(),
+                    }
+                }
+                panic!("file index {fi} names no tree")
+            }
         }
     }
 
-    pub fn files(self) -> u32 {
-        self.files.len() as u32
-    }
-
-    pub fn project_fi(self) -> Option<u32> {
-        self.project.map(|_| self.files())
+    /// The file indexes of set `set`'s trees, if the walk reads it.
+    pub fn range(self, set: usize) -> std::ops::Range<u32> {
+        match self {
+            Trees::One(_) => 0..u32::from(set == 0),
+            Trees::Sets(sets, read) if read & (1 << set) != 0 => {
+                let start: usize = sets[..set].iter().map(|s| s.len()).sum();
+                start as u32..(start + sets[set].len()) as u32
+            }
+            Trees::Sets(..) => 0..0,
+        }
     }
 }
 
@@ -230,7 +236,7 @@ impl<'a, S: Storage> Walk<'a, S> {
 
 impl<S: Storage> Tree<S> {
     pub fn cursor(&self, id: u32) -> Cursor<'_, S> {
-        Cursor::new(Trees::of(std::slice::from_ref(self)), 0, id)
+        Cursor::new(Trees::One(self), 0, id)
     }
     pub fn root(&self) -> Cursor<'_, S> {
         self.cursor(S::index(self.root))

@@ -19,10 +19,36 @@ use crate::intern::Lang;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Edge, Mutable, Storage};
 
+/// The trees a walk over one tree reads: each set's trees, the walked tree's
+/// set, and the sets the phase reads.
+pub struct Around<'a, S: Store> {
+    pub sets: &'a [&'a [Tree<S>]],
+    pub set: usize,
+    pub reads: u64,
+}
+
+impl<S: Store> Copy for Around<'_, S> {}
+impl<S: Store> Clone for Around<'_, S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S: Store> Around<'_, S> {
+    /// A tree in set `set` that reads no other tree.
+    pub fn alone(set: usize) -> Self {
+        Around {
+            sets: &[],
+            set,
+            reads: 0,
+        }
+    }
+}
+
 pub fn run_tree<S: Store>(
     phase: &Phase,
     tree: &mut Tree<S>,
-    project: Option<&Tree<S>>,
+    around: Around<'_, S>,
     rules: Option<usize>,
     engine: &Engine,
     budget: &Sentinel,
@@ -63,7 +89,7 @@ pub fn run_tree<S: Store>(
                     rules,
                     region,
                     engine,
-                    project,
+                    around,
                     budget,
                     file: &file,
                 };
@@ -289,7 +315,7 @@ struct On<'a, S: Store> {
     /// The region the walk covers: the tree's root or a region node.
     region: u32,
     engine: &'a Engine,
-    project: Option<&'a Tree<S>>,
+    around: Around<'a, S>,
     budget: &'a Sentinel,
     file: &'a Sentinel,
 }
@@ -310,14 +336,18 @@ impl<S: Store> On<'_, S> {
         let (mut at, mut replaced) = (0, false);
         while at < nodes.len() {
             let writes = {
-                let trees = Trees {
-                    files: std::slice::from_ref(&*tree),
-                    project: self.project,
-                };
+                let at_set = self.around.set;
+                let count = self.engine.lang.tree_sets().len().max(at_set + 1);
+                let mut parts: SmallVec<[&[Tree<S>]; 4]> = (0..count)
+                    .map(|set| self.around.sets.get(set).copied().unwrap_or(&[]))
+                    .collect();
+                parts[at_set] = std::slice::from_ref(&*tree);
+                let fi = parts[..at_set].iter().map(|p| p.len() as u32).sum();
+                let trees = Trees::Sets(&parts, self.around.reads | 1 << at_set);
                 let indexed = Indexed::new(self.phase, trees, self.engine, self.budget);
                 let input = Input {
                     trees,
-                    fi: 0,
+                    fi,
                     rules: self.rules,
                     graph: None,
                     indexed: Some(&indexed),

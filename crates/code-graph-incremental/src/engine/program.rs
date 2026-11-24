@@ -216,6 +216,7 @@ pub struct Phase {
     pub budget: BudgetSpec,
     pub walks: TreeSets,
     pub reads: TreeSets,
+    pub(super) input: usize,
     /// Reruns over the family until its edges stop changing.
     pub until_stable: bool,
     pub(super) modules: Vec<u8>,
@@ -240,14 +241,23 @@ pub struct Phase {
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
-pub struct TreeSets {
-    pub files: bool,
-    pub project: bool,
-}
+pub struct TreeSets(pub u64);
 
 impl TreeSets {
+    pub fn has(self, set: usize) -> bool {
+        self.0 & (1 << set) != 0
+    }
+
+    pub fn only(set: usize) -> Self {
+        Self(1 << set)
+    }
+
+    pub fn iter(self) -> impl Iterator<Item = usize> {
+        (0..64).filter(move |&set| self.has(set))
+    }
+
     fn meets(self, other: TreeSets) -> bool {
-        (self.files && other.files) || (self.project && other.project)
+        self.0 & other.0 != 0
     }
 }
 
@@ -257,12 +267,7 @@ impl Phase {
     }
 
     pub fn per_file(&self) -> bool {
-        self.walks
-            == TreeSets {
-                files: true,
-                project: false,
-            }
-            && self.reads == TreeSets::default()
+        self.walks == TreeSets::only(self.input) && self.reads == TreeSets::default()
     }
 
     pub(super) fn passes(&self, rules: usize) -> impl Iterator<Item = &Pass> {

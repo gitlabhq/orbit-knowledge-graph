@@ -18,8 +18,8 @@ pub enum Kind {
     Effect,
 }
 
-/// The region every file the walk reads.
-pub const FILES: u32 = 2;
+/// Where region values for tree sets start.
+pub const SETS: u32 = 2;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Arg {
@@ -30,8 +30,11 @@ pub enum Arg {
     /// `from`, or a node edge attribute's name: 0, or the attribute's slot
     /// plus one, once the rules load.
     EdgeKey,
-    /// `owned(x)`, `under(x)` or `files`: x, then 0, 1 or `FILES`, once the rules load.
+    /// `owned(x)`, `under(x)`, or a tree set's name: x, then 0, 1, or
+    /// `SETS` plus the set, once the rules load.
     Region,
+    /// A tree set's name, its index once the rules load.
+    TreeSet,
     /// `'pattern' [by key]`: a declared index, its id once the rules load.
     Pattern,
     /// A row shape's name, a number once the rules load; the call's named
@@ -511,14 +514,10 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
             .map_or(&[], |g| g.by_attribute(slot, kind, at))
     }
 
-    /// How many files the run covers; file indexes are `0..files()`.
-    pub fn files(&self) -> u32 {
-        self.run.input.trees.files()
-    }
-
-    pub fn project(&self) -> Option<Cursor<'t, S>> {
+    /// The roots of the trees of set `set` the walk reads.
+    pub fn roots(&self, set: usize) -> impl Iterator<Item = Cursor<'t, S>> + use<'t, S, M> {
         let trees = self.run.input.trees;
-        trees.project_fi().map(|fi| Cursor::new(trees, fi, 0))
+        trees.range(set).map(move |fi| Cursor::new(trees, fi, 0))
     }
 
     pub fn state(&mut self) -> &mut M::State {
@@ -589,8 +588,8 @@ impl<'r, 't, M: Module, S: Store> Cx<'r, 't, M, S> {
     }
 
     /// A declared rule index's whole-tree matches across the family, by key.
-    pub fn family(&self, id: u32) -> Option<&'t FxHashMap<u32, Vec<Loc>>> {
-        Some(self.run.input.indexed?.family(id))
+    pub fn family(&self, set: usize, id: u32) -> Option<&'t FxHashMap<u32, Vec<Loc>>> {
+        Some(self.run.input.indexed?.family(set, id))
     }
 
     pub fn emitted(&self) -> usize {

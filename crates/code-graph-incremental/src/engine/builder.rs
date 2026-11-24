@@ -3,8 +3,8 @@
 //! between runs.
 
 use crate::engine::Registration;
-use crate::engine::lang::DataSpec;
 use crate::error::LoadError;
+use crate::frontend::project::SetFrontend;
 use crate::intern::Lang;
 use crate::sentinel::Limits;
 
@@ -12,8 +12,9 @@ pub struct Engine {
     /// The mounted frontends, the engine's own language first.
     pub frontends: Vec<Mounted>,
     pub lang: Lang,
-    /// The mounted project frontend, which builds the project tree.
-    pub project: Box<dyn crate::frontend::project::ProjectFrontend>,
+    /// Per tree set, the frontend that builds its trees; none for the set
+    /// input files parse into.
+    pub sets: Vec<Option<Box<dyn SetFrontend>>>,
     pub limits: Limits,
     pub pipeline: crate::engine::Pipeline,
 }
@@ -44,6 +45,7 @@ pub struct EngineBuilder {
         Option<&'static str>,
         bool,
     )>,
+    sets: Vec<(&'static str, Box<dyn SetFrontend>)>,
     pipeline: Option<PipelineSource>,
     modules: &'static [Registration],
     limits: Limits,
@@ -70,6 +72,12 @@ impl EngineBuilder {
         rules: Option<&'static str>,
     ) -> Self {
         self.frontends.push((frontend, rules, false));
+        self
+    }
+
+    /// Mounts the frontend that builds the trees of the whole tree set `set`.
+    pub fn set_frontend(mut self, set: &'static str, frontend: Box<dyn SetFrontend>) -> Self {
+        self.sets.push((set, frontend));
         self
     }
 
@@ -135,11 +143,31 @@ impl EngineBuilder {
             self.modules,
         )?;
         let reading = file_rules(&frontends);
-        let project = Box::new(project(&pipeline, &reading)?);
+        let mut sets: Vec<Option<Box<dyn SetFrontend>>> =
+            lang.tree_sets().iter().map(|_| None).collect();
+        for (name, mut frontend) in self.sets {
+            let set = lang
+                .tree_set(name)
+                .filter(|&set| !lang.tree_sets()[set].per_file)
+                .ok_or_else(|| LoadError(format!("{name} is not a whole tree set")))?;
+            frontend.load(&pipeline, &reading)?;
+            sets[set] = Some(frontend);
+        }
+        if let Some(missing) = lang
+            .tree_sets()
+            .iter()
+            .zip(&sets)
+            .find(|(s, f)| !s.per_file && f.is_none())
+        {
+            return Err(LoadError(format!(
+                "tree set {} has no frontend",
+                missing.0.name
+            )));
+        }
         Ok(Engine {
             frontends,
             pipeline,
-            project,
+            sets,
             lang,
             limits: self.limits,
         })
@@ -150,6 +178,7 @@ impl Engine {
     pub fn builder() -> EngineBuilder {
         EngineBuilder {
             frontends: Vec::new(),
+            sets: Vec::new(),
             pipeline: None,
             modules: crate::modules::ALL,
             limits: Limits::UNLIMITED,
@@ -174,6 +203,11 @@ impl Engine {
         self.frontends.iter().find(|m| m.frontend.is_named(name))
     }
 
+    /// Whether a set frontend reads the contents of the file at `path`.
+    pub fn set_reads(&self, path: &str) -> bool {
+        self.sets.iter().flatten().any(|f| f.reads(path))
+    }
+
     /// Whether a mounted frontend reads `path`.
     pub fn reads(&self, path: &str) -> bool {
         self.frontend_for(path).is_some()
@@ -196,43 +230,4 @@ fn file_rules(frontends: &[Mounted]) -> Vec<usize> {
     }
     rules.sort_unstable();
     rules
-}
-
-fn texts(spec: Option<&DataSpec>) -> Vec<&str> {
-    match spec {
-        Some(DataSpec::Str(s)) => vec![s.as_str()],
-        Some(DataSpec::List(items)) => items.iter().flat_map(|i| texts(Some(i))).collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// The project tree frontend, inlining the `parse_files` of every language
-/// whose files the engine reads.
-fn project(
-    pipeline: &crate::engine::Pipeline,
-    rule_sets: &[usize],
-) -> Result<crate::frontend::project::ProjectTree, LoadError> {
-    use crate::frontend::project::{ParseFile, ParseFormat, ProjectTree};
-    let mut project = ProjectTree::default();
-    for &index in rule_sets {
-        let Some(DataSpec::List(entries)) = pipeline.setting(index, "parse_files") else {
-            continue;
-        };
-        for entry in entries {
-            let fields = texts(Some(entry));
-            let (name, format) = match fields.as_slice() {
-                [name, "json"] => (*name, ParseFormat::Json),
-                [name, "toml"] => (*name, ParseFormat::Toml),
-                [name, "raw", extract] => (*name, ParseFormat::Raw(regex::Regex::new(extract)?)),
-                _ => return Err(LoadError(format!("parse_files entry {fields:?}"))),
-            };
-            if !project.parse_files.iter().any(|p| p.name == name) {
-                project.parse_files.push(ParseFile {
-                    name: name.to_string(),
-                    format,
-                });
-            }
-        }
-    }
-    Ok(project)
 }

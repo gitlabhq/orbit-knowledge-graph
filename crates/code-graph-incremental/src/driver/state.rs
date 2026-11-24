@@ -31,8 +31,9 @@ pub struct State {
     pub edges: Vec<Edge>,
     /// Manifest files (`parse_files`) the resolver reads for module roots.
     pub configs: Vec<SourceFile>,
-    /// Rebuilt by every run, so snapshots leave it out.
-    pub project: Option<Tree<Compact>>,
+    /// Per tree set, the trees of the last run's whole sets; rebuilt by every
+    /// run, so snapshots leave them out.
+    pub sets: Vec<Vec<Tree<Compact>>>,
 }
 
 impl State {
@@ -41,8 +42,20 @@ impl State {
             trees: Vec::new(),
             edges: Vec::new(),
             configs: Vec::new(),
-            project: None,
+            sets: Vec::new(),
         }
+    }
+
+    /// Every tree set's trees, in the pipeline's order: the files in the set
+    /// they parse into, and the last run's trees in the others.
+    pub fn parts(&self, input: usize) -> Vec<&[Tree<Compact>]> {
+        let count = self.sets.len().max(input + 1);
+        (0..count)
+            .map(|set| match set == input {
+                true => &self.trees[..],
+                false => self.sets.get(set).map_or(&[][..], Vec::as_slice),
+            })
+            .collect()
     }
 
     /// Adds a tree with its own edges, which name it as tree 0.
@@ -620,7 +633,7 @@ impl State {
             trees,
             edges,
             configs: shared.configs.into_iter().map(Into::into).collect(),
-            project: None,
+            sets: Vec::new(),
         };
         Ok((engine, state))
     }

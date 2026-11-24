@@ -7,13 +7,22 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::constants::PATH_SEP;
 use crate::driver::SourceFile;
+use crate::engine::Pipeline;
+use crate::engine::lang::DataSpec;
+use crate::error::LoadError;
 use crate::intern::Lang;
 use crate::tree::{Node, Tree};
 
-/// Turns a project's paths, and the files it reads, into one tree whose
-/// kinds are the pipeline's.
-pub trait ProjectFrontend: Send + Sync {
+/// Builds a whole tree set's tree from every input path and the files it
+/// reads, in the pipeline's kinds.
+pub trait SetFrontend: Send + Sync {
     fn name(&self) -> &str;
+
+    /// Reads the frontend's settings from the compiled pipeline, for the rule
+    /// sets of the frontends that read files.
+    fn load(&mut self, _pipeline: &Pipeline, _rule_sets: &[usize]) -> Result<(), LoadError> {
+        Ok(())
+    }
 
     /// Whether the frontend reads the contents of the file at `path`.
     fn reads(&self, path: &str) -> bool;
@@ -44,9 +53,35 @@ pub struct ProjectTree {
     pub parse_files: Vec<ParseFile>,
 }
 
-impl ProjectFrontend for ProjectTree {
+impl SetFrontend for ProjectTree {
     fn name(&self) -> &str {
         "project"
+    }
+
+    fn load(&mut self, pipeline: &Pipeline, rule_sets: &[usize]) -> Result<(), LoadError> {
+        for &index in rule_sets {
+            let Some(DataSpec::List(entries)) = pipeline.setting(index, "parse_files") else {
+                continue;
+            };
+            for entry in entries {
+                let fields = texts(Some(entry));
+                let (name, format) = match fields.as_slice() {
+                    [name, "json"] => (*name, ParseFormat::Json),
+                    [name, "toml"] => (*name, ParseFormat::Toml),
+                    [name, "raw", extract] => {
+                        (*name, ParseFormat::Raw(regex::Regex::new(extract)?))
+                    }
+                    _ => return Err(LoadError(format!("parse_files entry {fields:?}"))),
+                };
+                if !self.parse_files.iter().any(|p| p.name == name) {
+                    self.parse_files.push(ParseFile {
+                        name: name.to_string(),
+                        format,
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     fn reads(&self, path: &str) -> bool {
@@ -289,5 +324,13 @@ mod tests {
             .join()
             .unwrap();
         assert_eq!(nodes, 5_002);
+    }
+}
+
+fn texts(spec: Option<&DataSpec>) -> Vec<&str> {
+    match spec {
+        Some(DataSpec::Str(s)) => vec![s.as_str()],
+        Some(DataSpec::List(items)) => items.iter().flat_map(|i| texts(Some(i))).collect(),
+        _ => Vec::new(),
     }
 }

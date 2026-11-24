@@ -165,7 +165,7 @@ export:
         row(contains, $ROOT, source_id: $P, source_kind: "Directory", relationship_kind: "CONTAINS",
           target_id: $ROOT, target_kind: "Directory", traversal_path: "")
     - '(__source_file)': >-
-        row(contains, $ROOT, source_id: $ROOT | file_dir, source_kind: "Directory", relationship_kind: "CONTAINS",
+        row(contains, $ROOT, source_id: $ROOT | file_dir(project), source_kind: "Directory", relationship_kind: "CONTAINS",
           target_id: $ROOT, target_kind: "File", traversal_path: "")
     - '(__def)': >-
         row(contains, $ROOT, source_id: $ROOT | tree_root, source_kind: "File", relationship_kind: "DEFINES",
