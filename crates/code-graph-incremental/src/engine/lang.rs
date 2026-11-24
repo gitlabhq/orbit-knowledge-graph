@@ -97,6 +97,9 @@ pub struct Sources<'a> {
     pub rules: &'a [(&'a str, &'a str)],
     pub libs: &'a [(&'a str, &'a str)],
     pub langs: &'a [Option<&'a str>],
+    /// The rule files whose members read files; their union is the family's
+    /// rule file, last in `langs`, for trees that span the family.
+    pub family: &'a [usize],
 }
 
 #[derive(Debug)]
@@ -124,7 +127,38 @@ pub fn load(sources: &Sources) -> Result<RuleFiles, LoadError> {
             yaml.map(|yaml| loader.file(&format!("language file {at}"), yaml))
                 .transpose()
         })
-        .collect::<Result<_, _>>()?;
+        .collect::<Result<Vec<Option<LangFile>>, _>>()?;
+    let mut family = LangFile::default();
+    for file in sources.family.iter().filter_map(|&at| langs[at].as_ref()) {
+        let mut data = shared.data.clone();
+        data.extend(file.data.clone());
+        for (name, value) in &data {
+            match family.data.get_mut(name) {
+                Some(DataSpec::List(items)) => {
+                    if let DataSpec::List(more) = value {
+                        for item in more {
+                            if !items.contains(item) {
+                                items.push(item.clone());
+                            }
+                        }
+                    }
+                }
+                Some(_) => {}
+                None => {
+                    family.data.insert(name.clone(), value.clone());
+                }
+            }
+        }
+        for (phase, stages) in &file.phases {
+            family
+                .phases
+                .entry(phase.clone())
+                .or_default()
+                .extend(stages.iter().cloned());
+        }
+    }
+    let mut langs = langs;
+    langs.push(Some(family));
     Ok(RuleFiles { shared, langs })
 }
 

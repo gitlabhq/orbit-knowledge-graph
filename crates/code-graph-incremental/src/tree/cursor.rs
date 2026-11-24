@@ -39,6 +39,23 @@ impl<'a, S: Storage> Trees<'a, S> {
         }
     }
 
+    /// The set tree `fi` belongs to.
+    pub fn set_of(self, fi: u32) -> usize {
+        match self {
+            Trees::One(_) => 0,
+            Trees::Sets(sets, _) => {
+                let mut at = fi as usize;
+                for (set, trees) in sets.iter().enumerate() {
+                    if at < trees.len() {
+                        return set;
+                    }
+                    at -= trees.len();
+                }
+                panic!("file index {fi} names no tree")
+            }
+        }
+    }
+
     /// The file indexes of set `set`'s trees, if the walk reads it.
     pub fn range(self, set: usize) -> std::ops::Range<u32> {
         match self {

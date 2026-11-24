@@ -266,7 +266,7 @@ fn run_files(
         .map(|&fi| {
             let tree = trees.get(fi);
             let file = tree_budget(phase, engine, &tree.label);
-            let own = engine.rules_index(&tree.label);
+            let own = engine.rules_of(trees, fi);
             let regions = regions(tree, engine, own);
             let mut done = FileRun {
                 edges: Vec::new(),

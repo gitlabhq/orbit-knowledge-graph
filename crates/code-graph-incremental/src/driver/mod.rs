@@ -291,11 +291,10 @@ pub fn finish(
                     set: walked,
                     reads: phase.reads.0,
                 };
-                for rules in engine.file_rules() {
-                    let (edges, outputs) = stage.run(phase, around, Some(rules), engine, run)?;
-                    report.outputs.merge(outputs);
-                    state.edges.extend(edges.into_iter().map(|e| e.in_file(fi)));
-                }
+                let rules = Some(engine.family_rules);
+                let (edges, outputs) = stage.run(phase, around, rules, engine, run)?;
+                report.outputs.merge(outputs);
+                state.edges.extend(edges.into_iter().map(|e| e.in_file(fi)));
             }
             whole[walked] = Some(stage);
         } else {

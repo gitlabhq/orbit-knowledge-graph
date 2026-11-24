@@ -49,7 +49,7 @@ impl<'t, S: Store> Indexed<'t, S> {
                 let input = Input {
                     trees,
                     fi,
-                    rules: engine.rules_index(&trees.get(fi).label),
+                    rules: engine.rules_of(trees, fi),
                     graph: None,
                     indexed: None,
                     budget,

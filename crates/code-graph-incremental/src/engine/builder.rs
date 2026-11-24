@@ -15,6 +15,9 @@ pub struct Engine {
     /// Per tree set, the frontend that builds its trees; none for the set
     /// input files parse into.
     pub sets: Vec<Option<Box<dyn SetFrontend>>>,
+    /// The rule set of trees that span the family: every member's own rules,
+    /// then the shared ones, over the members' data together.
+    pub family_rules: usize,
     pub limits: Limits,
     pub pipeline: crate::engine::Pipeline,
 }
@@ -139,10 +142,11 @@ impl EngineBuilder {
                 rules: source.rules,
                 libs: source.libs,
                 langs: &langs,
+                family: &file_rules(&frontends),
             },
             self.modules,
         )?;
-        let reading = file_rules(&frontends);
+        let family_rules = langs.len();
         let mut sets: Vec<Option<Box<dyn SetFrontend>>> =
             lang.tree_sets().iter().map(|_| None).collect();
         for (name, mut frontend) in self.sets {
@@ -150,7 +154,7 @@ impl EngineBuilder {
                 .tree_set(name)
                 .filter(|&set| !lang.tree_sets()[set].per_file)
                 .ok_or_else(|| LoadError(format!("{name} is not a whole tree set")))?;
-            frontend.load(&pipeline, &reading)?;
+            frontend.load(&pipeline, family_rules)?;
             sets[set] = Some(frontend);
         }
         if let Some(missing) = lang
@@ -168,6 +172,7 @@ impl EngineBuilder {
             frontends,
             pipeline,
             sets,
+            family_rules,
             lang,
             limits: self.limits,
         })
@@ -193,11 +198,6 @@ impl Engine {
             .find(|m| m.reads_files && m.frontend.accepts(path))
     }
 
-    /// The rule sets of the frontends that read files, each once, in order.
-    pub fn file_rules(&self) -> Vec<usize> {
-        file_rules(&self.frontends)
-    }
-
     /// The mounted frontend `name` names, reading files or not.
     pub fn frontend_named(&self, name: &str) -> Option<&Mounted> {
         self.frontends.iter().find(|m| m.frontend.is_named(name))
@@ -218,6 +218,19 @@ impl Engine {
     /// index.
     pub fn rules_index(&self, path: &str) -> usize {
         self.frontend_for(path).unwrap_or(&self.frontends[0]).rules
+    }
+
+    /// The rules tree `fi` of `trees` runs: its file's, or the family's for a
+    /// tree of a whole set.
+    pub fn rules_of<S: crate::tree::Storage>(
+        &self,
+        trees: crate::tree::Trees<'_, S>,
+        fi: u32,
+    ) -> usize {
+        match trees.set_of(fi) == self.lang.input_set() {
+            true => self.rules_index(&trees.get(fi).label),
+            false => self.family_rules,
+        }
     }
 }
 

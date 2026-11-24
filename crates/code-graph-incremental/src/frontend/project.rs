@@ -18,9 +18,9 @@ use crate::tree::{Node, Tree};
 pub trait SetFrontend: Send + Sync {
     fn name(&self) -> &str;
 
-    /// Reads the frontend's settings from the compiled pipeline, for the rule
-    /// sets of the frontends that read files.
-    fn load(&mut self, _pipeline: &Pipeline, _rule_sets: &[usize]) -> Result<(), LoadError> {
+    /// Reads the frontend's settings from the compiled pipeline, under the
+    /// family's rules.
+    fn load(&mut self, _pipeline: &Pipeline, _rules: usize) -> Result<(), LoadError> {
         Ok(())
     }
 
@@ -58,11 +58,8 @@ impl SetFrontend for ProjectTree {
         "project"
     }
 
-    fn load(&mut self, pipeline: &Pipeline, rule_sets: &[usize]) -> Result<(), LoadError> {
-        for &index in rule_sets {
-            let Some(DataSpec::List(entries)) = pipeline.setting(index, "parse_files") else {
-                continue;
-            };
+    fn load(&mut self, pipeline: &Pipeline, rules: usize) -> Result<(), LoadError> {
+        if let Some(DataSpec::List(entries)) = pipeline.setting(rules, "parse_files") {
             for entry in entries {
                 let fields = texts(Some(entry));
                 let (name, format) = match fields.as_slice() {
