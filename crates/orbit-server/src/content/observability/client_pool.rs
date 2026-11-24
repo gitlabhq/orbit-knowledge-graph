@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
-use orbit_server_config::{ClickHouseConfiguration, ProfilingConfig};
+use orbit_server_config::{AppConfig, ClickHouseConfiguration, ProfilingConfig};
 
 use super::host_map::TenantRoute;
 
@@ -90,6 +90,7 @@ impl TenantClientPool {
             password: Some(route.password.clone()),
             session_settings: HashMap::new(),
             replicated: false,
+            compatibility: AppConfig::embedded_defaults().graph.compatibility,
             insert_settings: HashMap::new(),
             profiling: ProfilingConfig {
                 enabled: false,
