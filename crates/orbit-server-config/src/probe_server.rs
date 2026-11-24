@@ -1,12 +1,10 @@
 use std::net::SocketAddr;
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PROBE_SERVER_PORT: u16 = 9394;
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProbeServerConfig {
     pub bind_address: Option<SocketAddr>,
 }

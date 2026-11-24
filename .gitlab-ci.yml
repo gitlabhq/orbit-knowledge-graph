@@ -413,16 +413,6 @@ xtask-build:
     - .xtask-check
     - .job-template
 
-generate-config-schema:
-  extends: .xtask-check
-  script:
-    - $XTASK schema -o config/schemas/config.schema.json
-    - git diff --exit-code config/schemas/config.schema.json || (echo "config/schemas/config.schema.json is out of date. Run 'mise schema:generate' and commit." && exit 1)
-  artifacts:
-    paths:
-      - config/schemas/config.schema.json
-    expire_in: 24 hours
-
 generate-config-proto:
   extends: .xtask-check-with-tools
   script:
