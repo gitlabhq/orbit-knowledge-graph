@@ -255,10 +255,13 @@ define:
   other_parts(ROOT): >-
     minus(union(select(under(file($ROOT)), '(__def $N:__defname)', $ROOT | child("__defname")),
     select(files, '(__def $N:__defname)', $ROOT | child("__defname"))), $ROOT)
-    | impl_pair($ROOT)
+    | impl_pair($ROOT) | same_arity($ROOT)
   impl_pair(ROOT, owner):
     '(__def (__impl))': '$ROOT'
     '_ when owner | is_impl': '$ROOT'
+  same_arity(ROOT, site):
+    '(__def) when ne($ROOT | tag("arity"), site | tag("arity"))': none
+    '_': '$ROOT'
   is_impl(ROOT):
     '(__def (__impl))': '$ROOT'
   supers(ROOT): 'union(supertypes($ROOT) | is_def, follow($ROOT, extends, from))'
@@ -383,7 +386,8 @@ define:
   class_in(name, at): >-
     first(enclose(at), s => select(owned(s), '(__def $N:__defname)', name) | is_class)
   target_of(ROOT): 'declared_in(@ROOT, ROOT) or $ROOT | follow(imports, from)'
-  resolved(ROOT):
+  resolved(ROOT): 'same_arity(resolved_name($ROOT), $ROOT) or resolved_name($ROOT)'
+  resolved_name(ROOT):
     '$D:(__def $ROOT:__supertype)': 'class_in(@ROOT, $D) or visible(@ROOT, $D)'
     '$D:(__def (__binding #outer (__rhs (__call $ROOT:__callee))))': 'class_in(@ROOT, $D) or visible(@ROOT, $D)'
     '(__call (__type) $ROOT)': 'declared_in(@ROOT, ROOT) | is_class or imported_name(@ROOT, ROOT) or visible(@ROOT, ROOT)'
