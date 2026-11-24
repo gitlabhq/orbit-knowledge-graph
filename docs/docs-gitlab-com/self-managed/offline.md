@@ -25,6 +25,7 @@ Prerequisites:
 - A host that can reach your registry, `registry.gitlab.com`, and `gitlab.com`.
   With `splitTables.volumeMode: initCopy` in the Siphon chart, the host must also reach `gcr.io` and `docker.io`.
 - [Helm](https://helm.sh/docs/intro/install/) 3 or later and [skopeo](https://github.com/containers/skopeo/blob/main/install.md).
+- A registry that serves HTTPS.
 
 To mirror the images and charts:
 
@@ -169,7 +170,7 @@ It does not include hosts that GitLab connects to.
 | Host | Used for | Offline |
 |------|----------|---------|
 | `registry.gitlab.com` | Images and the GitLab Orbit chart | Use a mirror. |
-| `gitlab.com` | Siphon chart, and the `orbit` binary download | Copy the files in. |
+| `gitlab.com` | Siphon chart, the `orbit` binary download, and the `glab` update check | Copy the files in. Set `GLAB_CHECK_UPDATE=false`. |
 | `gcr.io`, `docker.io` | `crane` and `busybox`, with `initCopy` only | Use a mirror. |
 | `tuf-repo-cdn.sigstore.dev` | `cosign verify` | Use `--trusted-root`. |
 | `customers.gitlab.com`, `billing.prdsub.gitlab.net` | Credits check and usage, from the webserver | Used only with an online cloud license. |
@@ -185,7 +186,13 @@ The instance has no active GitLab Orbit add-on.
 
 To resolve this issue, confirm that the license file has an unexpired add-on, then add the license again.
 
-### `cosign verify` fails on `tuf-repo-cdn.sigstore.dev`
+### Error: `setting trusted material: getting trusted root from TUF`
 
-Add `--trusted-root trusted_root.json` to the command.
+When `cosign verify` cannot reach `tuf-repo-cdn.sigstore.dev`, it prints:
+
+```plaintext
+Error: setting trusted material: getting trusted root from TUF for new bundle verification: error getting live trusted root: failed to create TUF client failed to load metadata: tuf refresh failed: Get "https://tuf-repo-cdn.sigstore.dev/15.root.json": <network_error>
+```
+
+To resolve this issue, add `--trusted-root trusted_root.json` to the command.
 The deprecated `--offline` flag does not prevent the connection.

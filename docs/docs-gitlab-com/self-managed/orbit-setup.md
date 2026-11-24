@@ -228,7 +228,7 @@ The Helm chart configures billing by default.
 If the instance has an online cloud license, allow outbound HTTPS from the webserver to `customers.gitlab.com` and `billing.prdsub.gitlab.net`.
 For more information, see [Billing connections](networking.md#billing-connections).
 
-When your subscription has no GitLab Credits available, queries fail with the [`GitLab credits exhausted`](../troubleshooting.md#error-gitlab-credits-exhausted) error.
+With an online cloud license, when your subscription has no GitLab Credits available, queries fail with the [`GitLab credits exhausted`](../troubleshooting.md#error-gitlab-credits-exhausted) error.
 
 ## Turn on indexing for a group
 
