@@ -18,7 +18,6 @@ data:
     pow, random, rint, round, scalb, signum, sin, sinh, sqrt, tan, tanh, toDegrees, toRadians, ulp]
   - [java/util/Objects, checkFromIndexSize, checkFromToIndex, checkIndex, compare, deepEquals, equals,
     hash, hashCode, isNull, nonNull, requireNonNull, requireNonNullElse, requireNonNullElseGet, toString]
-  lookup_from: [__source_root]
   record_overrides: [hashCode, toString]
   interface_lists: [super_interfaces, extends_interfaces]
   loops: [for_statement, while_statement, do_statement]

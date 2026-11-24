@@ -22,7 +22,6 @@ data:
   - [kotlin/sequences, '%sequences_symbols']
   - [kotlin/math, abs, acos, acosh, asin, asinh, atan, atan2, atanh, cbrt, ceil, cos, cosh, exp, expm1,
     floor, hypot, ln, ln1p, log, log10, log2, max, min, round, sign, sin, sinh, sqrt, tan, tanh, truncate]
-  lookup_from: [__source_root]
   params: [class_parameter, parameter]
   loops: [for_statement, while_statement, do_while_statement]
 

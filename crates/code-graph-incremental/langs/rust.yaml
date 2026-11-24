@@ -17,7 +17,6 @@ data:
   - [core/mem, '%mem_symbols']
   - [std/cmp, max, max_by, max_by_key, min, min_by, min_by_key]
   - [std/iter, empty, from_fn, once, once_with, repeat, repeat_n, repeat_with, successors, zip]
-  lookup_from: [__source_root, __crate_root]
   parse_files:
   - [Cargo.toml, toml]
   diverging_macros: [panic, unreachable, todo, unimplemented]

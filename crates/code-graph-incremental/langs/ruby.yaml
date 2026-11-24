@@ -19,7 +19,6 @@ data:
   - [kernel, '%builtins']
   - [pp, pp, pretty_inspect]
   frameworks: [rails]
-  lookup_from: [__source_root]
   module_hooks: [included, prepended]
   class_attributes: [class_attribute, mattr_accessor, mattr_reader, mattr_writer, cattr_accessor, cattr_reader,
     cattr_writer]

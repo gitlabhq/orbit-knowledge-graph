@@ -28,7 +28,6 @@ data:
   - ['node:util', '%util_symbols']
   - [fs, '%fs_symbols']
   - ['node:fs', '%fs_symbols']
-  lookup_from: [__source_root]
   parse_files:
   - [tsconfig.json, json]
   - [jsconfig.json, json]
@@ -175,22 +174,24 @@ canonicalize:
       - '(__import_type (__source_path "^."))': '#resolved_source=$ROOT | tag_up("file_dir") | concat("/", $ROOT | child("__source_path")) | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1") | regex_replace("/$", "") | regex_replace("^/", "")'
 
 project:
-  - stage: config
+  - stage: manifests
     rewrite:
+      - '(__file "/^(ts|js)config\.json$/" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" $V:__str)))))': '#paths_base=$ROOT | tree_dir | join_path(@$V)'
+      - '(__file "/^(ts|js)config\.json$/" !(__obj (__field "compilerOptions" (__obj (__field "baseUrl")))))': '#paths_base=$ROOT | tree_dir'
+      - '(__file "package.json" (__obj (__field "name" $N:__str)))': '#package=@$N'
+      - '(__file "package.json" !(__obj (__field "name"))) when tree_path($ROOT) | regex_match("(^|/)node_modules/")': '#package=$ROOT | tree_path | regex_replace("^(.*/)?node_modules/", "") | regex_replace("/package\.json$", "")'
+      - '(__file "webpack.config.js" $$$F:__field)': '(__file "webpack.config.js" $$$F->webpack_alias)'
       - '(__field "paths" (__obj $$$E:__field))': '(__field "paths" (__obj $$$E->path_alias))'
-      - '(__file "webpack.config.js" $$$F:__field)': '(__file "webpack.config.js" $$$F->__alias)'
-      - '(__file "/^(ts|js)config\.json$/" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" $V:__str) $$$REST))) $$$OUTER)': '(__file @$ROOT (__source_root @$V | strip("./") $V (__scope "bare_import")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
   - stage: aliases
     rewrite:
-      - '(__alias $V:__str)': '(__alias @$ROOT (__str @$ROOT | tree_path | regex_replace("(^|/)webpack\.config\.js/.*$", "") | concat("/", $ROOT | child("__str")) | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1") | regex_replace("^/", "")))'
-      - '(path_alias (__arr $V:__str $$$REST))': '(__alias @$ROOT (__str @$V | strip("./") $V))'
-  - stage: packages
+      - '(path_alias (__arr $$$T:__str))': '(path_alias @$ROOT $$$T=>path_target)'
+      - '(__file #paths_base (__obj (__field "compilerOptions" (__obj (__field "baseUrl")))))': '+ (__alias "*" (__str @$ROOT | tag("paths_base") | join_path("*")) (__scope "bare_import"))'
+      - '(__file #package (__obj (__field "main" $M:__str))) when join_inside(tree_dir($ROOT), @$M)': '+ (__alias @$ROOT | tag("package") (__str @$ROOT | tree_dir | join_inside(@$M)))'
+  - stage: targets
     rewrite:
-      - '(__dir (__file "package.json" (__obj (__field "main" $M:__str))))': '+ (__source_path @$M)'
-      - '(__dir (__file "package.json"))': '+ (__package_root)'
-  - stage: package-entrypoints
-    rewrite:
-      - '(__source_path)': '(__source_path @$ROOT | tree_path | regex_replace("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1"))'
+      - '(path_target)': '(__alias @$ROOT | parent (__str @$ROOT | tag_up("paths_base") | join_path(@$ROOT)))'
+      - '(webpack_alias $V:__str)': '(__alias @$ROOT (__str @$ROOT | parent | tree_dir | join_path(@$V)))'
+      - '(__file #package)': '+ (__alias @$ROOT | tag("package") (__str @$ROOT | tree_dir)) + (__alias @$ROOT | tag("package") | concat("/", "*") (__str @$ROOT | tree_dir | join_path("*")))'
   - stage: index_dirs
     rewrite:
       - '(__dir (__file "index.ts"))': '+ (__source_root)'

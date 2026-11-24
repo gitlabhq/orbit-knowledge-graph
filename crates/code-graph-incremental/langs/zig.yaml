@@ -13,7 +13,6 @@ data:
     '@mod', '@mulAdd', '@mulWithOverflow', '@reduce', '@rem', '@round', '@select', '@shlExact', '@shlWithOverflow',
     '@shrExact', '@shuffle', '@sin', '@splat', '@sqrt', '@subWithOverflow', '@tan', '@trunc']
   external: [std, builtin]
-  lookup_from: [__source_root]
   branches: [if_expression, switch_expression]
   loops: [while_statement, for_statement]
 

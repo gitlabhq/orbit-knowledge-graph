@@ -16,11 +16,20 @@ define:
   up_child(ROOT, KIND):
     '(_ $C:(KIND "/(?s)./"))': '$C'
     '$P:(_ $ROOT)': 'up_child($P, KIND)'
+  parent(ROOT):
+    '$P:(_ $ROOT)': '$P'
   tag_up(ROOT, key):
     '$P:(_ $ROOT)': '$P | tag(key) or tag_up($P, key)'
   tree_path(ROOT):
     '(__root $ROOT)': '$ROOT'
     '$P:(_ $ROOT)': 'concat(tree_path($P), "/", $ROOT)'
+  join_path(base, rel): >-
+    concat(base, "/", rel) | regex_loop("(^|/)\./", "$1") | regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1")
+    | regex_replace("/$", "") | regex_replace("^/", "")
+  join_inside(base, rel):
+    '_ when join_path("", rel) | regex_match("^\.\.(/|$)")': none
+    '_': 'join_path(base, rel)'
+  tree_dir(ROOT): 'tree_path($ROOT) | regex_replace("^([^/]*)$", "./$1") | regex_replace("/[^/]*$", "")'
   inherited_tag(ROOT, key): '$ROOT | tag(key) or $ROOT | tag_up(key)'
   name(ROOT): 'minus(read($ROOT), opaque)'
   ivar(ROOT): "first(select(under(scope(ROOT) | class), '(__binding $I:__ivar)', $ROOT), b => typed_field(b)) | producer"
