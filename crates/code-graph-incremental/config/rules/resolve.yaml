@@ -4,16 +4,16 @@ data:
 define:
   file_at(path):
     '_ when path | regex_match("(^|/)[*]$")': >-
-      select_project('(__source_file)' by $ROOT | regex_replace("/?[^/]*$", ""), path | regex_replace("/?[*]$", ""))
-      or select_project('(__source_file $P:__package)' by package_path($P), path | regex_replace("/?[*]$", ""))
+      select(files, '(__source_file)' by $ROOT | regex_replace("/?[^/]*$", ""), path | regex_replace("/?[*]$", ""))
+      or select(files, '(__source_file $P:__package)' by package_path($P), path | regex_replace("/?[*]$", ""))
     '_': >-
-      select_project('(__source_file)' by $ROOT | stem, path)
-      or select_project('(__source_file)' by $ROOT | collapse_index(%index_files), path)
-      or file(select_project('(__source_file $P:__package (__def $ROOT:__defname))' by package_path($P) | concat("/", $ROOT), path))
-      or file(select_project('(__source_file (__def $ROOT:__defname))' by package_path($ROOT), path))
+      select(files, '(__source_file)' by $ROOT | stem, path)
+      or select(files, '(__source_file)' by $ROOT | collapse_index(%index_files), path)
+      or file(select(files, '(__source_file $P:__package (__def $ROOT:__defname))' by package_path($P) | concat("/", $ROOT), path))
+      or file(select(files, '(__source_file (__def $ROOT:__defname))' by package_path($ROOT), path))
   package_path(ROOT): '$ROOT | regex_replace("[.]|::|[\\\\]", "/")'
   roots(at): >-
-    select(project(), under, '(__dir $D:__source_root)') | tree_path("/")
+    select(under(project()), '(__dir $D:__source_root)') | tree_path("/")
   files(path): 'first(%search, place => locate(place, path))'
   locate(place, path):
     '_ when in(place, "external")': 'outside(path, %external)'
@@ -23,19 +23,19 @@ define:
     '_ when in(path | split_first("/"), names)': 'opaque'
   modules(ROOT): 'aliased($ROOT) or files($ROOT | tag("resolved_source"))'
   aliased(ROOT): >-
-    first(select(project(), under, '(__alias)') | longest_first, a => alias_files(a, $ROOT))
+    first(select(under(project()), '(__alias)') | longest_first, a => alias_files(a, $ROOT))
   alias_files(ROOT, imp):
     '(__alias $S:__scope) when eq($S, $imp | tag("alias_scope"))': 'files($imp | child_sym("__source_path") | map_prefix($ROOT, $ROOT | child_sym("__str")))'
     '(__alias !(__scope))': 'files($imp | child_sym("__source_path") | map_prefix($ROOT, $ROOT | child_sym("__str")))'
   submodule(ROOT, N): 'files($ROOT | tag("resolved_source") | concat("/", @$N))'
   exported(module, name): >-
-    select(module, owned, '(__def $N:__defname)', name)
-    or select(module, under, '(__def $N:__defname)', name)
-    or select(module, owned, '(__def $N:__default_export)', name)
-    or select(module, owned, '(__module_export (__default_export))' by $ROOT | child_sym("__default_export"), name) | target_of
-    or select(module, under, '(__def #exports)' by $ROOT | tag("exports"), name)
-    or select(module, owned, '(%import_kinds $ROOT:__name)' by local_name($ROOT), name) | reexported(name) | is_def
-    or select(module, owned, '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def
+    select(owned(module), '(__def $N:__defname)', name)
+    or select(under(module), '(__def $N:__defname)', name)
+    or select(owned(module), '(__def $N:__default_export)', name)
+    or select(owned(module), '(__module_export (__default_export))' by $ROOT | child_sym("__default_export"), name) | target_of
+    or select(under(module), '(__def #exports)' by $ROOT | tag("exports"), name)
+    or select(owned(module), '(%import_kinds $ROOT:__name)' by local_name($ROOT), name) | reexported(name) | is_def
+    or select(owned(module), '(%import_kinds $ROOT:__name)' by $ROOT | written, "*") | reexported(name) | is_def
   offered(module, name): 'exported(module, name) or module'
   written(ROOT):
     '(_ (__ssa_hint "*"))': '"*"'
@@ -47,8 +47,8 @@ define:
     '(__call)': '$ROOT | follow(calls, site) | returned or $ROOT | type'
     '(__binding $R:__rhs)': '$R | tail | producing or $ROOT | type'
     '_': '$ROOT | type'
-  linked_file(ROOT): "select_project('(__source_file)' by $ROOT, @ROOT)"
-  linked_section(ROOT, anchor): "select(linked_file($ROOT), under, '(__def $N:__anchor)', @anchor)"
+  linked_file(ROOT): "select(files, '(__source_file)' by $ROOT, @ROOT)"
+  linked_section(ROOT, anchor): "select(under(linked_file($ROOT)), '(__def $N:__anchor)', @anchor)"
   returned(ROOT):
     '_ when $ROOT | returns | is_class': '$ROOT | returns'
     '_': 'visible($ROOT | returns, $ROOT)'

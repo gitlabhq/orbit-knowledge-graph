@@ -1,7 +1,7 @@
 define:
   inherited_tag(ROOT, key): '$ROOT | tag(key) or $ROOT | ancestor_tag(key)'
   name(ROOT): 'minus(read($ROOT), opaque)'
-  ivar(ROOT): "first(select(scope(ROOT) | class, under, '(__binding $I:__ivar)', $ROOT), b => typed_field(b)) | producer"
+  ivar(ROOT): "first(select(under(scope(ROOT) | class), '(__binding $I:__ivar)', $ROOT), b => typed_field(b)) | producer"
   typed_field(ROOT):
     '_ when typed($ROOT)': '$ROOT'
   resolution(ROOT, site):
@@ -34,7 +34,7 @@ define:
   return_ref(ROOT, def):
     '(__call $C:(__callee "/./"))': '$C'
     '(__call)': none
-    '_': "last(select(def, under, '(__binding)' by $ROOT, $ROOT) | rhs_callee) or $ROOT"
+    '_': "last(select(under(def), '(__binding)' by $ROOT, $ROOT) | rhs_callee) or $ROOT"
   value(ROOT):
     '(%opaque_nodes)': 'opaque'
     '(__call)': '$ROOT'
@@ -200,8 +200,8 @@ define:
     or other_parts(owner) | declared(name, role)
     or union(owner, other_parts(owner)) | supers | members(name, role)
   other_parts(ROOT): >-
-    minus(union(select(file($ROOT), under, '(__def $N:__defname)', $ROOT | child_sym("__defname")),
-    select_project('(__def $N:__defname)', $ROOT | child_sym("__defname"))), $ROOT)
+    minus(union(select(under(file($ROOT)), '(__def $N:__defname)', $ROOT | child_sym("__defname")),
+    select(files, '(__def $N:__defname)', $ROOT | child_sym("__defname"))), $ROOT)
     | impl_pair($ROOT)
   impl_pair(ROOT, owner):
     '(__def (__impl))': '$ROOT'
@@ -212,7 +212,7 @@ define:
   declared(owner, name, role): >-
     first(member_defs(owner, name) | fills(role), d => single_role(d))
     or first(member_defs(owner, name) | fills(role), d => d)
-  member_defs(owner, name): "select(owner, under, '(__def $N:__defname)', name) | belongs(owner)"
+  member_defs(owner, name): "select(under(owner), '(__def $N:__defname)', name) | belongs(owner)"
   belongs(ROOT, owner):
     '_ when reaches(boundary($ROOT), owner)': '$ROOT'
     '(__def (__binding (__ivar))) when hop(boundary($ROOT), owner)': '$ROOT'
@@ -314,11 +314,11 @@ define:
 
   visible(name, at): 'declared_in(name, at) or imported_name(name, at)'
   imported_name(name, at): >-
-    select(file(at), under, '(__import $ROOT:__name)' by local_name($ROOT), name) | target_of
-    or select(file(at), under, '(__import $ROOT:__name)' by $ROOT | written, "*") | follow(imports, from) | exported(name)
+    select(under(file(at)), '(__import $ROOT:__name)' by local_name($ROOT), name) | target_of
+    or select(under(file(at)), '(__import $ROOT:__name)' by $ROOT | written, "*") | follow(imports, from) | exported(name)
   local_name(ROOT): 'default($ROOT | child_sym("__alias"), default($ROOT | child_sym("__ssa_hint"), $ROOT))'
   declared_in(name, at): >-
-    first(enclose(at), s => select(s, owned, '(__def $N:__defname)', name))
+    first(enclose(at), s => select(owned(s), '(__def $N:__defname)', name))
   target_of(ROOT): 'declared_in(@ROOT, ROOT) or $ROOT | follow(imports, from)'
   resolved(ROOT):
     '(__call (__type) $ROOT)': 'declared_in(@ROOT, ROOT) | is_class or imported_name(@ROOT, ROOT) or visible(@ROOT, ROOT)'

@@ -58,18 +58,19 @@ impl Expr {
         }
     }
 
-    /// Every module function and YAML function this expression calls.
-    pub fn calls(&self, f: &mut dyn FnMut(Result<FnId, u16>)) {
-        let each = |parts: &[Expr], f: &mut dyn FnMut(Result<FnId, u16>)| {
+    /// Every module function and YAML function this expression calls, with
+    /// the call's arguments.
+    pub fn calls<'a>(&'a self, f: &mut dyn FnMut(Result<FnId, u16>, &'a [Expr])) {
+        let each = |parts: &'a [Expr], f: &mut dyn FnMut(Result<FnId, u16>, &'a [Expr])| {
             parts.iter().for_each(|p| p.calls(f))
         };
         match self {
             Expr::Call(id, args) => {
-                f(Ok(*id));
+                f(Ok(*id), args);
                 each(args, f);
             }
             Expr::Def(def, args) => {
-                f(Err(*def));
+                f(Err(*def), args);
                 each(args, f);
             }
             Expr::Union(parts) => each(parts, f),
@@ -296,12 +297,13 @@ impl<'s> Parser<'s, '_> {
         }
         let mut args = self.typed_args(f.sig, piped)?;
         let rest = f.sig.last() == Some(&Arg::Rest);
-        if f.sig.last() == Some(&Arg::Set) && args.len() > f.sig.len() {
-            let more = args.split_off(f.sig.len() - 1);
+        let arity = f.sig.len() + f.sig.iter().filter(|&&a| a == Arg::Region).count();
+        if f.sig.last() == Some(&Arg::Set) && args.len() > arity {
+            let more = args.split_off(arity - 1);
             args.push(Expr::Union(more.into()));
         }
-        if args.len() != f.sig.len() && !(rest && args.len() >= f.sig.len() - 1) {
-            return Err(self.error(&format!("{module}.{name} takes {} arguments", f.sig.len())));
+        if args.len() != arity && !(rest && args.len() >= arity - 1) {
+            return Err(self.error(&format!("{module}.{name} takes {} arguments", arity)));
         }
         Ok(Expr::Call(id, args.into()))
     }
@@ -314,6 +316,7 @@ impl<'s> Parser<'s, '_> {
     fn typed_args(&mut self, sig: &[Arg], piped: Option<Expr>) -> Result<Vec<Expr>, LoadError> {
         let mut args: Vec<Expr> = piped.into_iter().collect();
         let mut named: Option<(Vec<String>, Vec<Option<Expr>>)> = None;
+        let mut regions = 0;
         if !self.eat("(") || self.eat(")") {
             return Ok(args);
         }
@@ -331,7 +334,7 @@ impl<'s> Parser<'s, '_> {
                 }
                 _ => {
                     self.at = back;
-                    match sig[args.len().min(sig.len().saturating_sub(1))] {
+                    match sig[(args.len() - regions).min(sig.len().saturating_sub(1))] {
                         Arg::Edge => {
                             self.space();
                             let name = self.ident();
@@ -345,13 +348,30 @@ impl<'s> Parser<'s, '_> {
                         Arg::Region => {
                             self.space();
                             let name = self.ident();
-                            let region = ["owned", "under"]
+                            let region = ["owned", "under", "files"]
                                 .iter()
                                 .position(|&r| r == name)
                                 .ok_or_else(|| {
-                                    self.error(&format!("{name} is not owned or under"))
+                                    self.error(&format!(
+                                        "{name} is not owned(x), under(x) or files"
+                                    ))
                                 })?;
+                            let of = match name {
+                                "files" => Expr::Empty,
+                                _ => {
+                                    let of = match self.eat("(") {
+                                        true => self.expr()?,
+                                        false => return Err(self.error(&format!("{name}(x)"))),
+                                    };
+                                    if !self.eat(")") {
+                                        return Err(self.error("expected )"));
+                                    }
+                                    of
+                                }
+                            };
+                            args.push(of);
                             args.push(Expr::Lit(Val::Sym(region as u32)));
+                            regions += 1;
                         }
                         Arg::EdgeKey => {
                             self.space();

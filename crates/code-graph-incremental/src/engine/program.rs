@@ -112,7 +112,7 @@ impl Cases {
         !self.by_kind.get(&kind).unwrap_or(&self.any).is_empty()
     }
 
-    pub(super) fn calls(&self, f: &mut dyn FnMut(Result<FnId, u16>)) {
+    pub(super) fn calls<'a>(&'a self, f: &mut dyn FnMut(Result<FnId, u16>, &'a [Expr])) {
         for (_, guard, value) in &self.items {
             if let Some(g) = guard {
                 g.calls(f);
@@ -171,7 +171,7 @@ impl Def {
         key
     }
 
-    pub(super) fn calls(&self, f: &mut dyn FnMut(Result<FnId, u16>)) {
+    pub(super) fn calls<'a>(&'a self, f: &mut dyn FnMut(Result<FnId, u16>, &'a [Expr])) {
         match &self.body {
             DefImpl::Expr(e) => e.calls(f),
             DefImpl::Cases(cases) => cases.calls(f),

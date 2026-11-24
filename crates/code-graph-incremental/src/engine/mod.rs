@@ -17,8 +17,8 @@ use crate::tree::{Compact, Mutable, Node, Storage};
 pub use builder::{Engine, EngineBuilder, Mounted, PipelineSource};
 pub use graph::Graph;
 pub use host::{
-    Arg, Backend, Call, Calls, Cx, Derive, Entry, FnId, Function, Hooks, KeyPart, Kind, Links,
-    Module, Outputs, Registration, Registry, register, register_backend,
+    Arg, Backend, Call, Calls, Cx, Derive, Entry, FILES, FnId, Function, Hooks, KeyPart, Kind,
+    Links, Module, Outputs, Registration, Registry, register, register_backend,
 };
 pub use program::{Def, Part, Phase, Pipeline, RowShape};
 pub use run::{Indexed, Run, WHOLE, Write};

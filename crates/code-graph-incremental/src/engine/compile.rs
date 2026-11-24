@@ -459,7 +459,7 @@ fn def_deps(defs: &[Def], links: &super::Links) -> Vec<u64> {
         .iter()
         .map(|def| {
             let mut used = Vec::new();
-            def.calls(&mut |c| used.push(c));
+            def.calls(&mut |c, _| used.push(c));
             used
         })
         .collect();
@@ -588,35 +588,45 @@ fn modules_reached(
     passes: &[Pass],
     defs: &[Def],
 ) -> Vec<u8> {
-    let mut calls: Vec<Result<FnId, u16>> = Vec::new();
+    let mut used: Vec<u8> = Vec::new();
+    reached(links, passes, defs, &mut |id, _| {
+        let slot = registry.function(id).slot;
+        if !used.contains(&slot) {
+            used.push(slot);
+        }
+    });
+    used.sort_unstable();
+    used
+}
+
+/// Every module function call a phase's passes can reach, through bound
+/// functions and definitions, with its arguments.
+fn reached<'a>(
+    links: &super::Links,
+    passes: &'a [Pass],
+    defs: &'a [Def],
+    f: &mut dyn FnMut(FnId, &'a [Expr]),
+) {
+    let mut calls: Vec<(Result<FnId, u16>, &'a [Expr])> = Vec::new();
     for pass in passes {
-        pass.cases.calls(&mut |c| calls.push(c));
+        pass.cases.calls(&mut |c, args| calls.push((c, args)));
     }
     let mut seen = vec![false; defs.len()];
-    let mut used: Vec<u8> = Vec::new();
-    while let Some(c) = calls.pop() {
+    while let Some((c, args)) = calls.pop() {
         match c {
-            Ok(id) => {
-                if let Some(def) = links.def_of(id) {
-                    calls.push(Err(def));
-                    continue;
-                }
-                let slot = registry.function(links.to(id)).slot;
-                if !used.contains(&slot) {
-                    used.push(slot);
-                }
-            }
+            Ok(id) => match links.def_of(id) {
+                Some(def) => calls.push((Err(def), args)),
+                None => f(links.to(id), args),
+            },
             Err(def) => {
                 let def = usize::from(def);
                 if def < defs.len() && !seen[def] {
                     seen[def] = true;
-                    defs[def].calls(&mut |c| calls.push(c));
+                    defs[def].calls(&mut |c, args| calls.push((c, args)));
                 }
             }
         }
     }
-    used.sort_unstable();
-    used
 }
 
 /// Every module a phase calls has its required functions bound.

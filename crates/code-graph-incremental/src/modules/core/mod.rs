@@ -2,7 +2,7 @@
 //! and declared indexes, and the writes a rule makes. Literal arguments
 //! (edge kinds, index, row shape and template ids) arrive as numbers.
 
-use crate::engine::{Cx, Function, Loc, Module, Store, Val, Vals, WHOLE, Write, one};
+use crate::engine::{Cx, FILES, Function, Loc, Module, Store, Val, Vals, WHOLE, Write, one};
 use crate::modules::function;
 use crate::tree::{Edge, EdgeKind};
 
@@ -82,24 +82,9 @@ static FUNCTIONS: &[Function<Core>] = &[
         }
         out
     }),
-    function!(Inline, "select", [set, region, pattern, set], |cx, a| {
-        select(cx, a)
-    }),
-    function!(Inline, "select_project", [pattern, set], |cx, a| {
-        let id = number(&a[0]);
-        let mut out = Vals::new();
-        for key in a[1].iter().filter_map(|&k| cx.text(k)) {
-            for &found in cx
-                .family(id)
-                .and_then(|f| f.get(&key))
-                .into_iter()
-                .flatten()
-            {
-                push(&mut out, Val::Node(found));
-            }
-        }
-        out
-    }),
+    function!(Inline, "select", [region, pattern, set], |cx, a| select(
+        cx, a
+    )),
     function!(Effect, "edge", [edge, set, set, rest], |cx, a| {
         let kind = edge_kind(&a[0]);
         let attrs: Vec<(usize, u32)> = cx
@@ -169,14 +154,26 @@ static FUNCTIONS: &[Function<Core>] = &[
 
 /// Matches of a declared index under each node of the first set, by each
 /// key of the third: in the node's own scope, or anywhere under it.
-/// The matches of index `a[2]` for keys `a[3]`, owned by a node of `a[0]` or
-/// under it, as region `a[1]` says.
+/// The matches of index `a[2]` for keys `a[3]`: owned by a node of `a[0]`,
+/// under one, or in any file the walk reads, as region `a[1]` says.
 fn select<S: Store>(cx: &mut Cx<'_, '_, Core, S>, a: &[Vals]) -> Vals {
-    let under = number(&a[1]) == 1;
-    let id = number(&a[2]);
+    let (region, id) = (number(&a[1]), number(&a[2]));
     let mut out = Vals::new();
+    if region == FILES {
+        for key in a[3].iter().filter_map(|&k| cx.text(k)) {
+            for &found in cx
+                .family(id)
+                .and_then(|f| f.get(&key))
+                .into_iter()
+                .flatten()
+            {
+                push(&mut out, Val::Node(found));
+            }
+        }
+        return out;
+    }
     for at in nodes(&a[0]) {
-        let anchor = if under { WHOLE } else { at.node };
+        let anchor = if region == UNDER { WHOLE } else { at.node };
         let Some(piece) = cx.piece(at.fi, id) else {
             return out;
         };
@@ -196,6 +193,8 @@ fn select<S: Store>(cx: &mut Cx<'_, '_, Core, S>, a: &[Vals]) -> Vals {
     }
     out
 }
+
+const UNDER: u32 = 1;
 
 fn nodes(vals: &Vals) -> impl Iterator<Item = Loc> + '_ {
     vals.iter().filter_map(|v| v.loc())

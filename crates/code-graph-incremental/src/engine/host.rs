@@ -18,6 +18,9 @@ pub enum Kind {
     Effect,
 }
 
+/// The region every file the walk reads.
+pub const FILES: u32 = 2;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Arg {
     One,
@@ -27,7 +30,7 @@ pub enum Arg {
     /// `from`, or a node edge attribute's name: 0, or the attribute's slot
     /// plus one, once the rules load.
     EdgeKey,
-    /// `owned` or `under`: 0 or 1 once the rules load.
+    /// `owned(x)`, `under(x)` or `files`: x, then 0, 1 or `FILES`, once the rules load.
     Region,
     /// `'pattern' [by key]`: a declared index, its id once the rules load.
     Pattern,
