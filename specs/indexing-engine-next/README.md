@@ -21,13 +21,13 @@ So far, TLC found 7 ways to break the rules and one gap in the recovery after a 
    │ states, + liveness │ │                   │ │ 4 small clusters        │
    └────────────────────┘ └───────────────────┘ └────────────▲────────────┘
                                                              │
-                     ┌───────────────────────────────────────┴───┐
-                     │ crates/indexing-engine-next               │
-                     │  src/protocol/          the rules as code │
-                     │  src/testkit/simulator/ clock, key-value  │
-                     │                         store, broker, db │
-                     │  tests/protocol/        simulated cluster │
-                     └───────────────────────────────────────────┘
+                     ┌───────────────────────────────────────┴────┐
+                     │ crates/indexing-engine-next                │
+                     │  src/lease/rules.rs      the rules as code │
+                     │  src/testkit/simulation/ clock, key-value  │
+                     │                          store, broker, db │
+                     │  tests/protocol/         simulated cluster │
+                     └────────────────────────────────────────────┘
 ```
 
 | Path | What it holds |
@@ -37,8 +37,8 @@ So far, TLC found 7 ways to break the rules and one gap in the recovery after a 
 | `LeaseDedupeLiveness.tla`, `liveness/` | The liveness check and its 4 configs |
 | `counterexamples/`, `liveness/counterexamples/` | 8 configs that must break a rule |
 | `code-check/` | The 4 small clusters of the code check |
-| `src/protocol/` in the crate | The rules as code with no IO. The NATS lane loop of 1b calls it. |
-| `src/testkit/simulator/` in the crate | A simulated clock, key-value store, broker and database |
+| `src/lease/rules.rs` in the crate | The rules as code with no IO. The runner calls them. |
+| `src/testkit/simulation/` in the crate | A simulated clock, key-value store, broker and database |
 | `tests/protocol/` in the crate | A simulated cluster with one method for each spec action |
 
 ## Why

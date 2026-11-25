@@ -1,4 +1,4 @@
-use crate::protocol::{Fence, Generation, Revision};
+use crate::lease::{Fence, Generation, Revision};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DatabaseWrite {

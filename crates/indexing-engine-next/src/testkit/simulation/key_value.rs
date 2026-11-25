@@ -1,4 +1,4 @@
-use crate::protocol::{Generation, Lease, LeaseEntry, Revision};
+use crate::lease::{Generation, Lease, LeaseEntry, Revision};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RevisionConflict {

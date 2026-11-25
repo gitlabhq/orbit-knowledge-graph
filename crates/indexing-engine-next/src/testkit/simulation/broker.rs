@@ -1,10 +1,10 @@
-use crate::protocol::TaskId;
+use crate::task::TaskId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MessageState {
     Ready,
     Inflight,
-    Acknowledged,
+    Acked,
     Lost,
 }
 
@@ -24,14 +24,14 @@ impl BrokerMessage {
 
 #[derive(Clone, Debug)]
 pub struct SimulatedBroker {
-    acknowledge_wait: u64,
+    ack_wait: u64,
     messages: Vec<BrokerMessage>,
 }
 
 impl SimulatedBroker {
-    pub fn new(acknowledge_wait: u64) -> Self {
+    pub fn new(ack_wait: u64) -> Self {
         Self {
-            acknowledge_wait,
+            ack_wait,
             messages: Vec::new(),
         }
     }
@@ -49,7 +49,7 @@ impl SimulatedBroker {
     pub fn is_done(&self, task: TaskId) -> bool {
         self.messages
             .iter()
-            .any(|message| message.task == task && message.state == MessageState::Acknowledged)
+            .any(|message| message.task == task && message.state == MessageState::Acked)
     }
 
     pub fn live_tasks(&self) -> impl Iterator<Item = TaskId> + '_ {
@@ -93,7 +93,7 @@ impl SimulatedBroker {
         let delivered = &mut self.messages[message];
         delivered.state = MessageState::Inflight;
         delivered.consumer = Some(consumer);
-        delivered.deadline = now + self.acknowledge_wait;
+        delivered.deadline = now + self.ack_wait;
         delivered.task
     }
 
@@ -102,16 +102,24 @@ impl SimulatedBroker {
         self.messages[message].consumer = None;
     }
 
-    pub fn acknowledge_progress(&mut self, message: usize, consumer: usize, now: u64) {
+    pub fn ack_progress(&mut self, message: usize, consumer: usize, now: u64) {
         let held = &mut self.messages[message];
         if held.state == MessageState::Inflight && held.consumer == Some(consumer) {
-            held.deadline = now + self.acknowledge_wait;
+            held.deadline = now + self.ack_wait;
         }
     }
 
-    pub fn acknowledge(&mut self, message: usize) {
+    pub fn nack(&mut self, message: usize, redeliver_at: u64) {
+        let held = &mut self.messages[message];
+        if held.state == MessageState::Inflight {
+            held.consumer = None;
+            held.deadline = redeliver_at;
+        }
+    }
+
+    pub fn ack(&mut self, message: usize) {
         if self.messages[message].state != MessageState::Lost {
-            self.messages[message].state = MessageState::Acknowledged;
+            self.messages[message].state = MessageState::Acked;
         }
     }
 
