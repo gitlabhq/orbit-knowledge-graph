@@ -7,11 +7,9 @@
 //! `enabled` says: the events stay in the customer's cluster, and Service Ping
 //! decides what leaves it.
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AnalyticsConfig {
     pub enabled: Option<bool>,
     pub collector_url: String,
@@ -20,8 +18,7 @@ pub struct AnalyticsConfig {
     pub deployment: DeploymentConfig,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DeploymentConfig {
     #[serde(rename = "type")]
     pub kind: DeploymentKind,
@@ -45,9 +42,7 @@ impl AnalyticsConfig {
     }
 }
 
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, strum::IntoStaticStr,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, strum::IntoStaticStr)]
 #[serde(rename_all = "snake_case")]
 pub enum DeploymentKind {
     #[strum(serialize = ".com")]
@@ -58,9 +53,7 @@ pub enum DeploymentKind {
     SelfManaged,
 }
 
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, strum::IntoStaticStr,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, strum::IntoStaticStr)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum DeploymentEnvironment {

@@ -1,0 +1,44 @@
+"crates/clickhouse-client/src/arrow_client.rs":
+- category: upstream
+  reason: "ClickHouse rejects an async insert that also carries insert_quorum."
+  preview: "/// ClickHouse rejects an async insert that also carries `insert_quorum…"
+  hash: 1a00dfa5d925c144
+  lines: 1
+- category: upstream
+  reason: "Readonly mode 1 forbids the settings every query sends; never use on an inserting client."
+  preview: "/// Mark the client as read-only so ClickHouse cancels its queries when…"
+  hash: 984e375c72c1a57d
+  lines: 3
+- category: upstream
+  reason: "The ClickHouse HTTP parameter parser rejects a trailing Z on DateTime64 and Date values."
+  preview: "/// ClickHouse's HTTP parameter parser for DateTime64 and Date rejects …"
+  hash: e2ed1cf91b6958bc
+  lines: 3
+- category: upstream
+  reason: "A quorum conflict arrives only with the first chunk; retrying a later read would duplicate rows."
+  preview: "/// A quorum conflict arrives with the first chunk, before any rows, so…"
+  hash: cce2ab796117d07f
+  lines: 1
+- category: upstream
+  reason: "The cursor AsyncRead loses bytes when the next chunk is late, so whole chunks are required."
+  preview: "// Take whole chunks: the cursor's AsyncRead loses bytes when the next …"
+  hash: 063d0e4747cdc80c
+  lines: 1
+"crates/clickhouse-client/src/configuration.rs":
+- category: upstream
+  reason: "ClickHouse 26.x enables async_insert by default and rejects it with quorum inserts."
+  preview: "/// Serialized inserts make `select_sequential_consistency` work; `asyn…"
+  hash: 1ee680bb576cef15
+  lines: 1
+"crates/clickhouse-client/src/error.rs":
+- category: upstream
+  reason: "Only the ClickHouse server-wide tracker adds current RSS; query limits are the caller's problem."
+  preview: "// Only the server-wide memory tracker adds `current RSS` to MEMORY_LIM…"
+  hash: 21f4074da31de05e
+  lines: 2
+"crates/clickhouse-client/src/profiling.rs":
+- category: upstream
+  reason: "ClusterAllReplicas makes ClickHouse serialize Nullable numbers as strings; removing string parsing silently zeroes values."
+  preview: "/// `clusterAllReplicas` wraps columns in `Nullable`, which ClickHouse"
+  hash: c1e8f208b0e933a0
+  lines: 2

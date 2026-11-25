@@ -1,0 +1,62 @@
+"crates/orbit-log-fields/src/lib.rs":
+- category: security
+  reason: "Security rule: safe fields never hold customer data, and safe names must not collide with dependency free-text fields."
+  preview: "//! Log and span field names for Orbit."
+  hash: 2bf6bf370b78a30b
+  lines: 21
+- category: security
+  reason: "Trust boundary: safe fields appear on every log line and in exported traces, so no customer data."
+  preview: "/// Fields that are written on every log line and kept in exported trac…"
+  hash: 5be82739364537c6
+  lines: 1
+- category: security
+  reason: "Billing namespace comes from the JWT claim, not the read namespace; confusing them breaks billing attribution."
+  preview: "/// Billing namespace from the JWT `root_namespace_id` claim, not the n…"
+  hash: 545caf1c0aa21570
+  lines: 2
+- category: contract
+  reason: "The expanded logs predicate reads this field by name; renaming it silently disables expanded logging."
+  preview: "/// Numeric IDs, `<org_id>/<root_namespace_id>/.../`. The expanded logs…"
+  hash: 8452be7322108661
+  lines: 1
+- category: security
+  reason: "Only Orbit-defined names may go in this safe field, never customer text."
+  preview: "/// Only names that Orbit defines, such as scheduled or named queries."
+  hash: d6e69e52df0faace
+  lines: 1
+- category: security
+  reason: "This field must hold the fixed error kind, never the error text that can carry customer data."
+  preview: "/// Fixed error kind. Never the error text."
+  hash: 5eb607bfbbee5be2
+  lines: 1
+- category: security
+  reason: "Marks the field as external free text from CustomersDot, which matters for log-safety review."
+  preview: "/// Free text that CustomersDot returns."
+  hash: f374f265fd1efb3e
+  lines: 1
+- category: security
+  reason: "URLs are logged without query string or fragment, which can carry tokens."
+  preview: "/// Without query string or fragment."
+  hash: 7868545181bbee52
+  lines: 1
+- category: security
+  reason: "The field logs only that a license checksum exists. It must never log the checksum value."
+  preview: "/// Never the checksum."
+  hash: f6c308e68d32313f
+  lines: 1
+- category: security
+  reason: "The field is safe to log only because its values come from a closed set that Orbit defines."
+  preview: "/// From a closed set that Orbit defines."
+  hash: 82671496ddab91c3
+  lines: 1
+"crates/orbit-log-fields/src/macros.rs":
+- category: tool-read
+  reason: "The compile_fail doctests are the only tests that prove unsafe values are rejected by safe() fields."
+  preview: "/// ```compile_fail"
+  hash: 89c3dfcd2c6ca481
+  lines: 19
+- category: upstream
+  reason: "Tracing level macros parse { NAME } = value after target: as a field block, so all levels must go through event!."
+  preview: "/// `tracing::info!` and the other level macros read `{ NAME } = value`…"
+  hash: d1a94d6ed894faa3
+  lines: 2

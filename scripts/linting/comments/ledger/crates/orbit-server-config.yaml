@@ -1,0 +1,18 @@
+"crates/orbit-server-config/src/engine.rs":
+- category: upstream
+  reason: "Croner 3.0.1 keeps the sub-second fraction, which causes drift and double fires."
+  preview: "// croner 3.0.1 preserves the sub-second fraction of `now` in the"
+  hash: cb4ef89534cf8805
+  lines: 5
+"crates/orbit-server-config/src/grpc.rs":
+- category: upstream
+  reason: "Tonic 0.14.5 panics when the connection-age timer fires without a grace value (hyperium/tonic#2522)."
+  preview: "// Must stay paired with max_connection_age_secs: without a grace value,"
+  hash: 01ecf711763f8a74
+  lines: 3
+"crates/orbit-server-config/src/secrets.rs":
+- category: upstream
+  reason: "Kubernetes stages atomic secret updates behind a ..data symlink; reading dot entries would load staged files."
+  preview: "// Kubernetes stages atomic updates behind a `..data` symlink."
+  hash: 7b2bcd03a0b9917e
+  lines: 1

@@ -1,22 +1,29 @@
 #![deny(clippy::allow_attributes, clippy::allow_attributes_without_reason)]
 
 mod builder;
+mod clock;
 mod config;
 mod disposition;
+mod event;
 mod lane;
+pub mod lease;
 mod ledger;
 mod payload;
+mod pending;
 mod planner;
+mod ports;
 pub mod prelude;
-pub mod protocol;
 mod reconciler;
+mod runner;
+mod submit;
+pub mod task;
 pub mod testkit;
 mod trigger;
 mod worker;
 
 pub use builder::{BuildError, Engine, EngineBuilder};
 pub use config::{ClusterPoolConfig, EngineConfig, LaneConfig, PoolConfig};
-pub use lane::Lane;
+pub use lane::{InvalidLaneId, Lane, LaneId};
 pub use ledger::JobSummary;
 pub use payload::{Key, Payload, Tenant};
 pub use planner::{PlanContext, PlanError, Planner, Submit};

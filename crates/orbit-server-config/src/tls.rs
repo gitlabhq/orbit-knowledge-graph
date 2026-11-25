@@ -8,26 +8,22 @@
 //! inherit that identity or name their own, so an external-facing certificate
 //! and an internal one can be rotated on different cycles.
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 pub struct TlsConfig {
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
     /// The internal listeners: the probe server in every mode and the
     /// health-check API.
     #[serde(default)]
-    #[schemars(default)]
     pub internal: ListenerTlsConfig,
 }
 
 /// TLS for a group of listeners.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 pub struct ListenerTlsConfig {
     #[serde(default)]
     pub enabled: bool,

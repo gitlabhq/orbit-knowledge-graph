@@ -26,7 +26,7 @@ args=(cargo nextest run --workspace \
   --test macros --test introduced_versions \
   --test build --test config --test dedupe --test errors --test jobs \
   --test lanes --test pools --test reconcilers --test sweeps --test testkit \
-  --test protocol --test simulator)
+  --test protocol --test simulation)
 
 # Append caller's arguments last (e.g. --profile ci) so they can
 # override defaults.

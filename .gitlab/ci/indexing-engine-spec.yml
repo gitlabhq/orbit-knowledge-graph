@@ -10,8 +10,9 @@
 
 .indexing-engine-code-changes: &indexing-engine-code-changes
   - specs/indexing-engine-next/**/*
-  - crates/indexing-engine-next/src/protocol/**/*
-  - crates/indexing-engine-next/src/testkit/simulator/**/*
+  - crates/indexing-engine-next/src/lease/**/*
+  - crates/indexing-engine-next/src/task.rs
+  - crates/indexing-engine-next/src/testkit/simulation/**/*
   - crates/indexing-engine-next/tests/protocol/**/*
 
 engine-spec-model-check:

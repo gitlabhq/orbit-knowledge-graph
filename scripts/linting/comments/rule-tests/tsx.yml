@@ -1,0 +1,7 @@
+id: comments-tsx
+valid:
+  - 'const url = "https://example.com";'
+invalid:
+  - '// a comment'
+  - '/** A JSDoc comment. */ function a() {}'
+  - '/* a block comment */'

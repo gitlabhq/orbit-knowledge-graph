@@ -15,6 +15,10 @@
 /config/default.yaml
 /.gitlab/CODEOWNERS
 
+[Comment ban] @gitlab-org/orbit/team
+/scripts/linting/comments/
+/.gitlab/ci/linting.yml
+
 [Architecture] @gitlab-org/orbit/team
 /docs/pages/engineering/adr/
 /crates/orbit-log-fields/

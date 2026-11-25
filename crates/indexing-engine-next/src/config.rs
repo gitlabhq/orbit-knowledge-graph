@@ -4,13 +4,15 @@ use std::time::Duration;
 
 use serde::{Deserialize, Deserializer};
 
+use crate::lane::LaneId;
+
 const DEFAULT_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EngineConfig {
     #[serde(default)]
-    pub lanes: BTreeMap<String, LaneConfig>,
+    pub lanes: BTreeMap<LaneId, LaneConfig>,
     #[serde(default)]
     pub pools: BTreeMap<String, PoolConfig>,
     #[serde(default)]
@@ -26,7 +28,7 @@ pub struct LaneConfig {
     #[serde(default = "default_max_age", deserialize_with = "parse_duration")]
     pub max_age: Duration,
     #[serde(default)]
-    pub on_timeout: Option<String>,
+    pub on_timeout: Option<LaneId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -47,8 +49,8 @@ pub struct ClusterPoolConfig {
 }
 
 impl EngineConfig {
-    pub fn with_lane(mut self, lane: impl Into<String>, config: LaneConfig) -> Self {
-        self.lanes.insert(lane.into(), config);
+    pub fn with_lane(mut self, lane: LaneId, config: LaneConfig) -> Self {
+        self.lanes.insert(lane, config);
         self
     }
 
@@ -68,8 +70,8 @@ impl LaneConfig {
         }
     }
 
-    pub fn on_timeout(mut self, lane: impl Into<String>) -> Self {
-        self.on_timeout = Some(lane.into());
+    pub fn on_timeout(mut self, lane: LaneId) -> Self {
+        self.on_timeout = Some(lane);
         self
     }
 }
