@@ -1,9 +1,3 @@
-# Dockerfile / Containerfile rewrite rules.
-# Handles: FROM stages as class-like definitions (the base image is an
-# ImportedSymbol inside the stage), ARG and ENV pairs as variable definitions,
-# COPY --from=<stage> and FROM <stage> as calls to the stage, $VAR / ${VAR}
-# expansions as calls to the variable definition.
-
 config:
   stdlib: []
 
@@ -13,10 +7,6 @@ stages:
       - match: '(source_file $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
 
-  # `ENV PATH=$GOPATH/bin:$PATH` reads the previous value. Each pass drops the
-  # first expansion that names the variable itself, or sets aside the first
-  # one that does not, so a self-reference is found in any position and never
-  # becomes a call from the variable to itself.
   - name: drop-self-expansions
     repeat: true
     rules:
@@ -69,11 +59,6 @@ stages:
         replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)) $$$T)'
       - match: '(from_instruction (image_spec name: $N) as: $A)'
         replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)))'
-      # An unnamed stage is `stage:<image>#<index>`, e.g. `stage:node#2`. The
-      # regex strips the tag and digest from the image. The index is the FROM's
-      # position among the file's top-level nodes, so comments and parser
-      # directives count and it is not Docker's stage number. It keeps two
-      # stages from one image apart.
       - match: '(from_instruction (image_spec name: $N tag: (image_tag $$$T)))'
         replace: '(__from (__defname @$ROOT|concat("#", "child_sym:image_spec", "sibling_index")|regex_replace("(:[^/:#@]*)?(@[^#]*)?#", "#")|prepend("stage:")) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)) $$$T)'
       - match: '(from_instruction (image_spec name: $N))'
@@ -84,8 +69,6 @@ stages:
       - match: '(copy_instruction $P:(param "^--from="))'
         replace: '(__call (__callee @$P|strip_prefix("--from=") $P))'
 
-  # The grammar has no stage node. Each pass nests the first ungrouped stage
-  # under its FROM, so the stage repeats until none is left.
   - name: group-stages
     repeat: true
     rules:
@@ -142,8 +125,6 @@ display:
           entity: File
           fqn: '@$M|stem|split_last("/")'
           file_path: '@$M'
-          # A name that is not a Dockerfile keeps its extension. The regexes
-          # mirror `file_names` in config/languages.yaml.
           language: '@$M|split_last("/")|regex_replace("(?i)^(.*)\.(tt|erb|template|tmpl|tpl|j2|jinja|jinja2|in|diff|patch|md|txt|bak|orig|dockerignore|yml|yaml|json|toml|lock)$", "_.${2}")|regex_replace("(?i)^((docker|container)file(\..*)?|.*\.(docker|container)file)$", "dockerfile.dockerfile")|split_last(".")'
       - match: '(__def !(__impl))'
         tag:

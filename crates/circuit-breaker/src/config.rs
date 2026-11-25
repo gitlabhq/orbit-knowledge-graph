@@ -1,13 +1,9 @@
 use std::time::Duration;
 
-/// Per-service circuit breaker configuration.
 #[derive(Debug, Clone)]
 pub struct CircuitConfig {
-    /// Number of failures within `window` before the circuit opens.
     pub failure_threshold: u32,
-    /// Sliding time window for counting failures.
     pub window: Duration,
-    /// How long the circuit stays open before allowing a probe.
     pub cooldown: Duration,
 }
 

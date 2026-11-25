@@ -57,9 +57,6 @@ fn java_super_types(node: &N<'_>) -> Vec<String> {
     result
 }
 
-/// Extract implicit accessor definitions for record components, only when
-/// the body does not explicitly define a no-arg method that shares a name
-/// with that component.
 fn java_record_accessors(
     node: &N<'_>,
     defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
@@ -190,14 +187,10 @@ impl DslLanguage for JavaDsl {
             reference("object_creation_expression")
                 .name_from(field("type").inner("type_arguments", "type_identifier"))
                 .when(!has_descendant("scoped_type_identifier")),
-            // Qualified constructor new Outer.Inner(): chain becomes
-            // [Ident("Outer"), Call("Inner")] so the resolver looks up Inner as a
-            // nested member of Outer.
             reference("object_creation_expression")
                 .name_from(field("type").nth(Child, Kind("type_identifier"), -1))
                 .when(has_descendant("scoped_type_identifier"))
                 .receiver_via(field("type").nth(Child, Kind("type_identifier"), 0)),
-            // Skip inside object_creation_expression (already tracked above).
             reference("type_identifier")
                 .name_from(text())
                 .when(!parent_is("object_creation_expression")),
@@ -267,8 +260,6 @@ impl DslLanguage for JavaDsl {
         let java_type = |rule: BindingRule| {
             rule.typed(
                 vec![
-                    // Dotted types (Outer.Inner): the engine resolves the first segment
-                    // via imports and appends the rest, so emit the full scoped text.
                     Extract::one(Field("type"), Kind("scoped_type_identifier")),
                     field("type").inner("type_arguments", "type_identifier"),
                 ],
@@ -451,13 +442,6 @@ mod tests {
 
     #[test]
     fn permits_clause_names_reach_the_reference_stream() {
-        // JEP 409 sealed types: the `permits` clause is not extracted into
-        // metadata and produces no semantic Extends edge (#847) — in valid
-        // Java the child-side extends/implements clause already provides it.
-        // The permitted type names are still picked up by the bare
-        // `reference("type_identifier")` rule, attributed to the sealed
-        // parent, so the parent->child relationship stays reachable even
-        // when a child file is missing or malformed.
         let probe = |code: &str| {
             JavaDsl::spec()
                 .parse_full_collect(
@@ -543,8 +527,6 @@ mod tests {
             .map(|d| d.range.start.line)
             .collect();
         lines.sort_unstable();
-        // Line 0 is the synthetic accessor anchored to the component; line 1
-        // is the explicit radius(int) overload, which must not suppress it.
         assert_eq!(lines, [0, 1]);
     }
 

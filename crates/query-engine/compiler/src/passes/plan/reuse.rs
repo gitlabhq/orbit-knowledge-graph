@@ -1,6 +1,3 @@
-//! Decides which relations lowering materializes as CTEs: those referenced more than once and worth
-//! keeping (selective reads, joins, unions, latest-row picks). Point lookups are recomputed inline.
-
 use std::collections::HashMap;
 
 use super::graph::{RelationGraph, RelationId, RelationNode};
@@ -70,7 +67,6 @@ impl RelationUsage {
     fn materialize(&mut self, id: RelationId) {
         if !self.materialized.contains(&id) {
             self.materialized.push(id);
-            // Kept in relation order because the lowerer emits CTEs in this order.
             self.materialized.sort_by_key(|id| id.0);
         }
     }

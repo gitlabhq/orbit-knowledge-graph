@@ -72,7 +72,6 @@ async fn grpc_tls_handshake_succeeds() {
     let channel = connect_with_retry(tls_endpoint(bound_addr.port(), &ca_pem), 20).await;
     let mut client = OrbitServiceClient::new(channel);
 
-    // No auth token → Unauthenticated. Getting a gRPC status proves TLS worked.
     let status = client
         .get_cluster_health(GetClusterHealthRequest { format: 0 })
         .await
@@ -99,7 +98,6 @@ async fn grpc_plaintext_client_rejected_by_tls_server() {
 
     let server_handle = tokio::spawn(server.run(listener));
 
-    // Wait for server readiness via TLS before testing plaintext rejection
     let _ = connect_with_retry(tls_endpoint(bound_addr.port(), &ca_pem), 20).await;
 
     let result =
@@ -147,8 +145,6 @@ async fn legacy_orbit_service_path_reaches_the_service() {
         .await
         .unwrap_err();
 
-    // Unauthenticated proves the legacy path routed into the real service;
-    // an unrouted service name would return Unimplemented instead.
     assert_eq!(status.code(), tonic::Code::Unauthenticated);
 
     server_handle.abort();

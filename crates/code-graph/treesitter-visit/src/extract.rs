@@ -1,38 +1,12 @@
-//! Composable node extraction pipelines for tree-sitter ASTs.
-//!
-//! An [`Extract`] is a chain of [`Step`]s that navigate through a CST,
-//! followed by an [`Emit`] that produces a string from the final node.
-//!
-//! Every step is just `(Axis, Match)` — the same two enums used by
-//! `Node::find`. A step is either **required** (pipeline fails on miss)
-//! or **optional** (stays at current node on miss).
-//!
-//! ```
-//! use treesitter_visit::extract::*;
-//!
-//! # let _ = [
-//! field("name"),
-//! field("function").field("object"),
-//! field("receiver")
-//!     .child_of_kind("parameter_declaration")
-//!     .field("type")
-//!     .inner("pointer_type", "type_identifier"),
-//! # ];
-//! ```
-
 use crate::node::{Axis, Match, Node};
 use crate::source::Doc;
 use smallvec::SmallVec;
 
 #[derive(Clone)]
 pub enum Step {
-    /// Must succeed or pipeline returns None.
     Nav(Axis<'static>, Match<'static>),
-    /// Stay at current node on failure.
     Try(Axis<'static>, Match<'static>),
-    /// Fail pipeline if current node doesn't match (no navigation).
     Where(Match<'static>),
-    /// Navigate to the n-th match along axis. Negative n counts from end (-1 = last).
     Nth(Axis<'static>, Match<'static>, isize),
 }
 
@@ -40,7 +14,6 @@ pub enum Step {
 pub enum Emit {
     Text,
     None,
-    /// Try `field("name")`, then first child matching these kinds.
     Name(&'static [&'static str]),
     Children(Match<'static>),
     Const(&'static str),
@@ -157,7 +130,6 @@ impl Extract {
     pub fn nav(self, axis: Axis<'static>, m: Match<'static>) -> Self {
         self.push(Step::Nav(axis, m))
     }
-    /// Navigate to the n-th match. Negative n counts from end (-1 = last).
     pub fn nth(self, axis: Axis<'static>, m: Match<'static>, n: isize) -> Self {
         self.push(Step::Nth(axis, m, n))
     }
@@ -192,7 +164,6 @@ impl Extract {
         self
     }
 
-    /// Use with `apply_all()` instead of `apply()`.
     pub fn collect(mut self, m: Match<'static>) -> Self {
         self.emit = Emit::Children(m);
         self
@@ -214,8 +185,6 @@ impl Extract {
         emit(&self.emit, &target)
     }
 
-    /// The transform receives the *origin* node (not the navigated target),
-    /// so it can walk ancestors for scope or siblings for decorators.
     pub fn apply_with<D: Doc>(
         &self,
         node: &Node<'_, D>,
@@ -226,7 +195,6 @@ impl Extract {
         Some(transform(raw, node))
     }
 
-    /// Returns empty vec on navigation failure or non-Children emit.
     pub fn apply_all<D: Doc>(&self, node: &Node<'_, D>) -> Vec<String> {
         let Some(target) = self.navigate(node) else {
             return vec![];
@@ -405,7 +373,6 @@ mod tests {
         let methods = field("body")
             .collect(Match::Kind("function_definition"))
             .apply_all(&cls);
-        // text() of function_definition nodes includes full "def a(self): pass"
         assert_eq!(methods.len(), 2);
         assert!(methods[0].contains("a"));
         assert!(methods[1].contains("b"));

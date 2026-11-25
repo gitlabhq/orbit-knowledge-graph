@@ -17,7 +17,6 @@ mod tests {
 
         println!("repo.user_config(): {}", repo.user_config());
 
-        // Create some test files
         repo.fs.create_directory("src");
         repo.fs.create_file("README.md", Some("test"));
         repo.fs.create_file("Cargo.toml", Some("test"));
@@ -31,10 +30,8 @@ mod tests {
 
     #[test]
     fn test_get_status_invalid_repo_path() {
-        // create a temporary workspace
         let local_repo = init_test_workspace_with_repo();
 
-        // validate that the workspace is indexed
         let workspace = CoreGitaliskWorkspaceFolder::new(
             local_repo.workspace_path.to_str().unwrap().to_string(),
         );
@@ -42,16 +39,13 @@ mod tests {
         let repos = workspace.get_repositories();
         let repo = repos.first().unwrap();
 
-        // create a malicious path that will be used to test the repository path sanitization
         let repo_path_str = repo.path.clone();
         let real_path_but_malicious_cmd: String = format!("{repo_path_str}; ls -la");
 
-        // Validate that the repository path exists, and is sanitized
         let malicious_path_struct = Path::new(&real_path_but_malicious_cmd);
         assert!(!malicious_path_struct.try_exists().unwrap_or(false));
         println!("NOT PATH: malicious_path_struct: {malicious_path_struct:?}");
 
-        // fake path, malicious command
         let fake_malicious_path = Path::new("/test/path; ls -la");
         let repo_path = Path::new(fake_malicious_path);
         println!("FAKE PATH: repo_path: {repo_path:?}");
@@ -60,10 +54,8 @@ mod tests {
 
     #[test]
     fn test_get_status_invalid_repo_path_sanitization() {
-        // create a temporary workspace
         let local_repo = init_test_workspace_with_repo();
 
-        // validate that the workspace is indexed
         let workspace = CoreGitaliskWorkspaceFolder::new(
             local_repo.workspace_path.to_str().unwrap().to_string(),
         );
@@ -71,16 +63,13 @@ mod tests {
         let repos = workspace.get_repositories();
         let repo = repos.first().unwrap();
 
-        // create a malicious path that will be used to test the repository path sanitization
         let repo_path_str = repo.path.clone();
         let real_path_but_malicious_cmd: String = format!("{repo_path_str}; ls -la");
 
-        // Validate that the repository path exists, and is sanitized
         let malicious_path_struct = Path::new(&real_path_but_malicious_cmd);
         assert!(!malicious_path_struct.try_exists().unwrap_or(false));
         println!("NOT PATH: malicious_path_struct: {malicious_path_struct:?}");
 
-        // fake path, malicious command
         let fake_malicious_path = Path::new("/test/path; ls -la");
         let repo_path = Path::new(fake_malicious_path);
         println!("FAKE PATH: repo_path: {repo_path:?}");
@@ -89,13 +78,10 @@ mod tests {
 
     #[test]
     fn test_get_status_basic() {
-        // create a temporary workspace
         let mut local_repo = init_test_workspace_with_repo();
 
-        // Track the files BEFORE indexing the workspace
         local_repo.add_all();
 
-        // validate that the workspace is indexed
         let workspace = CoreGitaliskWorkspaceFolder::new(
             local_repo.workspace_path.to_str().unwrap().to_string(),
         );
@@ -107,10 +93,8 @@ mod tests {
         }
         let repo = repos.first().unwrap();
 
-        // get the status of the repository
         let statuses = repo.get_status().unwrap();
 
-        // validate that we have 3 untracked files, added in the init_test_workspace_with_repo function
         let unique_statuses: Vec<StatusCode> = statuses.iter().map(|s| s.status.index).collect();
         for status in statuses.clone() {
             println!("status: {status:?}");
@@ -127,10 +111,8 @@ mod tests {
 
     #[test]
     fn test_get_status_commit_and_modify() {
-        // create a temporary workspace
         let mut local_repo = init_test_workspace_with_repo();
 
-        // validate that the workspace is indexed
         let workspace = CoreGitaliskWorkspaceFolder::new(
             local_repo.workspace_path.to_str().unwrap().to_string(),
         );
@@ -138,10 +120,8 @@ mod tests {
         let repos = workspace.get_repositories();
         let repo = repos.first().unwrap();
 
-        // Track the files
         local_repo.add_all();
 
-        // get the status of the repository
         let statuses = repo.get_status().unwrap();
         println!("local_repo.status(): {}", local_repo.status());
         println!(
@@ -149,7 +129,6 @@ mod tests {
             local_repo.status_porcelain()
         );
 
-        // validate that we have 3 untracked files, added in the init_test_workspace_with_repo function
         let unique_statuses: Vec<StatusCode> = statuses.iter().map(|s| s.status.index).collect();
         for status in statuses.clone() {
             println!("status: {status:?}");
@@ -157,7 +136,6 @@ mod tests {
         assert!(unique_statuses.contains(&StatusCode::Added));
         assert_eq!(statuses.len(), 3);
 
-        // commit the changes (README.md, Cargo.toml, src/main.rs)
         local_repo.commit("test commit 1");
         println!("\nPOST COMMIT");
         println!("local_repo.status(): {}", local_repo.status());
@@ -166,7 +144,6 @@ mod tests {
             local_repo.status_porcelain()
         );
 
-        // modify the README.md file
         local_repo
             .fs
             .append_file_content("README.md", "test commit 2");
@@ -177,13 +154,6 @@ mod tests {
             local_repo.status_porcelain()
         );
 
-        // // stage the changes
-        // test_git_add(Path::new(&repo.path));
-        // println!("\nPOST STAGE");
-        // print_naive_git_status(Path::new(&repo.path));
-        // print_git_status_porcelain(Path::new(&repo.path));
-
-        // get the status of the repository, again, should only have the README.md file modified
         let statuses_2 = repo.get_status().unwrap();
         let unique_statuses_2: Vec<StatusCode> =
             statuses_2.iter().map(|s| s.status.worktree).collect();
@@ -196,10 +166,8 @@ mod tests {
 
     #[test]
     fn test_get_status_commit_and_rename() {
-        // create a temporary workspace
         let mut local_repo = init_test_workspace_with_repo();
 
-        // validate that the workspace is indexed
         let workspace = CoreGitaliskWorkspaceFolder::new(
             local_repo.workspace_path.to_str().unwrap().to_string(),
         );
@@ -207,10 +175,8 @@ mod tests {
         let repos = workspace.get_repositories();
         let repo = repos.first().unwrap();
 
-        // Track the files
         local_repo.add_all();
 
-        // get the status of the repository
         let statuses = repo.get_status().unwrap();
         println!("local_repo.status(): {}", local_repo.status());
         println!(
@@ -218,7 +184,6 @@ mod tests {
             local_repo.status_porcelain()
         );
 
-        // validate that we have 3 untracked files, added in the init_test_workspace_with_repo function
         let unique_statuses: Vec<StatusCode> = statuses.iter().map(|s| s.status.index).collect();
         for status in statuses.clone() {
             println!("status: {status:?}");
@@ -226,7 +191,6 @@ mod tests {
         assert!(unique_statuses.contains(&StatusCode::Added));
         assert_eq!(statuses.len(), 3);
 
-        // commit the changes (README.md, Cargo.toml, src/main.rs)
         local_repo.commit("test commit 1");
         println!("\nPOST COMMIT");
         println!("local_repo.status(): {}", local_repo.status());
@@ -235,7 +199,6 @@ mod tests {
             local_repo.status_porcelain()
         );
 
-        // rename the README.md file
         local_repo.fs.rename_to("README.md", "README.md.new");
         println!("\nPOST MODIFY");
         println!("local_repo.status(): {}", local_repo.status());
@@ -252,10 +215,8 @@ mod tests {
 
     #[test]
     fn test_get_status_commit_and_move_file() {
-        // create a temporary workspace
         let mut local_repo = init_test_workspace_with_repo();
 
-        // validate that the workspace is indexed
         let workspace = CoreGitaliskWorkspaceFolder::new(
             local_repo.workspace_path.to_str().unwrap().to_string(),
         );
@@ -263,10 +224,8 @@ mod tests {
         let repos = workspace.get_repositories();
         let repo = repos.first().unwrap();
 
-        // Track the files
         local_repo.add_all();
 
-        // get the status of the repository
         let statuses = repo.get_status().unwrap();
         println!("local_repo.status(): {}", local_repo.status());
         println!(
@@ -274,7 +233,6 @@ mod tests {
             local_repo.status_porcelain()
         );
 
-        // validate that we have 3 untracked files, added in the init_test_workspace_with_repo function
         let unique_statuses: Vec<StatusCode> = statuses.iter().map(|s| s.status.index).collect();
         for status in statuses.clone() {
             println!("status: {status:?}");
@@ -282,7 +240,6 @@ mod tests {
         assert!(unique_statuses.contains(&StatusCode::Added));
         assert_eq!(statuses.len(), 3);
 
-        // commit the changes (README.md, Cargo.toml, src/main.rs)
         local_repo.commit("test commit 1");
         println!("\nPOST COMMIT");
         println!("local_repo.status(): {}", local_repo.status());
@@ -291,8 +248,6 @@ mod tests {
             local_repo.status_porcelain()
         );
 
-        // move the README.md file to the src directory
-        // test_move_file_to_dir(Path::new(&repo.path), "README.md", "src");
         local_repo.fs.move_to("README.md", "src/README.md");
         println!("\nPOST MOVE");
         println!("local_repo.status(): {}", local_repo.status());
@@ -301,7 +256,6 @@ mod tests {
             local_repo.status_porcelain()
         );
 
-        // get the status of the repository, again, should only have the README.md file modified
         let statuses_2 = repo.get_status().unwrap();
         assert_eq!(statuses_2.len(), 1);
 
@@ -348,7 +302,6 @@ mod tests {
             .unwrap();
         assert!(files.len() >= 3);
 
-        // Check that expected files are found
         let file_names: Vec<String> = files
             .iter()
             .filter_map(|f| Path::new(f.path()).file_name()?.to_str())
@@ -405,7 +358,6 @@ mod tests {
             })
             .unwrap();
 
-        // Should find .gitignore and src.rs, but not target/debug or test.log
         let file_names: Vec<String> = files
             .iter()
             .filter_map(|f| Path::new(f.path()).file_name()?.to_str())

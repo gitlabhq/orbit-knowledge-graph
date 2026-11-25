@@ -1,8 +1,3 @@
-//! Where bytes live when they are not in memory: one anonymous append-only
-//! file, opened on the first spill, positional writes from any thread,
-//! positional reads, gone when the store is. Each blob is one independent
-//! LZ4 block when compression reduces its size, so reads stay random-access.
-
 use std::io;
 use std::path::PathBuf;
 use std::sync::OnceLock;

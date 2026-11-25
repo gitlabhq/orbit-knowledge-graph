@@ -1,5 +1,3 @@
-# config/ontology/nodes/ci/runner.yaml
-
 node_type: Runner
 domain: ci
 global: true

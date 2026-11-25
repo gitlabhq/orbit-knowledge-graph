@@ -6,28 +6,10 @@ use super::EdgeRows;
 use super::scope::{LedgerScope, MigrationScope, sdlc_entity_names};
 use crate::Ontology;
 
-/// Ledger path relative to `ORBIT_CONFIG_DIR`.
 pub const LEDGER_FILE: &str = "schema-migrations.yaml";
 
-const LEDGER_HEADER: &str = "\
-# yaml-language-server: $schema=schemas/schema-migrations.schema.json
-#
-# One entry per SCHEMA_VERSION bump, newest first (prepended by `mise schema:bump`).
-# Each entry declares how much of the graph a given version invalidates:
-#   scope: \"*\"    full rebuild (fail-safe; the default for anything unmapped)
-#   scope: sdlc   SDLC-sourced tables; optional `entities:` narrows to a subset
-#   scope: code   the code-graph tables (Definition, File, Directory, Branch,
-#                 ImportedSymbol) and their edge table
-#   scope: none   re-index NOTHING; the source text changed but the produced
-#                 output is byte-identical. Requires a `note:` certifying
-#                 output-neutrality. This deliberately bypasses the
-#                 under-declaration guard, so the note is mandatory and audited.
-#
-# Humans may WIDEN an entry (scope or entities), never narrow it below the
-# drift detected from the fingerprint snapshot — CI enforces this, except for a
-# note-gated `scope: none` entry, the certified output-neutral escape hatch. A
-# version with no entry is treated as \"*\", which also makes pruning old entries safe.
-";
+const LEDGER_HEADER: &str =
+    "# yaml-language-server: $schema=schemas/schema-migrations.schema.json\n";
 
 const EMBEDDED_LEDGER: &str =
     include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/schema-migrations.yaml"));
@@ -48,14 +30,12 @@ impl MigrationLedger {
         Self::parse(EMBEDDED_LEDGER)
     }
 
-    /// Serialized YAML with the usage header.
     #[must_use]
     pub fn render(&self) -> String {
         let body = orbit_utils::yaml::to_string(self).expect("ledger serializes");
         format!("{LEDGER_HEADER}{body}")
     }
 
-    /// The current entry: newest first, so the top of the list.
     #[must_use]
     pub fn latest(&self) -> Option<&MigrationEntry> {
         self.migrations.first()
@@ -126,7 +106,6 @@ impl MigrationLedger {
     }
 }
 
-/// One `SCHEMA_VERSION` bump.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MigrationEntry {

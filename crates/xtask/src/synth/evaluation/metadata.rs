@@ -83,7 +83,6 @@ pub struct RunMetadata {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunConfig {
-    /// Sanitized, no credentials.
     pub clickhouse_url: String,
     pub iterations: usize,
     pub sample_size: usize,

@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""
+import argparse
+import json
+import re
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
+
+USAGE = """
 Mock GitLab internal API for code indexing benchmarks.
 
 Serves two endpoints the code indexer needs:
@@ -8,12 +14,6 @@ Serves two endpoints the code indexer needs:
 
 Archives are read from a local directory (mounted via GCS FUSE).
 """
-
-import argparse
-import json
-import re
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from pathlib import Path
 
 HEALTHZ_RE = re.compile(r"/healthz$")
 INFO_RE = re.compile(r"/api/v4/internal/orbit/project/(\d+)/info$")
@@ -65,7 +65,7 @@ class CorpusHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__)
+    p = argparse.ArgumentParser(description=USAGE)
     p.add_argument("--corpus-dir", type=Path, default=Path("/data/corpus"))
     p.add_argument("--port", type=int, default=8090)
     args = p.parse_args()

@@ -1,5 +1,3 @@
-# config/ontology/edges/auto_canceled_by.yaml
-
 description: Entity was auto-canceled by a newer pipeline
 table: gl_ci_edge
 

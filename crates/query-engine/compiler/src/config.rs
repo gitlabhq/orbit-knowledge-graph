@@ -1,7 +1,3 @@
-//! SSOT declaration for the compiler's env fields, state fields, phase grants,
-//! and pipeline presets. The macro generates the `CompilerCtx` trait,
-//! per-pipeline context structs, and runner functions.
-
 use orbit_server_config::QueryConfig;
 
 use crate::ast::Node;

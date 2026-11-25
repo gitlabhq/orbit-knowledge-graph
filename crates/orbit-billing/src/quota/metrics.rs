@@ -10,8 +10,6 @@ use orbit_observability::billing::quota::values::{
 
 pub(super) static QUOTA_METRICS: LazyLock<QuotaMetrics> = LazyLock::new(QuotaMetrics::new);
 
-// `cache.entries` gauge is registered inside `QuotaCache::new()` instead of here
-// because it needs a live reference to the moka `Cache` from that constructor.
 pub(super) struct QuotaMetrics {
     pub decisions: Counter<u64>,
     pub cdot_duration: Histogram<f64>,
@@ -59,7 +57,6 @@ pub fn register() {
             }
         }
     }
-    // fail_open, fail_closed, and skipped are only ever observed on cache=miss (never cached).
     for decision in [FAIL_OPEN, FAIL_CLOSED, SKIPPED] {
         for source_type in metered_types {
             QUOTA_METRICS.decisions.add(

@@ -1,8 +1,3 @@
-# Regression: the system-note edge writer once omitted the denormalized
-# `source_tags`/`target_tags` (and `_version`) columns. Strict ClickHouse
-# (input_format_arrow_allow_missing_columns=0, as in production) rejects such an
-# INSERT, so every system-note write failed, the checkpoint never advanced, and
-# the same notes were re-indexed forever. The edge must land for this to pass.
 description: System-note edge write includes every gl_edge column under strict ClickHouse
 scope: { namespace: 100 }
 

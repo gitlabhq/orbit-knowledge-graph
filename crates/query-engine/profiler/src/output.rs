@@ -13,8 +13,6 @@ pub struct ProfilerOutput {
     pub pagination: Option<PaginationInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance_health: Option<serde_json::Value>,
-    /// Formatted query response as served to agents (`--emit-response`):
-    /// a TOON string or a raw graph object.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<serde_json::Value>,
 }
@@ -39,12 +37,6 @@ pub struct CompilationInfo {
     pub hydration_plan: String,
 }
 
-/// One actual ClickHouse query the run issued (the base query, then one per
-/// hydration pass). Metrics come from the response's `X-ClickHouse-Summary`
-/// header, which is accurate for rows/bytes/server-time. Peak memory and
-/// ProfileEvents are intentionally absent: they require cross-replica
-/// `system.query_log` (which the relay user cannot read), so fetch them
-/// out-of-band by `correlation_id`.
 #[derive(Serialize)]
 pub struct RanQuery {
     pub label: String,

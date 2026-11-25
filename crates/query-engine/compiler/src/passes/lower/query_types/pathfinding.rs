@@ -1,7 +1,3 @@
-//! Generates forward + backward frontier CTEs (UNION ALL of depth arms),
-//! then combines via direct (depth-1) + intersection (forward meets backward).
-//! Dedup is baked into anchor CTEs.
-
 use std::collections::HashMap;
 
 use ontology::constants::*;

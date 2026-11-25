@@ -1,4 +1,3 @@
-# Check the ontology redaction config against the Rails contract of the GitLab that e2e pins; a cache hit skips the toolbox pull.
 .rails-contract-rules:
   rules:
     - !reference [.skip-on-solo-schedule, rules]

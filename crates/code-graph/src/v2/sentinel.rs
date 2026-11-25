@@ -1,8 +1,3 @@
-//! Watchdog sentinel for per-file timeout enforcement.
-//!
-//! When a file exceeds its timeout, the sentinel sets its kill flag, causing
-//! the worker to bail out at the next check point via `Result<T, Killed>`.
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -11,7 +6,6 @@ use std::time::{Duration, Instant};
 pub struct Killed;
 
 pub enum SentinelMsg {
-    /// Includes a kill flag the sentinel can set to abort the file.
     FileStart {
         id: u64,
         path: String,
@@ -30,7 +24,6 @@ pub struct SentinelHandle {
 }
 
 impl SentinelHandle {
-    /// Returns a `FileGuard` that sends `FileDone` on drop.
     pub fn file_start(&self, path: &str) -> FileGuard {
         let id = self
             .next_id
@@ -53,7 +46,6 @@ impl SentinelHandle {
     }
 }
 
-/// Sends `FileDone` on drop.
 pub struct FileGuard {
     id: u64,
     kill: Arc<AtomicBool>,

@@ -1,6 +1,3 @@
-//! An overrun leaves no checkpoint, so the sweep re-dispatches the repository every tick;
-//! landing writes one, which is what stops it.
-
 use indexer::handler::Handler;
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
@@ -65,7 +62,6 @@ async fn index_once(
 }
 
 async fn a_job_too_slow_for_its_budget_never_checkpoints(incremental: bool) {
-    // The slow archive takes 3s to start; a 1s budget overruns on any host.
     let (outcome, checkpointed) = index_once(
         incremental,
         CodeIndexingPipelineConfig {

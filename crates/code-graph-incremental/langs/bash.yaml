@@ -1,8 +1,3 @@
-# Bash rewrite rules.
-# Handles: source/. as wildcard imports, function definitions, commands as
-# calls, variable assignments, control flow. Definitions hang off the file
-# stem (stem.name).
-
 config:
   stdlib: [
     { availability: implicit, symbols: [

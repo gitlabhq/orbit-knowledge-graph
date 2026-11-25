@@ -290,7 +290,6 @@ async fn reconcile_tombstones_old_path_after_move() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
 
-    // A merge would collapse a row with its tombstone and change the stored row counts.
     for table in [t("gl_project"), t("gl_edge")] {
         context
             .execute(&format!("SYSTEM STOP MERGES {table}"))

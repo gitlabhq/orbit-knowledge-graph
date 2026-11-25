@@ -52,8 +52,6 @@ pub const DATALAKE_QUERY_DURATION: MetricSpec = MetricSpec::histogram_f64(
     DOMAIN,
 );
 
-// Drop `.bytes` from the name so the Prometheus `By` unit suffix doesn't
-// produce `bytes_bytes_total`.
 pub const DATALAKE_QUERY_BYTES: MetricSpec = MetricSpec::counter(
     "gkg.indexer.sdlc.datalake.query",
     "Total bytes returned by ClickHouse datalake extraction queries.",

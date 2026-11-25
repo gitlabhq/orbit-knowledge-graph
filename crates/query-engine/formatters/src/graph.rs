@@ -35,11 +35,6 @@ mod id_as_string {
     }
 }
 
-/// Keys that collide with `GraphNode`'s fixed struct fields under
-/// `#[serde(flatten)]`. If an ontology property strips to one of
-/// these names after alias removal, the serialized JSON would get
-/// duplicate keys and deserialization would silently shadow the
-/// struct field. Filter them out before inserting into `properties`.
 pub(crate) fn is_reserved_node_key(key: &str) -> bool {
     key == "type" || key == "id"
 }
@@ -144,9 +139,6 @@ impl ResultFormatter for GraphFormatter {
     }
 
     fn format(&self, output: &PipelineOutput) -> Value {
-        // GraphResponse holds only strings, primitives, and Values that
-        // already came from `column_value_to_json` (which filters non-finite
-        // floats). Serialization is infallible.
         serde_json::to_value(self.build_response(output))
             .expect("GraphResponse serialization is infallible")
     }
@@ -562,9 +554,6 @@ impl GraphFormatter {
                 )
             };
 
-            // Collapse multi-`_version` edge rows surfacing as duplicate neighbors.
-            // Check dedup before materializing neighbor properties so duplicate
-            // rows don't do unnecessary node-map work.
             let key = (
                 from.clone(),
                 from_id,
@@ -1060,10 +1049,6 @@ mod tests {
         use arrow::array::{Array, ListArray, StructArray};
         use arrow::buffer::OffsetBuffer;
 
-        // Two paths sharing endpoints but going through different intermediate
-        // nodes. Dedup must NOT collapse them.
-        // Path A: User(1) -> Group(2) -> Project(99)
-        // Path B: User(1) -> Group(3) -> Project(99)
         let all_ids: Vec<i64> = vec![1, 2, 99, 1, 3, 99];
         let all_types = vec!["User", "Group", "Project", "User", "Group", "Project"];
         let offsets = vec![0i32, 3, 6];
@@ -1155,7 +1140,7 @@ mod tests {
 
     #[test]
     fn ids_serialize_as_strings_preserving_precision() {
-        let beyond_safe = 9_007_199_254_740_993_i64; // 2^53 + 1
+        let beyond_safe = 9_007_199_254_740_993_i64;
 
         let node = GraphNode {
             entity_type: "File".to_string(),

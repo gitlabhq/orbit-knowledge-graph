@@ -1,5 +1,3 @@
-# config/ontology/edges/related_to.yaml
-
 description: A work item relates to another work item
 
 variants:

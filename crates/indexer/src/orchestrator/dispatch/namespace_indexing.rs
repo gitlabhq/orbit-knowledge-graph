@@ -16,7 +16,6 @@ use orbit_utils::traversal_path::TraversalPath;
 pub struct NamespaceDispatchRequest {
     pub namespace_id: i64,
     pub traversal_path: TraversalPath,
-    /// Entity targets to reindex; empty means all (a full sweep).
     pub targets: Vec<String>,
 }
 

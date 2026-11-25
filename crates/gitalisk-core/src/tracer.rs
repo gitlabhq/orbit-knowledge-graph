@@ -15,7 +15,7 @@ where
         mut writer: format::Writer<'_>,
         event: &Event<'_>,
     ) -> fmt::Result {
-        write!(writer, "[RUST] ")?; // Add your prefix here
+        write!(writer, "[RUST] ")?;
         format().format_event(ctx, writer, event)
     }
 }

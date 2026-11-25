@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Verify that every pin in config/versions.yaml whose covered files changed
-# was bumped. Checks all pins and reports every failure before exiting, so a
-# single run surfaces everything that needs bumping.
-#
-# Usage: check-pinned-version.sh [base-ref]
-#
-# Skip with [skip pinned-version-check] in the MR description, or
-# SKIP_PINNED_VERSION_CHECK=1 locally.
 set -euo pipefail
 
 BASE_REF="${1:-origin/main}"
@@ -17,7 +9,6 @@ if ci_skip_requested "pinned-version-check"; then
     exit 0
 fi
 
-# pin, regex of files that require a bump when changed
 COVERS='
 query_dsl          ^(config/schemas/graph_query\.schema\.json|crates/query-engine/compiler/src/(input\.rs|passes/validate(\.rs|/[^/]+\.rs)))$
 raw_output_format  ^(crates/query-engine/formatters/src/(graph|lib)\.rs|config/schemas/query_response\.json)$

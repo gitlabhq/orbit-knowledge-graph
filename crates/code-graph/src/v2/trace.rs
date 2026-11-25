@@ -1,13 +1,6 @@
-//! One `Tracer` is created at the top level and passed by reference to all
-//! pipeline components. Events accumulate in a `Mutex<Vec>` and are dumped
-//! once after execution completes. In integration tests, set `trace: true`
-//! on a test suite to enable.
-
 use std::fmt;
 use std::sync::Mutex;
 
-/// The event expression is not evaluated when tracing is off, avoiding all
-/// allocations (`.to_string()`, `format!()`, `.clone()`).
 #[macro_export]
 macro_rules! trace_event {
     ($tracer:expr, $variant:ident { $($field:ident : $val:expr),* $(,)? }) => {
@@ -612,7 +605,6 @@ impl fmt::Display for TraceEvent {
     }
 }
 
-/// Collects trace events. Thread-safe via `Mutex` (lock only taken when enabled).
 #[derive(Debug)]
 pub struct Tracer {
     events: Mutex<Vec<TraceEvent>>,
@@ -713,9 +705,6 @@ impl Tracer {
     }
 }
 
-/// Return a `&'static Tracer` that is always disabled. One-time allocation
-/// via `OnceLock` so SSA engine can store `&'a Tracer` as a default
-/// without requiring a tracer at construction time.
 pub fn leaked_noop_tracer() -> &'static Tracer {
     use std::sync::OnceLock;
     static NOOP: OnceLock<&'static Tracer> = OnceLock::new();

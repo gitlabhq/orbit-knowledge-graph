@@ -31,7 +31,6 @@ tests:
       - { row_count: 1 }
       - { row: { sl: 2, sc: 5, sb: 16 } }
 
-  # corrected: Python: `import os` binds the name `os` to the module, so the imported name is `os`.
   - name: Python imports are 1-indexed
     query: |
       MATCH (i:ImportedSymbol)

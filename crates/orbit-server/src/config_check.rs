@@ -4,7 +4,6 @@ use orbit_server_config::{AppConfig, QuerySettings};
 use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
 
-/// Checks a config the way startup does before it starts anything.
 pub fn run(overlay: Option<&Path>) -> anyhow::Result<()> {
     let config = AppConfig::check(overlay)?;
     query_keys(&config.query)?;

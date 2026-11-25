@@ -162,7 +162,6 @@ fn self_managed_query(
         }],
         ..test_claims()
     };
-    // `Claims` never serializes `license_checksum`, so sign the payload as Rails would.
     let now = chrono::Utc::now().timestamp();
     let mut payload = serde_json::to_value(Claims {
         iat: now,

@@ -61,7 +61,7 @@
 - category: security
   reason: "Role scoping closes the aggregation oracle on higher-privilege entities; removing it reopens the leak."
   preview: "//! Security filter injection for multi-tenant isolation."
-  hash: 04184e98f915cba3
+  hash: 40866efd4afaa72b
   lines: 21
 - category: security
   reason: "An empty security context must fail closed with an error; empty results would hide the bug."

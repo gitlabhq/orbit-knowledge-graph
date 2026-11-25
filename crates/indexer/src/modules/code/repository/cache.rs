@@ -24,14 +24,9 @@ pub enum RepositoryCacheError {
     #[error("archive extraction failed: {0}")]
     Archive(String),
 
-    /// Archive stream ended before any entry was extracted. Surfaced so the
-    /// resolver can classify this as an empty-repository outcome instead of
-    /// a retryable processing failure.
     #[error("archive contained no entries (empty or truncated stream)")]
     EmptyArchive,
 
-    /// The repository exceeded the total-bytes cap. Like `EmptyArchive`, the
-    /// resolver treats it as an empty repo (checkpoint), not a retryable failure.
     #[error("repository exceeded the total-bytes cap")]
     RepositoryTooLarge,
 }
@@ -281,7 +276,6 @@ mod tests {
     #[tokio::test]
     async fn cap_exceeded_leaves_no_partial_extraction_on_disk() {
         let (dir, cache) = create_cache_with_total_cap(8);
-        // Two 6-byte files: the first fits, the second trips the 8-byte total cap mid-stream.
         let archive = build_tar_gz(&[
             ("repo-abc/first.rs", b"aaaaaa"),
             ("repo-abc/second.rs", b"bbbbbb"),
@@ -363,8 +357,6 @@ mod tests {
 
     #[tokio::test]
     async fn extract_archive_reports_empty_archive_for_truncated_gzip() {
-        // First 3 bytes of a gzip header only. GzDecoder fails mid-read with
-        // an UnexpectedEof-shaped error, which we classify as EmptyArchive.
         let truncated: Vec<u8> = vec![0x1f, 0x8b, 0x08];
 
         let (_dir, cache) = create_cache();
@@ -389,10 +381,6 @@ mod tests {
             ("project-abc/static/banner.gif", b"GIF89a"),
             ("project-abc/fonts/Inter.woff2", b""),
             ("project-abc/dist/build.zip", b"PK"),
-            // Resolver inputs: must survive even though they aren't
-            // parsable source. Inclusion filters historically dropped
-            // these and silently broke cross-crate / cross-module
-            // resolution.
             (
                 "project-abc/Cargo.toml",
                 b"[workspace]\nmembers = [\"src/foo\"]\n",
@@ -432,8 +420,6 @@ mod tests {
         assert!(path.path().join("package.json").exists());
         assert!(path.path().join("tsconfig.json").exists());
         assert!(path.path().join(".gitignore").exists());
-        // Anything outside the denylist passes through, even if the
-        // parser will ignore it later.
         assert!(path.path().join("README.md").exists());
     }
 

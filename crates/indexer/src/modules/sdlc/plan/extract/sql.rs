@@ -16,7 +16,6 @@ pub(in crate::modules::sdlc) fn compile_authored_extract(
             version_column => declaration.version,
             watermark_column => declaration.watermark,
             deleted_column => declaration.deleted,
-            // Re-emit the per-page markers unchanged so `PreparedQuery::to_sql` renders them at extraction time.
             filters => FILTERS_MARKER,
             batch_size => BATCH_SIZE_MARKER,
         },
@@ -49,7 +48,6 @@ pub(in crate::modules::sdlc) fn compile_authored_extract(
     })
 }
 
-/// The SELECT-list expression written `AS {alias}`, so filters/cursors target the source expression.
 fn aliased_expression(sql: &str, alias: &str) -> Option<String> {
     let marker = format!(" AS {alias}");
     let end = sql.find(&marker)?;

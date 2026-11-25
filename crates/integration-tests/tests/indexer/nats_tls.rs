@@ -1,5 +1,3 @@
-//! These tests require a Docker-compatible runtime (Docker, Colima, etc).
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -42,8 +40,6 @@ struct TestPki {
     client_key_pem: String,
 }
 
-/// Generates a test PKI. `server_sans` must include all hostnames/IPs the client
-/// will use to connect (e.g. "localhost", "127.0.0.1", "docker" in CI).
 fn generate_test_pki(server_sans: &[String]) -> TestPki {
     let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -58,7 +54,6 @@ fn generate_test_pki(server_sans: &[String]) -> TestPki {
     let ca_key = KeyPair::generate().unwrap();
     let ca = CertifiedIssuer::self_signed(ca_params, ca_key).unwrap();
 
-    // SANs must match the hostname the client connects to.
     let mut server_params = CertificateParams::new(server_sans.to_vec()).unwrap();
     server_params
         .distinguished_name
@@ -71,7 +66,6 @@ fn generate_test_pki(server_sans: &[String]) -> TestPki {
     let server_key = KeyPair::generate().unwrap();
     let server_cert = server_params.signed_by(&server_key, &*ca).unwrap();
 
-    // CN is used for NATS user mapping via verify_and_map.
     let mut client_params = CertificateParams::new(vec!["test-client".into()]).unwrap();
     client_params
         .distinguished_name
@@ -94,7 +88,6 @@ fn generate_test_pki(server_sans: &[String]) -> TestPki {
 }
 
 async fn resolve_container_host() -> String {
-    // Start a throwaway container to discover the host (localhost vs docker in CI)
     let probe = GenericImage::new("nats", "2.15.0-alpine")
         .with_mapped_port(0, ContainerPort::Tcp(4222))
         .start()
@@ -239,7 +232,6 @@ async fn mtls_rejects_without_client_cert() {
     let (_container, url) = start_nats_tls_container(&pki).await;
     let temp_dir = TempDir::new().unwrap();
 
-    // CA only — no client cert — server requires verify_and_map
     let ca_path = temp_dir.path().join("ca.pem");
     std::fs::write(&ca_path, &pki.ca_cert_pem).unwrap();
 
@@ -264,7 +256,6 @@ async fn mtls_rejects_wrong_ca() {
     let pki = generate_test_pki(&sans);
     let (_container, url) = start_nats_tls_container(&pki).await;
 
-    // Generate a completely separate CA — server won't trust certs signed by it
     let wrong_pki = generate_test_pki(&sans);
     let temp_dir = TempDir::new().unwrap();
     let config = client_config(&wrong_pki, &url, &temp_dir);

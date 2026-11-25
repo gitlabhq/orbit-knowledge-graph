@@ -66,7 +66,6 @@ impl RequestContext {
     }
 }
 
-/// Admins read the whole organization, so they have no single root namespace.
 fn request_root_namespace_id(claims: &Claims) -> Option<u64> {
     if claims.admin {
         return None;

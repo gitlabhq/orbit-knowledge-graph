@@ -270,7 +270,6 @@ fn envelope(git: &GitInfo) -> Envelope<'_> {
     ])
 }
 
-/// The directories that hold `paths`, and the edges between them.
 pub(super) fn directory_rows(
     git: &GitInfo,
     ontology: &ontology::Ontology,
@@ -284,8 +283,6 @@ pub(super) fn directory_rows(
     )?)
 }
 
-/// Writes what a refresh read: each family's rows, then every directory
-/// again when files came or went.
 pub(super) fn apply_refresh(
     writer: &GraphWriter,
     ontology: &ontology::Ontology,

@@ -215,7 +215,6 @@ pub fn excluded_path_predicate(col: &str) -> String {
     let likes = EXCLUDE_LIKE
         .iter()
         .map(|pat| format!("{col} LIKE {}", sql_lit(pat)));
-    // The indexers skip these directories case-insensitively, so search hides them the same way.
     let directory_likes = EXCLUDED_INDEXING_DIRS
         .iter()
         .flat_map(|dir| [format!("{dir}/%"), format!("%/{dir}/%")])

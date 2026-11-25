@@ -118,8 +118,6 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
     remove_retired_only(agent, false, target, report)
 }
 
-/// Removes what an earlier release installed. A config file is read only when it names a retired
-/// value, so a config Orbit never wrote to, such as one with comments, is left alone.
 pub(super) fn remove_retired(
     agent: Agent,
     ui: bool,
@@ -154,8 +152,6 @@ pub(super) fn remove_retired_only(
     Ok(())
 }
 
-/// Removes feature files together or not at all: an edited file kept without its siblings, such
-/// as an extension entry point without the module it imports, would stop working.
 pub(super) fn remove_by_feature<'a>(
     files: impl Iterator<Item = &'a TemplateFile>,
     target: &Target,
@@ -195,7 +191,6 @@ fn remove_group(files: Vec<&ScopedPath>, target: &Target, report: &mut Report) -
     Ok(())
 }
 
-/// The labels of the retired files and config files that setup would touch to clean up.
 pub(super) fn retired_labels(agent: Agent, ui: bool, target: &Target) -> Result<Vec<String>> {
     let mut labels = Vec::new();
     let switched_off = agent.switched_off_files(ui).map(|file| &file.path);

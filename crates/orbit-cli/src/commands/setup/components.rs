@@ -42,8 +42,6 @@ fn file_mentions(path: &Path, marker: &str) -> bool {
     std::fs::read_to_string(path).is_ok_and(|text| text.contains(marker))
 }
 
-/// Whether a file setup installed for the agent already asks the CLI for the instructions, so a
-/// run that skips the component that writes it leaves the agent its instructions.
 pub(super) fn loads_instructions(agent: Agent, target: &Target) -> bool {
     const CALLS: [&str; 3] = [
         "hook-guard instructions",
@@ -250,8 +248,6 @@ fn backup_once(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     Ok(())
 }
 
-/// Copies `source` to `destination` only if nothing exists there, without
-/// following a link at `destination`. A partial copy is removed on failure.
 fn copy_new(source: &Path, destination: &Path) -> std::io::Result<()> {
     let mut input = std::fs::File::open(source)?;
     let permissions = input.metadata()?.permissions();

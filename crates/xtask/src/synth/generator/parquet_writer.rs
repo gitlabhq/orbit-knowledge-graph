@@ -46,7 +46,6 @@ impl StreamingEdgeWriter {
         })
     }
 
-    /// Flushes automatically when the buffer reaches the threshold.
     #[inline]
     pub fn push(&mut self, edge: EdgeRecord) -> Result<()> {
         self.buffer.push(edge);
@@ -79,7 +78,6 @@ impl StreamingEdgeWriter {
         Ok(self.total_written)
     }
 
-    /// Includes edges still buffered and not yet flushed.
     pub fn count(&self) -> usize {
         self.total_written + self.buffer.len()
     }
@@ -149,7 +147,6 @@ impl ParquetWriter {
         StreamingEdgeWriter::new(&edge_path, None, ontology)
     }
 
-    /// Writes nodes only; edges are written separately via the streaming writer.
     pub fn write_organization_nodes(&self, org_id: u32, nodes: &OrganizationNodes) -> Result<()> {
         let org_dir = self.output_dir.join(format!("org_{}", org_id));
         fs::create_dir_all(&org_dir)?;

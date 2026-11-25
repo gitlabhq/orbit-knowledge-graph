@@ -53,7 +53,6 @@ impl RowEnvelope for IndexerEnvelope {
     }
 
     fn header_specs(&self) -> Vec<ColumnSpec> {
-        // Not used — specs come from the ontology. Kept for trait compliance.
         vec![]
     }
 }
@@ -110,8 +109,6 @@ fn convert_semantic_graph(
     let definitions = convert_definitions(graph, ids, envelope, &specs.definition)?;
     let imported_symbols = convert_imports(graph, ids, envelope, &specs.imported_symbol)?;
     let tag_cache = graph.build_node_tags(&specs.tag_properties);
-    // The tag cache is the last reader of the definition and import payloads, so
-    // from here the edge build needs only endpoints, edge weights and the cache.
     graph.release_node_payloads();
     let edges = convert_semantic_edges(graph, ids, envelope, specs, &tag_cache)?;
     Ok(ConvertedGraphData {
@@ -164,8 +161,6 @@ pub(super) fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<Column
     specs
 }
 
-/// Constant for every row in a batch, so the wire encoding collapses each to one
-/// key. That is an indexer-side fact, not graph shape, so not in the ontology.
 const ENVELOPE_CONSTANT_COLUMNS: [&str; 3] = ["traversal_path", "branch", "commit_sha"];
 
 fn column_type_for(
@@ -194,9 +189,6 @@ pub(super) fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
         .map(|col| col.name.clone())
         .collect();
 
-    // Build the union of logical columns across ALL edge tables so the
-    // batch can hold columns from tables with extra fields (gl_code_edge
-    // has project_id + branch that gl_edge does not).
     let mut seen_cols = std::collections::HashSet::new();
     let mut specs: Vec<ColumnSpec> = Vec::new();
     for table_name in ontology.edge_tables() {
@@ -218,8 +210,6 @@ pub(super) fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
         if let Some(config) = ontology.edge_table_config(table_name) {
             for col in &config.storage.denormalized_columns {
                 if seen.insert(col.name.clone()) {
-                    // A handful of tag values repeat across every edge row. Only
-                    // the wire encoding changes; the column stays `Array(String)`.
                     specs.push(ColumnSpec {
                         name: col.name.clone(),
                         col_type: ColumnType::DictStrList,
@@ -613,14 +603,9 @@ pub(super) fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
     let mut hasher = rustc_hash::FxHasher::default();
     project_id.hash(&mut hasher);
     branch.hash(&mut hasher);
-    // Mask clears the sign bit so the result is always a positive i64.
     (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
 
-/// Per-node-kind list of `(tag_key, property_name)` pairs derived from
-/// the ontology's denormalization declarations. Deduplicated because the
-/// ontology expands one declaration per edge relationship, but the tag
-/// values are the same regardless of which edge the node appears in.
 type TagProperties = std::collections::HashMap<String, Vec<(String, String)>>;
 
 pub(super) fn build_tag_properties(ontology: &Ontology) -> TagProperties {
@@ -709,12 +694,8 @@ pub(super) fn route_graph(
     if data.edges.num_rows() > 0 {
         let routing = EdgeRouting::resolve(&data.edges, table_names)?;
 
-        // Columns that only exist on gl_code_edge. Sub-batches going
-        // to other edge tables (gl_edge) must have them stripped.
         let code_only_cols: &[&str] = &["project_id", "branch"];
 
-        // Every semantic edge kind usually routes to one table, and `take`
-        // would copy the whole batch while the original is still live.
         match routing {
             EdgeRouting::Single(table) => {
                 let batch = if table.contains("code_edge") {
@@ -866,8 +847,6 @@ mod tests {
 
     #[test]
     fn compute_branch_id_is_always_non_negative() {
-        // Project/branch pairs whose unmasked FxHash output has the
-        // high bit set previously produced negative i64 ids.
         let cases = [
             (1_i64, "main"),
             (42, "feature/x"),

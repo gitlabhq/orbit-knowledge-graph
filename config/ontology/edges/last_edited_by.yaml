@@ -1,5 +1,3 @@
-# config/ontology/edges/last_edited_by.yaml
-
 description: User who most recently edited an entity's content (title/description)
 
 variants:

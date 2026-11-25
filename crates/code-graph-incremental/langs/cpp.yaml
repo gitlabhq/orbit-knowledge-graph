@@ -10,7 +10,6 @@
 #   include receives unresolved calls.
 # - Concepts are displayed as Interface; the canonical alphabet has no
 #   Namespace or Concept kind.
-
 config:
   stdlib: [
       { module: cstdio, symbols: [clearerr, fclose, feof, ferror, fflush, fgetc,
@@ -117,7 +116,6 @@ stages:
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
-      # a::b::f() and a::b::c::f(): the scope nests to the right, so each depth is its own rule
       - match: '(call_expression function: (qualified_identifier scope: $S:namespace_identifier name: (qualified_identifier scope: $T:namespace_identifier name: (qualified_identifier scope: $U:namespace_identifier name: $N:identifier))) arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object (__member @$U (__object (__member @$T (__object @$S $S))))))) $A)'
       - match: '(call_expression function: (qualified_identifier scope: $S:namespace_identifier name: (qualified_identifier scope: $T:namespace_identifier name: $N:identifier)) arguments: $A)'
@@ -139,9 +137,6 @@ stages:
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (attributed_declarator (function_declarator declarator: $N:identifier parameters: $P)) body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
-      # An explicit specialization (Foo::bar<int>) is named without its template arguments.
-      # Nested arguments are flattened, then the trailing list is dropped. A trailing operator
-      # ending in > (Ptr<T>::operator->) is marked with # first, so its qualifier keeps <T>.
       - match: '(function_definition type:? $RT:type_identifier declarator: (pointer_declarator declarator: (function_declarator declarator: $Q:qualified_identifier parameters: $P)) body: $B)'
         replace: '(__def (__defname @$Q|regex_replace("(\boperator\s*(?:->|>>|>))$", "${1}#")|regex_loop("<[^<>]*>([^<]*>)$", "${1}")|regex_replace("\s*<([^<>=][^<>]*)?>$", "")|regex_replace("#$", "") $Q) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (reference_declarator (function_declarator declarator: $Q:qualified_identifier parameters: $P)) body: $B)'
@@ -158,7 +153,6 @@ stages:
       - match: '(declaration declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier)))'
         replace: '(__defname @$N)'
         tag: { exports: '@$N' }
-      # Method declarations and definitions inside a class body
       - match: '(field_declaration type:? $RT:type_identifier declarator: (function_declarator declarator: $N:field_identifier parameters: $P))'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: $N:field_identifier parameters: $P) body: $B)'
@@ -169,24 +163,20 @@ stages:
         replace: '(__def (__defname @$N $N) (__method) (__ssa_return_type? @$RT) $P)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: (qualified_identifier scope: $S:namespace_identifier name: $N:operator_name) parameters: $P) body: $B)'
         replace: '(__def (__defname @$S) (__impl) (__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B))'
-      # Out-of-class method definitions: Class::method
       - match: '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: (qualified_identifier scope: $S:namespace_identifier name: $N:identifier) parameters: $P) body: $B)'
         replace: '(__def (__defname @$S) (__impl) (__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B))'
-      # Free functions
       - match: '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: $N:identifier parameters: $P) body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier parameters: $P)) body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (reference_declarator (function_declarator declarator: $N:identifier parameters: $P)) body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
-      # Explicit specializations (foo<int>) are named without their template arguments
       - match: '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: (template_function name: $N:identifier) parameters: $P) body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (pointer_declarator declarator: (function_declarator declarator: (template_function name: $N:identifier) parameters: $P)) body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (reference_declarator (function_declarator declarator: (template_function name: $N:identifier) parameters: $P)) body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
-      # Fields
       - match: '(field_declaration type: $T:struct_specifier declarator: $N:field_identifier)'
         replace: '(field_declaration $T (__def (__defname @$N) (__field_def)))'
       - match: '(field_declaration type: $T:class_specifier declarator: $N:field_identifier)'
@@ -197,7 +187,6 @@ stages:
         replace: '(__def (__defname @$N) (__field_def))'
       - match: '(field_declaration declarator: (pointer_declarator declarator: $N:field_identifier))'
         replace: '(__def (__defname @$N) (__field_def))'
-      # Locals (Type name(args) and Ns::Type name)
       - match: '(declaration type: $T:type_identifier declarator: (function_declarator declarator: $N:identifier parameters: $A))'
         replace: '(__binding @$N (__declaration) (__ssa_typed @$T) $A)'
       - match: '(declaration type: $T:qualified_identifier declarator: (function_declarator declarator: $N:identifier parameters: $A))'
@@ -246,7 +235,6 @@ stages:
         replace: '(__scope (__ssa_loop $V (__binding @$N (__declaration)) $B))'
       - match: '(for_range_loop right: $V body: $B)'
         replace: '(__ssa_loop $V $B)'
-      # Types
       - match: '(class_specifier name: $N:type_identifier $$$ANN body: $B)'
         replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
       - match: '(struct_specifier name: $N:type_identifier $$$ANN body: $B)'

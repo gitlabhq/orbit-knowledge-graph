@@ -7,7 +7,6 @@ use anyhow::Result;
 
 pub const BRIEF_WAIT: Duration = Duration::from_secs(5);
 const DEFAULT_WAIT: Duration = Duration::from_secs(600);
-/// sysexits.h EX_TEMPFAIL.
 pub const WAIT_TIMED_OUT_EXIT_CODE: i32 = 75;
 const FIRST_NOTICE_AFTER: Duration = Duration::from_secs(1);
 const NOTICE_EVERY: Duration = Duration::from_secs(15);
@@ -72,7 +71,6 @@ fn open_lock_file(path: &Path) -> Result<File> {
         .open(PathBuf::from(lock_path))?)
 }
 
-/// For a writer holder, the lock file's mtime is the index's start time.
 fn acquire_database_lock(
     path: &Path,
     shared: bool,

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create the _siphon_watermark column the SDLC indexer queries (gkg!1729).
+# Create the _siphon_watermark column the SDLC indexer queries.
 # Siphon 0.0.100-beta handles the column but does NOT create it: it omits it
 # from every insert so ClickHouse fills the DEFAULT. We add it to every siphon
 # CDC table plus the non-siphon_-prefixed ontology source tables.

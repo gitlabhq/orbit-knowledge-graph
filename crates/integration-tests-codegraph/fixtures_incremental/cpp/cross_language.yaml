@@ -75,10 +75,6 @@ fixtures:
       }
 
 tests:
-  # ══════════════════════════════════════════════════════════════
-  # FILE EXTENSION COVERAGE
-  # ══════════════════════════════════════════════════════════════
-
   - name: "All file extensions discovered (.h, .c, .hh, .cc, .cxx, .hxx, .hpp, .cpp)"
     query: |
       MATCH (f:File)
@@ -95,10 +91,6 @@ tests:
       - { row: { path: "alt/data.cpp" } }
       - { row: { path: "main.hpp" } }
       - { row: { path: "main.cpp" } }
-
-  # ══════════════════════════════════════════════════════════════
-  # CROSS-LANGUAGE: .cxx calling .c via .h
-  # ══════════════════════════════════════════════════════════════
 
   - name: "C++ engine.cxx calls C add() via ops.h -> ops.c"
     query: |
@@ -129,10 +121,6 @@ tests:
     assert:
       - { row: { src: "engine.cxx", tgt: "util/format.cc" } }
 
-  # ══════════════════════════════════════════════════════════════
-  # CROSS-EXTENSION: .cpp calling through .hxx -> .cpp
-  # ══════════════════════════════════════════════════════════════
-
   - name: "main.cpp calls record_sum via data.hxx -> data.cpp"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -152,10 +140,6 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { src: "main.cpp", tgt: "math/ops.c" } }
-
-  # ══════════════════════════════════════════════════════════════
-  # STRUCT FROM .hxx HEADER
-  # ══════════════════════════════════════════════════════════════
 
   - name: "Struct defined in .hxx header exists"
     query: |

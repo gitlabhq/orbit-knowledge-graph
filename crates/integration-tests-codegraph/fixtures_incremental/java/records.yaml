@@ -1,13 +1,5 @@
 name: "Java 14+ records — definitions, members, call resolution, and pattern matching"
 
-# Remaining gaps confirmed by this fixture:
-#   - Implicit equals/hashCode/toString on records are compiler-synthesised and
-#     not indexed; the java.rs on_scope hook only synthesises component accessors.
-# Gap tracked in #851:
-#   - Java 21 record patterns (record_pattern nodes) produce no edges at all:
-#     neither the type reference (instanceof Point(int x, int y)) nor accessor
-#     calls for destructured components.
-
 fixtures:
   - path: com/example/records/Measurable.java
     content: |
@@ -221,8 +213,6 @@ fixtures:
       }
 
 tests:
-  # ── Record definitions ────────────────────────────────────────────
-
   - name: "Simple record is extracted as definition_type Record"
     query: |
       MATCH (d:Definition)
@@ -250,7 +240,6 @@ tests:
       - { row_count: 1 }
       - { row: { type: "Class" } }
 
-  # corrected: records display as the canonical Class, so the ten are named
   - name: "All ten records (eight top-level plus nested Swap and Inner) are indexed"
     query: |
       MATCH (d:Definition)
@@ -260,8 +249,6 @@ tests:
     assert:
       - { row_count: 10 }
       - { match: { field: fqn, pattern: "com.example.records.*" } }
-
-  # ── Constructor ───────────────────────────────────────────────────
 
   - name: "Explicit canonical constructor in Range is extracted"
     query: |
@@ -283,8 +270,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Methods ───────────────────────────────────────────────────────
-
   - name: "Custom method length() in Range is extracted"
     query: |
       MATCH (d:Definition)
@@ -303,7 +288,6 @@ tests:
       - { row_count: 1 }
       - { row: { type: "Method" } }
 
-  # corrected: a record also declares equals, hashCode, and toString (JLS 8.10.3); five methods
   - name: "Implicit accessors x() and y() are synthesised for Point components"
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
@@ -315,8 +299,6 @@ tests:
       - { row_count: 5 }
       - { row: { name: "x", line: 4 } }
       - { row: { name: "y", line: 4 } }
-
-  # ── Containment edges ─────────────────────────────────────────────
 
   - name: "Range record defines its canonical constructor"
     query: |
@@ -337,8 +319,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Nested record ────────────────────────────────────────────────
-
   - name: "Nested record Swap inside Pair is extracted"
     query: |
       MATCH (d:Definition)
@@ -357,8 +337,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── File containment ─────────────────────────────────────────────
-
   - name: "File defines top-level record"
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
@@ -368,9 +346,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Call resolution into records ──────────────────────────────────
-
-  # corrected: one constructor call; the return type is a reference, not a call
   - name: "PointUser.origin() calls Point constructor"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -378,7 +353,6 @@ tests:
         AND callee.fqn = 'com.example.records.Point'
       RETURN callee.fqn AS callee
     assert:
-      # Two edges: the Point return-type reference and the new Point(...) call.
       - { row_count: 1 }
 
   - name: "RangeUser.span() calls explicit record method Range.length"
@@ -428,7 +402,6 @@ tests:
         AND callee.fqn = 'com.example.records.Outer.Inner'
       RETURN callee.fqn AS callee
     assert:
-      # Two edges: the Inner return-type reference and the new Inner(...) call.
       - { row_count: 2 }
 
   - name: "Outer.use() calls nested record method Inner.doubled"
@@ -465,8 +438,6 @@ tests:
       - { row: { callee: "com.example.records.Rectangle.height" } }
       - { row: { callee: "com.example.records.Rectangle.width" } }
 
-  # ── Explicit overrides of implicit members ────────────────────────
-
   - name: "Explicit accessor override is a single Method definition"
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
@@ -497,8 +468,6 @@ tests:
       RETURN callee.fqn AS callee, callee.start_line AS line
     assert:
       - { row_count: 1 }
-      # Pinning the line ensures the call resolves to the explicit override,
-      # not an implicit definition, once implicit accessors are synthesised.
       - { row: { line: 5 } }
 
   - name: "WrappedUser.print() calls explicitly overridden Wrapped.toString"
@@ -509,8 +478,6 @@ tests:
       RETURN callee.fqn AS callee, callee.start_line AS line
     assert:
       - { row_count: 1 }
-      # Line 9 is the @Override annotation: an annotated method's range starts
-      # at its annotation, not its signature.
       - { row: { line: 9 } }
 
   - name: "WrappedUser.same() calls explicitly overridden Wrapped.equals"
@@ -522,8 +489,6 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { line: 14 } }
-
-  # ── Gaps (severity: warning — see header comment) ─────────────────
 
   - name: "GAP: implicit equals/hashCode/toString defined on Point"
     severity: warning

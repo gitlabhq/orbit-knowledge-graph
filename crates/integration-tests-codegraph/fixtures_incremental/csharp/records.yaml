@@ -1,14 +1,5 @@
 name: "C# 9+ records — positional records, record structs, inheritance, nesting"
 
-# Gaps confirmed by this fixture, mirroring the Java records coverage in
-# fixtures/java/records.yaml:
-#   - Implicit positional-parameter properties and the compiler-synthesised
-#     copy/Deconstruct/Equals members are not present in the source AST → not
-#     indexed. Only members written in source are extracted.
-#   - The `record` keyword is mapped by csharp.rs to definition_type "Record"
-#     (scope("record_declaration", "Record")); `record struct` uses the same
-#     record_declaration node and so is also reported as "Record".
-
 fixtures:
   - path: Shapes/IShape.cs
     content: |
@@ -76,7 +67,6 @@ tests:
       - { row_count: 1 }
       - { row: { type: "Class" } }
 
-  # corrected: a record struct is a value type (C# spec 16.1), so it is a Struct
   - name: "record struct Range is extracted as Record"
     query: |
       MATCH (d:Definition)

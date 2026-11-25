@@ -1,8 +1,3 @@
-//! Read-side entries are sorted and immutable. File lookups and subtree bounds use binary search.
-//! Directory listing scans the matching subtree. Content decisions on linked files use OnceLock;
-//! concurrent first reads may wait for classification. Stored content reads do not take store locks.
-//! Virtual links resolve within `/`. Missing paths return NotFound and listed files Unsupported.
-
 use std::io;
 
 use rustc_hash::FxHashMap;

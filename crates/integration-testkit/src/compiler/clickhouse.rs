@@ -242,7 +242,6 @@ async fn other_skip_indexes(ctx: &TestContext, table: &str, index: &str) -> Stri
         .join(",")
 }
 
-/// Older twins in their own unmerged part give each skip index a granule to prune; FINAL still returns the real rows.
 async fn seed_decoys(ctx: &TestContext, table: &str) {
     let table = format!("{}{table}", *crate::TABLE_PREFIX);
     let columns = ctx

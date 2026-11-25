@@ -1,15 +1,12 @@
 // SECURITY: Only HS256 (HMAC-SHA256) is supported. Do NOT add RSA algorithms
 // (RS256, RS384, RS512, PS256, PS384, PS512) until jsonwebtoken updates to
 // rsa 0.10+ which fixes RUSTSEC-2023-0071 (Marvin Attack timing vulnerability).
-
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 
 use super::{AuthError, Claims};
 
-// Both sides use the same issuer/audience: Rails signs and validates
-// with iss="gitlab", aud="gitlab-knowledge-graph".
 const EXPECTED_ISSUER: &str = "gitlab";
 const EXPECTED_AUDIENCE: &str = "gitlab-knowledge-graph";
 const MIN_SECRET_LENGTH: usize = 32;

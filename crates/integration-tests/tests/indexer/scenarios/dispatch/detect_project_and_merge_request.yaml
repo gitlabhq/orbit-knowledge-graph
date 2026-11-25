@@ -1,7 +1,6 @@
 description: Incremental dispatch targets the namespaces of changed projects and merge requests
 
 seed:
-  # A changes checkpoint below the rows' replicated_at + a now() sweep cursor select the incremental path.
   checkpoint:
     - { key: dispatch.sdlc.namespace.changes, watermark: "2024-01-19 00:00:00.000000", cursor_values: "null" }
     - { key: dispatch.sdlc.namespace.sweep, watermark: { sql: "now64(6)" }, cursor_values: "null" }

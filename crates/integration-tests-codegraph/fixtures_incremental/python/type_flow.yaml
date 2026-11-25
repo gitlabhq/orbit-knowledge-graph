@@ -157,7 +157,6 @@ tests:
         assert:
           - { row: { callee: "get_connection" } }
           - { row: { callee: "execute" } }
-      # no false positive to rollback()
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.name = 'use_pool' AND callee.name = 'rollback'
@@ -177,7 +176,6 @@ tests:
           - { row: { callee: "session" } }
           - { row: { callee: "cursor" } }
           - { row: { callee: "fetch_all" } }
-      # no edges to wrong types
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.name = 'run_query'

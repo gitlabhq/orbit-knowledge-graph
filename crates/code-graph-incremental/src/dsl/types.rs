@@ -84,8 +84,6 @@ pub enum EdgeDir {
     Outgoing,
 }
 
-/// Which nodes have an edge of each kind, so `has_incoming` and
-/// `has_outgoing` answer from a set rather than a scan of every edge.
 pub struct EdgeIndex {
     incoming: FxHashSet<(EdgeKind, u32, u32)>,
     outgoing: FxHashSet<(EdgeKind, u32, u32)>,

@@ -60,7 +60,6 @@ fn swift_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bo
     let raw = node.text().to_string();
     let rest = raw.trim().strip_prefix("import").unwrap_or("").trim();
 
-    // Strip optional import-kind qualifier (e.g. "import struct UIKit.UIColor")
     let path = SWIFT_IMPORT_KINDS
         .iter()
         .find_map(|kind| {
@@ -108,15 +107,11 @@ impl DslLanguage for SwiftDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        // Rules for class_declaration are evaluated in reverse insertion order (last → first).
-        // The unconditional fallback at index 0 catches actors and any future keyword variants.
         vec![
             scope("class_declaration", "Class")
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier"))
                 .metadata(metadata().super_types(swift_super_types)),
-            // Extensions index the name but do not push a scope — methods inside would receive
-            // the wrong FQN prefix without a reattach hook (tracked in #765).
             scope("class_declaration", "Extension")
                 .def_kind(DefKind::Other)
                 .when(has_child_text("extension"))
@@ -143,8 +138,6 @@ impl DslLanguage for SwiftDsl {
             scope("function_declaration", "Function")
                 .def_kind(DefKind::Function)
                 .name_from(child_of_kind("simple_identifier")),
-            // Protocol method requirements have no body; no_scope keeps them as flat defs
-            // nested under the protocol's FQN (e.g. Drawable.draw).
             scope("protocol_function_declaration", "Method")
                 .def_kind(DefKind::Method)
                 .no_scope()
