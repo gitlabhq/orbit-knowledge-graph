@@ -6,7 +6,6 @@ use super::Runner;
 use crate::builder::ErasedWorker;
 use crate::event::{Failure, TaskStep};
 use crate::lease::Hold;
-use crate::pending::PendingWrite;
 use crate::submit::submit_task;
 use crate::task::{Delivery, TaskMessage};
 use crate::worker::{EncodedOutcome, TaskContext};
@@ -70,20 +69,7 @@ impl Runner {
 
     async fn start_task(&self, message: &TaskMessage) -> anyhow::Result<SystemTime> {
         let now = self.ports.clock.now().await;
-        let pending = &self.ports.pending;
-        let key = message.worker_key();
-
-        let entry = pending.read(&key).await?;
-        let holds_this_task = entry
-            .task
-            .is_some_and(|pending| pending.task == message.task);
-        let cleared_pending = if holds_this_task {
-            let written = pending.write(&key, entry.revision, None).await?;
-            matches!(written, PendingWrite::Written)
-        } else {
-            false
-        };
-
+        let cleared_pending = self.ports.pending.clear_if_still_pending(message).await?;
         let started = TaskStep::Started { cleared_pending };
         self.ports
             .observer
