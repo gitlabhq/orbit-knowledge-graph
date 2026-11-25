@@ -1,6 +1,6 @@
 use std::time::{Duration, SystemTime};
 
-use super::{Fence, HolderId, Lease, LeaseEntry, Revision};
+use super::{HolderId, Lease, LeaseEntry, Revision};
 use crate::task::TaskId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,7 +20,6 @@ pub struct Claim {
 pub struct Hold {
     holder: HolderId,
     task: TaskId,
-    fence: Fence,
     seen: Revision,
     expires_at: SystemTime,
     renew_at: SystemTime,
@@ -47,22 +46,20 @@ impl Claim {
             None => true,
             Some(lease) => local_now >= lease.expires_at + rules.skew_margin,
         };
-        let recovered = entry.generation.is_some();
-        (recovered && free).then(|| rules.lease_for(&self.holder, local_now))
+        free.then(|| rules.lease_for(&self.holder, local_now))
     }
 
     pub fn into_hold(
         self,
         rules: &LeaseRules,
         lease: &Lease,
-        written: Fence,
+        written: Revision,
         local_now: SystemTime,
     ) -> Hold {
         Hold {
             holder: self.holder,
             task: self.task,
-            fence: written,
-            seen: written.revision,
+            seen: written,
             expires_at: lease.expires_at,
             renew_at: local_now + rules.renew_every,
         }
@@ -80,7 +77,7 @@ impl Hold {
         entry: &LeaseEntry,
         local_now: SystemTime,
     ) -> Renewal {
-        if entry.is_held_by(&self.holder, self.fence.generation, self.seen) {
+        if entry.is_held_by(&self.holder, self.seen) {
             Renewal::Extend(rules.lease_for(&self.holder, local_now))
         } else {
             Renewal::Lost
@@ -101,16 +98,12 @@ impl Hold {
 
     pub fn revision_to_release(&self, entry: &LeaseEntry) -> Option<Revision> {
         entry
-            .is_held_by(&self.holder, self.fence.generation, self.seen)
+            .is_held_by(&self.holder, self.seen)
             .then_some(entry.revision)
     }
 
     pub fn task(&self) -> TaskId {
         self.task
-    }
-
-    pub fn fence(&self) -> Fence {
-        self.fence
     }
 
     pub fn seen_revision(&self) -> Revision {

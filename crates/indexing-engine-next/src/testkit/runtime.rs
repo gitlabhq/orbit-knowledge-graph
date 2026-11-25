@@ -16,7 +16,6 @@ use crate::builder::{Engine, ErasedPlanner};
 use crate::config::LaneConfig;
 use crate::disposition::{Attempt, Disposition};
 use crate::lane::{Lane, LaneId};
-use crate::lease::{Fence, Generation, Revision};
 use crate::ledger::JobSummary;
 use crate::payload::{Key, TaskInput, Tenant};
 use crate::planner::{Plan, PlanError, PlannedTask};
@@ -41,7 +40,6 @@ struct KitState {
     queue: Vec<QueuedTask>,
     pending: HashSet<(&'static str, Key)>,
     running_keys: HashSet<(&'static str, Key)>,
-    fences: HashMap<(&'static str, Key), u64>,
     busy_slots: HashMap<LaneId, u32>,
     paused_lanes: HashMap<LaneId, Instant>,
     ledger: MemoryLedger,
@@ -221,12 +219,7 @@ impl KitRuntime {
             let error = anyhow!("no module registered the worker {}", task.input.worker);
             return Attempt::Failed(TaskError::permanent(error));
         };
-        let fence = self
-            .engine
-            .registry
-            .is_exclusive(task.input.worker)
-            .then(|| self.state.lock().take_next_fence(task));
-        let ctx = TaskContext::new(Arc::clone(&self.pools), fence);
+        let ctx = TaskContext::new(Arc::clone(&self.pools));
         match tokio::time::timeout(lane.timeout, worker.run(&ctx, &task.input.bytes)).await {
             Ok(Ok(outcome)) => Attempt::Finished(outcome),
             Ok(Err(error)) => Attempt::Failed(error),
@@ -388,15 +381,6 @@ impl KitState {
         self.running_keys.remove(&task.worker_key());
         if let Some(busy) = self.busy_slots.get_mut(&task.lane_id()) {
             *busy -= 1;
-        }
-    }
-
-    fn take_next_fence(&mut self, task: &QueuedTask) -> Fence {
-        let revision = self.fences.entry(task.worker_key()).or_default();
-        *revision += 1;
-        Fence {
-            generation: Generation(1),
-            revision: Revision(*revision),
         }
     }
 

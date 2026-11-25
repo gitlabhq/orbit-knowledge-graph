@@ -1,13 +1,11 @@
 use rand::RngExt;
 
-use crate::lease::Lease;
 use crate::task::TaskId;
 
 use super::MessageState;
 use super::world::{Stall, StepKind, World};
 
 const MAX_STALL_TICKS: u64 = 8;
-const MAX_RECOVERY_TICKS: u64 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FaultBudget {
@@ -32,9 +30,7 @@ pub(super) enum Fault {
         process: usize,
     },
     PlannerCrash,
-    Wipe {
-        recover_after: u64,
-    },
+    Wipe,
     Duplicate {
         message: usize,
     },
@@ -53,7 +49,7 @@ impl World {
             let at = if self.rng.random_bool(0.5) {
                 StepKind::Any
             } else {
-                StepKind::Commit
+                StepKind::Work
             };
             faults.push(Fault::Stall { process, ticks, at });
         }
@@ -65,8 +61,7 @@ impl World {
             ]);
         }
         if left.wipes > 0 {
-            let recover_after = self.rng.random_range(0..=MAX_RECOVERY_TICKS);
-            faults.push(Fault::Wipe { recover_after });
+            faults.push(Fault::Wipe);
         }
         let messages = self.broker.messages().len();
         if left.duplicates > 0 && messages > 0 {
@@ -97,8 +92,8 @@ impl World {
                 self.planner_crash_armed = true;
                 None
             }
-            Fault::Wipe { recover_after } => {
-                self.wipe_nats(recover_after);
+            Fault::Wipe => {
+                self.wipe_nats();
                 None
             }
             Fault::Duplicate { message } => {
@@ -113,7 +108,6 @@ impl World {
         for process in &mut self.processes {
             process.renewal_fails = false;
         }
-        self.recover_at = Some(self.now_tick());
         self.resume_stalls(true)
     }
 
@@ -132,15 +126,6 @@ impl World {
             }
         }
         resumed
-    }
-
-    pub(super) fn recover_nats_when_due(&mut self) {
-        let due = self.recover_at.is_some_and(|at| self.now_tick() >= at);
-        if !due || self.nats_generation.is_some() {
-            return;
-        }
-        self.nats_generation = Some(self.database.start_next_generation());
-        self.record_step("RecoverNats", String::new());
     }
 
     pub(super) fn stall_if_armed(&mut self, process: usize, step: StepKind) -> bool {
@@ -162,16 +147,9 @@ impl World {
         }
     }
 
-    pub(super) fn consume_renewal_failure(
-        &mut self,
-        process: usize,
-        lease: Option<&Lease>,
-    ) -> bool {
+    pub(super) fn consume_renewal_failure(&mut self, process: usize) -> bool {
         let state = &self.processes[process];
-        let fails = state.renewal_fails
-            && state.phase.is_holding()
-            && lease.is_some()
-            && self.faults_left.crashes > 0;
+        let fails = state.renewal_fails && state.phase.is_holding() && self.faults_left.crashes > 0;
         if fails {
             self.faults_left.crashes -= 1;
             self.processes[process].renewal_fails = false;
@@ -209,7 +187,7 @@ impl World {
         true
     }
 
-    fn wipe_nats(&mut self, recover_after: u64) {
+    fn wipe_nats(&mut self) {
         if self.faults_left.wipes == 0 {
             return;
         }
@@ -217,8 +195,6 @@ impl World {
         self.lease.wipe();
         self.pending.wipe();
         self.broker.wipe();
-        self.nats_generation = None;
-        self.recover_at = Some(self.now_tick() + recover_after);
         let not_done: Vec<TaskId> = self
             .ids
             .iter()

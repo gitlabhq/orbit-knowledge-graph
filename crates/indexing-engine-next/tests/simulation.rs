@@ -1,11 +1,11 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use indexing_engine_next::lease::{Fence, Generation, Revision};
+use indexing_engine_next::lease::Revision;
 use indexing_engine_next::task::TaskId;
 use indexing_engine_next::testkit::simulation::{
-    DatabaseWrite, FaultBudget, MessageState, RevisionConflict, SimulatedBroker, SimulatedDatabase,
-    SimulatedKeyValue, Simulation, SimulationReport, TickClock,
+    FaultBudget, MessageState, RevisionConflict, SimulatedBroker, SimulatedKeyValue, Simulation,
+    SimulationReport, TickClock,
 };
 use indexing_engine_next::{EngineEvent, Observer, TaskEvent, TaskStep, Tenant};
 use uuid::Uuid;
@@ -14,13 +14,6 @@ const SEEDS: u64 = 300;
 
 fn task(n: u128) -> TaskId {
     TaskId::new(Uuid::from_u128(n))
-}
-
-fn fence(generation: u64, revision: u64) -> Fence {
-    Fence {
-        generation: Generation(generation),
-        revision: Revision(revision),
-    }
 }
 
 #[test]
@@ -89,28 +82,6 @@ fn a_nack_of_a_message_that_is_not_in_flight_changes_nothing() {
 
     assert_eq!(broker.messages()[0].state, MessageState::Ready);
     assert_eq!(broker.ready_messages().collect::<Vec<_>>(), [0]);
-}
-
-#[test]
-fn the_database_rejects_a_write_with_a_lower_fence_than_one_it_kept() {
-    let mut database = SimulatedDatabase::default();
-
-    assert_eq!(database.write(fence(1, 4)), DatabaseWrite::Kept);
-    assert_eq!(database.write(fence(1, 3)), DatabaseWrite::Rejected);
-    assert_eq!(database.write(fence(1, 4)), DatabaseWrite::Kept);
-    assert_eq!(database.highest_fence(), fence(1, 4));
-}
-
-#[test]
-fn a_new_generation_survives_in_the_database_and_beats_older_fences() {
-    let mut database = SimulatedDatabase::default();
-    assert_eq!(database.write(fence(1, 4_000)), DatabaseWrite::Kept);
-
-    let next = database.start_next_generation();
-
-    assert_eq!(next, Generation(2));
-    assert_eq!(database.write(fence(next.0, 1)), DatabaseWrite::Kept);
-    assert_eq!(database.write(fence(1, 4_001)), DatabaseWrite::Rejected);
 }
 
 #[test]
@@ -228,7 +199,7 @@ async fn every_seed_keeps_the_rules_when_other_steps_run_inside_a_step() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn the_seeds_reach_every_fault_and_every_fence_rejection() {
+async fn the_seeds_reach_every_fault_and_every_step() {
     let reports = run_seeds(&three_processes()).await;
 
     for step in [
@@ -238,12 +209,11 @@ async fn the_seeds_reach_every_fault_and_every_fence_rejection() {
         "RenewFails",
         "PlannerCrash",
         "NatsWipe",
-        "RecoverNats",
         "DuplicateCopy",
         "Redeliver",
         "GiveBack",
-        "RejectedWrite",
         "Renew",
+        "Work",
         "Finish",
     ] {
         assert!(sum(&reports, step) > 0, "no seed reached the step {step}");

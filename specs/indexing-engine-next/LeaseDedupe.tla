@@ -1,6 +1,6 @@
 ---------------------------- MODULE LeaseDedupe ----------------------------
-\* ADR 023 lease and pending-dedupe protocol: no overlapping runs of one key, one pending task per key.
-\* why: NATS is the broker and the key-value store. It can wipe all its state, deliver a message twice, or lose one. The database and its fences survive a wipe.
+\* ADR 023 lease and pending-dedupe protocol: one pending task per key, and every acked submit runs.
+\* why: NATS is the broker and the key-value store. It can wipe all its state, deliver a message twice, or lose one. Workers write rows versioned by their source, so a rare overlap of two runs of one key is harmless.
 EXTENDS Integers, Sequences, FiniteSets, TLC
 
 CONSTANTS
@@ -19,10 +19,7 @@ CONSTANTS
     MaxDuplicates,
     MaxLosses,
     StartClearsOnlyOwnMarker,
-    SubmitRepublishesFoundMarker,
-    HolderStopsBeforeExpiry,
-    WritesFencedByLeaseRevision,
-    FenceHasGeneration
+    SubmitRepublishesFoundMarker
 
 VARIABLES
     now,
@@ -37,49 +34,32 @@ VARIABLES
     started,
     pc,
     held,
-    token,
     seenRev,
-    expiry,
     renewAt,
     stalled,
     stallsLeft,
     crashesLeft,
-    storeFence,
-    staleWrite,
-    rejectedCurrent,
-    generation,
-    natsGeneration,
     wipesLeft,
     duplicatesLeft,
     lossesLeft,
     lostInWipe
 
 vars == <<now, offset, lease, marker, nextId, copies, planner, submitted, cover,
-          started, pc, held, token, seenRev, expiry, renewAt, stalled,
-          stallsLeft, crashesLeft, storeFence, staleWrite, rejectedCurrent,
-          generation, natsGeneration, wipesLeft, duplicatesLeft, lossesLeft, lostInWipe>>
+          started, pc, held, seenRev, renewAt, stalled, stallsLeft, crashesLeft,
+          wipesLeft, duplicatesLeft, lossesLeft, lostInWipe>>
 
-podVars == <<pc, held, token, seenRev, expiry, renewAt, stalled>>
+podVars == <<pc, held, seenRev, renewAt, stalled>>
 plannerVars == <<marker, nextId, planner, submitted, cover>>
-storeVars == <<storeFence, staleWrite, rejectedCurrent, generation>>
-natsVars == <<natsGeneration, wipesLeft, duplicatesLeft, lossesLeft, lostInWipe>>
+natsVars == <<wipesLeft, duplicatesLeft, lossesLeft, lostInWipe>>
 
 NoMarker == 0
 MaxIds == MaxEvents + MaxCrashes
 Ids == 1..MaxIds
-HoldingPhases == {"leased", "running", "writing", "done"}
-RunPhases == {"running", "writing", "done"}
+HoldingPhases == {"leased", "running", "done"}
+RunPhases == {"running", "done"}
 LiveStates == {"ready", "inflight"}
 
 Local(p) == now + offset[p]
-
-NoFence == <<0, 0>>
-
-Below(a, b) == a[1] < b[1] \/ (a[1] = b[1] /\ a[2] < b[2])
-
-MaxFence(a, b) == IF Below(a, b) THEN b ELSE a
-
-FenceGeneration == IF FenceHasGeneration THEN natsGeneration ELSE 0
 
 HasLiveCopy(id) == \E c \in DOMAIN copies : copies[c].id = id /\ copies[c].state \in LiveStates
 
@@ -110,18 +90,11 @@ Init ==
     /\ started = {}
     /\ pc = [p \in Pods |-> "idle"]
     /\ held = [p \in Pods |-> 0]
-    /\ token = [p \in Pods |-> NoFence]
     /\ seenRev = [p \in Pods |-> 0]
-    /\ expiry = [p \in Pods |-> 0]
     /\ renewAt = [p \in Pods |-> 0]
     /\ stalled = [p \in Pods |-> FALSE]
     /\ stallsLeft = MaxStalls
     /\ crashesLeft = MaxCrashes
-    /\ storeFence = NoFence
-    /\ staleWrite = FALSE
-    /\ rejectedCurrent = FALSE
-    /\ generation = 1
-    /\ natsGeneration = 1
     /\ wipesLeft = MaxWipes
     /\ duplicatesLeft = MaxDuplicates
     /\ lossesLeft = MaxLosses
@@ -132,7 +105,7 @@ Tick ==
     /\ \A p \in Pods : (pc[p] \in HoldingPhases /\ Awake(p)) => Local(p) < renewAt[p]
     /\ now' = now + 1
     /\ UNCHANGED <<offset, lease, copies, started, stallsLeft, crashesLeft>>
-    /\ UNCHANGED <<podVars, plannerVars, storeVars>>
+    /\ UNCHANGED <<podVars, plannerVars>>
     /\ UNCHANGED natsVars
 
 Submit ==
@@ -150,7 +123,7 @@ Submit ==
                 /\ cover' = [cover EXCEPT ![submitted + 1] = marker]
                 /\ UNCHANGED <<marker, nextId, planner>>
     /\ UNCHANGED <<now, offset, lease, copies, started, stallsLeft, crashesLeft>>
-    /\ UNCHANGED <<podVars, storeVars>>
+    /\ UNCHANGED podVars
     /\ UNCHANGED natsVars
 
 Publish ==
@@ -163,7 +136,7 @@ Publish ==
     /\ cover' = [cover EXCEPT ![submitted + 1] = planner.id]
     /\ planner' = [phase |-> "idle", id |-> NoMarker]
     /\ UNCHANGED <<now, offset, lease, marker, nextId, started, stallsLeft, crashesLeft>>
-    /\ UNCHANGED <<podVars, storeVars>>
+    /\ UNCHANGED podVars
     /\ UNCHANGED natsVars
 
 PlannerCrash ==
@@ -172,7 +145,7 @@ PlannerCrash ==
     /\ crashesLeft' = crashesLeft - 1
     /\ planner' = [phase |-> "idle", id |-> NoMarker]
     /\ UNCHANGED <<now, offset, lease, marker, nextId, copies, submitted, cover, started, stallsLeft>>
-    /\ UNCHANGED <<podVars, storeVars>>
+    /\ UNCHANGED podVars
     /\ UNCHANGED natsVars
 
 Deliver(p, c) ==
@@ -184,7 +157,7 @@ Deliver(p, c) ==
     /\ pc' = [pc EXCEPT ![p] = "leasing"]
     /\ held' = [held EXCEPT ![p] = c]
     /\ UNCHANGED <<now, offset, lease, started, stallsLeft, crashesLeft>>
-    /\ UNCHANGED <<token, seenRev, expiry, renewAt, stalled, plannerVars, storeVars>>
+    /\ UNCHANGED <<seenRev, renewAt, stalled, plannerVars>>
     /\ UNCHANGED natsVars
 
 Redeliver(c) ==
@@ -192,22 +165,19 @@ Redeliver(c) ==
     /\ now >= copies[c].deadline
     /\ copies' = [copies EXCEPT ![c].state = "ready", ![c].pod = NoPod]
     /\ UNCHANGED <<now, offset, lease, started, stallsLeft, crashesLeft>>
-    /\ UNCHANGED <<podVars, plannerVars, storeVars>>
+    /\ UNCHANGED <<podVars, plannerVars>>
     /\ UNCHANGED natsVars
 
 AcquireLease(p) ==
     /\ pc[p] = "leasing"
     /\ Awake(p)
     /\ LeaseAcquirable(p)
-    /\ FenceHasGeneration => natsGeneration # 0
     /\ lease' = [holder |-> p, expiresAt |-> Local(p) + Ttl, rev |-> lease.rev + 1]
-    /\ token' = [token EXCEPT ![p] = <<FenceGeneration, lease.rev + 1>>]
     /\ seenRev' = [seenRev EXCEPT ![p] = lease.rev + 1]
-    /\ expiry' = [expiry EXCEPT ![p] = Local(p) + Ttl]
     /\ renewAt' = [renewAt EXCEPT ![p] = Local(p) + RenewEvery]
     /\ pc' = [pc EXCEPT ![p] = "leased"]
     /\ UNCHANGED <<now, offset, copies, started, stallsLeft, crashesLeft>>
-    /\ UNCHANGED <<held, stalled, plannerVars, storeVars>>
+    /\ UNCHANGED <<held, stalled, plannerVars>>
     /\ UNCHANGED natsVars
 
 StartTask(p) ==
@@ -218,7 +188,7 @@ StartTask(p) ==
     /\ marker' = IF StartClearsOnlyOwnMarker /\ marker # id THEN marker ELSE NoMarker
     /\ pc' = [pc EXCEPT ![p] = "running"]
     /\ UNCHANGED <<now, offset, lease, nextId, copies, planner, submitted, cover, stallsLeft, crashesLeft>>
-    /\ UNCHANGED <<held, token, seenRev, expiry, renewAt, stalled, storeVars>>
+    /\ UNCHANGED <<held, seenRev, renewAt, stalled>>
     /\ UNCHANGED natsVars
 
 Renew(p) ==
@@ -228,16 +198,15 @@ Renew(p) ==
     /\ IF HoldsCurrentLease(p)
          THEN /\ lease' = [holder |-> p, expiresAt |-> Local(p) + Ttl, rev |-> lease.rev + 1]
               /\ seenRev' = [seenRev EXCEPT ![p] = lease.rev + 1]
-              /\ expiry' = [expiry EXCEPT ![p] = Local(p) + Ttl]
               /\ renewAt' = [renewAt EXCEPT ![p] = Local(p) + RenewEvery]
               /\ copies' = IF copies[held[p]].state = "inflight" /\ copies[held[p]].pod = p
                              THEN [copies EXCEPT ![held[p]].deadline = now + AckWait]
                              ELSE copies
               /\ UNCHANGED <<pc, held>>
          ELSE /\ DropRun(p)
-              /\ UNCHANGED <<lease, seenRev, expiry, renewAt, copies>>
+              /\ UNCHANGED <<lease, seenRev, renewAt, copies>>
     /\ UNCHANGED <<now, offset, started, stallsLeft, crashesLeft>>
-    /\ UNCHANGED <<token, stalled, plannerVars, storeVars>>
+    /\ UNCHANGED <<stalled, plannerVars>>
     /\ UNCHANGED natsVars
 
 RenewFails(p) ==
@@ -248,31 +217,15 @@ RenewFails(p) ==
     /\ crashesLeft' = crashesLeft - 1
     /\ DropRun(p)
     /\ UNCHANGED <<now, offset, lease, copies, started, stallsLeft>>
-    /\ UNCHANGED <<token, seenRev, expiry, renewAt, stalled, plannerVars, storeVars>>
+    /\ UNCHANGED <<seenRev, renewAt, stalled, plannerVars>>
     /\ UNCHANGED natsVars
 
-BeginWrite(p) ==
+Work(p) ==
     /\ pc[p] = "running"
     /\ Awake(p)
-    /\ HolderStopsBeforeExpiry => Local(p) < expiry[p] - SkewMargin
-    /\ pc' = [pc EXCEPT ![p] = "writing"]
+    /\ pc' = [pc EXCEPT ![p] = "done"]
     /\ UNCHANGED <<now, offset, lease, copies, started, stallsLeft, crashesLeft>>
-    /\ UNCHANGED <<held, token, seenRev, expiry, renewAt, stalled, plannerVars, storeVars>>
-    /\ UNCHANGED natsVars
-
-CommitWrite(p) ==
-    /\ pc[p] = "writing"
-    /\ Awake(p)
-    /\ IF WritesFencedByLeaseRevision /\ Below(token[p], storeFence)
-         THEN /\ DropRun(p)
-              /\ rejectedCurrent' = (rejectedCurrent \/ HoldsCurrentLease(p))
-              /\ UNCHANGED <<storeFence, staleWrite>>
-         ELSE /\ staleWrite' = (staleWrite \/ Below(token[p], storeFence))
-              /\ storeFence' = MaxFence(storeFence, token[p])
-              /\ pc' = [pc EXCEPT ![p] = "done"]
-              /\ UNCHANGED <<held, rejectedCurrent>>
-    /\ UNCHANGED <<now, offset, lease, copies, started, stallsLeft, crashesLeft, generation>>
-    /\ UNCHANGED <<token, seenRev, expiry, renewAt, stalled, plannerVars>>
+    /\ UNCHANGED <<held, seenRev, renewAt, stalled, plannerVars>>
     /\ UNCHANGED natsVars
 
 Finish(p) ==
@@ -286,7 +239,7 @@ Finish(p) ==
                   ELSE lease
     /\ DropRun(p)
     /\ UNCHANGED <<now, offset, started, stallsLeft, crashesLeft>>
-    /\ UNCHANGED <<token, seenRev, expiry, renewAt, stalled, plannerVars, storeVars>>
+    /\ UNCHANGED <<seenRev, renewAt, stalled, plannerVars>>
     /\ UNCHANGED natsVars
 
 Stall(p) ==
@@ -296,14 +249,14 @@ Stall(p) ==
     /\ stallsLeft' = stallsLeft - 1
     /\ stalled' = [stalled EXCEPT ![p] = TRUE]
     /\ UNCHANGED <<now, offset, lease, copies, started, crashesLeft>>
-    /\ UNCHANGED <<pc, held, token, seenRev, expiry, renewAt, plannerVars, storeVars>>
+    /\ UNCHANGED <<pc, held, seenRev, renewAt, plannerVars>>
     /\ UNCHANGED natsVars
 
 Resume(p) ==
     /\ stalled[p]
     /\ stalled' = [stalled EXCEPT ![p] = FALSE]
     /\ UNCHANGED <<now, offset, lease, copies, started, stallsLeft, crashesLeft>>
-    /\ UNCHANGED <<pc, held, token, seenRev, expiry, renewAt, plannerVars, storeVars>>
+    /\ UNCHANGED <<pc, held, seenRev, renewAt, plannerVars>>
     /\ UNCHANGED natsVars
 
 Crash(p) ==
@@ -313,7 +266,7 @@ Crash(p) ==
     /\ DropRun(p)
     /\ stalled' = [stalled EXCEPT ![p] = FALSE]
     /\ UNCHANGED <<now, offset, lease, copies, started, stallsLeft>>
-    /\ UNCHANGED <<token, seenRev, expiry, renewAt, plannerVars, storeVars>>
+    /\ UNCHANGED <<seenRev, renewAt, plannerVars>>
     /\ UNCHANGED natsVars
 
 \* why: a wipe loses the message of every task that isn't done, started or not. The recovery campaign of ADR 023 replans those keys.
@@ -328,18 +281,8 @@ NatsWipe ==
     /\ marker' = NoMarker
     /\ copies' = [c \in DOMAIN copies |-> LoseCopy(c)]
     /\ lostInWipe' = lostInWipe \cup {id \in 1..(nextId - 1) : ~IsDone(id)}
-    /\ natsGeneration' = IF FenceHasGeneration THEN 0 ELSE natsGeneration
     /\ UNCHANGED <<now, offset, nextId, planner, submitted, cover, started, stallsLeft, crashesLeft>>
-    /\ UNCHANGED <<duplicatesLeft, lossesLeft, podVars, storeVars>>
-
-RecoverNats ==
-    /\ FenceHasGeneration
-    /\ natsGeneration = 0
-    /\ generation' = generation + 1
-    /\ natsGeneration' = generation + 1
-    /\ UNCHANGED <<now, offset, lease, marker, nextId, copies, planner, submitted, cover, started>>
-    /\ UNCHANGED <<stallsLeft, crashesLeft, storeFence, staleWrite, rejectedCurrent>>
-    /\ UNCHANGED <<wipesLeft, duplicatesLeft, lossesLeft, lostInWipe, podVars>>
+    /\ UNCHANGED <<duplicatesLeft, lossesLeft, podVars>>
 
 DuplicateCopy(c) ==
     /\ duplicatesLeft > 0
@@ -347,7 +290,7 @@ DuplicateCopy(c) ==
     /\ duplicatesLeft' = duplicatesLeft - 1
     /\ copies' = Append(copies, [id |-> copies[c].id, state |-> "ready", deadline |-> 0, pod |-> NoPod])
     /\ UNCHANGED <<now, offset, lease, started, stallsLeft, crashesLeft>>
-    /\ UNCHANGED <<natsGeneration, wipesLeft, lossesLeft, lostInWipe, podVars, plannerVars, storeVars>>
+    /\ UNCHANGED <<wipesLeft, lossesLeft, lostInWipe, podVars, plannerVars>>
 
 LoseMessage(c) ==
     /\ lossesLeft > 0
@@ -355,7 +298,7 @@ LoseMessage(c) ==
     /\ lossesLeft' = lossesLeft - 1
     /\ copies' = [copies EXCEPT ![c].state = "lost"]
     /\ UNCHANGED <<now, offset, lease, started, stallsLeft, crashesLeft>>
-    /\ UNCHANGED <<natsGeneration, wipesLeft, duplicatesLeft, lostInWipe, podVars, plannerVars, storeVars>>
+    /\ UNCHANGED <<wipesLeft, duplicatesLeft, lostInWipe, podVars, plannerVars>>
 
 Next ==
     \/ Tick
@@ -363,7 +306,6 @@ Next ==
     \/ Publish
     \/ PlannerCrash
     \/ NatsWipe
-    \/ RecoverNats
     \/ \E c \in DOMAIN copies : Redeliver(c)
     \/ \E c \in DOMAIN copies : DuplicateCopy(c)
     \/ \E c \in DOMAIN copies : LoseMessage(c)
@@ -373,8 +315,7 @@ Next ==
         \/ StartTask(p)
         \/ Renew(p)
         \/ RenewFails(p)
-        \/ BeginWrite(p)
-        \/ CommitWrite(p)
+        \/ Work(p)
         \/ Finish(p)
         \/ Stall(p)
         \/ Resume(p)
@@ -391,10 +332,6 @@ TypeOK ==
     /\ submitted \in 0..MaxEvents
     /\ started \subseteq Ids
     /\ pc \in [Pods -> {"idle", "leasing"} \cup HoldingPhases]
-
-NoStaleWrite == ~staleWrite
-
-NoRejectedCurrentHolder == ~rejectedCurrent
 
 NoOverlap == Cardinality({p \in Pods : pc[p] \in RunPhases}) <= 1
 

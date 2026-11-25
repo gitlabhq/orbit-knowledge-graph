@@ -88,7 +88,6 @@ pub(super) fn state_lines(cluster: &Cluster) -> Vec<String> {
         .map(|task| spec_id(*task).to_string())
         .collect();
     cover.resize(cluster.bounds.max_events, "0".to_string());
-    let fence = cluster.database.highest_fence();
 
     let values = BTreeMap::from([
         ("now", cluster.clock.ticks().to_string()),
@@ -124,21 +123,8 @@ pub(super) fn state_lines(cluster: &Cluster) -> Vec<String> {
             per_holder(&|holder| holder.held.map_or(0, |c| c + 1).to_string()),
         ),
         (
-            "token",
-            per_holder(&|holder| {
-                format!(
-                    "<<{}, {}>>",
-                    holder.last_hold.token_generation, holder.last_hold.token
-                )
-            }),
-        ),
-        (
             "seenRev",
             per_holder(&|holder| holder.last_hold.seen.to_string()),
-        ),
-        (
-            "expiry",
-            per_holder(&|holder| holder.last_hold.expiry.to_string()),
         ),
         (
             "renewAt",
@@ -150,24 +136,6 @@ pub(super) fn state_lines(cluster: &Cluster) -> Vec<String> {
         ),
         ("stallsLeft", cluster.faults.stalls.to_string()),
         ("crashesLeft", cluster.faults.crashes.to_string()),
-        (
-            "storeFence",
-            format!("<<{}, {}>>", fence.generation.0, fence.revision.0),
-        ),
-        ("staleWrite", "FALSE".to_string()),
-        (
-            "rejectedCurrent",
-            tla_bool(cluster.rejected_current).to_string(),
-        ),
-        ("generation", cluster.database.generation().0.to_string()),
-        (
-            "natsGeneration",
-            cluster
-                .generation
-                .get()
-                .map_or(0, |generation| generation.0)
-                .to_string(),
-        ),
         ("wipesLeft", cluster.faults.wipes.to_string()),
         ("duplicatesLeft", cluster.faults.duplicates.to_string()),
         ("lossesLeft", cluster.faults.losses.to_string()),

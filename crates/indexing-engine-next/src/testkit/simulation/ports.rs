@@ -8,7 +8,7 @@ use rand::RngExt;
 use crate::clock::Clock;
 use crate::event::{EngineEvent, Observer};
 use crate::lane::LaneId;
-use crate::lease::{Fence, Lease, LeaseEntry, LeaseStore, LeaseWrite, Revision};
+use crate::lease::{Lease, LeaseEntry, LeaseStore, LeaseWrite, Revision};
 use crate::pending::{PendingEntry, PendingStore, PendingWrite};
 use crate::ports::Ports;
 use crate::task::{Delivery, InFlight, TaskMessage, TaskQueue, WorkerKey};
@@ -134,7 +134,7 @@ impl LeaseStore for SimulatedPorts {
     async fn read(&self, _key: &WorkerKey) -> anyhow::Result<LeaseEntry> {
         self.world.interleave_inside_step(self.actor).await;
         let world = self.world.lock();
-        Ok(world.lease.entry(world.nats_generation))
+        Ok(world.lease.entry())
     }
 
     async fn write(
@@ -146,19 +146,13 @@ impl LeaseStore for SimulatedPorts {
         self.world.interleave_inside_step(self.actor).await;
         let mut world = self.world.lock();
         if let Actor::Process { index, .. } = self.actor
-            && world.consume_renewal_failure(index, lease)
+            && lease.is_some()
+            && world.consume_renewal_failure(index)
         {
             return Err(anyhow!("the renewal did not reach the key-value store"));
         }
-        let Some(generation) = world.nats_generation else {
-            world.count("LeaseConflict");
-            return Ok(LeaseWrite::Conflict);
-        };
         match world.lease.put(expected, lease.cloned()) {
-            Ok(revision) => Ok(LeaseWrite::Written(Fence {
-                generation,
-                revision,
-            })),
+            Ok(revision) => Ok(LeaseWrite::Written(revision)),
             Err(_) => {
                 world.count("LeaseConflict");
                 Ok(LeaseWrite::Conflict)

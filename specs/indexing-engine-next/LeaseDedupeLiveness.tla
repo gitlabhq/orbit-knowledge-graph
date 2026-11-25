@@ -12,15 +12,13 @@ EngineStep ==
     \/ Tick
     \/ Submit
     \/ Publish
-    \/ RecoverNats
     \/ \E c \in DOMAIN copies : Redeliver(c)
     \/ \E p \in Pods :
         \/ \E c \in DOMAIN copies : Deliver(p, c)
         \/ AcquireLease(p)
         \/ StartTask(p)
         \/ Renew(p)
-        \/ BeginWrite(p)
-        \/ CommitWrite(p)
+        \/ Work(p)
         \/ Finish(p)
         \/ Resume(p)
 
@@ -36,7 +34,7 @@ FaultsStop ==
     /\ quiet' = TRUE
     /\ now' = Horizon
     /\ UNCHANGED <<offset, lease, marker, nextId, copies, planner, submitted, cover, started>>
-    /\ UNCHANGED <<stallsLeft, crashesLeft, podVars, storeVars, natsVars>>
+    /\ UNCHANGED <<stallsLeft, crashesLeft, podVars, natsVars>>
 
 LiveInit == Init /\ quiet = FALSE
 
@@ -50,15 +48,13 @@ LiveSpec ==
     /\ [][LiveNext]_allVars
     /\ WF_allVars(FaultsStop)
     /\ WF_allVars(Publish /\ UNCHANGED quiet)
-    /\ WF_allVars(RecoverNats /\ UNCHANGED quiet)
     /\ WF_allVars(\E c \in DOMAIN copies : Redeliver(c) /\ UNCHANGED quiet)
     /\ \A p \in Pods :
         /\ WF_allVars(\E c \in DOMAIN copies : Deliver(p, c) /\ UNCHANGED quiet)
         /\ WF_allVars(AcquireLease(p) /\ UNCHANGED quiet)
         /\ WF_allVars(StartTask(p) /\ UNCHANGED quiet)
         /\ WF_allVars(Renew(p) /\ UNCHANGED quiet)
-        /\ WF_allVars(BeginWrite(p) /\ UNCHANGED quiet)
-        /\ WF_allVars(CommitWrite(p) /\ UNCHANGED quiet)
+        /\ WF_allVars(Work(p) /\ UNCHANGED quiet)
         /\ WF_allVars(Finish(p) /\ UNCHANGED quiet)
         /\ WF_allVars(Resume(p) /\ UNCHANGED quiet)
 

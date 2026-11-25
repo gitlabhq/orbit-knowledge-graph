@@ -1,5 +1,4 @@
 mod broker;
-mod database;
 mod faults;
 mod key_value;
 mod ports;
@@ -27,7 +26,6 @@ use crate::task::TaskMessage;
 use crate::worker::Worker;
 
 pub use broker::{BrokerMessage, MessageState, SimulatedBroker};
-pub use database::{DatabaseWrite, SimulatedDatabase};
 pub use faults::FaultBudget;
 pub use key_value::{RevisionConflict, SimulatedKeyValue};
 pub use tick_clock::TickClock;
@@ -192,7 +190,6 @@ impl Cluster {
             world = self.world.lock();
             changed = true;
         }
-        world.recover_nats_when_due();
         drop(world);
         if changed {
             self.world.notify_changed();
@@ -245,7 +242,7 @@ impl Cluster {
 
     fn spawn_process(&self, process: usize) -> JoinHandle<()> {
         let holder = HolderId::new(format!("p{}-{}", process + 1, self.restarts[process]));
-        let actor = self.world.lock().start_process(holder.clone(), process);
+        let actor = self.world.lock().start_process(process);
         let worker = SimulatedWrite::new(&self.world, actor, process);
         let lane = LaneId::new(SimulatedWrite::NAME, Lane::DEFAULT);
         let config =

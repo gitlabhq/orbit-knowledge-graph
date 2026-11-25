@@ -1,8 +1,6 @@
-use anyhow::anyhow;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::lease::Fence;
 use crate::payload::Key;
 use crate::worker::{Outcome, TaskContext, TaskError, Worker};
 
@@ -44,43 +42,22 @@ impl Worker for SimulatedWrite {
         Key::new("simulation", 1)
     }
 
-    async fn run(&self, ctx: &TaskContext, _input: WriteInput) -> Result<Outcome<()>, TaskError> {
-        let Some(fence) = ctx.fence() else {
-            return Err(TaskError::permanent(anyhow!(
-                "an exclusive run got no fence"
-            )));
-        };
-        let (work_ticks, write_ticks) = self.store.draw_durations();
-
+    async fn run(&self, _ctx: &TaskContext, _input: WriteInput) -> Result<Outcome<()>, TaskError> {
+        let work_ticks = self.store.draw_work_ticks();
         tokio::time::sleep(TICK * work_ticks).await;
-        self.store.begin_write().await;
-        tokio::time::sleep(TICK * write_ticks).await;
-        if self.store.commit_write(fence).await {
-            Ok(Outcome::done(()))
-        } else {
-            Err(TaskError::from(anyhow!("the database kept a newer write")))
-        }
+        self.store.finish_work().await;
+        Ok(Outcome::done(()))
     }
 }
 
 impl SimulatedStore {
-    fn draw_durations(&self) -> (u32, u32) {
-        let mut world = self.world.lock();
-        let work = world.draw_number(0..=2);
-        let write = world.draw_number(0..=1);
-        (
-            u32::try_from(work).unwrap_or(0),
-            u32::try_from(write).unwrap_or(0),
-        )
+    fn draw_work_ticks(&self) -> u32 {
+        let work = self.world.lock().draw_number(0..=2);
+        u32::try_from(work).unwrap_or(0)
     }
 
-    async fn begin_write(&self) {
-        self.world.begin_step(self.actor, StepKind::Any).await;
-        self.world.lock().begin_write(self.process);
-    }
-
-    async fn commit_write(&self, fence: Fence) -> bool {
-        self.world.begin_step(self.actor, StepKind::Commit).await;
-        self.world.lock().commit_write(self.process, fence)
+    async fn finish_work(&self) {
+        self.world.begin_step(self.actor, StepKind::Work).await;
+        self.world.lock().finish_work(self.process);
     }
 }

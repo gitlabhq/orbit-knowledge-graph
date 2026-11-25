@@ -3,13 +3,10 @@ mod tlc;
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::time::{Duration, SystemTime};
 
-use indexing_engine_next::lease::{
-    Claim, Fence, Generation, Hold, HolderId, Lease, LeaseRules, Renewal,
-};
+use indexing_engine_next::lease::{Claim, Hold, HolderId, Lease, LeaseRules, Renewal};
 use indexing_engine_next::task::TaskId;
 use indexing_engine_next::testkit::simulation::{
-    DatabaseWrite, FaultBudget, MessageState, SimulatedBroker, SimulatedDatabase,
-    SimulatedKeyValue, TickClock,
+    FaultBudget, MessageState, SimulatedBroker, SimulatedKeyValue, TickClock,
 };
 use uuid::Uuid;
 
@@ -88,7 +85,6 @@ pub enum Action {
     Publish,
     PlannerCrash,
     NatsWipe,
-    RecoverNats,
     Redeliver(usize),
     DuplicateCopy(usize),
     LoseMessage(usize),
@@ -97,8 +93,7 @@ pub enum Action {
     StartTask(usize),
     Renew(usize),
     RenewFails(usize),
-    BeginWrite(usize),
-    CommitWrite(usize),
+    Work(usize),
     Finish(usize),
     Stall(usize),
     Resume(usize),
@@ -164,25 +159,20 @@ enum Step {
     Leasing(Claim),
     Leased(Hold),
     Running(Hold),
-    Writing(Hold),
     Done(Hold),
 }
 
 impl Step {
     fn hold(&self) -> Option<&Hold> {
         match self {
-            Step::Leased(hold) | Step::Running(hold) | Step::Writing(hold) | Step::Done(hold) => {
-                Some(hold)
-            }
+            Step::Leased(hold) | Step::Running(hold) | Step::Done(hold) => Some(hold),
             Step::Idle | Step::Leasing(_) => None,
         }
     }
 
     fn hold_mut(&mut self) -> Option<&mut Hold> {
         match self {
-            Step::Leased(hold) | Step::Running(hold) | Step::Writing(hold) | Step::Done(hold) => {
-                Some(hold)
-            }
+            Step::Leased(hold) | Step::Running(hold) | Step::Done(hold) => Some(hold),
             Step::Idle | Step::Leasing(_) => None,
         }
     }
@@ -193,7 +183,6 @@ impl Step {
             Step::Leasing(_) => "leasing",
             Step::Leased(_) => "leased",
             Step::Running(_) => "running",
-            Step::Writing(_) => "writing",
             Step::Done(_) => "done",
         }
     }
@@ -201,10 +190,7 @@ impl Step {
 
 #[derive(Clone, Copy, Default)]
 struct LastHold {
-    token_generation: u64,
-    token: u64,
     seen: u64,
-    expiry: u64,
     renew_at: u64,
 }
 
@@ -226,16 +212,13 @@ struct Cluster {
     holders: Vec<Holder>,
     lease: SimulatedKeyValue<Lease>,
     pending: SimulatedKeyValue<TaskId>,
-    generation: SimulatedKeyValue<Generation>,
     broker: SimulatedBroker,
-    database: SimulatedDatabase,
     faults: FaultBudget,
     next_id: u64,
     publishing: Option<TaskId>,
     covers: Vec<TaskId>,
     started: BTreeSet<TaskId>,
     lost_in_wipe: BTreeSet<TaskId>,
-    rejected_current: bool,
 }
 
 impl Cluster {
@@ -252,14 +235,6 @@ impl Cluster {
                 last_hold: LastHold::default(),
             })
             .collect();
-        let database = SimulatedDatabase::default();
-        let mut generation = SimulatedKeyValue::default();
-        let written = generation.put(generation.revision(), Some(database.generation()));
-        assert!(
-            written.is_ok(),
-            "a fresh key-value entry takes its first write"
-        );
-
         Self {
             bounds,
             rules: LeaseRules {
@@ -271,21 +246,18 @@ impl Cluster {
             holders,
             lease: SimulatedKeyValue::default(),
             pending: SimulatedKeyValue::default(),
-            generation,
             broker: SimulatedBroker::new(ACK_WAIT),
-            database,
             faults: bounds.faults,
             next_id: 1,
             publishing: None,
             covers: Vec::new(),
             started: BTreeSet::new(),
             lost_in_wipe: BTreeSet::new(),
-            rejected_current: false,
         }
     }
 
     fn lease_entry(&self) -> indexing_engine_next::lease::LeaseEntry {
-        self.lease.entry(self.generation.get().copied())
+        self.lease.entry()
     }
 
     fn local_now(&self, h: usize) -> SystemTime {
@@ -320,9 +292,6 @@ impl Cluster {
         }
         if self.faults.wipes > 0 {
             actions.push(Action::NatsWipe);
-        }
-        if self.generation.get().is_none() {
-            actions.push(Action::RecoverNats);
         }
         actions.extend(
             self.broker
@@ -365,8 +334,7 @@ impl Cluster {
                     }
                 }
                 Step::Leased(_) => actions.push(Action::StartTask(h)),
-                Step::Running(_) => actions.push(Action::BeginWrite(h)),
-                Step::Writing(_) => actions.push(Action::CommitWrite(h)),
+                Step::Running(_) => actions.push(Action::Work(h)),
                 Step::Done(_) => actions.push(Action::Finish(h)),
             }
         }
@@ -397,7 +365,6 @@ impl Cluster {
                 self.publishing = None;
             }
             Action::NatsWipe => self.wipe_nats(),
-            Action::RecoverNats => self.recover_nats(),
             Action::Redeliver(c) => self.broker.redeliver(c),
             Action::DuplicateCopy(c) => {
                 self.faults.duplicates -= 1;
@@ -415,8 +382,7 @@ impl Cluster {
                 self.faults.crashes -= 1;
                 self.drop_run(h);
             }
-            Action::BeginWrite(h) => self.advance(h),
-            Action::CommitWrite(h) => self.commit_write(h),
+            Action::Work(h) => self.work(h),
             Action::Finish(h) => self.finish(h),
             Action::Stall(h) => {
                 self.faults.stalls -= 1;
@@ -469,17 +435,11 @@ impl Cluster {
         let Some(lease) = claim.lease_if_free(&self.rules, &entry, local_now) else {
             return;
         };
-        let Some(generation) = entry.generation else {
-            return;
-        };
         let Ok(written) = self.lease.put(entry.revision, Some(lease.clone())) else {
             return;
         };
-        let fence = Fence {
-            generation,
-            revision: written,
-        };
-        self.holders[h].step = Step::Leased(claim.into_hold(&self.rules, &lease, fence, local_now));
+        self.holders[h].step =
+            Step::Leased(claim.into_hold(&self.rules, &lease, written, local_now));
     }
 
     fn start_task(&mut self, h: usize) {
@@ -521,30 +481,12 @@ impl Cluster {
         }
     }
 
-    fn advance(&mut self, h: usize) {
+    fn work(&mut self, h: usize) {
         let step = std::mem::replace(&mut self.holders[h].step, Step::Idle);
         self.holders[h].step = match step {
-            Step::Running(hold) => Step::Writing(hold),
-            Step::Writing(hold) => Step::Done(hold),
+            Step::Running(hold) => Step::Done(hold),
             other => other,
         };
-    }
-
-    fn commit_write(&mut self, h: usize) {
-        let Some(fence) = self.holds(h).map(Hold::fence) else {
-            return;
-        };
-        match self.database.write(fence) {
-            DatabaseWrite::Kept => self.advance(h),
-            DatabaseWrite::Rejected => {
-                let entry = self.lease_entry();
-                let holds_current = self
-                    .holds(h)
-                    .is_some_and(|hold| hold.revision_to_release(&entry).is_some());
-                self.rejected_current |= holds_current;
-                self.drop_run(h);
-            }
-        }
     }
 
     fn finish(&mut self, h: usize) {
@@ -564,19 +506,12 @@ impl Cluster {
         self.faults.wipes -= 1;
         self.lease.wipe();
         self.pending.wipe();
-        self.generation.wipe();
         self.broker.wipe();
         let unfinished: Vec<TaskId> = (1..self.next_id)
             .map(task_id)
             .filter(|task| !self.broker.is_done(*task))
             .collect();
         self.lost_in_wipe.extend(unfinished);
-    }
-
-    fn recover_nats(&mut self) {
-        let next = self.database.start_next_generation();
-        let written = self.generation.put(self.generation.revision(), Some(next));
-        assert!(written.is_ok(), "a recovery is atomic in the spec");
     }
 
     fn drop_run(&mut self, h: usize) {
@@ -588,10 +523,7 @@ impl Cluster {
         for holder in &mut self.holders {
             if let Some(hold) = holder.step.hold() {
                 holder.last_hold = LastHold {
-                    token_generation: hold.fence().generation.0,
-                    token: hold.fence().revision.0,
                     seen: hold.seen_revision().0,
-                    expiry: self.clock.ticks_at(hold.expires_at()),
                     renew_at: self.clock.ticks_at(hold.renew_at()),
                 };
             }
@@ -599,10 +531,6 @@ impl Cluster {
     }
 
     fn check_invariants(&self) -> Result<(), String> {
-        if self.rejected_current {
-            return Err("NoRejectedCurrentHolder: the database refused the write of the current lease holder".into());
-        }
-
         let pending_task = self.pending.get().copied();
         let waiting: Vec<TaskId> = self
             .broker

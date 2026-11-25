@@ -20,20 +20,10 @@ pub struct HolderId(String);
 pub struct LeaseEntry {
     pub lease: Option<Lease>,
     pub revision: Revision,
-    pub generation: Option<Generation>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Revision(pub u64);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Generation(pub u64);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Fence {
-    pub generation: Generation,
-    pub revision: Revision,
-}
 
 impl HolderId {
     pub fn new(id: impl Into<String>) -> Self {
@@ -46,9 +36,8 @@ impl HolderId {
 }
 
 impl LeaseEntry {
-    fn is_held_by(&self, holder: &HolderId, generation: Generation, revision: Revision) -> bool {
-        self.generation == Some(generation)
-            && self.revision == revision
+    fn is_held_by(&self, holder: &HolderId, revision: Revision) -> bool {
+        self.revision == revision
             && self
                 .lease
                 .as_ref()

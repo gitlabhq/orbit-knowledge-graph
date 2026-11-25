@@ -3,7 +3,7 @@ use std::time::SystemTime;
 
 use async_trait::async_trait;
 
-use super::{Claim, Fence, Hold, HolderId, Lease, LeaseEntry, LeaseRules, Renewal, Revision};
+use super::{Claim, Hold, HolderId, Lease, LeaseEntry, LeaseRules, Renewal, Revision};
 use crate::clock::Clock;
 use crate::event::{Failure, Observer, TaskStep};
 use crate::ports::Ports;
@@ -21,7 +21,7 @@ pub(crate) trait LeaseStore: Send + Sync {
 }
 
 pub(crate) enum LeaseWrite {
-    Written(Fence),
+    Written(Revision),
     Conflict,
 }
 
@@ -138,10 +138,10 @@ impl Leases {
             return Ok(None);
         };
         let written = self.store.write(key, entry.revision, Some(&lease)).await?;
-        let LeaseWrite::Written(fence) = written else {
+        let LeaseWrite::Written(revision) = written else {
             return Ok(None);
         };
-        Ok(Some(claim.into_hold(&self.rules, &lease, fence, now)))
+        Ok(Some(claim.into_hold(&self.rules, &lease, revision, now)))
     }
 
     async fn extend_if_ours(
@@ -156,10 +156,10 @@ impl Leases {
             Renewal::Lost => return Ok(Extension::Lost),
         };
         let written = self.store.write(key, entry.revision, Some(&lease)).await?;
-        let LeaseWrite::Written(fence) = written else {
+        let LeaseWrite::Written(revision) = written else {
             return Ok(Extension::Lost);
         };
-        hold.record_renewal(&self.rules, &lease, fence.revision, now);
+        hold.record_renewal(&self.rules, &lease, revision, now);
         Ok(Extension::Extended)
     }
 }

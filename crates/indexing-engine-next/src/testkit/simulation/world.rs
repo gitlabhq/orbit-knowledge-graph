@@ -8,9 +8,9 @@ use rand::{RngExt, SeedableRng};
 use tokio::sync::Notify;
 use tokio::time::Instant;
 
-use super::{DatabaseWrite, FaultBudget, SimulatedBroker, SimulatedDatabase, SimulatedKeyValue};
+use super::{FaultBudget, SimulatedBroker, SimulatedKeyValue};
 use crate::event::{TaskEvent, TaskStep};
-use crate::lease::{Fence, Generation, HolderId, Lease, Revision};
+use crate::lease::{Lease, Revision};
 use crate::task::{TaskId, TaskMessage};
 
 pub(super) const TICK: Duration = Duration::from_secs(20);
@@ -44,13 +44,9 @@ pub(super) struct World {
     step_order: StepOrder,
     pub(super) lease: SimulatedKeyValue<Lease>,
     pub(super) pending: SimulatedKeyValue<TaskMessage>,
-    pub(super) nats_generation: Option<Generation>,
-    pub(super) recover_at: Option<u64>,
     pub(super) broker: SimulatedBroker,
     payloads: HashMap<TaskId, TaskMessage>,
-    pub(super) database: SimulatedDatabase,
     pub(super) processes: Vec<ProcessState>,
-    holders: HashMap<HolderId, usize>,
     pub(super) publishing: Option<TaskId>,
     pub(super) ids: Vec<TaskId>,
     pub(super) covers: Vec<TaskId>,
@@ -58,7 +54,6 @@ pub(super) struct World {
     pub(super) lost_in_wipe: BTreeSet<TaskId>,
     pub(super) faults_left: FaultBudget,
     pub(super) planner_crash_armed: bool,
-    pub(super) rejected_current: bool,
     pub(super) submits: usize,
     timeline: Vec<String>,
     broken: Option<String>,
@@ -70,9 +65,7 @@ pub(super) struct ProcessState {
     pub(super) incarnation: usize,
     pub(super) phase: Phase,
     pub(super) held: Option<usize>,
-    pub(super) token: Fence,
     pub(super) seen: Revision,
-    pub(super) expiry: u64,
     pub(super) renew_at: u64,
     pub(super) stall: Stall,
     pub(super) renewal_fails: bool,
@@ -84,7 +77,6 @@ pub(super) enum Phase {
     Leasing,
     Leased,
     Running,
-    Writing,
     Done,
 }
 
@@ -98,7 +90,7 @@ pub(super) enum Stall {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum StepKind {
     Any,
-    Commit,
+    Work,
 }
 
 pub(super) struct WorldOutcome {
@@ -129,13 +121,9 @@ impl SharedWorld {
             step_order,
             lease: SimulatedKeyValue::default(),
             pending: SimulatedKeyValue::default(),
-            nats_generation: Some(Generation(1)),
-            recover_at: None,
             broker: SimulatedBroker::new(ACK_WAIT_TICKS),
             payloads: HashMap::new(),
-            database: SimulatedDatabase::default(),
             processes,
-            holders: HashMap::new(),
             publishing: None,
             ids: Vec::new(),
             covers: Vec::new(),
@@ -143,7 +131,6 @@ impl SharedWorld {
             lost_in_wipe: BTreeSet::new(),
             faults_left: faults,
             planner_crash_armed: false,
-            rejected_current: false,
             submits,
             timeline: Vec::new(),
             broken: None,
@@ -251,8 +238,7 @@ impl World {
         self.broken.is_some()
     }
 
-    pub(super) fn start_process(&mut self, holder: HolderId, index: usize) -> Actor {
-        self.holders.insert(holder, index);
+    pub(super) fn start_process(&self, index: usize) -> Actor {
         Actor::Process {
             index,
             incarnation: self.processes[index].incarnation,
@@ -320,9 +306,7 @@ impl World {
             (Actor::Process { index, .. }, TaskStep::LeaseAcquired(hold)) => {
                 let process = &mut self.processes[index];
                 process.phase = Phase::Leased;
-                process.token = hold.fence();
                 process.seen = hold.seen_revision();
-                process.expiry = ticks_at(hold.expires_at());
                 process.renew_at = ticks_at(hold.renew_at());
                 self.record_step("AcquireLease", format!("(p{})", index + 1));
             }
@@ -338,7 +322,6 @@ impl World {
             (Actor::Process { index, .. }, TaskStep::Renewed(hold)) => {
                 let process = &mut self.processes[index];
                 process.seen = hold.seen_revision();
-                process.expiry = ticks_at(hold.expires_at());
                 process.renew_at = ticks_at(hold.renew_at());
                 self.record_step("Renew", format!("(p{})", index + 1));
             }
@@ -367,29 +350,9 @@ impl World {
         }
     }
 
-    pub(super) fn begin_write(&mut self, process: usize) {
-        self.processes[process].phase = Phase::Writing;
-        self.record_step("BeginWrite", format!("(p{})", process + 1));
-    }
-
-    pub(super) fn commit_write(&mut self, process: usize, fence: Fence) -> bool {
-        if fence != self.processes[process].token {
-            self.break_rule(format!(
-                "p{} wrote with the fence {fence:?}, which is not the fence of its lease",
-                process + 1
-            ));
-        }
-        let holds_current = self.holds_current_lease(process);
-        let kept = self.database.write(fence) == DatabaseWrite::Kept;
-        if kept {
-            self.processes[process].phase = Phase::Done;
-        } else {
-            self.count("RejectedWrite");
-            self.rejected_current |= holds_current;
-            self.drop_run(process);
-        }
-        self.record_step("CommitWrite", format!("(p{}), kept {kept}", process + 1));
-        kept
+    pub(super) fn finish_work(&mut self, process: usize) {
+        self.processes[process].phase = Phase::Done;
+        self.record_step("Work", format!("(p{})", process + 1));
     }
 
     pub(super) fn redeliver_expired_messages(&mut self) -> bool {
@@ -415,12 +378,6 @@ impl World {
             .iter()
             .position(|id| *id == task)
             .map_or(0, |index| index + 1)
-    }
-
-    pub(super) fn find_lease_holder(&self) -> Option<usize> {
-        self.lease
-            .get()
-            .and_then(|lease| self.holders.get(&lease.holder).copied())
     }
 
     pub(super) fn drop_run(&mut self, process: usize) {
@@ -463,11 +420,6 @@ impl World {
         }
     }
 
-    fn holds_current_lease(&self, process: usize) -> bool {
-        self.find_lease_holder() == Some(process)
-            && self.lease.revision() == self.processes[process].seen
-    }
-
     fn record_initial_state(&mut self) {
         self.timeline.push("t0 Init".to_owned());
     }
@@ -481,9 +433,6 @@ impl World {
     }
 
     fn find_broken_rule(&self) -> Option<&'static str> {
-        if self.rejected_current {
-            return Some("NoRejectedCurrentHolder");
-        }
         let pending_task = self.pending.get().map(|message| message.task);
         let another_task_waits = self
             .ids
@@ -520,12 +469,7 @@ impl ProcessState {
             incarnation: 0,
             phase: Phase::Idle,
             held: None,
-            token: Fence {
-                generation: Generation(0),
-                revision: Revision(0),
-            },
             seen: Revision(0),
-            expiry: 0,
             renew_at: 0,
             stall: Stall::Awake,
             renewal_fails: false,
@@ -536,7 +480,7 @@ impl ProcessState {
 impl Phase {
     pub(super) fn is_holding(self) -> bool {
         match self {
-            Phase::Leased | Phase::Running | Phase::Writing | Phase::Done => true,
+            Phase::Leased | Phase::Running | Phase::Done => true,
             Phase::Idle | Phase::Leasing => false,
         }
     }

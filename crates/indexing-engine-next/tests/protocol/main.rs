@@ -9,7 +9,7 @@ use cluster::{
     SMALL_CLUSTER_WITH_TWO_TASKS, StateGraph, explore_graph, read_spec_graph,
 };
 use indexing_engine_next::lease::{
-    Claim, Fence, Generation, HolderId, Lease, LeaseEntry, LeaseRules, Renewal, Revision,
+    Claim, HolderId, Lease, LeaseEntry, LeaseRules, Renewal, Revision,
 };
 use indexing_engine_next::task::TaskId;
 use uuid::Uuid;
@@ -20,7 +20,6 @@ const SMALL_CLUSTERS: [(&str, Bounds); 4] = [
     ("nats_wipe", SMALL_CLUSTER_WITH_NATS_WIPE),
     ("duplicate", SMALL_CLUSTER_WITH_DUPLICATE),
 ];
-const FIRST_GENERATION: Generation = Generation(1);
 
 const RULES: LeaseRules = LeaseRules {
     ttl: Duration::from_secs(60),
@@ -36,13 +35,6 @@ fn task(n: u128) -> TaskId {
     TaskId::new(Uuid::from_u128(n))
 }
 
-fn fence(revision: u64) -> Fence {
-    Fence {
-        generation: FIRST_GENERATION,
-        revision: Revision(revision),
-    }
-}
-
 fn holder(name: &str) -> HolderId {
     HolderId::new(name)
 }
@@ -54,7 +46,6 @@ fn held_by(name: &str, expires_at: u64, revision: u64) -> LeaseEntry {
             expires_at: at(expires_at),
         }),
         revision: Revision(revision),
-        generation: Some(FIRST_GENERATION),
     }
 }
 
@@ -125,26 +116,20 @@ fn an_expired_lease_is_free_only_after_the_skew_margin() {
 }
 
 #[test]
-fn the_fence_is_the_lease_revision_when_the_holder_took_it() {
+fn a_renewal_moves_the_revision_that_the_holder_saw() {
     let claim = Claim::new(holder("p1"), task(1));
     let lease = claim
         .lease_if_free(&RULES, &held_by("p0", 0, 3), at(10))
         .unwrap();
-    let mut hold = claim.into_hold(&RULES, &lease, fence(4), at(10));
+    let mut hold = claim.into_hold(&RULES, &lease, Revision(4), at(10));
 
     let renewal = hold.build_renewal(&RULES, &held_by("p1", 70, 4), at(30));
     let Renewal::Extend(renewed) = renewal else {
         panic!("the holder of the current lease renews it");
     };
+    assert_eq!(hold.seen_revision(), Revision(4));
     hold.record_renewal(&RULES, &renewed, Revision(5), at(30));
 
-    assert_eq!(
-        hold.fence(),
-        Fence {
-            generation: FIRST_GENERATION,
-            revision: Revision(4)
-        }
-    );
     assert_eq!(hold.seen_revision(), Revision(5));
 }
 
@@ -154,7 +139,7 @@ fn a_renewal_is_lost_once_another_holder_took_the_lease() {
     let lease = claim
         .lease_if_free(&RULES, &held_by("p0", 0, 3), at(10))
         .unwrap();
-    let hold = claim.into_hold(&RULES, &lease, fence(4), at(10));
+    let hold = claim.into_hold(&RULES, &lease, Revision(4), at(10));
 
     assert_eq!(
         hold.build_renewal(&RULES, &held_by("p2", 200, 5), at(90)),
@@ -173,49 +158,13 @@ fn a_renewal_is_lost_once_the_same_holder_took_the_lease_again_for_another_run()
     let lease = claim
         .lease_if_free(&RULES, &held_by("p0", 0, 3), at(10))
         .unwrap();
-    let hold = claim.into_hold(&RULES, &lease, fence(4), at(10));
+    let hold = claim.into_hold(&RULES, &lease, Revision(4), at(10));
 
     assert_eq!(
         hold.build_renewal(&RULES, &held_by("p1", 200, 6), at(90)),
         Renewal::Lost
     );
     assert_eq!(hold.revision_to_release(&held_by("p1", 200, 6)), None);
-
-    let after_wipe = LeaseEntry {
-        generation: Some(Generation(2)),
-        ..held_by("p1", 200, 4)
-    };
-    assert_eq!(
-        hold.build_renewal(&RULES, &after_wipe, at(90)),
-        Renewal::Lost
-    );
-    assert_eq!(hold.revision_to_release(&after_wipe), None);
-}
-
-#[test]
-fn no_lease_is_taken_until_the_key_value_store_is_recovered_after_a_wipe() {
-    let claim = Claim::new(holder("p1"), task(1));
-    let wiped = LeaseEntry {
-        lease: None,
-        revision: Revision(0),
-        generation: None,
-    };
-
-    assert_eq!(claim.lease_if_free(&RULES, &wiped, at(10)), None);
-}
-
-#[test]
-fn a_fence_of_a_newer_generation_beats_any_revision_of_an_older_one() {
-    let before_wipe = Fence {
-        generation: Generation(1),
-        revision: Revision(4_000),
-    };
-    let after_wipe = Fence {
-        generation: Generation(2),
-        revision: Revision(1),
-    };
-
-    assert!(before_wipe < after_wipe);
 }
 
 #[test]

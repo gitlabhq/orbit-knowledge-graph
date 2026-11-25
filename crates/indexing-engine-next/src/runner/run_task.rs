@@ -41,7 +41,7 @@ impl Runner {
             Err(error) => return self.abandon_run(message, "start_failed", error).await,
         };
 
-        let ctx = TaskContext::new(Arc::clone(&self.pools), Some(hold.fence()));
+        let ctx = TaskContext::new(Arc::clone(&self.pools));
         let outcome = tokio::select! {
             biased;
             () = self.leases.renew_while_running(&mut hold, message, in_flight, started_at) => return,
@@ -60,7 +60,7 @@ impl Runner {
             return self.abandon_run(message, "start_failed", error).await;
         }
 
-        let ctx = TaskContext::new(Arc::clone(&self.pools), None);
+        let ctx = TaskContext::new(Arc::clone(&self.pools));
         match worker.run(&ctx, &message.input).await {
             Ok(outcome) => self.finish_task(&delivery, None, outcome).await,
             Err(error) => self.abandon_run(message, "worker_failed", error).await,
