@@ -1,5 +1,12 @@
 # yaml-language-server: $schema=schemas/schema-migrations.schema.json
 migrations:
+- version: 130
+  scope: none
+  note: >-
+    Observability virtual properties on Pipeline and Job. The fingerprint hashes the
+    node YAML, so declaring them reads as drift, but every one is disabled and
+    resolved at query time: no stored column, no DDL, no extract SQL, and every
+    indexed row is byte-identical.
 - version: 129
   scope: none
   note: Ontology YAML comments removed; DDL and reindex output byte-identical.
