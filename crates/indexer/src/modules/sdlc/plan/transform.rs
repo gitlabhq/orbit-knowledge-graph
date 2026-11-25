@@ -754,6 +754,8 @@ mod tests {
         }));
     }
 
+    // DuckDB resolves `<string column> = <int literal>` by casting the column,
+    // so an ordinal comparison against a string enum fails the cast at runtime.
     #[test]
     fn string_enum_denormalized_tag_never_compares_against_int_ordinals() {
         let ontology = test_ontology();

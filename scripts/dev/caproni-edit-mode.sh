@@ -154,7 +154,6 @@ watch() {
 
 library_path() {
   # shellcheck disable=SC2012 # ls -t is the point; the paths carry no odd characters
-  # shellcheck disable=SC2012
   ls -td "$(dirname "$BINARY")"/build/aws-lc-fips-sys/*/out/build/artifacts 2>/dev/null | paste -sd: - || true
 }
 

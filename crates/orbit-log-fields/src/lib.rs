@@ -75,6 +75,7 @@ pub mod safe {
         REALM = "realm";
         DEPLOYMENT_TYPE = "deployment_type";
         SOURCE_TYPE = "source_type";
+        /// Never the checksum.
         LICENSE_CHECKSUM_PRESENT = "license_checksum_present";
         FEATURE_QUALIFIED_NAME = "feature_qualified_name";
         QUERY_TYPE = "query_type";
@@ -204,6 +205,7 @@ pub mod safe {
         K8S_KIND = "k8s_kind";
         LANGUAGE = "language";
         LANGUAGE_FAMILY = "language_family";
+        /// From a closed set that Orbit defines.
         REASON = "reason_code";
         OUTCOME = "outcome";
         PHASE = "phase";

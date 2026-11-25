@@ -1,3 +1,5 @@
+# DRIFT WARNING: keep decoded_sha and the masked hash in sync with
+# merge_request.yaml, or MERGED_AT_COMMIT points at a non-existent node.
 node_type: Commit
 domain: source_code
 description: A Git commit, shared target for commit-related edges

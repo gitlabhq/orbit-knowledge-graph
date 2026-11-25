@@ -64,6 +64,12 @@ impl QuotaCache {
         }
     }
 
+    /// Returns the gate decision and whether it was served from cache.
+    ///
+    /// `Failed` means CDot was unreachable, rejected our credentials, or returned an
+    /// unexpected status. The caller denies the request but records the outcome
+    /// separately from a CDot `Deny`. Failures are never cached, so the next
+    /// request retries CDot.
     pub(crate) async fn check(&self, request: CdotRequest) -> (QuotaGateDecision, CacheOutcome) {
         let key = request.key.clone();
 

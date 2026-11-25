@@ -1051,6 +1051,8 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             )));
         }
 
+        // ClickHouse rejects lower()/startsWith on non-string columns at
+        // execution, which would surface as an opaque 500.
         if is_like_op
             && !matches!(
                 data_type,

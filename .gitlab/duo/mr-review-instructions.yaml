@@ -148,7 +148,7 @@ instructions:
       2. Graph-shape facts (entity names, properties, edges) hardcoded in Rust
          instead of read from the ontology
       3. Tests or a crate AGENTS.md left stale by the change
-      4. A new scripts/linting/comments/ledger.toml entry whose reason does not
+      4. A new entry under scripts/linting/comments/ledger/ whose reason does not
          show why a change to the code cannot replace the comment
       For stale pages under docs/, suggest a follow-up docs MR. Never ask for
       docs/ edits in a code MR; the docs-in-code-mr-check CI job forbids them.

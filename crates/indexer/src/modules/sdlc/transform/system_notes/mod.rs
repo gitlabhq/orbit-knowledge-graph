@@ -434,6 +434,8 @@ fn edges_to_record_batch(edges: &[EmittedEdge<'_>]) -> Result<RecordBatch, Handl
     let mut target_kinds = Vec::with_capacity(len);
     let mut deleted = Vec::with_capacity(len);
 
+    // Strict ClickHouse rejects an INSERT omitting a no-DEFAULT column, so emit the
+    // denormalized tag columns as empty lists even though system notes project no tags.
     let mut source_tags = ListBuilder::with_capacity(StringBuilder::new(), len);
     let mut target_tags = ListBuilder::with_capacity(StringBuilder::new(), len);
 

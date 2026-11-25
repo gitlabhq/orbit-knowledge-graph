@@ -82,6 +82,7 @@ fn is_requested(facts: &SpanFacts<'_>) -> bool {
     facts.get_bool(safe::EXPANDED_LOGS_REQUESTED) == Some(true)
 }
 
+/// A customer path inside an internal span must not be expanded.
 fn is_internal_tenant(facts: &SpanFacts<'_>, internal: &HashSet<u64>) -> bool {
     let by_id = facts.get_u64(safe::GL_ROOT_NAMESPACE_ID);
     let by_path = facts.get_str(safe::TRAVERSAL_PATH);

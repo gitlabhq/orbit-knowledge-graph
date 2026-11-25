@@ -132,11 +132,6 @@ enum Command {
         )]
         check: bool,
     },
-    /// Run a gRPC load test against a running Orbit server, replaying the
-    /// performance query corpus and reporting latency percentiles (plus
-    /// optional ClickHouse server-side work per query).
-    ///
-    /// Requires GKG_JWT_SECRET (base64-encoded HMAC key, same as the server).
     #[command(
         about = "Run a gRPC load test against a running Orbit server, replaying the performance query corpus and reporting latency percentiles (plus optional ClickHouse server-side work per query)",
         long_about = "Run a gRPC load test against a running Orbit server, replaying the performance query corpus and reporting latency percentiles (plus optional ClickHouse server-side work per query).\n\n\
@@ -166,7 +161,6 @@ enum Command {
         )]
         rounds: usize,
 
-        /// Discarded rounds, shaped like measured ones, before measuring (0 = none).
         #[arg(
             long,
             default_value_t = 1,

@@ -35,7 +35,7 @@ For test layers and CI jobs, see [Testing](docs/pages/engineering/testing/README
 - Do not write code comments, including doc comments (`///`, `//!`) and docstrings.
   `mise lint:comments` blocks them in lefthook and CI. Fix the root cause in the code, and put
   the reason for a change in the MR description. For an exception, add an entry with a reason to
-  `scripts/linting/comments/ledger.toml`. See [the comment ban](scripts/linting/README.md#comment-ban).
+  its area file under `scripts/linting/comments/ledger/`. See [the comment ban](scripts/linting/README.md#comment-ban).
 - Rust doc examples compile in `mise test:fast`, and `ignore` blocks fail it. Use a plain or `no_run` block with hidden setup lines starting with `#`, or `text` for pseudo-code.
 - Reuse infrastructure before you add new infrastructure.
 - Declare each crates.io or Git dependency once, in `[workspace.dependencies]` in

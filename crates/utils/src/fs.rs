@@ -1,3 +1,7 @@
+//! Filesystem security utilities (safe directory creation, symlink
+//! validation, path-traversal prevention). Security-critical: review
+//! carefully before modification.
+
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -15,6 +19,19 @@ pub enum RemovedSymlinkReason {
     Dangling,
 }
 
+/// Canonicalize `path` and return it only if the real target lives
+/// inside `root`. The path-traversal guard every subsystem that turns
+/// a user-supplied specifier into a filesystem read should route
+/// through.
+///
+/// Returns `None` when:
+/// - `path` does not exist
+/// - `path` is a dangling symlink
+/// - the canonical target resolves outside `root` (direct symlink
+///   escape, `../..` climb, Windows UNC redirect, etc.)
+///
+/// `root` is expected to already be canonical. Caller's responsibility
+/// to canonicalize it once at setup time.
 pub fn contained_canonical_path(root: &Path, path: &Path) -> Option<PathBuf> {
     let canonical = std::fs::canonicalize(path).ok()?;
     canonical.starts_with(root).then_some(canonical)

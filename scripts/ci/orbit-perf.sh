@@ -157,7 +157,6 @@ load_one() {
 
 # Largest first so the edge table does not start last; LOAD_JOBS inserts at a time.
 # shellcheck disable=SC2012  # generated lowercase names; ls -S gives size order
-# shellcheck disable=SC2012
 while read -r pq; do
   stem="$(basename "$pq" .parquet)"
   suffix="$(grep -E "^${stem}=" "$MAP_FILE" | head -1 | cut -d= -f2)"

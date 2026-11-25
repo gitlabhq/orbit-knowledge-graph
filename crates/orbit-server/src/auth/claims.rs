@@ -2,6 +2,15 @@ use orbit_utils::traversal_path::TraversalPath;
 use secrecy::SecretString;
 use serde::{Deserialize, Deserializer, Serialize};
 
+/// One traversal path the user holds in their scope, paired with the exact
+/// effective access levels they hold on that path. Mirrors the `(path, roles)`
+/// tuples discussed with Security: a single user can hold Reporter on one group
+/// and Developer on another, and the compiler security pass needs to see both
+/// so it can drop lower-role paths from an entity's predicate.
+///
+/// `access_levels` contains raw `Gitlab::Access` integers (Reporter=20,
+/// SecurityManager=25, Developer=30, ...) so comparisons against
+/// `required_role` in the ontology remain direct numeric checks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraversalPathClaim {
     pub path: TraversalPath,
@@ -49,6 +58,9 @@ pub struct Claims {
     pub realm: Option<String>,
     #[serde(default)]
     pub is_gitlab_team_member: Option<bool>,
+    /// Set by Rails on GitLab.com when the user's Orbit billing namespace has the
+    /// `orbit_gitlab_com_access_override` ops flag. Honored on SaaS only, like
+    /// `is_gitlab_team_member`.
     #[serde(default)]
     pub orbit_quota_exempt: Option<bool>,
     #[serde(default)]

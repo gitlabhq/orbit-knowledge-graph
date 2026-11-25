@@ -627,6 +627,9 @@ mod tests {
 
     #[test]
     fn iid_extracts_at_most_20_digits() {
+        // The `\d{1,20}` cap exists to prevent unbounded backtracking on
+        // adversarial input; a real Rails IID never exceeds
+        // `Gitlab::Database::MAX_INT_VALUE` (~19 digits).
         let body = "mentioned in #123456789012345678901";
         let refs = extract(Action::CrossReference, body);
         assert!(refs.len() <= 1, "got {refs:?}");

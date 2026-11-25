@@ -5,6 +5,11 @@ pub fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
+/// Wraps a string in quotes, escaping backslash, quote, newline, carriage return,
+/// and tab.
+///
+/// All other C0 control bytes and DEL (`0x7f`) are silently dropped. This policy is not
+/// lossless or JSON-compatible and must not be used when control-character fidelity matters.
 pub fn quote_escaped(value: &str) -> String {
     let mut output = String::with_capacity(value.len() + 2);
     output.push('"');

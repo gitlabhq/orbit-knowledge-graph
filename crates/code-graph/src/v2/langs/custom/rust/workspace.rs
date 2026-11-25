@@ -385,6 +385,7 @@ fn load_workspace_no_watcher(
     workspace: &ProjectWorkspace,
     repo_rust_files: &[AbsPathBuf],
 ) -> Result<(RootDatabase, Vfs)> {
+    // Invariant: this function never starts a proc-macro server.
     const _: ProcMacroServerChoice = ProcMacroServerChoice::None;
 
     let mut db = RootDatabase::new(None);
@@ -538,6 +539,9 @@ mod tests {
         assert_eq!(paths, ["a/src/lib.rs", "b/src/lib.rs"]);
     }
 
+    /// Guards the atomic-polyfill advisory mitigation (RUSTSEC-2023-0089). If
+    /// anyone flips our loader to launch a proc-macro server, this test must
+    /// fail so it can't regress silently.
     #[test]
     fn proc_macro_server_is_disabled() {
         let choice = ProcMacroServerChoice::None;

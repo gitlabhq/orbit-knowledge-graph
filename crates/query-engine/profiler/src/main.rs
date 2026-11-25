@@ -63,12 +63,9 @@ struct Cli {
     )]
     ch_user: String,
 
-    /// ClickHouse password
     #[arg(long, env = "CLICKHOUSE_PASSWORD", help = "ClickHouse password")]
     ch_password: Option<String>,
 
-    /// Authorized paths for the security context (repeatable), as `path` or `path@access_level`;
-    /// a bare path gets the default Reporter level
     #[arg(
         short = 't',
         long,
