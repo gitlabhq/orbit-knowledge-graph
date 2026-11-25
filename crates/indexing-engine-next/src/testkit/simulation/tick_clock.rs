@@ -1,12 +1,12 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug)]
-pub struct SimulatedClock {
+pub struct TickClock {
     tick: Duration,
     now: u64,
 }
 
-impl SimulatedClock {
+impl TickClock {
     pub fn new(tick: Duration) -> Self {
         Self { tick, now: 0 }
     }

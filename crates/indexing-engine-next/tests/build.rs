@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use indexing_engine_next::prelude::*;
-use indexing_engine_next::{BuildError, Engine, EngineConfig, LaneConfig, PoolConfig};
+use indexing_engine_next::{BuildError, Engine, EngineConfig, LaneConfig, LaneId, PoolConfig};
 use support::{DownstreamPlanner, TestPlanner, TestWorker, nonzero};
 
 struct FirstStatusWriter;
@@ -88,25 +88,14 @@ fn two_workers_must_not_share_a_name() {
 }
 
 #[test]
-fn a_config_lane_must_look_like_worker_slash_lane() {
-    let built = build_test_flow(EngineConfig::default().with_lane("default", lane()));
-
-    assert_eq!(
-        built,
-        Some(BuildError::InvalidLane {
-            lane: "default".to_owned()
-        })
-    );
-}
-
-#[test]
 fn a_config_lane_must_belong_to_a_registered_worker() {
-    let config = EngineConfig::default().with_lane("unknown.worker/default", lane());
+    let config =
+        EngineConfig::default().with_lane(LaneId::new("unknown.worker", Lane::DEFAULT), lane());
 
     assert_eq!(
         build_test_flow(config),
         Some(BuildError::UnknownLaneWorker {
-            lane: "unknown.worker/default".to_owned()
+            lane: LaneId::new("unknown.worker", Lane::DEFAULT)
         })
     );
 }
@@ -114,15 +103,15 @@ fn a_config_lane_must_belong_to_a_registered_worker() {
 #[test]
 fn an_on_timeout_lane_must_belong_to_the_same_worker() {
     let config = EngineConfig::default().with_lane(
-        "test.worker/default",
-        lane().on_timeout("downstream.worker/big"),
+        LaneId::new("test.worker", Lane::DEFAULT),
+        lane().on_timeout(LaneId::new("downstream.worker", Lane::new("big"))),
     );
 
     assert_eq!(
         build_test_flow(config),
         Some(BuildError::UnknownTimeoutLane {
-            lane: "test.worker/default".to_owned(),
-            on_timeout: "downstream.worker/big".to_owned()
+            lane: LaneId::new("test.worker", Lane::DEFAULT),
+            on_timeout: LaneId::new("downstream.worker", Lane::new("big"))
         })
     );
 }
