@@ -168,8 +168,6 @@ impl GraphSchema {
         Self::from_ontology_replicated(ontology, false)
     }
 
-    /// `replicated` renders every MergeTree engine as its `Replicated*` variant for a
-    /// self-managed cluster; a `Replicated` database replicates DDL only.
     pub fn from_ontology_replicated(
         ontology: &Ontology,
         replicated: bool,

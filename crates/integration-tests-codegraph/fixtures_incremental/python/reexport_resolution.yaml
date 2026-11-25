@@ -1,10 +1,6 @@
 name: "Python: symbol re-export resolution"
 
 fixtures:
-  # Wildcard re-export through a package __init__. Mirrors ai_gateway exactly:
-  # BasePromptRegistry is defined in prompts/base.py and surfaced by
-  # `prompts/__init__.py` via `from prompts.base import *`, so callers write
-  # `from prompts import BasePromptRegistry`.
   - path: prompts/base.py
     content: |
       class BasePromptRegistry:
@@ -22,8 +18,6 @@ fixtures:
       def build_registry():
           return BasePromptRegistry()
 
-  # Direct module import of the same class must keep resolving (regression
-  # guard): callers importing from the defining module bind directly.
   - path: api/monitoring.py
     content: |
       from prompts.base import BasePromptRegistry
@@ -31,8 +25,6 @@ fixtures:
       def build_registry_direct():
           return BasePromptRegistry()
 
-  # Named re-export with a rename: the package binds a different local name
-  # than the underlying definition.
   - path: selection/impl.py
     content: |
       class RealConfig:
@@ -49,7 +41,6 @@ fixtures:
       def load_config():
           return ModelSelectionConfig()
 
-  # Sibling-module re-export: ops.py re-exports a name defined in typing.py.
   - path: processing/typing.py
     content: |
       class LanguageId:
@@ -66,7 +57,6 @@ fixtures:
       def make_language_id():
           return LanguageId()
 
-  # Multi-hop re-export chain: impl -> mid -> __init__.
   - path: deep/impl.py
     content: |
       class Deep:
@@ -87,7 +77,6 @@ fixtures:
       def make_deep():
           return Deep()
 
-  # External symbol with no local definition must stay an ImportedSymbol.
   - path: ext/caller.py
     content: |
       from thirdparty import Widget
@@ -95,8 +84,6 @@ fixtures:
       def build_widget():
           return Widget()
 
-  # A package that does not re-export the requested name must not bind it
-  # (over-resolution guard): empty_pkg re-exports `Present`, not `Absent`.
   - path: empty_pkg/real.py
     content: |
       class Present:
@@ -113,8 +100,6 @@ fixtures:
       def use_absent():
           return Absent()
 
-  # Same name re-exported from two starred modules is ambiguous and must not
-  # bind to either definition.
   - path: amb/a.py
     content: |
       class Thing:

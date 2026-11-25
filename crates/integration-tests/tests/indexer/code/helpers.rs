@@ -86,7 +86,6 @@ impl CodeIndexingDeps {
         let metrics = CodeMetrics::new();
 
         let cache_dir = tempfile::TempDir::new().expect("failed to create temp dir for cache");
-        // 0 keeps the unlimited default that tests without extraction caps rely on.
         let max_file_size = match pipeline_config.max_file_size_bytes {
             0 => u64::MAX,
             n => n,
@@ -132,7 +131,6 @@ impl CodeIndexingDeps {
         self.handler_with_writer_and_lock_ttl(writer, std::time::Duration::from_secs(60))
     }
 
-    /// A long lock lease, so a test can hold the job's inserts without the heartbeat losing the lock.
     pub fn gated_handler(&self, gate: &GatedClickHouse) -> CodeIndexingTaskHandler {
         self.handler_with_writer_and_lock_ttl(
             gate.writer(&self.clickhouse_config),
@@ -209,7 +207,6 @@ pub fn writer_for(
     ))
 }
 
-/// Holds every ClickHouse request until `open`, so a test can observe a job whose rows are in flight.
 pub struct GatedClickHouse {
     url: String,
     open: tokio::sync::watch::Sender<bool>,
@@ -345,13 +342,7 @@ struct MockState {
 
 struct ProjectData {
     default_branch: String,
-    /// Raw file entries (path, content). The archive is built on-the-fly
-    /// in the handler using the ref from the request query, so the Gitaly
-    /// `<slug>-<ref>/` prefix matches whatever commit SHA the indexer asks for.
     archive_files: Vec<(String, Vec<u8>)>,
-    /// How many more times the archive endpoint returns 200 OK with a zero-byte body,
-    /// matching the production case where Gitaly streams an empty archive for
-    /// projects that lack repository content. `u32::MAX` means always.
     empty_archive_responses: u32,
     slow_archive: bool,
     archive_status: Option<StatusCode>,
@@ -411,7 +402,6 @@ impl MockGitlabServer {
         );
     }
 
-    /// Register a project whose archive endpoint sleeps, so a short job timeout fires mid-fetch.
     pub fn add_project_with_slow_archive(&self, project_id: i64, default_branch: &str) {
         self.state.projects.lock().insert(
             project_id,
@@ -428,9 +418,6 @@ impl MockGitlabServer {
         );
     }
 
-    /// Register a project whose archive endpoint returns HTTP 200 with a
-    /// zero-byte body, exercising the "empty 200" path the indexer must
-    /// classify as an empty repository instead of a retryable failure.
     pub fn add_project_with_empty_archive(&self, project_id: i64, default_branch: &str) {
         self.state.projects.lock().insert(
             project_id,
@@ -542,7 +529,6 @@ async fn handle_download_archive(
     }
 }
 
-/// Build a gzipped tar archive with the Gitaly `<slug>-<ref>/` prefix.
 fn build_tar_gz(files: &[(&str, &str)], ref_name: &str) -> Vec<u8> {
     let mut tar_builder = tar::Builder::new(Vec::new());
 

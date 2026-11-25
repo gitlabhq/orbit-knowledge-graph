@@ -1,4 +1,3 @@
-// Re-exports from orbit-migrations for backward compatibility with integration tests.
 pub use orbit_migrations::version::*;
 
 use std::time::Duration;

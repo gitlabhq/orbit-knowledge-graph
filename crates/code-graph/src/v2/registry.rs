@@ -1,6 +1,3 @@
-//! Adding a new language or custom pipeline: add one line to the
-//! `register_v2_pipelines!` invocation below.
-
 use crate::v2::config::{Language, LanguageFamily};
 
 use crate::v2::langs::custom::js::JsPipeline;
@@ -32,13 +29,11 @@ use crate::v2::pipeline::{
     PipelineContext, PipelineError,
 };
 
-/// Pipeline types wrapped in `[]` to avoid comma ambiguity in generics.
 macro_rules! register_v2_pipelines {
     (@munch [$($langs:tt)*] [$($tags:tt)*]) => {
         register_v2_pipelines!(@emit_lang $($langs)*);
         register_v2_pipelines!(@emit_tag $($tags)*);
     };
-    // Tag entry (before ident arm — first-match-wins).
     (@munch [$($langs:tt)*] [$($tags:tt)*] Tag($tag:literal) => $p:tt , $($rest:tt)*) => {
         register_v2_pipelines!(@munch [$($langs)*] [$($tags)* [$tag => $p]] $($rest)*);
     };
@@ -59,8 +54,6 @@ macro_rules! register_v2_pipelines {
             })
         }
 
-        /// Returns `None` for custom pipelines (JS, Rust) that don't
-        /// implement `lang_ctx`.
         pub fn lang_ctx_for(
             language: Language,
             ctx: &Arc<PipelineContext>,
@@ -72,7 +65,6 @@ macro_rules! register_v2_pipelines {
             }
         }
     };
-    // dispatch_by_tag is called by the YAML test harness.
     (@emit_tag $( [$tag:literal => [$($pipeline:tt)*]] )* ) => {
         pub fn dispatch_by_tag(
             tag: &str,
@@ -117,11 +109,6 @@ register_v2_pipelines! {
     Tag("js") => [JsPipeline],
 }
 
-/// For single-language families and families where all members use
-/// custom pipelines, groups files by language and delegates to
-/// [`dispatch_language`]. For multi-language generic-pipeline
-/// families, runs a shared [`FamilyPipeline`] so all members share
-/// a single `CodeGraph` and can resolve symbols across languages.
 pub fn dispatch_family(
     _family: LanguageFamily,
     files: &[FamilyFileInput],
@@ -133,7 +120,6 @@ pub fn dispatch_family(
         languages.insert(f.language);
     }
 
-    // Avoids building the family machinery for the common single-language case.
     if languages.len() == 1 {
         let lang = *languages.iter().next().unwrap();
         let paths: Vec<FileInput> = files.iter().map(|f| f.path.clone()).collect();

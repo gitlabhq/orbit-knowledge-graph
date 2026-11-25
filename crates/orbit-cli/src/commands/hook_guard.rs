@@ -1,8 +1,3 @@
-//! Hidden `orbit hook-guard` — the Claude Code PreToolUse guard installed by `orbit setup`.
-//! Reads a tool call from stdin and nudges the agent to use `orbit grep` instead of grep or
-//! rg. Fails open: on any error it prints nothing and exits 0, never blocking a tool call.
-//! `read` is accepted for installs that still register it, and never nudges.
-
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -34,7 +29,6 @@ const PATTERN_FLAGS: &[&str] = &["-e", "-f", "--regexp", "--file"];
 
 const INFO_FLAGS: &[&str] = &["--files", "--type-list", "--version", "-V", "--help"];
 
-/// Short flags whose value is the next word, and the long ones, per tool family.
 const RG_VALUE_SHORT: &str = "ABCEMTdefgjmrt";
 const GREP_VALUE_SHORT: &str = "ABCDdefm";
 const VALUE_LONG: &[&str] = &[
@@ -70,7 +64,6 @@ const VALUE_LONG: &[&str] = &[
     "--type-not",
 ];
 
-/// Returns whether it nudged, so telemetry counts nudges rather than every tool call.
 pub(crate) fn run(kind: Kind, gitlab: bool, no_gitlab: bool) -> bool {
     if matches!(kind, Kind::Instructions) {
         println!("{}", spec::instructions_text(gitlab, no_gitlab));
@@ -111,7 +104,6 @@ const GLAB_READ_GROUPS: &[&str] = &["mr", "issue", "ci", "pipeline", "job", "inc
 const GLAB_READ_VERBS: &[&str] = &["view", "list", "ls", "diff", "trace", "status", "search"];
 const GLAB_API_FIELD_FLAGS: &[&str] = &["-f", "-F", "--field", "--raw-field", "--input"];
 
-/// Orbit only reads GitLab, so only glab reads get the nudge; writes such as `glab mr create` stay with glab.
 fn reads_gitlab_with_glab(call: &Value) -> bool {
     let tool_input = call.get("tool_input").unwrap_or(call);
     let command = tool_input
@@ -152,7 +144,6 @@ fn glab_reads(args: &[&str]) -> bool {
     }
 }
 
-/// Checks the graph's default location without creating or migrating the data directory.
 fn local_graph_exists() -> bool {
     let root = match std::env::var("ORBIT_DATA_DIR") {
         Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
@@ -164,7 +155,6 @@ fn local_graph_exists() -> bool {
     root.join("local/manifest.duckdb").is_file()
 }
 
-/// The enclosing git work tree, found without running git.
 fn work_tree(cwd: &Path) -> Option<PathBuf> {
     let cwd = dunce::canonicalize(cwd).ok()?;
     cwd.ancestors()
@@ -199,8 +189,6 @@ fn tree_dir(cwd: &Path, root: &Path, path: &str) -> bool {
     dunce::canonicalize(cwd.join(path)).is_ok_and(|full| full.is_dir() && full.starts_with(root))
 }
 
-/// Splits a shell command into simple commands, each as its words and whether its input is piped.
-/// Quotes and escapes are honored; redirections and their targets are dropped.
 fn segments(command: &str) -> Vec<(Vec<String>, bool)> {
     let mut segments = Vec::new();
     let (mut words, mut word, mut started) = (Vec::new(), String::new(), false);

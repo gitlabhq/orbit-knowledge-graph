@@ -1,6 +1,5 @@
 //! Host file access without following symlinks in any path component.
 //! Callers select trusted paths. Reads verify size but are not immutable snapshots.
-
 mod syscalls;
 
 use std::io::{self, Read};

@@ -128,7 +128,6 @@ fn build_scope_status(
     let last_completed_at =
         root_checkpoints.and_then(|by_plan| by_plan.get_last_completed_at(&plans));
 
-    // The Project plan writes the project list, so the code total is final only once it settles.
     let project_list_phase = combine_phases(
         plan_phases
             .iter()

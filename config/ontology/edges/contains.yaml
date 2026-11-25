@@ -1,5 +1,3 @@
-# config/ontology/edges/contains.yaml
-
 description: Container relationship for core entities (hierarchy/ownership)
 
 variants:

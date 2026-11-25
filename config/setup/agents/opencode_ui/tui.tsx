@@ -13,25 +13,21 @@ import { type Activity, OrbitUi } from './rpc.ts'
 //
 // Usage bar, in the prompt footer (prompt.footer.status), once the session calls Orbit:
 //   3 queries · 3.2k nodes · 20 edges  ◎ GitLab Orbit
-
 const MARK = '◎'
 const ORBIT_BLUE = '#949dcb'
 const ORBIT_LIGHT = '#b5dedc'
 const LINGER_MS = 2500
-// A start whose end never arrives clears after this, or when its session stops running.
 const STALE_MS = 60_000
 const SESSION_STOPPED = ['session.execution.succeeded', 'session.execution.failed', 'session.execution.interrupted']
 
 type Usage = { calls: number; nodes: number; edges: number }
 
-// The session a server event belongs to, when it names one.
 function sessionOf(event: unknown): string | undefined {
   const record = (value: unknown) => (typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {})
   const id = record(record(event)['data'])['sessionID'] ?? record(event)['sessionID']
   return typeof id === 'string' ? id : undefined
 }
 
-// 950, 1.2k, 12k, 1.2M. Same as compact() in core/stats.ts.
 function compact(n: number): string {
   if (n < 1000) return String(n)
   if (n < 10000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k'
@@ -87,7 +83,6 @@ export default Plugin.define({
       expire(data.key, data.state === 'start' ? STALE_MS : LINGER_MS)
     })
 
-    // An interrupted call may never send its end. When a session stops, its running lines go.
     const stopSessions = SESSION_STOPPED.map((type) =>
       context.data.on(type, (event) => {
         const sessionID = sessionOf(event)
@@ -100,7 +95,6 @@ export default Plugin.define({
     )
 
     const linesFor = (sessionID?: string) => state.lines.filter((line) => !sessionID || line.sessionID === sessionID)
-    // A slot that is not given a session shows the session of the latest Orbit call.
     const usageFor = (sessionID?: string) => state.usage[sessionID || state.lastSessionID]
 
     const Line = (props: { line: Activity }) => {
@@ -118,7 +112,6 @@ export default Plugin.define({
       )
     }
 
-    // Numbers and the name in Orbit blue, the words between them grey.
     const UsageBar = (props: { usage: Usage }) => {
       const muted = context.theme.text.muted
       const count = (n: number, one: string, many: string) => [

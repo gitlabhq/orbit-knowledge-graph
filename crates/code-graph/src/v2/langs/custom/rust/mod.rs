@@ -37,8 +37,6 @@ use ra_ap_syntax::{
 };
 use ra_ap_vfs::{self as vfs, FileExcluded, Vfs, loader};
 use rayon::prelude::*;
-// triomphe::Arc is re-exported for submodules (workspace.rs) that
-// call ra_ap APIs expecting triomphe::Arc, not std::sync::Arc.
 pub(super) use triomphe::Arc;
 
 use crate::v2::config::Language;
@@ -236,8 +234,6 @@ impl LanguagePipeline for RustPipeline {
             &ctx.config.cancel,
             ctx.config.progress.as_ref(),
         );
-        // Nothing past the parse reads the rust-analyzer databases, and they are
-        // the largest thing this pipeline holds.
         drop(workspaces);
         release_ty_interner(db_alive);
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -274,9 +270,6 @@ impl LanguagePipeline for RustPipeline {
             graph.mark_parsed_only();
         }
 
-        // Edge resolution is sequential over all parsed files, so it
-        // gets its own wall-clock budget separate from the per-file
-        // sentinel used during the parallel parse phase.
         let deadline = ctx
             .config
             .cross_file_resolve_timeout
@@ -405,13 +398,10 @@ fn parse_rust_files_with_workspaces(
             break;
         }
         let candidates = plan.candidates(workspace_id);
-        // A root whose files an earlier root already claimed never needs a
-        // rust-analyzer database of its own.
         if candidates.iter().all(|&idx| claimed[idx]) {
             continue;
         }
 
-        // A rust-analyzer load panic must cost one root, not the whole pass.
         let loaded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             plan.load(workspace_id, root_path)
         }));
@@ -691,10 +681,6 @@ fn parse_rust_file_standalone(
             &workspace.paths_by_file_id,
             &relative_path,
         );
-        // Pass sema and workspace through to the extractor so that supertype
-        // edges (EXTENDS) are emitted in standalone mode too. The standalone
-        // workspace already pays the salsa setup cost; reusing it keeps
-        // single-file fallbacks consistent with workspace-aware indexing.
         build_parsed_rust_file(
             relative_path.clone(),
             source_file.syntax().text().to_string(),
@@ -1430,11 +1416,6 @@ fn callable_to_definition_site(
         CallableKind::TupleEnumVariant(variant) => {
             hir_def_to_definition_site(db, paths_by_file_id, variant)
         }
-        // Closures, raw fn pointers, and `impl Fn*` receivers do not map to a
-        // stable definition site: ra_ap_hir 0.0.328 does not expose the
-        // body-source-map lookup needed to recover the closure's AST node, and
-        // resolving `FnImpl<Ty>` to the `Ty::call*` method requires the
-        // callsite receiver type which is not carried in `CallableKind`.
         CallableKind::Closure(_) | CallableKind::FnPtr | CallableKind::FnImpl(_) => None,
     }
 }

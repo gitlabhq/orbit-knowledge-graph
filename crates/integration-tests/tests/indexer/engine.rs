@@ -1,5 +1,3 @@
-//! Require a Docker-compatible runtime (Docker, Colima, etc).
-
 use clickhouse_client::ClickHouseConfigurationExt;
 use integration_testkit::{CLICKHOUSE_IMAGE, CLICKHOUSE_TAG};
 use std::sync::Arc;

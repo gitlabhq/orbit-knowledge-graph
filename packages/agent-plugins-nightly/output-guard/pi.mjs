@@ -48,7 +48,6 @@ export function registerOutputGuard(pi) {
       const shrunk = fullOutputPath === details?.fullOutputPath ? withPiFraming(original, body, fullOutputPath) : body;
       return { content: [{ type: "text", text: shrunk }], structuredContent: event.structuredContent };
     } catch {
-      // A guard failure must never disturb the session.
     }
   });
 }

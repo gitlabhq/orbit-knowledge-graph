@@ -1,5 +1,3 @@
-# config/ontology/edges/imports.yaml
-
 description: Import relationships in source code
 
 variants:

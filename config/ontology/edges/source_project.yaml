@@ -1,5 +1,3 @@
-# config/ontology/edges/source_project.yaml
-
 description: Merge request's source project (differs from target project for fork-based MRs)
 
 variants:

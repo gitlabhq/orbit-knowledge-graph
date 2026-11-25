@@ -1,11 +1,3 @@
-//! OTel instrument holders for the ETL engine, backed by the central
-//! `orbit-observability` catalog.
-//!
-//! Names, descriptions, units, labels, and histogram buckets live in
-//! `crates/orbit-observability/src/indexer/etl.rs`. This module only
-//! builds instruments against the running `MeterProvider` and exposes
-//! ergonomic `record_*` wrappers for the ETL engine.
-
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, Meter, UpDownCounter};
 

@@ -294,7 +294,6 @@ fn write_file(repo: &std::path::Path, path: &str, text: &str) {
     std::fs::write(path, text).unwrap();
 }
 
-/// Every row of every graph table, in a stable order.
 fn graph_tables(data: &std::path::Path) -> Vec<Value> {
     [
         "gl_directory",
@@ -579,6 +578,54 @@ fn a_tracked_ignored_file_with_a_non_utf8_name_is_skipped() {
     assert_eq!(files, [".claude/tool.py", ".gitignore", "app.py"]);
 }
 
+fn indexed_files(data: &std::path::Path) -> Vec<String> {
+    rows(&orbit_sql("SELECT path FROM gl_file ORDER BY path", data))
+        .iter()
+        .map(|row| row["path"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn an_untracked_file_with_a_non_utf8_name_does_not_fail_the_index() {
+    use std::os::unix::ffi::OsStrExt;
+    let data = tempfile::TempDir::new().unwrap();
+    let repo_dir = tempfile::TempDir::new().unwrap();
+    let repo = repo_dir.path();
+    init_repo_at(repo, &[("app.py", "def app():\n    pass\n")]);
+    let name = std::ffi::OsStr::from_bytes(b"\xff.py");
+    std::fs::write(repo.join(name), "def bad():\n    pass\n").unwrap();
+    write_file(repo, "new.py", "def new():\n    pass\n");
+
+    assert!(orbit_index(repo, data.path()));
+    assert_eq!(indexed_files(data.path()), ["app.py", "new.py"]);
+}
+
+#[test]
+fn a_skip_worktree_file_stays_out_of_full_and_incremental_indexes() {
+    let data = tempfile::TempDir::new().unwrap();
+    let repo_dir = tempfile::TempDir::new().unwrap();
+    let repo = repo_dir.path();
+    init_repo_at(
+        repo,
+        &[
+            ("app.py", "def app():\n    pass\n"),
+            ("local.py", "def local():\n    pass\n"),
+        ],
+    );
+    git(repo, &["update-index", "--skip-worktree", "local.py"]);
+    write_file(repo, "local.py", "def edited():\n    pass\n");
+
+    assert!(orbit_index(repo, data.path()));
+    assert_eq!(indexed_files(data.path()), ["app.py"]);
+    assert_eq!(graph_tables(data.path()), full_index_tables(repo));
+
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    write_file(repo, "local.py", "def edited_again():\n    pass\n");
+    assert!(orbit_index(repo, data.path()));
+    assert_eq!(graph_tables(data.path()), full_index_tables(repo));
+}
+
 #[test]
 fn index_db_flag_writes_to_custom_path() {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -733,7 +780,6 @@ fn sequential_read_consistency() {
 fn unindexable_repo_records_error_in_manifest() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = tempfile::TempDir::new().unwrap();
-    // A commitless repo is discovered (.git exists) but git_info fails on HEAD.
     git(repo.path(), &["init"]);
 
     let ok = orbit_cmd()
@@ -1265,8 +1311,6 @@ fn workspace_sql_indexes_the_current_repository_on_first_use() {
     assert_eq!(counts, json!([{"n": 2}]));
 }
 
-/// `orbit` with no credentials and no glab on PATH, so skills commands never
-/// reach a real login or instance.
 fn hermetic_skills_cmd(cache: &std::path::Path) -> std::process::Command {
     let mut cmd = orbit_cmd();
     for key in [
@@ -1520,6 +1564,24 @@ fn grep_lists_matching_lines_with_their_definitions() {
             "{out}\n{err}"
         );
     }
+}
+
+#[test]
+fn grep_only_suggests_tracked_files_for_a_missing_path() {
+    let data = tempfile::TempDir::new().unwrap();
+    let repo_dir = tempfile::TempDir::new().unwrap();
+    let repo = repo_dir.path();
+    init_repo_at(repo, &[("src/utils.py", "def read_file():\n    pass\n")]);
+    write_file(repo, "extra/utils.py", "def read_file():\n    pass\n");
+    let repo_arg = repo.to_str().unwrap();
+    let (out, err, ok) = run_cmd(
+        &["grep", "read_file", "lib/utils.py", "--repo", repo_arg],
+        data.path(),
+    );
+    assert!(
+        ok && out.contains("» lib/utils.py not found; searched src/utils.py\n"),
+        "{err}\n{out}"
+    );
 }
 
 #[test]

@@ -17,9 +17,8 @@
 //! This closes the aggregation-query oracle where a Reporter-only user
 //! could count or binary-search properties on a higher-privilege entity
 //! (e.g. Vulnerability) by pairing a Project `group_by` with a Vulnerability
-//! target. Now the target entity's scan is filtered down to zero paths
+//! target. The target entity's scan is filtered down to zero paths
 //! (producing a Bool(false) predicate) and the aggregation counts nothing.
-
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -35,8 +34,6 @@ use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
 
 static GRAPH_TABLE_PATTERN: OnceLock<Regex> = OnceLock::new();
 
-/// Per-alias role floors come from the query data model.
-/// Tables without authorization metadata keep the historical Reporter floor.
 pub fn apply_security_context(
     node: &mut Node,
     ctx: &SecurityContext,
@@ -177,7 +174,6 @@ mod tests {
         assert!(SecurityContext::new(1, vec!["1/2/3/".into()]).is_ok());
         assert!(SecurityContext::new(42, vec!["42/100/".into()]).is_ok());
 
-        // Cross-org paths are allowed (user's home org != path org)
         assert!(SecurityContext::new(1, vec!["42/".into()]).is_ok());
         assert!(SecurityContext::new(99, vec!["1/2/3/".into()]).is_ok());
 
@@ -381,15 +377,13 @@ mod tests {
         assert!(query.union_all[0].where_clause.is_some());
     }
 
-    // Paths tagged at Developer (30) still qualify because 30 >= the
-    // Security Manager floor (25).
     #[test]
     fn role_floors_filter_and_collapse_paths() {
         let ctx = SecurityContext::new_with_roles(
             1,
             vec![
-                AuthorizedPath::new("1/100/", 20), // Reporter
-                AuthorizedPath::new("1/101/", 30), // Developer (covers SM)
+                AuthorizedPath::new("1/100/", 20),
+                AuthorizedPath::new("1/101/", 30),
             ],
         )
         .unwrap();
@@ -429,11 +423,8 @@ mod tests {
             "Vulnerability alias 'v' must only keep the higher-role path, got: {where_sql}"
         );
 
-        let ctx = SecurityContext::new_with_roles(
-            1,
-            vec![AuthorizedPath::new("1/100/", 20)], // Reporter only
-        )
-        .unwrap();
+        let ctx =
+            SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/100/", 20)]).unwrap();
 
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {

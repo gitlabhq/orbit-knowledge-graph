@@ -1,25 +1,3 @@
-//! Handlers process messages from specific topics.
-//!
-//! ```
-//! use indexer::handler::{Handler, HandlerContext, HandlerError};
-//! use indexer::types::{Envelope, Subscription};
-//! use async_trait::async_trait;
-//!
-//! struct MyHandler;
-//!
-//! #[async_trait]
-//! impl Handler for MyHandler {
-//!     fn name(&self) -> &str { "my-handler" }
-//!     fn subscription(&self) -> Subscription { Subscription::new("my-stream", "my-subject") }
-//!
-//!     async fn handle(&self, ctx: HandlerContext, msg: Envelope) -> Result<(), HandlerError> {
-//!         // ctx.destination has your writers
-//!         // ctx.nats has NATS services for publishing
-//!         Ok(())
-//!     }
-//! }
-//! ```
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -52,19 +30,15 @@ pub enum PermanentAction {
 
 #[derive(Debug, Error)]
 pub enum HandlerError {
-    /// Transient failure; retried via the subscription's retry policy, then dead-lettered.
     #[error("processing failed: {0}")]
     Processing(String),
 
-    /// Never got capacity to run; redelivered without spending an attempt or dead-lettering.
     #[error("backpressure: {0}")]
     Backpressure(String),
 
-    /// Another holder owns the work; redelivered after `delay` without spending an attempt.
     #[error("deferred for {delay:?}: {reason}")]
     Deferred { reason: String, delay: Duration },
 
-    /// A deterministic failure that will never succeed on retry.
     #[error("permanent failure: {message}")]
     Permanent {
         message: String,
@@ -104,7 +78,6 @@ impl HandlerError {
         }
     }
 
-    /// A deterministic failure that will never succeed on retry; dead-letter it for inspection.
     pub fn dead_letter(message: impl Into<String>) -> Self {
         HandlerError::Permanent {
             message: message.into(),
@@ -112,7 +85,6 @@ impl HandlerError {
         }
     }
 
-    /// A deterministic failure that should be discarded without retry or dead-lettering.
     pub fn drop(message: impl Into<String>) -> Self {
         HandlerError::Permanent {
             message: message.into(),
@@ -135,7 +107,6 @@ impl HandlerInitError {
 pub struct HandlerContext {
     pub nats: Arc<dyn NatsServices>,
     pub lock_service: Arc<dyn LockService>,
-    /// Signals in-progress processing to prevent NATS message redelivery.
     pub progress: ProgressNotifier,
     pub work: WorkSlot,
     pub redelivered_on_failure: bool,
@@ -167,24 +138,14 @@ impl HandlerContext {
     }
 }
 
-/// Engine behavior (retries, concurrency, DLQ) is configured on the
-/// [`Subscription`] returned by [`subscription()`](Handler::subscription),
-/// not on the handler itself.
 #[async_trait]
 pub trait Handler: Send + Sync {
-    /// Should be a stable identifier; used for metrics labeling and config lookup.
     fn name(&self) -> &str;
 
     fn subscription(&self) -> Subscription;
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError>;
 
-    /// Whether the engine should acquire a worker pool permit before calling
-    /// [`handle`](Handler::handle). Defaults to `true`.
-    ///
-    /// Handlers that manage their own concurrency (e.g. pipelined handlers
-    /// with separate fetch and process semaphores) return `false` so the
-    /// engine does not gate them behind the shared worker pool.
     fn requires_worker_pool(&self) -> bool {
         true
     }

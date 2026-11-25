@@ -2,13 +2,8 @@ use crate::error::{QueryError, Result};
 use orbit_utils::traversal_path::TraversalPath;
 use serde::Deserialize;
 
-/// Default role assumed for a traversal path when the JWT does not supply an
-/// explicit per-path role. Matches the historical behavior where Rails only
-/// published Reporter+ paths and GKG treated every path uniformly.
 pub const DEFAULT_PATH_ACCESS_LEVEL: u32 = 20;
 
-/// Deployment realm from the JWT `realm` claim. Values match
-/// `CloudConnector.gitlab_realm` in Rails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum Realm {
     #[serde(alias = "saas")]
@@ -45,11 +40,6 @@ impl AccessLevel {
     }
 }
 
-/// A traversal path the user is entitled to see, plus the exact effective
-/// access levels they hold on that path. The access levels are stored as raw
-/// GitLab integers (matching `Gitlab::Access` in Rails) so that comparing
-/// against an entity's `required_access_level` is a direct `>=` without a
-/// role-table lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthorizedPath {
     pub path: TraversalPath,
@@ -73,17 +63,6 @@ impl AuthorizedPath {
     }
 }
 
-/// Security context for request-level isolation.
-///
-/// Contains the org ID and traversal paths used to scope queries to
-/// a specific organization's data, plus optional role metadata from
-/// the JWT claims for access-gated features (e.g. debug output).
-///
-/// Each entry in `traversal_paths` carries the user's exact role set on that
-/// path. The compiler security pass uses the per-path roles to drop paths that
-/// do not meet an entity's `required_access_level`, which is how
-/// aggregation queries over e.g. Vulnerability are redacted for users who
-/// only have Reporter access.
 #[derive(Debug, Clone)]
 pub struct SecurityContext {
     pub org_id: i64,
@@ -91,15 +70,10 @@ pub struct SecurityContext {
     pub admin: bool,
     pub access_level: Option<AccessLevel>,
     pub realm: Option<Realm>,
-    /// Whether the user is a GitLab team member (from the JWT
-    /// `is_gitlab_team_member` claim). Only meaningful on SaaS.
     pub is_gitlab_team_member: bool,
 }
 
 impl SecurityContext {
-    /// Create a security context from plain path strings, tagging every path
-    /// with the default Reporter access level. Kept for tests and internal
-    /// callers that intentionally model the historical Reporter-only floor.
     pub fn new(org_id: i64, traversal_paths: Vec<String>) -> Result<Self> {
         let tagged = traversal_paths
             .into_iter()
@@ -108,11 +82,6 @@ impl SecurityContext {
         Self::new_with_roles(org_id, tagged)
     }
 
-    /// Create a security context where every path carries an explicit role.
-    ///
-    /// Validates that:
-    /// - Each path matches the format `int/int/.../`
-    /// - Each segment fits in i64
     pub fn new_with_roles(org_id: i64, traversal_paths: Vec<AuthorizedPath>) -> Result<Self> {
         for tp in &traversal_paths {
             Self::validate_traversal_path(&tp.path)?;
@@ -149,9 +118,6 @@ impl SecurityContext {
         self
     }
 
-    /// Return the subset of paths where one of the user's access levels meets
-    /// `required_access_level`. Admin users bypass the filter because they
-    /// already carry the synthetic org-root path at maximum role.
     pub fn paths_at_least(&self, required_access_level: u32) -> Vec<&TraversalPath> {
         self.traversal_paths
             .iter()

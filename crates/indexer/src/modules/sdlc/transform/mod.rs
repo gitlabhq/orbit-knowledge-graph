@@ -1,7 +1,3 @@
-//! The pluggable transform stage. The SQL projection for `data_fusion` plans comes
-//! from an injected [`SqlTransformFactory`]. Other transforms are registered by
-//! name and resolved from the ontology's `etl.transform` field (e.g. `system_notes`).
-
 pub(in crate::modules::sdlc) mod system_notes;
 
 use std::collections::HashMap;
@@ -14,18 +10,11 @@ use crate::handler::HandlerError;
 
 use super::plan::{Plan, TransformSpec, Transformation};
 
-/// A transformed batch tagged with the [`BlockTransform::outputs`] entry it
-/// writes to.
 pub struct TableBatch {
     pub output_index: usize,
     pub batch: RecordBatch,
 }
 
-/// Turns one extracted block into rows for one or more destination tables. The
-/// pipeline drives this per block; everything around it (paging, checkpoint,
-/// retry, streaming writes) is transform-agnostic. A transform receives its
-/// dependencies (datalake handle, config) at construction via the registry
-/// factory; the namespace scope travels in the block's `traversal_path` column.
 #[async_trait]
 pub trait BlockTransform: Send + Sync {
     fn name(&self) -> &str;
@@ -39,7 +28,6 @@ pub(in crate::modules::sdlc) type TransformFactory =
 pub type SqlTransformFactory =
     Arc<dyn Fn(String, Vec<Transformation>) -> Arc<dyn BlockTransform> + Send + Sync>;
 
-/// Holds the SQL projection factory and the custom transforms, keyed by name.
 pub(in crate::modules::sdlc) struct TransformRegistry {
     sql: SqlTransformFactory,
     factories: HashMap<String, TransformFactory>,
@@ -53,8 +41,6 @@ impl TransformRegistry {
         }
     }
 
-    /// Called from each transform module's `register()` during handler setup,
-    /// before the registry is frozen behind an `Arc`.
     pub(in crate::modules::sdlc) fn register(
         &mut self,
         name: impl Into<String>,
@@ -63,8 +49,6 @@ impl TransformRegistry {
         self.factories.insert(name.into(), factory);
     }
 
-    /// A `DataFusion` plan always builds; a `Rust` plan only when its transform
-    /// has been registered (otherwise the handler is skipped).
     pub(in crate::modules::sdlc) fn is_registered(&self, transform: &TransformSpec) -> bool {
         match transform {
             TransformSpec::DataFusion(_) => true,

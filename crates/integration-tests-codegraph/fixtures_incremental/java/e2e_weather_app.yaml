@@ -110,7 +110,6 @@ fixtures:
       }
 
 tests:
-  # ── Definition types: enum and record ─────────────────────────
   - name: "Record definition type"
     query: |
       MATCH (d:Definition)
@@ -149,7 +148,6 @@ tests:
     assert:
       - { row_count: 3 }
 
-  # ── Containment edges ─────────────────────────────────────────
   - name: "Class defines method"
     query: |
       MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
@@ -186,7 +184,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Imports ────────────────────────────────────────────────────
   - name: "Cli imports PrintStream"
     query: |
       MATCH (f:File)-[e:IMPORTS]->(i:ImportedSymbol)

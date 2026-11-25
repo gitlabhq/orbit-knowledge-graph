@@ -193,8 +193,6 @@ mod tests {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::{EnvFilter, Layer};
 
-    // The env filter must stay per-layer; as a global registry filter it would
-    // disable the span below its level and current() would return None.
     #[test]
     fn correlation_id_resolves_within_profile_span() {
         let subscriber = tracing_subscriber::registry()

@@ -1,6 +1,3 @@
-# Pins the known limit: once ClickHouse has merged the source parts only the
-# tombstone is left, so the edge it should remove cannot be identified and stays.
-# The edge is seeded directly because the live row is gone from the source table.
 description: A tombstone with no live source version leaves an existing CREATED_MR edge in place
 scope: { namespace: 100 }
 

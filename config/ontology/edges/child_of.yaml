@@ -1,5 +1,3 @@
-# config/ontology/edges/child_of.yaml
-
 description: Pipeline was triggered as a child of another pipeline (downstream pipeline relationship)
 table: gl_ci_edge
 

@@ -42,8 +42,6 @@ impl DslLanguage for DockerfileDsl {
     }
 }
 
-/// References are bound to their target in the parser, so resolution only has to follow
-/// the reaching definitions and imports.
 pub struct DockerfileRules;
 
 impl HasRules for DockerfileRules {
@@ -160,7 +158,6 @@ impl<'a> DockerfileParser<'a> {
             .unwrap_or_default();
         let name = match instruction.field("as") {
             Some(alias) => truncate_name(&alias.text()),
-            // The index counts comments and parser directives, as in the incremental engine.
             None => format!("stage:{image}#{index}"),
         };
         let range = canonical_range(&node_to_range(instruction));

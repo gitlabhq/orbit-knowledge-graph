@@ -208,8 +208,6 @@ fn sanitize_error_message(error: &PipelineError) -> String {
     }
 }
 
-/// No internal details (table names, SQL, infrastructure) are exposed — only
-/// the failure class and generic suggestions for refining the query.
 fn classify_execution_error(msg: &str) -> String {
     match ClickHouseLimit::from_message(msg) {
         Some(ClickHouseLimit::MemoryLimit) => {

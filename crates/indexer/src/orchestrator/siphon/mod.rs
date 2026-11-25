@@ -1,5 +1,3 @@
-//! Trigger B: the continuous, reactive Siphon CDC consumer and its routes.
-
 pub mod code_indexing_task;
 pub mod decoder;
 pub mod enabled_namespaces;

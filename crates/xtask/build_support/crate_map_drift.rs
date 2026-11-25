@@ -1,6 +1,3 @@
-// Shared by `build.rs` and `tests/crate_map_drift.rs` via `include!`; string
-// in, sets/report out, no filesystem or env access.
-
 use std::collections::BTreeSet;
 
 use serde::Deserialize;
@@ -17,8 +14,6 @@ struct Workspace {
     members: Vec<String>,
 }
 
-// Keeps the full path below `crates/` (not just the leaf) so `a/shared` and
-// `b/shared` stay distinct and one can't mask the other's missing row.
 fn crate_key(member_path: &str) -> String {
     member_path
         .strip_prefix(MEMBER_PREFIX)
@@ -26,9 +21,6 @@ fn crate_key(member_path: &str) -> String {
         .to_string()
 }
 
-// A real TOML parse so `default-members` can't be mis-read. Globs (`crates/*`)
-// are not expanded and would surface as a literal `*` key; the workspace uses
-// explicit paths, so that is not a concern today.
 fn workspace_member_names(manifest_src: &str) -> BTreeSet<String> {
     let manifest: Manifest = toml::from_str(manifest_src)
         .expect("Cargo.toml has a parseable [workspace].members array");
@@ -40,8 +32,6 @@ fn workspace_member_names(manifest_src: &str) -> BTreeSet<String> {
         .collect()
 }
 
-// The key is the backtick-wrapped token in each row's first cell; header and
-// separator rows have no backticked first cell and are skipped.
 fn crate_map_row_names(crate_map_src: &str) -> BTreeSet<String> {
     crate_map_src
         .lines()

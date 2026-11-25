@@ -1,5 +1,3 @@
-//! Where files come from. Every source uses only `Loading::put`.
-
 mod archive;
 mod diff;
 mod directory;

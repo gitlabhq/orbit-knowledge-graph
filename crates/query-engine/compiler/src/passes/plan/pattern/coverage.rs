@@ -1,5 +1,3 @@
-//! What an edge row already answers about its endpoint nodes, so the node table need not be read.
-
 use std::collections::HashSet;
 
 use ontology::constants::*;
@@ -123,7 +121,6 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
         self.model.table_columns(relation.single_edge_table()?)
     }
 
-    /// Endpoint filters on properties the edge table stores as columns, each property once.
     pub fn edge_column_filters(&self, relation: &EdgeRelation) -> Vec<(&str, &BoundFilter)> {
         let mut seen = HashSet::new();
         [&relation.from_node, &relation.to_node]

@@ -1,5 +1,3 @@
-//! Require a Docker-compatible runtime (Docker, Colima, etc).
-
 use clickhouse_client::ClickHouseConfigurationExt;
 use std::sync::Arc;
 
@@ -145,9 +143,6 @@ async fn clickhouse_destination() {
     write_empty_batch_succeeds(&context).await;
 }
 
-/// The byte cap the datalake pins on retry (`preferred_block_size_bytes`)
-/// resolves the Arrow String 2GB overflow that a smaller row cap alone can't.
-/// Needs ~3GB of container memory to build the oversized block.
 #[tokio::test]
 async fn arrow_string_overflow_recovers_with_byte_cap() {
     use futures::StreamExt;
@@ -162,7 +157,6 @@ async fn arrow_string_overflow_recovers_with_byte_cap() {
              ENGINE = MergeTree ORDER BY id SETTINGS index_granularity_bytes = 0",
         )
         .await;
-    // 2148 * 1MB exceeds the Arrow String 2GB offset cap.
     context
         .execute(
             "INSERT INTO wide_overflow SELECT number, repeat('A', 1000000) \
@@ -172,8 +166,6 @@ async fn arrow_string_overflow_recovers_with_byte_cap() {
 
     let sql = "SELECT s FROM wide_overflow ORDER BY id LIMIT 2148";
 
-    // preferred_block_size_bytes=0 reproduces the incident profile; the default
-    // of 1MB would mask the bug.
     let without_cap = client
         .query(sql)
         .with_setting("max_memory_usage", "0")
@@ -215,8 +207,6 @@ async fn arrow_string_overflow_recovers_with_byte_cap() {
     assert_eq!(rows, 2148);
 }
 
-/// Forwards responses in 1 KiB pieces, 1 ms apart, so a plain response reaches
-/// the client in many small chunks, as it does over a real network.
 async fn throttling_proxy(upstream_url: &str) -> String {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -254,7 +244,6 @@ async fn streamed_read_keeps_every_byte_of_a_slow_plain_response() {
         ..context.config.clone()
     };
 
-    // Small blocks put many Arrow message headers across chunk boundaries.
     let mut batches = config
         .build_client("graph")
         .query("SELECT number FROM numbers(3200)")

@@ -126,7 +126,6 @@ pub(super) struct StatisticsExcludeYaml {
     pub columns: Vec<String>,
 }
 
-/// A `denormalized_joins` entry; see [`crate::denormalized`].
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct DenormalizedJoinYaml {
@@ -144,7 +143,6 @@ pub(super) struct DenormalizedHopYaml {
     pub via: HopVia,
 }
 
-/// Link a hop through its edge table or directly through the variant's FK column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum HopVia {
@@ -162,9 +160,6 @@ pub(super) struct PartitionYaml {
     pub include_edge_tables: Vec<String>,
 }
 
-/// One optional block per strategy; exactly one must be set (enforced in the
-/// loader). Serde's externally-tagged enums require a YAML `!tag`, which reads
-/// worse than a named nested block, so this models the choice as optionals.
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub(super) struct PartitionStrategyYaml {
@@ -183,8 +178,6 @@ pub(super) struct HashBucketYaml {
 pub(super) struct DenormalizationEntryYaml {
     pub node: String,
     pub property: String,
-    /// Edge column suffix. Defaults to `property` if omitted.
-    /// The full column name is `{direction}_{as}`, e.g. `source_status`.
     #[serde(rename = "as", default)]
     pub column_alias: Option<String>,
 }

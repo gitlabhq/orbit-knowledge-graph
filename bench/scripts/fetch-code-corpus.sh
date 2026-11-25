@@ -1,18 +1,4 @@
 #!/usr/bin/env bash
-# Fetch repository archives from gitlab.com via git archive --remote (SSH).
-# Streams directly to GCS without touching local disk.
-#
-# Usage:
-#   bash bench/scripts/fetch-code-corpus.sh [projects.tsv]
-#   FETCH_MAX=10 bash bench/scripts/fetch-code-corpus.sh
-#   JOBS=16 ARCHIVE_TIMEOUT=300 bash bench/scripts/fetch-code-corpus.sh
-#   RETRY=fail bash bench/scripts/fetch-code-corpus.sh      # retry only failures
-#   RETRY=fail,skip bash bench/scripts/fetch-code-corpus.sh # retry both
-#   RETRY=all bash bench/scripts/fetch-code-corpus.sh      # re-fetch everything
-#
-# RETRY modes parse LOG_FILE for previous run output. Redirect the initial
-# run's output to LOG_FILE so retries can find it:
-#   bash bench/scripts/fetch-code-corpus.sh 2>&1 | tee /tmp/corpus-fetch.log
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -31,7 +17,6 @@ mkdir -p "${WORK}"
 trap 'rm -rf "${WORK}"' EXIT
 [[ "${BUCKET}" != gs://* ]] && mkdir -p "${BUCKET}"
 
-# Resolve project list: explicit file > GCS > error
 if [[ -z "${INPUT}" ]]; then
   if [[ "${BUCKET}" == gs://* ]]; then
     echo "[corpus] No input file specified, checking ${BUCKET}/projects.tsv"
@@ -45,12 +30,6 @@ fi
 
 TOTAL=$(wc -l < "${INPUT}" | tr -d ' ')
 
-# --- Retry modes ---
-# RETRY=fail         re-fetch only FAIL entries from a previous log
-# RETRY=skip         re-fetch only SKIP entries from a previous log
-# RETRY=fail,skip    both (any order, comma-separated)
-# RETRY=all          ignore existing archives, re-fetch everything
-# (unset)            skip existing archives (default)
 if [[ "${RETRY}" == "all" ]]; then
   echo "[corpus] RETRY=all: re-fetching all projects (ignoring existing)"
   touch "${WORK}/existing.txt"
@@ -75,7 +54,6 @@ elif [[ -n "${RETRY}" ]]; then
   TOTAL="${RETRY_COUNT}"
   touch "${WORK}/existing.txt"
 else
-  # Pre-fetch existing archives list to avoid per-project GCS lookups.
   if [[ "${BUCKET}" == gs://* ]]; then
     echo "[corpus] Listing existing archives in ${BUCKET}..."
     gcloud storage ls "${BUCKET}/*.tar.gz" 2>/dev/null \

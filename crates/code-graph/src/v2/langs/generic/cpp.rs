@@ -38,7 +38,6 @@ impl DslLanguage for CppDsl {
             scope("class_specifier", "Class")
                 .def_kind(DefKind::Class)
                 .when(has_descendant("field_declaration_list")),
-            // C++ treats a struct as a class with public default.
             scope("struct_specifier", "Struct")
                 .def_kind(DefKind::Class)
                 .when(has_descendant("field_declaration_list")),
@@ -59,16 +58,11 @@ impl DslLanguage for CppDsl {
             scope("concept_definition", "Concept")
                 .def_kind(DefKind::Interface)
                 .no_scope(),
-            // Template declarations wrap function/class definitions but
-            // create no named scope; the inner scope handles naming.
         ]
     }
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // Must precede the direct-call rule: both match call_expression,
-            // but qualified needs field("function").field("name") to extract
-            // the bare name, not "Ns::func".
             reference("call_expression")
                 .name_from(field("function").field("name"))
                 .when(has_descendant("qualified_identifier")),

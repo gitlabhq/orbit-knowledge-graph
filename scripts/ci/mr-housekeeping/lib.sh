@@ -10,9 +10,6 @@ log() { printf '%s\n' "$*" >&2; }
 
 api() { glab api "$@"; }
 
-# GitLab timestamps vary (".000Z", "+00:00"); strip the fractional part so GNU
-# date parses every variant. Empty/null inputs return 0 (treated as ancient by
-# callers only where that is safe — see get_last_activity_epoch in stale.sh).
 to_epoch() {
   local timestamp="${1:-}"
   if [ -z "$timestamp" ] || [ "$timestamp" = "null" ]; then

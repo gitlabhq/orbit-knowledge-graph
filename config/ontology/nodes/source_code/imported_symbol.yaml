@@ -1,5 +1,3 @@
-# config/ontology/nodes/source_code/imported_symbol.yaml
-
 node_type: ImportedSymbol
 domain: source_code
 description: An imported symbol or module reference within a source file

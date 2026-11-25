@@ -133,7 +133,6 @@ fn emit_ref(
     }
 }
 
-/// A materialized reference must expose the alias its inline form would, or predicates and join conditions dangle.
 pub(super) fn exposed_alias(id: RelationId, graph: &RelationGraph) -> Option<String> {
     match graph.get(id) {
         RelationNode::Read { alias, .. }

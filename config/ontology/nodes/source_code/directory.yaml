@@ -1,5 +1,3 @@
-# config/ontology/nodes/source_code/directory.yaml
-
 node_type: Directory
 domain: source_code
 description: A directory within a repository's file structure

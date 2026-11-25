@@ -5,14 +5,12 @@ use compiler::CompiledQueryContext;
 
 pub trait PipelineObserver: Send {
     fn set_query_type(&mut self, query_type: &'static str);
-    /// Called once after successful compilation with the full compiled context.
     fn set_compiled(&mut self, _ctx: &CompiledQueryContext) {}
     fn compiled(&mut self, elapsed: Duration);
     fn executed(&mut self, elapsed: Duration, batch_count: usize);
     fn authorized(&mut self, elapsed: Duration);
     fn hydrated(&mut self, elapsed: Duration);
 
-    /// Called for each ClickHouse query execution (base and hydration queries).
     fn query_executed(&mut self, _label: &str, _read_rows: u64, _read_bytes: u64, _memory: i64) {}
 
     fn record_error(&self, error: &PipelineError);
@@ -32,8 +30,6 @@ impl PipelineObserver for NoOpObserver {
     fn finish(&self, _row_count: usize, _redacted_count: usize) {}
 }
 
-/// Run multiple independent observers (e.g. OTel metrics + billing events)
-/// against the same pipeline without coupling them.
 pub type MultiObserver = orbit_utils::observability::MultiObserver<dyn PipelineObserver>;
 
 impl PipelineObserver for MultiObserver {

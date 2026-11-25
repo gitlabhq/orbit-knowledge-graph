@@ -1,15 +1,5 @@
 name: "Rust: closures are not extracted as Definition nodes"
 
-# Intentional limitation, not a bug: ra_ap_hir 0.0.328 does not expose the
-# body-source-map lookup needed to recover a closure's AST node, so closures
-# (and raw fn pointers / `impl Fn*` receivers) have no stable definition site.
-# See the CallableKind::Closure branch in
-# crates/code-graph/src/v2/langs/custom/rust/mod.rs.
-#
-# precision_resolution.yaml already asserts closures create no spurious call
-# edges; this fixture asserts the other direction - closures must not appear
-# as Definition nodes - so an accidental start of anonymous-closure extraction
-# is caught by a test.
 fixtures:
   - path: Cargo.toml
     content: |
@@ -57,10 +47,6 @@ tests:
       - { row: { name: "uses_closures", kind: "Function" } }
       - { row: { name: "with_callback", kind: "Function" } }
 
-  # An anonymously extracted closure would carry a synthetic name (not
-  # 'double'/'add'/'f'), which the name-filtered test above cannot catch.
-  # Pinning the complete Definition name set closes that gap: any extra
-  # Definition, whatever its name, fails the set equality.
   - name: "The three named functions are the ONLY Definitions in the fixture"
     query: |
       MATCH (d:Definition)

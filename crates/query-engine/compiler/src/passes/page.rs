@@ -1,9 +1,3 @@
-//! Row window pass. Runs after lowering establishes the final ORDER BY:
-//! overfetches one probe row for `has_more` and lowers `SKIP` into an
-//! OFFSET over a total order. Compiler tie-breakers extend the sort whenever
-//! SKIP is present, so consecutive windows of the same statement neither
-//! overlap nor drop rows.
-
 use crate::ast::Node;
 use crate::input::Input;
 use crate::passes::lower::LoweredMetadata;

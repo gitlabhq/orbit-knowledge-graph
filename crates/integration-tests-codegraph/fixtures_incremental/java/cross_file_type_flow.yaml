@@ -42,7 +42,6 @@ tests:
           - { row: { callee: "ServiceFactory" } }
           - { row: { callee: "createService", callee_fqn: "com.example.ServiceFactory.createService" } }
           - { row: { callee: "findUser", callee_fqn: "com.example.UserService.findUser" } }
-      # no false positive to deleteUser
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'com.example.App'

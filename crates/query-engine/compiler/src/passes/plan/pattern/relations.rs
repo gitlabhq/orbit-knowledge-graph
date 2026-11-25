@@ -1,6 +1,3 @@
-//! Relation planning: an `EdgeRelation` per input relationship (edge tables, layout, foreign-key
-//! shortcut), ordered most selective first along a connected chain.
-
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 
@@ -50,7 +47,6 @@ impl EdgeRelation {
         }
     }
 
-    /// The endpoints as the edge row stores them: the node in `source_id`, then the node in `target_id`.
     pub(super) fn stored_endpoints(&self) -> (&str, &str) {
         self.direction
             .stored_order(self.from_node.as_str(), self.to_node.as_str())
@@ -160,7 +156,6 @@ where
         .collect()
 }
 
-/// Swaps each table for the equivalent layout whose sort key reaches a pinned endpoint column soonest.
 pub(super) fn select_edge_layouts(
     model: &(impl OrbitQueryModel + ?Sized),
     tables: &mut [String],
@@ -187,7 +182,6 @@ pub(super) fn select_edge_layouts(
     }
 }
 
-/// Orders relations most selective first while keeping each one connected to the ones before it.
 pub(super) fn linearize_relations(
     relations: &mut [EdgeRelation],
     nodes: &HashMap<String, NodePlan>,

@@ -1,5 +1,3 @@
-//! Places WHERE conditions: on one node's scan when they only touch that node, else on the joined rows.
-
 use std::collections::HashSet;
 
 use query_data_model::OrbitQueryModel;
@@ -13,7 +11,6 @@ use crate::passes::plan::predicates::{Column, Predicate, tag_filter};
 
 #[derive(Default)]
 pub(super) struct ConditionPlacement {
-    /// Per condition tree, the node whose scan takes it, or `None` when it binds against the joined rows.
     pub scans: Vec<Option<String>>,
     pub joined_nodes: HashSet<String>,
 }

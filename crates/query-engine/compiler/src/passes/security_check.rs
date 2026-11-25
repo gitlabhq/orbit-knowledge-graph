@@ -1,10 +1,3 @@
-//! Post-compilation safety checks.
-//!
-//! Runs after security filter injection to verify invariants that must hold
-//! before the AST is handed to codegen. Checks that every namespaced graph
-//! table alias has a role-eligible traversal path predicate or a fail-closed
-//! false predicate.
-
 use query_data_model::GitLabPolicy;
 use serde_json::Value;
 
@@ -355,11 +348,6 @@ mod tests {
         assert!(check(&node, &ctx, model()).is_ok());
     }
 
-    /// An AND-chain containing `Bool(false)` short-circuits to zero rows, so
-    /// the post-check must accept the query even when no per-alias
-    /// `startsWith` filter is present. The security pass emits this shape
-    /// when an alias has no eligible traversal paths (e.g. a Reporter-only
-    /// user hitting an entity that requires Security Manager).
     #[test]
     fn accepts_bool_false_as_dead_alias_filter() {
         use crate::ast::Op;
@@ -426,15 +414,6 @@ mod tests {
         assert!(error.to_string().contains("access level 25"));
     }
 
-    /// A `col = false` comparison (or any other non-AND operator whose
-    /// operand happens to be a boolean false literal) must NOT be treated
-    /// as a proof that the alias is scoped. Bool(false) short-circuits the
-    /// clause only when AND-chained into the top level. OR-ing or
-    /// equality-ing against it leaves other rows reachable.
-    ///
-    /// Without this guard a user filter like `Project.archived = false`
-    /// would bypass CheckPass defense-in-depth for any alias whose
-    /// `startsWith` is missing — defeating the purpose of the post-check.
     #[test]
     fn rejects_bool_false_nested_inside_comparison() {
         use crate::ast::Op;
@@ -453,9 +432,6 @@ mod tests {
         );
     }
 
-    /// `Bool(false)` OR-ed with anything is not a dead clause: the OR
-    /// arms can still produce rows. Treating it as proof of scoping would
-    /// leak data if the security pass forgot to emit a `startsWith`.
     #[test]
     fn rejects_bool_false_ored_with_true() {
         use crate::ast::Op;
@@ -474,9 +450,6 @@ mod tests {
         );
     }
 
-    /// A `Bool(false)` buried in a deeply nested AND chain (the shape
-    /// `Expr::and_all` typically emits for multi-alias queries) still
-    /// short-circuits the clause and counts as a valid path filter.
     #[test]
     fn accepts_bool_false_in_nested_and_chain() {
         use crate::ast::Op;
@@ -498,10 +471,6 @@ mod tests {
         assert!(check(&node, &ctx, model()).is_ok());
     }
 
-    /// Inverse of the previous test: if the AND chain has no Bool(false)
-    /// and no matching startsWith for the alias, the check must fail even
-    /// when the clause contains `col = false` (which is NOT a dead
-    /// conjunct).
     #[test]
     fn rejects_and_chain_with_col_eq_false_and_no_starts_with() {
         use crate::ast::Op;

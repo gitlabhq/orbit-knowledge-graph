@@ -112,8 +112,6 @@ impl DslLanguage for KotlinDsl {
             scope("companion_object", "Object")
                 .def_kind(DefKind::Class)
                 .name_from_or(child_of_kind("type_identifier"), "Companion"),
-            // Unconditional fallback first — reverse iteration means
-            // conditional rule (ExtensionFunction) is checked before fallback.
             scope("function_declaration", "Function").def_kind(DefKind::Function),
             scope("function_declaration", "ExtensionFunction")
                 .def_kind(DefKind::Function)
@@ -166,8 +164,6 @@ impl DslLanguage for KotlinDsl {
                 .when(has_child(&["navigation_expression"]))
                 .receiver_via(child_of_kind("navigation_expression").first_named()),
             reference("type_identifier").name_from(text()),
-            // Operator desugaring: binary operators map to named methods.
-            // The left operand is the receiver, the method name is derived from the operator.
             reference("additive_expression")
                 .name_from(constant("plus"))
                 .when(has_child_text("+"))
@@ -239,10 +235,6 @@ impl DslLanguage for KotlinDsl {
         let kotlin_type = |rule: BindingRule| {
             rule.typed(
                 vec![
-                    // variable_declaration > user_type — extract full text so
-                    // dotted types like Parent.GrandChild are preserved. The
-                    // engine's dotted type resolution splits on separator and
-                    // resolves the first segment via imports.
                     child_of_kind("variable_declaration")
                         .then(child_of_kind("user_type"))
                         .then(text()),

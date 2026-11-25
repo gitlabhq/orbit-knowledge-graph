@@ -1,5 +1,3 @@
-# The checkpoint row makes the second run incremental, so only the renamed
-# route (replicated after the watermark) is re-read.
 description: A route rename on an incremental run updates the group full_path
 scope: { namespace: 100 }
 

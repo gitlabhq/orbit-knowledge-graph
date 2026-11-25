@@ -3,7 +3,6 @@ use crate::tree_sitter::{LanguageExt, TSLanguage};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Variants are always available, but tree-sitter parsing requires the corresponding feature.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SupportLang {
     Bash,

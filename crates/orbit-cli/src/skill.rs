@@ -23,7 +23,6 @@ struct SkillAssets;
 #[folder = "$SKILLS_DIR/orbit-wrapper"]
 struct WrapperAssets;
 
-/// Set while the setup frame is drawn, so fallback warnings keep its gutter.
 static WARN_IN_FRAME: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn warn_inside_setup_frame() {
@@ -42,7 +41,6 @@ const CACHE_MANIFEST: &str = ".orbit-cache.json";
 const DEFAULT_SKILL: &str = "orbit";
 const LOCK_WAIT: Duration = Duration::from_secs(10);
 const STALE_CACHE_TEMP_AGE: Duration = Duration::from_secs(15 * 60);
-/// Fixed because the content, not the name, depends on whether the instance is reachable.
 pub(crate) const INSTALL_DIR_NAME: &str = "orbit";
 pub(crate) const LEGACY_INSTALL_DIR_NAME: &str = "orbit-cli";
 const GLAB_SKILLS_GET: &str = "glab orbit skills get orbit";
@@ -105,7 +103,6 @@ pub(crate) fn embedded_full_tree() -> Result<BTreeMap<String, Vec<u8>>> {
         .collect()
 }
 
-/// Installed trees are addressed by directory, so the manifest name must match it.
 fn rename_manifest(manifest: &str, name: &str) -> Result<String> {
     let mut in_frontmatter = false;
     let mut renamed = false;
@@ -341,7 +338,6 @@ fn one_line(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Descriptions are written for agents to match on; people need only the summary.
 fn first_sentence(description: &str) -> String {
     let description = one_line(description);
     match description.find(". ") {
@@ -444,7 +440,6 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
             let cached = cached.ok_or_else(|| {
                 anyhow!("Orbit skill server returned 304 but no validated cache entry exists")
             })?;
-            // A 304 does not change the tree; rewriting the cache would only alter its timestamp.
             Ok(Some(cached.tree))
         }
         404 if name != DEFAULT_SKILL => embedded_fallback(name, degradation_warning(&response)),
@@ -463,7 +458,6 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
     }
 }
 
-/// Only the `orbit` skill has an embedded copy; any other skill comes from the server or fails.
 fn embedded_fallback<T>(name: &str, reason: impl std::fmt::Display) -> Result<Option<T>> {
     if name != DEFAULT_SKILL {
         bail!("could not fetch the {name:?} skill: {reason}");
@@ -475,12 +469,10 @@ fn embedded_fallback<T>(name: &str, reason: impl std::fmt::Display) -> Result<Op
 const BODY_EXCERPT_CHARS: usize = 200;
 
 enum Degradation {
-    /// The cache is skipped so a rejected token is not hidden behind a validated copy.
     AuthRejected,
     Unavailable,
 }
 
-/// The skill is documentation, so auth failures, rate limits and outages degrade to a local copy.
 fn degradation(status: u16) -> Option<Degradation> {
     match status {
         401 | 403 => Some(Degradation::AuthRejected),

@@ -7,7 +7,6 @@ use ontology::{DataType, Field, NodeEntity};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-/// Accumulates rows and flushes to batches when `batch_size` is reached.
 pub struct BatchBuilder {
     primary_keys: HashSet<String>,
     batch_size: usize,
@@ -21,7 +20,6 @@ pub struct BatchBuilder {
 struct ColumnData {
     field: Field,
     kind: FieldKind,
-    /// Enum keys are i64 per ontology.
     enum_values: Option<std::collections::BTreeMap<i64, String>>,
     values: ColumnValues,
 }
@@ -51,8 +49,6 @@ impl BatchBuilder {
         seed: Option<u64>,
         pools: &'static FakeDataPools,
     ) -> Self {
-        // traversal_path is a system column handled separately.
-        // Pre-compute FieldKind once per field to avoid runtime string matching per row.
         let columns: Vec<ColumnData> = node
             .fields
             .iter()

@@ -2,7 +2,6 @@ name: "JavaScript security hardening (MR 950)"
 pipeline: js
 
 fixtures:
-  # --- H4: node-builtin alias smuggling refused ---
   - path: webpack.config.js
     content: |
       const path = require('path');
@@ -53,7 +52,6 @@ fixtures:
       import { packageSafe } from 'local-package';
       export function runPackage() { return packageSafe(); }
 
-  # --- L2: star-reexport dedup ---
   - path: src/lib/shared.js
     content: |
       export function sharedFn() { return 'shared'; }
@@ -71,7 +69,6 @@ fixtures:
       import { sharedFn } from './lib/barrel.js';
       export function runShared() { return sharedFn(); }
 
-  # --- L3: module key normalization (`./src/x.js` vs `src/x.js`) ---
   - path: src/mod_a.js
     content: |
       export function fromA() { return 'a'; }
@@ -82,7 +79,6 @@ fixtures:
       import { fromA } from './mod_a.js';
       export function runFromA() { return fromA(); }
 
-  # --- L9: Vue virtual-class FQN does not collide with a real class ---
   - path: src/Collide.vue
     content: |
       <script>
@@ -171,8 +167,7 @@ tests:
       - { row: { caller: "runFromA", callee: "fromA" } }
 
   - name: Vue virtual class does not collide with a real class of the same name
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (def:Definition)
       WHERE def.file_path = 'src/Collide.vue'
