@@ -106,6 +106,9 @@ Commands that use only the local graph need no GitLab account and no network.
 | `context` | Local graph and GitLab Orbit API | Show the source of definitions with their callers and tests, and read merge requests, issues, pipelines, and jobs. |
 | `workspace index` | Local graph | Index a repository, or a directory of repositories. |
 | `workspace list` | Local graph | List the indexed repositories. |
+| `workspace sql` | Local graph | Run a read-only SQL query against the local graph. |
+| `workspace schema` | Local graph | Show the tables and columns of the local graph. |
+| `workspace reset` | Local graph | Delete the local graph so the next index starts from nothing. Settings stay. |
 | `setup`, `uninstall` | None | Add or remove the agent configuration. |
 | `config` | None | Read and write saved settings. |
 | `version` | None | Print the version. |
