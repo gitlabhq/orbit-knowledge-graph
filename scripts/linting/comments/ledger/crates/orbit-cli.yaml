@@ -44,41 +44,6 @@
   preview: "/// Only bounds commands too fast to hide a round trip behind their own…"
   hash: 007cf94ecc92f6c5
   lines: 2
-- category: tool-read
-  reason: "Clap doc comment is the --timeout help text users see."
-  preview: "/// Seconds to wait for a running index or open readers before exiting …"
-  hash: d11303b4af9dad6f
-  lines: 2
-- category: tool-read
-  reason: "Clap reads this doc comment as the --help text for the flag; deleting it blanks user-facing help."
-  preview: "/// Print the lines that do not match."
-  hash: f8142483f2122b63
-  lines: 1
-- category: tool-read
-  reason: "Clap doc comment is the -B help text users see."
-  preview: "/// Print NUM lines before each match."
-  hash: 2bec35853ca1eb86
-  lines: 1
-- category: tool-read
-  reason: "Clap reads this doc comment as the --help text for the flag; deleting it blanks user-facing help."
-  preview: "/// Print NUM lines before and after each match; `-NUM` works too."
-  hash: b7017adc0ec6536f
-  lines: 1
-- category: tool-read
-  reason: "Clap doc comment is the -q help text and exit-code contract users see."
-  preview: "/// Print nothing; exit 0 when something matches and 1 otherwise."
-  hash: c886f754b5910724
-  lines: 1
-- category: tool-read
-  reason: "Clap reads this doc comment as the --help text for the flag; deleting it blanks user-facing help."
-  preview: "/// Read the existing index as is: never build or refresh it, and fail …"
-  hash: dd3239bb5b216631
-  lines: 2
-- category: tool-read
-  reason: "Clap doc comment is the --no-index help text users see."
-  preview: "/// Do not index the current repository after configuring."
-  hash: 8b1934b859f0125b
-  lines: 1
 - category: upstream
   reason: "Exit(0) skips the runtime wait on blocking DNS lookups past the flush timeout; a return would hang."
   preview: "// Skips the runtime's wait on blocking DNS lookups past the flush time…"

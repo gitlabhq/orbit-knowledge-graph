@@ -10,6 +10,16 @@
   preview: "/// SHA-256 of the instance's online cloud license, sent by Rails on se…"
   hash: 7d71f5aeb71f9aab
   lines: 4
+- category: contract
+  reason: "The Rails ops flag orbit_gitlab_com_access_override sets this claim; no other file names the flag."
+  preview: "/// Set by Rails on GitLab.com when the user's Orbit billing namespace …"
+  hash: 48150e93cc6ba52f
+  lines: 3
+- category: security
+  reason: "access_levels are raw Gitlab::Access integers that the security pass compares directly with required_role."
+  preview: "/// One traversal path the user holds in their scope, paired with the e…"
+  hash: 4cd2b1e05e6134b1
+  lines: 9
 "crates/orbit-server/src/auth/validator.rs":
 - category: security
   reason: "RSA algorithms hit RUSTSEC-2023-0071 until jsonwebtoken moves to rsa 0.10+; only HS256 is allowed."

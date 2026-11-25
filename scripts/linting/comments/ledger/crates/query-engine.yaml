@@ -79,6 +79,11 @@
   preview: "// \"both\" generates OR joins that defeat CH index usage; schema also re…"
   hash: 5af540363cbef78f
   lines: 2
+- category: upstream
+  reason: "ClickHouse rejects lower() and startsWith on non-string columns at run time, which shows as an opaque 500."
+  preview: "// ClickHouse rejects lower()/startsWith on non-string columns at"
+  hash: 5a9766ba035eca30
+  lines: 2
 "crates/query-engine/compiler/src/types.rs":
 - category: contract
   reason: "Values must match Rails Gitlab::Access constants sent in the JWT."
@@ -91,17 +96,6 @@
   preview: "// Dedupe paths by canonical (node_seq, edge_kinds) tuple. ReplacingMer…"
   hash: 9968cc9a14ba2f94
   lines: 4
-"crates/query-engine/profiler/src/main.rs":
-- category: tool-read
-  reason: "Clap doc comment is the ClickHouse password flag help text."
-  preview: "/// ClickHouse password"
-  hash: 32e19480e77899ff
-  lines: 1
-- category: tool-read
-  reason: "Clap reads this doc comment as the --help text for the flag; deleting it blanks user-facing help."
-  preview: "/// Authorized paths for the security context (repeatable), as `path` o…"
-  hash: 608f53bf98b0b3c7
-  lines: 2
 "crates/query-engine/shared/src/hydration.rs":
 - category: security
   reason: "Traversal_paths is the authorized scope; a center-path fallback would widen access."

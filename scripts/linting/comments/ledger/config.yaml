@@ -48,6 +48,12 @@
   preview: "# Temporary: aligned with source-code entities so Project + code traver…"
   hash: 7a141bf858682697
   lines: 4
+"config/ontology/nodes/security/vulnerability.yaml":
+- category: security
+  reason: "Security Manager (25) is the minimum role for security resources, so the security pass drops Reporter-only paths."
+  preview: "# Security Manager is the minimum GitLab role designed to view security"
+  hash: 008fd3f5d9479678
+  lines: 8
 "config/ontology/nodes/source_code/commit.yaml":
 - category: contract
   reason: "decoded_sha and the masked hash must match merge_request.yaml, or MERGED_AT_COMMIT points at no node."

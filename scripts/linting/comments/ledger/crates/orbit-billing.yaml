@@ -27,11 +27,21 @@
   preview: "// Kept alive for the lifetime of the cache so the OTel SDK keeps invok…"
   hash: ec9e4b7c8bb2a3e0
   lines: 2
+- category: compliance
+  reason: "SOX billing scope: a failed CustomersDot call must not be cached, so the next request retries."
+  preview: "/// Returns the gate decision and whether it was served from cache."
+  hash: 7857c758ba562159
+  lines: 6
 "crates/orbit-billing/src/quota/key.rs":
 - category: security
   reason: "Cache key fields are logged, so adding license_checksum would leak a credential into logs."
   preview: "// `license_checksum` stays out of `CacheKey`: key fields are logged, a…"
   hash: 2048fa94f3b846c2
+  lines: 3
+- category: contract
+  reason: "CustomersDot expects the realm exactly as Rails signs it, so it must not become REALM_SM."
+  preview: "// The quota check sends the realm claim exactly as Rails signed it (`s…"
+  hash: 1defe74d6d85b39d
   lines: 3
 "crates/orbit-billing/src/quota/metrics.rs":
 - category: upstream

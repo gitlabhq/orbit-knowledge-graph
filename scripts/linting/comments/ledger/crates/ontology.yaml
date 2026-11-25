@@ -36,3 +36,8 @@
   preview: "/// Whether the specific `(relationship_kind, source_kind, target_kind)`"
   hash: e8247395a1550f82
   lines: 4
+- category: invariant
+  reason: "The FK-projecting guard is sound only while every FK edge declares fk_column on all its variants."
+  preview: "// An FK edge is indexed from the node holding the key, so only that si…"
+  hash: 3c1cec08d1138cfe
+  lines: 7

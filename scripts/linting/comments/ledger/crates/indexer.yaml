@@ -144,6 +144,18 @@
   preview: "/// OR-of-ANDs `(c0 > v0) OR (c0 = v0 AND c1 > v1) …` — ClickHouse prun…"
   hash: 150312adbaeecf35
   lines: 1
+"crates/indexer/src/modules/sdlc/plan/transform.rs":
+- category: upstream
+  reason: "DuckDB casts the string column for an int literal, so an ordinal compare on a string enum fails."
+  preview: "// DuckDB resolves `<string column> = <int literal>` by casting the col…"
+  hash: 2bd45a63fa344629
+  lines: 2
+"crates/indexer/src/modules/sdlc/transform/system_notes/mod.rs":
+- category: upstream
+  reason: "Strict ClickHouse rejects an INSERT that omits a no-DEFAULT column, so the empty tag lists must stay."
+  preview: "// Strict ClickHouse rejects an INSERT omitting a no-DEFAULT column, so…"
+  hash: a421ef39fc6e3d25
+  lines: 2
 "crates/indexer/src/modules/sdlc/transform/system_notes/parse.rs":
 - category: contract
   reason: "Bounds derive from Rails reference patterns and constants that no code in this repo can check."

@@ -14,17 +14,6 @@
   preview: "// Rails base64-decodes the secret before signing; mirror that so the"
   hash: 89737ea1802a05eb
   lines: 3
-"crates/xtask/src/main.rs":
-- category: tool-read
-  reason: "Clap doc comment is the loadtest subcommand help, including the required GKG_JWT_SECRET."
-  preview: "/// Run a gRPC load test against a running Orbit server, replaying the"
-  hash: cb4c8067437232f1
-  lines: 5
-- category: tool-read
-  reason: "Clap reads this doc comment as the --help text for the flag; deleting it blanks user-facing help."
-  preview: "/// Discarded rounds, shaped like measured ones, before measuring (0 = …"
-  hash: 105f5f8441c8b2aa
-  lines: 1
 "crates/xtask/src/synth/generator/fake_data.rs":
 - category: safety
   reason: "SAFETY argument for the unsafe UTF-8 buffer write."

@@ -26,6 +26,16 @@
   preview: "/// Walk a directory tree and remove any symlink that resolves outside"
   hash: 0ddb04879c6f3520
   lines: 8
+- category: security
+  reason: "A change to this module can open a path-traversal or symlink escape, so it needs a security review."
+  preview: "//! Filesystem security utilities (safe directory creation, symlink"
+  hash: 13becb997c4145b7
+  lines: 3
+- category: security
+  reason: "Every read of a user-supplied path must go through this guard, and the caller must canonicalize root first."
+  preview: "/// Canonicalize `path` and return it only if the real target lives"
+  hash: a87cbb0c714adb77
+  lines: 13
 "crates/utils/src/markdown.rs":
 - category: contract
   reason: "Expected anchors come from the GitLab 19.6 renderer, not local output, so they must not be regenerated locally."
@@ -49,6 +59,12 @@
   preview: "//! OS-specific file access refuses host symlinks, including parent com…"
   hash: 3c2e5b61b2dec7f6
   lines: 3
+"crates/utils/src/strings.rs":
+- category: contract
+  reason: "The quoting drops control bytes and is not JSON-compatible, so callers that need byte fidelity must not use it."
+  preview: "/// Wraps a string in quotes, escaping backslash, quote, newline, carri…"
+  hash: 8843d0e1862e5a47
+  lines: 5
 "crates/utils/src/traversal_path/mod.rs":
 - category: security
   reason: "An empty or malformed path makes startsWith match every row in the table."
