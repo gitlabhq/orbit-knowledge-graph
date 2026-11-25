@@ -148,7 +148,7 @@
 - category: contract
   reason: "Bounds derive from Rails reference patterns and constants that no code in this repo can check."
   preview: "// Reference token grammar, derived from Rails:"
-  hash: 365a25d60155d029
+  hash: 629ca0fdf116ec1a
   lines: 12
 "crates/indexer/src/modules/sdlc/transform/system_notes/resolve.rs":
 - category: upstream

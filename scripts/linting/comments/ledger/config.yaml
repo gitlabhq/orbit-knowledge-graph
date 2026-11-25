@@ -6,8 +6,8 @@
   lines: 1
 - category: upstream
   reason: "The drain window pairing avoids the tonic 0.14.5 panic (hyperium/tonic#2522)."
-  preview: "# 5 min, for L4 ILB rebalancing"
-  hash: b20ab362d82ec98a
+  preview: "# 5 min, for L4 ILB rebalancing; null turns it off (behind the Orbit Ga…"
+  hash: 5b18a028e097629f
   lines: 2
 - category: magic-value
   reason: "Upstream: the tonic and hyper default is too small for GitLab JWTs with many traversal IDs."
