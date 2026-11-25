@@ -918,7 +918,7 @@ docs_hugo_build:
   allow_failure: true
   script:
     - make add-latest-icons
-    - hugo --gc --printPathWarnings --environment test
+    - hugo --gc --printPathWarnings --panicOnWarning --environment test
 
 docs_index_pages:
   extends:
