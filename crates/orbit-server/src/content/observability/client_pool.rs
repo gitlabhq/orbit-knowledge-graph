@@ -6,8 +6,6 @@ use orbit_server_config::{ClickHouseConfiguration, ProfilingConfig};
 
 use super::host_map::TenantRoute;
 
-/// Credentials are part of the identity: a rotated password must build a new
-/// client rather than reuse one authenticating with the old one.
 type ClientKey = (String, String, String, String);
 
 pub struct TenantClientPool {
@@ -31,8 +29,6 @@ impl TenantClientPool {
         self.client_for(route, &route.traces_db)
     }
 
-    /// Drops clients whose tenant no longer appears in the host map, so a
-    /// moved or deprovisioned tenant does not keep a connection pool alive.
     pub fn retain_routes(&self, live: &[TenantRoute]) {
         let keys: HashSet<ClientKey> = live
             .iter()

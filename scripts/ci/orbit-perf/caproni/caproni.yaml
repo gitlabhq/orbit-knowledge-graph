@@ -1,8 +1,4 @@
 # yaml-language-server: $schema=https://gitlab.com/gitlab-org/caproni/-/raw/main/schema/config.v2.schema.json
-#
-# caproni stack for the orbit-perf job: gitlab-dev-stack (ClickHouse, NATS,
-# Postgres) plus Orbit. No GitLab Rails or siphon: the load test calls Orbit
-# over gRPC directly and the graph is bulk-loaded into ClickHouse.
 
 version: 2
 
@@ -10,7 +6,6 @@ variables:
   BASE_DOMAIN: caproni.test
 
 extends:
-  # cert-manager, trust-manager, CloudNativePG and the Prometheus operator CRDs.
   - https://gitlab.com/gitlab-org/gitlab-caproni/-/raw/0883b078c5dfd9cf19774acdd96dcd77d1ca8635/fragments/caproni.infra.yaml
 
 deployers:
@@ -42,7 +37,6 @@ deployers:
     type: helm
     needs:
       - gitlab-dev-stack
-      # gkg renders PodMonitors, so it needs the operator CRDs.
       - prometheus-operator-crds
     helm:
       namespace: gitlab

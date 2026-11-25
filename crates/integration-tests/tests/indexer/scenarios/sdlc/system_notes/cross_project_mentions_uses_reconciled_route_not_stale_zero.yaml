@@ -1,12 +1,3 @@
-# siphon_routes is a ReplacingMergeTree whose sort key includes
-# traversal_path, so the stale (0/) and reconciled (1/100/94/) rows for the
-# same PG route id coexist and never collapse under FINAL. The resolver must
-# dedup by PG primary key + argMax(_siphon_replicated_at) and pick the
-# reconciled row. The stale row is listed second so insertion order is
-# adversarial: only argMax (not row order, not FINAL) resolves it.
-# The MENTIONS edge lands in the noteable's (target's) namespace partition,
-# so the traversal_path assertion is on the noteable's namespace, not the
-# resolved ref's route.
 description: Cross-project MENTIONS uses the reconciled route, not the stale 0/ row
 scope: { namespace: 100 }
 

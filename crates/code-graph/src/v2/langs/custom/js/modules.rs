@@ -1,7 +1,3 @@
-//! Module-layer graph: synthesizes the `Module` and `ModuleExport` proxy
-//! definitions and the binding records that downstream resolution walks to
-//! attach import edges without guessing at file-level fallbacks.
-
 use crate::v2::config::Language;
 use crate::v2::linker::CodeGraph;
 use crate::v2::types::{
@@ -123,9 +119,6 @@ impl JsModuleIndex {
     }
 }
 
-/// Normalize a module-index key so the builder and resolver cannot miss
-/// a module just because one called it `./foo/bar.ts` and the other
-/// called it `foo/bar.ts` (or `foo/bar.ts/`).
 fn normalize_module_key(path: &str) -> String {
     let trimmed = path.strip_prefix("./").unwrap_or(path);
     let trimmed = trimmed.trim_end_matches('/');

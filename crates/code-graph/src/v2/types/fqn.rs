@@ -16,8 +16,6 @@ impl Fqn {
         }
     }
 
-    /// Like [`Fqn::from_parts`], but [`Fqn::parent`] drops exactly the last
-    /// part, so a part may contain the separator as escaped text.
     pub fn from_segments(parts: &[&str], separator: &'static str) -> Self {
         let cached = parts.join(separator);
         let last_part_start = cached.len() - parts.last().map_or(0, |part| part.len());

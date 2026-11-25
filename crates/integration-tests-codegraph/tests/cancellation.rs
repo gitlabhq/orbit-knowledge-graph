@@ -1,5 +1,3 @@
-//! A job that outruns its budget cancels the run; the work it started must stop.
-
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -40,7 +38,6 @@ fn context(root: &Path, cancel: CancellationToken) -> Arc<PipelineContext> {
     })
 }
 
-/// Bypasses the orchestrator's pre-spawn cancellation check.
 fn dispatch(language: Language, ctx: &Arc<PipelineContext>, files: &[String]) -> usize {
     let converter = NoopConverter;
     let on_batch = |_: &str, _: arrow::record_batch::RecordBatch| Ok(());
@@ -73,7 +70,6 @@ fn write(root: &Path, relative: &str, body: &str) -> String {
     relative.to_string()
 }
 
-/// Each file is costly enough to graph that one loop iteration dwarfs the watcher's poll.
 fn many_definitions_fixture(root: &Path, files: usize) -> Vec<String> {
     let mut body = String::new();
     for symbol in 0..400 {
@@ -86,7 +82,6 @@ fn many_definitions_fixture(root: &Path, files: usize) -> Vec<String> {
         .collect()
 }
 
-/// Cancels once `ctx` reports `at_files` graphed, so no wall clock decides the outcome.
 fn cancel_at_progress(
     ctx: &Arc<PipelineContext>,
     cancel: CancellationToken,

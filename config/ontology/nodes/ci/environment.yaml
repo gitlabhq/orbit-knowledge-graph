@@ -1,5 +1,3 @@
-# config/ontology/nodes/ci/environment.yaml
-
 node_type: Environment
 domain: ci
 description: A CI/CD deployment target (production, staging, review app, etc.)

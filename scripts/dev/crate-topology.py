@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Rank workspace crates by how much of the workspace they rebuild.
+import argparse
+import json
+import os
+import subprocess
+from collections import defaultdict
+from pathlib import Path
+
+USAGE = """Rank workspace crates by how much of the workspace they rebuild.
 
 Usage:
     python3 scripts/dev/crate-topology.py
@@ -9,13 +16,6 @@ Usage:
 Commit counts cover each crate's src/, build.rs and Cargo.toml. Files that a build
 script watches outside the crate are not counted; pass them to --measure with --touch.
 """
-
-import argparse
-import json
-import os
-import subprocess
-from collections import defaultdict
-from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 BUILD_EDGE_KINDS = {None, "build"}
@@ -178,7 +178,7 @@ def measure_report(packages, dependencies, extra_touches):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description=USAGE, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--exclude", nargs="*", default=[], help="crates to leave out of the graph")
     parser.add_argument("--days", type=int, default=90, help="git history window for commit counts")
     parser.add_argument("--measure", action="store_true", help="touch each crate and count what cargo check rebuilds")

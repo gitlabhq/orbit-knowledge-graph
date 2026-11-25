@@ -410,9 +410,6 @@ impl PythonImportRewriter {
     }
 
     fn resolve_source_root(&self, raw_path: &str, module_scope: &str, sep: &str) -> Option<String> {
-        // Over-deep or bare-dot relative imports (e.g. `from ...x import Y` above
-        // the package root) reach here because resolve_python_relative_import
-        // returned None for them. They are still relative, so never source-root them.
         if raw_path.is_empty() || raw_path.starts_with('.') {
             return None;
         }
@@ -420,8 +417,6 @@ impl PythonImportRewriter {
         let mut candidate = String::with_capacity(module_scope.len() + sep.len() + raw_path.len());
         let mut resolved = None;
         for (source_root_end, _) in module_scope.match_indices(sep) {
-            // A regular package is imported through its own name, so neither it
-            // nor anything under it can be a sys.path root; break covers both.
             if self
                 .package_paths
                 .contains(&module_scope[..source_root_end])
@@ -443,8 +438,6 @@ impl PythonImportRewriter {
             return resolved;
         }
 
-        // Try each non-package top-level directory as the sys.path root, but
-        // never capture a path that already resolves as written.
         if self.importable_paths.contains(raw_path) {
             return None;
         }
@@ -474,8 +467,6 @@ impl PythonImportRewriter {
         }
 
         if let Some(path) = self.resolve_source_root(&import.path, module_scope, sep) {
-            // The local binding keeps the originally-written first segment, so
-            // capture it before the path gains the source-root prefix.
             let scope_name =
                 if import.import_type == "Import" || import.import_type == "AliasedImport" {
                     import
@@ -502,8 +493,6 @@ fn build_python_import_rewriter(paths: &[&str], sep: &str) -> Box<ImportRewriter
     })
 }
 
-/// Index every `from M import ...` (named or `import *`) keyed by the declaring
-/// module, so callers of a re-exported name bind to the concrete definition.
 fn build_python_reexport_index(
     graph: &crate::v2::linker::CodeGraph,
     sep: &str,
@@ -554,9 +543,6 @@ fn insert_importable_path_prefixes(
     }
 }
 
-/// Resolve Python relative import paths against the current module scope.
-/// `from .models import User` in module `pkg.sub.mod` → `pkg.sub.models`
-/// `from ..services import Auth` in `pkg.sub.mod` → `pkg.services`
 fn resolve_python_relative_import(
     raw_path: &str,
     module_scope: &str,
@@ -569,12 +555,7 @@ fn resolve_python_relative_import(
     let dots = raw_path.chars().take_while(|&c| c == '.').count();
     let suffix = &raw_path[dots..];
 
-    // Module scope is the file's module (e.g. "pkg.sub.module").
-    // 1 dot = same package (drop last component), 2 dots = parent, etc.
     let parts: Vec<&str> = module_scope.split(sep).collect();
-    // An `__init__.py` *is* its package: its module scope already equals
-    // `__package__`, with no module leaf for the first dot to drop. A regular
-    // module's scope ends in the module name, which the first dot drops.
     let drop = dots - usize::from(is_package_init);
     if drop > parts.len() {
         return None;
@@ -597,12 +578,6 @@ fn resolve_python_relative_import(
     }
 }
 
-/// Derive module scope from a file path.
-///
-/// `services/user_service.py` → `services.user_service`
-/// `models/__init__.py`       → `models`
-/// `main.py`                  → `main`
-/// `__init__.py`              → `None` (no enclosing package — skip scope)
 fn python_module_from_path(file_path: &str, sep: &str) -> Option<String> {
     let path = std::path::Path::new(file_path);
     let stem = path.with_extension("");
@@ -611,10 +586,6 @@ fn python_module_from_path(file_path: &str, sep: &str) -> Option<String> {
     let module = module
         .strip_suffix(&format!("{sep}__init__"))
         .unwrap_or(&module);
-    // A bare `__init__.py` at the repository root has no enclosing package
-    // name. The strip_suffix above only removes a dot-prefixed `.__init__`
-    // segment, so the bare form arrives here unchanged and must be caught
-    // explicitly before it escapes as the nonsensical module name `"__init__"`.
     if module.is_empty() || module == "__init__" {
         return None;
     }
@@ -714,7 +685,6 @@ mod tests {
         assert!(result.definitions[0].is_top_level);
 
         assert_eq!(result.definitions[1].name, "add");
-        // FQN includes module prefix from file path (test.py → "test")
         assert_eq!(result.definitions[1].fqn.to_string(), "test.Calculator.add");
     }
 
@@ -781,7 +751,6 @@ mod tests {
             .find(|d| d.name == "greet")
             .unwrap();
         let meta = greet.metadata.as_ref().expect("should have metadata");
-        // "str" is FQN-qualified with the module prefix from "test.py"
         assert_eq!(meta.return_type.as_deref(), Some("test.str"));
     }
 
@@ -849,8 +818,6 @@ mod tests {
 
     #[test]
     fn import_transformer_aliased_import_without_alias_keeps_first_segment() {
-        // `import a.b, c.d as e` labels the unaliased `a.b` name AliasedImport with
-        // alias=None, so the scope-name override must still bind `a`, not `src`.
         let transformer = PythonImportRewriter::from_paths(["src/a/b.py", "src/main.py"], ".");
 
         assert_eq!(
@@ -994,8 +961,6 @@ mod tests {
 
     #[test]
     fn import_transformer_does_not_strip_top_level_regular_packages() {
-        // pkg/json.py is only importable as pkg.json, so bare `import json`
-        // must stay external even though the stripped path matches uniquely.
         let transformer = PythonImportRewriter::from_paths(
             ["pkg/__init__.py", "pkg/json.py", "tests/test_json.py"],
             ".",
@@ -1019,8 +984,6 @@ mod tests {
 
     #[test]
     fn import_transformer_ancestor_pass_skips_package_prefixes() {
-        // From inside the package, stdlib `json` must not bind the sibling
-        // pkg/json.py through the ancestor prefix `pkg`.
         let transformer = PythonImportRewriter::from_paths(
             ["pkg/__init__.py", "pkg/json.py", "pkg/service.py"],
             ".",
@@ -1040,8 +1003,6 @@ mod tests {
 
     #[test]
     fn import_transformer_skips_prefixes_nested_inside_packages() {
-        // alpha/beta sits inside package alpha, so it is no root; otherwise
-        // dropping the package candidate turns ambiguity into a wrong rewrite.
         let transformer = PythonImportRewriter::from_paths(
             [
                 "alpha/__init__.py",

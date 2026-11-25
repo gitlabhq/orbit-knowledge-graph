@@ -50,7 +50,7 @@ tests:
       - { row: { name: "makeStatus", type: "Function" } }
 
   - name: Type-only imports are preserved distinctly from runtime imports
-    skip: true
+    known_gap: "reason not recorded"
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'types/consumer.ts'

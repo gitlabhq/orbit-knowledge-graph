@@ -99,7 +99,6 @@ export function othersText(call: OrbitCall): string {
   return '  + ' + shown.join(', ') + (hidden > 0 ? `, … +${hidden} more` : '')
 }
 
-// Claude Code and OpenCode 1 name their shell tool `Bash` or `bash`; OpenCode 2 names it `shell`.
 const SHELL_TOOLS = new Set(['bash', 'shell'])
 
 export function describeOrbitCall(tool: string, input: unknown, known: ReadonlySet<string> = NO_ENTITIES): OrbitCall | null {

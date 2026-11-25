@@ -1,6 +1,5 @@
 use crate::sentinel::Killed;
 
-/// A config or rule file that does not load.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadError(pub String);
 
@@ -30,7 +29,6 @@ impl From<regex::Error> for LoadError {
     }
 }
 
-/// Anything a pipeline run can fail with.
 #[derive(Debug)]
 pub enum Error {
     Load(LoadError),

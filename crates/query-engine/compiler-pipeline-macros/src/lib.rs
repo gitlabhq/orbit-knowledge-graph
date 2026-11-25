@@ -1,6 +1,3 @@
-//! `define_compiler_ctx! { .. }` generates per-pipeline context structs with
-//! per-phase runtime-enforced field access grants.
-
 use proc_macro::TokenStream;
 
 mod ssot;
@@ -18,9 +15,6 @@ fn to_pascal(field_name: &str) -> String {
         .collect()
 }
 
-/// Per-phase field access grants are runtime-enforced.
-///
-/// See `compiler/src/config.rs` for the full DSL syntax.
 #[proc_macro]
 pub fn define_compiler_ctx(input: TokenStream) -> TokenStream {
     ssot::generate(input)

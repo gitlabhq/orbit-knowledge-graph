@@ -1,5 +1,3 @@
-# config/ontology/edges/on_branch.yaml
-
 description: Code entities belong to a specific branch
 
 variants:

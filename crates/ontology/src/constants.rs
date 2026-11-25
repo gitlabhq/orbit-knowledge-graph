@@ -1,14 +1,9 @@
-//! `GL_TABLE_PREFIX` is validated against the embedded ontology YAML by
-//! [`validate_ontology_constants`]. `EDGE_TABLE` is derived from it via
-//! `concatcp!` and also validated.
-
 use const_format::concatcp;
 
 pub const DEFAULT_PRIMARY_KEY: &str = "id";
 
 pub const NODE_RESERVED_COLUMNS: &[&str] = &["id"];
 
-/// Must match EdgeEntity schema.
 pub const EDGE_RESERVED_COLUMNS: &[&str] = &[
     TRAVERSAL_PATH_COLUMN,
     RELATIONSHIP_KIND_COLUMN,
@@ -53,21 +48,14 @@ pub fn siphon_version_column() -> &'static str {
     &EMBEDDED_ONTOLOGY.etl_settings.version
 }
 
-/// Siphon datalake watermark column, derived from `schema.yaml`'s
-/// `settings.etl.default_watermark` at runtime.
 pub fn siphon_watermark_column() -> &'static str {
     &EMBEDDED_ONTOLOGY.etl_settings.watermark
 }
 
-/// Siphon datalake soft-delete flag column, derived from `schema.yaml`'s
-/// `settings.etl.default_deleted` at runtime.
 pub fn siphon_deleted_column() -> &'static str {
     &EMBEDDED_ONTOLOGY.etl_settings.deleted
 }
 
-/// Panics if compile-time constants diverge from the embedded ontology YAML.
-///
-/// Call this at startup and in a `#[test]` so CI catches stale constants.
 pub fn validate_ontology_constants(ontology: &crate::Ontology) {
     assert_eq!(
         ontology.table_prefix(),

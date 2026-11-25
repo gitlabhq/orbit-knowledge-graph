@@ -1,5 +1,3 @@
-# config/ontology/edges/reopened.yaml
-
 description: User who reopened a merge request or work item (ADR 013)
 
 variants:

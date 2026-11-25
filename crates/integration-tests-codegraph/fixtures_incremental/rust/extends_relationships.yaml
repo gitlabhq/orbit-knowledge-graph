@@ -103,9 +103,6 @@ fixtures:
       impl Animal for Counter {}
 
 tests:
-  # ─────────────────────────────────────────────────────────────────
-  # Direct supertrait declarations
-  # ─────────────────────────────────────────────────────────────────
   - name: "1. Simple supertrait Pet -> Animal"
     queries:
       - query: |
@@ -145,9 +142,6 @@ tests:
           - { row_count: 1 }
           - { row: { parent: "Mammal" } }
 
-  # ─────────────────────────────────────────────────────────────────
-  # Trait impls on concrete types
-  # ─────────────────────────────────────────────────────────────────
   - name: "4. Simple struct impl Dog -> Animal"
     queries:
       - query: |
@@ -198,9 +192,6 @@ tests:
           - { row_count: 1 }
           - { row: { parent: "Animal" } }
 
-  # ─────────────────────────────────────────────────────────────────
-  # Cross-module resolution
-  # ─────────────────────────────────────────────────────────────────
   - name: "9. Cross-module supertrait Bark -> traits::Audible resolves through module path"
     queries:
       - query: |
@@ -221,9 +212,6 @@ tests:
           - { row_count: 1 }
           - { row: { parent: "io::Reader" } }
 
-  # ─────────────────────────────────────────────────────────────────
-  # Edge cases that must NOT emit edges
-  # ─────────────────────────────────────────────────────────────────
   - name: "11. Blanket impl<T> Markable for T does not anchor EXTENDS on a type parameter"
     queries:
       - query: |
@@ -242,9 +230,6 @@ tests:
         assert:
           - { row: { n: 0 } }
 
-  # ─────────────────────────────────────────────────────────────────
-  # Diamond pattern
-  # ─────────────────────────────────────────────────────────────────
   - name: "13. Diamond supertrait Polygon -> {HasArea, HasPerimeter}, each -> Shape"
     queries:
       - query: |
@@ -270,9 +255,6 @@ tests:
           - { row_count: 1 }
           - { row: { parent: "Shape" } }
 
-  # ─────────────────────────────────────────────────────────────────
-  # Coexistence with inherent impl
-  # ─────────────────────────────────────────────────────────────────
   - name: "14. Counter has trait impl EXTENDS even when an inherent impl also exists"
     queries:
       - query: |

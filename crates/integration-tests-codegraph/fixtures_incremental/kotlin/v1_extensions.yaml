@@ -3,8 +3,6 @@ fixture_tree: kotlin_v1
 trace: true
 
 tests:
-  # ── K12: test_kotlin_reference_to_extensions ──
-
   - name: "callToExtensions -> printValue (local extension, direct + property chain)"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)

@@ -1,7 +1,3 @@
-//! Consumed by both the `orbit-server` MCP `get_graph_schema` tool (full
-//! ontology) and the local `orbit` CLI `schema` subcommand (filtered to
-//! entities present in the local DuckDB graph).
-
 use std::collections::BTreeMap;
 
 use serde::Serialize;
@@ -12,7 +8,6 @@ use crate::{EdgeEntity, Field, Ontology};
 pub enum IntrospectionScope {
     #[default]
     All,
-    /// Driven by `settings.local_db.entities` in the ontology YAML.
     Local,
 }
 
@@ -59,7 +54,6 @@ pub enum SchemaNode {
     },
 }
 
-/// `expand_nodes`: pass `["*"]` to expand every node, or specific names.
 pub fn build_schema_response(
     ontology: &Ontology,
     scope: IntrospectionScope,
@@ -144,7 +138,6 @@ fn format_listed_property(field: &Field) -> String {
     }
 }
 
-/// One `(Source)-[:TYPE]->(Target|Target)` line per source node and edge type.
 #[must_use]
 pub fn build_relationship_patterns(ontology: &Ontology, scope: IntrospectionScope) -> Vec<String> {
     let local_names: Vec<&str> = match scope {

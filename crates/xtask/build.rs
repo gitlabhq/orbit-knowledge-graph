@@ -1,8 +1,3 @@
-//! Fails the build when `docs/pages/engineering/development/agents-crate-map.md` drifts from the
-//! `[workspace].members` in the root `Cargo.toml`. Name-presence only;
-//! descriptions are not checked. Parsing/diffing lives in
-//! `build_support/crate_map_drift.rs` so the test target can `include!` it.
-
 use std::path::{Path, PathBuf};
 
 include!("build_support/crate_map_drift.rs");
@@ -25,7 +20,6 @@ fn main() {
     }
 }
 
-// `CARGO_MANIFEST_DIR` points at `crates/xtask`; the workspace root is two up.
 fn workspace_root() -> PathBuf {
     let manifest_dir =
         std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR set by cargo");

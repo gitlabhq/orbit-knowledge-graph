@@ -34,8 +34,6 @@ pub struct Scenario {
 }
 
 impl Scenario {
-    /// Normalize the single-step sugar (top-level seed/run/expect) and the
-    /// explicit `steps:` form into one list of steps.
     pub fn into_steps(self) -> Vec<Step> {
         let has_inline = self.seed.is_some()
             || !self.seed_settings.is_empty()
@@ -88,9 +86,6 @@ pub struct Step {
     pub create_tables: Vec<String>,
     #[serde(default)]
     pub seed: Seed,
-    /// ClickHouse INSERT settings applied to every seed insert in this step,
-    /// e.g. `date_time_overflow_behavior: ignore`. Their presence switches the
-    /// inserts from VALUES to JSONEachRow, where such settings take effect.
     #[serde(default)]
     pub seed_settings: SeedSettings,
     #[serde(default)]
@@ -99,7 +94,6 @@ pub struct Step {
     pub dispatch: Option<DispatchSpec>,
     #[serde(default)]
     pub cdc: Vec<CdcEvent>,
-    /// Entity types the namespace handler indexes (empty means all).
     #[serde(default)]
     pub targets: Vec<String>,
     #[serde(default)]
@@ -132,8 +126,6 @@ pub enum DispatchSpec {
     Many(Vec<DispatchKind>),
 }
 
-/// A dispatcher scheduled task. Drains the requests it publishes for
-/// `expect.dispatched`.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DispatchKind {
@@ -152,8 +144,6 @@ impl DispatchKind {
     }
 }
 
-/// A Siphon logical-replication event fed to a CDC route, so a scenario can
-/// exercise routing the same way the wire path does.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CdcEvent {

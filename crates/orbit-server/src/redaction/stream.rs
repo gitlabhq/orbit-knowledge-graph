@@ -22,7 +22,6 @@ pub enum RedactionExchangeError {
 }
 
 impl RedactionExchangeError {
-    /// A closed or broken request stream is on the caller's side of the exchange.
     pub fn into_pipeline_error(self) -> PipelineError {
         match self {
             Self::StreamClosed | Self::ReceiveFailed(_) => {

@@ -43,7 +43,6 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "com.example.caller", callee: "com.example.topLevel" } }
 
-  # corrected: create nests under Companion; the class has three direct members
   - name: "App methods have correct FQN"
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)

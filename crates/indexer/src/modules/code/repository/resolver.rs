@@ -15,9 +15,6 @@ const ARCHIVE_DOWNLOAD_RETRY: LocalRetry = LocalRetry {
     max_attempts: 3,
 };
 
-/// `EmptyRepository` is a recognized terminal outcome: the project record
-/// exists but has no Gitaly content (no refs, or no repository storage at
-/// all). These should be checkpointed as "indexed empty" instead of retried.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
     #[error("project has no repository content ({reason}): {detail}")]
@@ -38,7 +35,6 @@ pub enum ResolveError {
 
 impl From<RetryExhausted> for ResolveError {
     fn from(e: RetryExhausted) -> Self {
-        // Satisfies the drive bound; full_download GiveUps the real error so the cap is never reached.
         ResolveError::Other(HandlerError::Processing(e.to_string()))
     }
 }
@@ -48,10 +44,7 @@ pub enum EmptyRepositoryReason {
     NotFound,
     /// Rails raises 500 for a repository that does not exist.
     ServerError,
-    /// HTTP 200 OK with an empty or truncated archive body. Distinct from
-    /// `NotFound` so dashboards can separate real 404s from quietly-empty 200s.
     EmptyArchive,
-    /// Repository exceeded the total-bytes cap; indexed empty and checkpointed.
     RepositoryTooLarge,
 }
 
@@ -83,8 +76,6 @@ impl std::fmt::Display for EmptyRepositoryReason {
     }
 }
 
-/// Backfill resolves the branch through `project_info` first, so the project exists
-/// and a 404 means it has no repository or no refs.
 fn classify_download_error(
     err: RepositoryServiceError,
 ) -> Result<ResolveError, RepositoryServiceError> {

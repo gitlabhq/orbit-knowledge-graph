@@ -14,9 +14,6 @@ import {
 } from "../search-guard/core.mjs";
 import { CONNECTIONS, CONTEXT_OUTPUT, DEFINITION, GREP_OUTPUT, stubOrbit } from "./search-guard-support.ts";
 
-// The guard parses the Orbit CLI's text output. These tests pin the two shapes it depends on, so a
-// change to the CLI output fails here instead of silently turning the guard off.
-
 test("the definition is the first block under the `Kind name — path:range` header of grep output", () => {
   assert.equal(extractDefinition(GREP_OUTPUT), DEFINITION);
   assert.equal(extractDefinition("grep \"x\"\nno definitions here\n"), undefined);

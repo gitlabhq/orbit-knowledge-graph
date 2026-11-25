@@ -1,7 +1,6 @@
 use super::node::DefKind;
 use strum::{AsRefStr, Display, EnumIter, EnumString};
 
-/// The high-level edge kind stored in the `relationship_kind` column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter, EnumString, AsRefStr, Display)]
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
 pub enum EdgeKind {
@@ -29,7 +28,6 @@ pub struct Relationship {
     pub target_def_kind: Option<DefKind>,
 }
 
-/// V1-compatible labels for structural (non-def-to-def) edges.
 const STRUCTURAL_LABELS: &[(NodeKind, NodeKind, &str)] = &[
     (NodeKind::Directory, NodeKind::Directory, "DIR_CONTAINS_DIR"),
     (NodeKind::Directory, NodeKind::File, "DIR_CONTAINS_FILE"),

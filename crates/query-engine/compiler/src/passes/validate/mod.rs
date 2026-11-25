@@ -1,13 +1,3 @@
-//! Query validation.
-//!
-//! [`Validator`] checks in three layers:
-//! 1. **Schema validation** — JSON-only: the raw text against the base and
-//!    ontology-derived JSON Schemas, before deserialization.
-//! 2. **Shape validation** — every [`Input`] regardless of frontend: identifiers,
-//!    ontology membership, limits, and filter value shapes.
-//! 3. **Cross-reference validation** — node ID references, complexity caps, and
-//!    filter typing that neither layer above can express.
-
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
@@ -104,9 +94,6 @@ pub(crate) fn collect_schema_errors(
     }
 }
 
-/// Check whether a JSON value is compatible with an ontology `DataType`.
-///
-/// Returns `None` if compatible, or `Some(reason)` describing the mismatch.
 fn check_value_type(value: &serde_json::Value, expected: DataType) -> Option<String> {
     match expected {
         DataType::String | DataType::Uuid => {
@@ -129,7 +116,6 @@ fn check_value_type(value: &serde_json::Value, expected: DataType) -> Option<Str
             }
             None => return Some(format!("is {}, not a string", json_type_name(value))),
         },
-        // Int-based enums are coerced to string labels by normalization before lowering.
         DataType::Enum => match value {
             serde_json::Value::String(_) => {}
             serde_json::Value::Number(n) if n.is_i64() => {}
@@ -182,17 +168,10 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
     }
 }
 
-/// Maximum span for id_range before it stops counting as selective.
-/// Ranges wider than this are effectively unfiltered full-table scans.
 pub(crate) const MAX_ID_RANGE_SPAN: i64 = 100_000;
 
-/// Tighter id_range cap for path_finding endpoints. The frontier BFS is
-/// O(anchors × E^depth), so we bound anchor cardinality to match
-/// MAX_NODE_IDS (500).
 const MAX_PATH_ANCHOR_RANGE: i64 = 500;
 
-/// Maximum number of rows the lowerer will resolve from a filtered
-/// path_finding endpoint CTE. Matches the node_ids cap (500).
 pub(crate) const MAX_PATH_ANCHOR_LIMIT: i64 = 500;
 
 const CONDITION_COLUMN_RULE: &str = "every condition must compare a property of a matched node or relationship with a value or another property";
@@ -210,8 +189,6 @@ fn path_endpoint_has_selectivity(node: &InputNode) -> bool {
     false
 }
 
-/// Whether a node has explicit selectivity (node_ids, filters, or a narrow id_range).
-/// Queries where no node is selective tend to produce full-table scans.
 fn node_has_selectivity(node: &InputNode) -> bool {
     if !node.node_ids.is_empty() {
         return true;
@@ -392,9 +369,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         Ok(())
     }
 
-    /// Validate what the JSON schema used to enforce, natively on `Input`, so
-    /// every frontend is held to the same rules. Complexity caps live in
-    /// [`Self::check_depth`].
     pub fn check_shape(&self, input: &Input) -> Result<()> {
         if input.nodes.is_empty() || input.query_type == QueryType::Hydration {
             return Err(QueryError::Validation(
@@ -559,7 +533,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         Ok(())
     }
 
-    /// Validate cross-node references that JSON Schema cannot express.
     pub fn check_references(&self, input: &Input) -> Result<()> {
         self.check_node_ids(input)?;
         self.check_relationships(input)?;
@@ -571,13 +544,10 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         self.check_selectivity(input)?;
         self.check_predicates(input)?;
         self.check_filter_types(input)?;
-        // Run after individual reference checks so "undefined node X" errors
-        // take priority over "node Y is unreferenced".
         self.check_unreferenced_nodes(input)?;
         Ok(())
     }
 
-    /// Enforce query limits for every frontend, including counts across input fields.
     pub fn check_depth(&self, input: &Input) -> Result<()> {
         use crate::query_limits::{
             MAX_AGGREGATIONS, MAX_COLUMNS, MAX_DEPTH_CAP, MAX_GROUP_BY_KEYS, MAX_HOPS_CAP,
@@ -618,7 +588,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 input.relationships.len()
             )));
         }
-        // Multi-node traversal requires exactly n-1 relationships (1 node + 0 rels is a search).
         if input.query_type == QueryType::Traversal
             && !input.nodes.is_empty()
             && !(input.nodes.len() == 1 && input.relationships.is_empty())
@@ -728,18 +697,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         check_condition_counts(input)
     }
 
-    /// Validate that filter values are compatible with the ontology column type.
-    ///
-    /// For scalar ops (eq, gt, lt, ...) the JSON value must match the column's
-    /// DataType. For `in`, every element of the JSON array must match; the
-    /// first mismatched element returns a `QueryError::Validation` and the
-    /// query is rejected. Ops that carry no value (`is_null`, `is_not_null`)
-    /// are skipped. Filters on unknown entities or fields are skipped —
-    /// `check_ontology` catches those.
-    ///
-    /// Relationship filters are validated against the fixed edge table schema.
-    /// Unknown edge columns are rejected (fail closed) since they would
-    /// produce broken SQL at runtime.
     pub(crate) fn check_filter_types(&self, input: &Input) -> Result<()> {
         if input.predicates.iter().any(|root| {
             root.fold(
@@ -1183,19 +1140,11 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         Ok(())
     }
 
-    /// Reject queries that would produce unbounded scans or Cartesian explosions.
-    ///
-    /// The checks are intentionally conservative: they reject shapes that are
-    /// structurally guaranteed to be expensive regardless of data volume.
     fn check_selectivity(&self, input: &Input) -> Result<()> {
         if self.skip.selectivity {
             return Ok(());
         }
         match input.query_type {
-            // Path-finding endpoints seed BFS frontiers, so each endpoint
-            // must have bounded selectivity: node_ids (already capped at 500
-            // by check_depth), filters (lowerer caps CTE at MAX_PATH_ANCHOR_LIMIT),
-            // or id_range with span ≤ MAX_PATH_ANCHOR_RANGE.
             QueryType::PathFinding => {
                 if let Some(ref path) = input.path {
                     for endpoint in [&path.from, &path.to] {
@@ -1568,14 +1517,9 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         Ok(())
     }
 
-    /// Every declared node must be referenced by at least one structural field
-    /// (relationship, path, neighbors). Unreferenced nodes would be absent from
-    /// the FROM clause, producing broken SQL or silently dropped columns.
     fn check_unreferenced_nodes(&self, input: &Input) -> Result<()> {
         let referenced: std::collections::HashSet<&str> = match input.query_type {
-            // Single-node query types where all declared nodes are used directly.
             QueryType::Neighbors | QueryType::Hydration => return Ok(()),
-            // Search-shaped traversal (1 node, 0 rels) has no references to check.
             QueryType::Traversal if input.is_search() => return Ok(()),
             QueryType::Traversal | QueryType::Aggregation => {
                 let mut set: std::collections::HashSet<&str> = input
@@ -1612,8 +1556,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         Ok(())
     }
 
-    /// Output columns are `{node id}_{property}`, so two ids overlap when one is the
-    /// other's prefix followed by `_`.
     fn check_node_ids(&self, input: &Input) -> Result<()> {
         for (index, node) in input.nodes.iter().enumerate() {
             for other in &input.nodes[index + 1..] {
@@ -1840,10 +1782,10 @@ mod tests {
         assert!(re.is_match("_foo"));
         assert!(re.is_match("User123"));
 
-        assert!(!re.is_match("usеr")); // Cyrillic е (U+0435)
-        assert!(!re.is_match("ᴜser")); // Latin small capital U (U+1D1C)
-        assert!(!re.is_match("üser")); // Latin u with diaeresis
-        assert!(!re.is_match("用户")); // CJK
+        assert!(!re.is_match("usеr"));
+        assert!(!re.is_match("ᴜser"));
+        assert!(!re.is_match("üser"));
+        assert!(!re.is_match("用户"));
     }
 
     #[test]

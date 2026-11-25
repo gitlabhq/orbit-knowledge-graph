@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-# Prints the Rails facts that Orbit redaction depends on as sorted JSON, for `rails runner`.
-
 EXPORTER_VERSION = 1
 ROLE_LADDER = %i[guest planner reporter security_manager developer maintainer owner].freeze
 CONTAINER_TARGETS = %w[subject_container resource_parent preloaded_parent_container container]

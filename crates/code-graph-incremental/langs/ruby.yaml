@@ -8,7 +8,6 @@
 # Known gaps (engine, not rules):
 # - Bare identifiers cannot be told apart from locals, so implicit-self
 #   calls without parentheses are modeled as this-calls and may over-link.
-
 config:
   frameworks:
     - name: rails
@@ -69,7 +68,6 @@ stages:
       - match: '(call receiver: !$RECEIVER method: (identifier "/^(included|prepended)$/") block: (do_block $$$B))'
         replace: '(rb_synth $$$B)'
 
-      # include/extend/prepend: each module argument becomes a supertype and an import
       - match: '(call method: (identifier "include") arguments: (argument_list $$$M:constant|scope_resolution))'
         replace: '(rb_synth $$$M->rb_include)'
       - match: '(call method: (identifier "extend") arguments: (argument_list $$$M:constant|scope_resolution))'
@@ -77,7 +75,6 @@ stages:
       - match: '(call method: (identifier "prepend") arguments: (argument_list $$$M:constant|scope_resolution))'
         replace: '(rb_synth $$$M->rb_prepend)'
 
-      # Metaprogramming: literal symbols become synthetic definitions
       - match: '(call method: (identifier "attr_accessor") arguments: (argument_list $$$S:simple_symbol))'
         replace: '(rb_synth $$$S->rb_attr)'
       - match: '(call method: (identifier "attr_reader") arguments: (argument_list $$$S:simple_symbol))'
@@ -144,7 +141,6 @@ stages:
 
   - name: constants
     rules:
-      # Callable constants are lambdas; other constant assignments are constants
       - match: '(assignment left: $N:constant right: $R:lambda)'
         replace: '(__def (__defname @$N) (__lambda) $R)'
       - match: '(assignment left: $N:constant right: (call method: (identifier "lambda") block: $B))'
@@ -176,7 +172,6 @@ stages:
         replace: '(rb_super (__supertype @$S|strip=::|split_last("::") $S) (__import (__source @$S|regex_replace("(::)?[^:]+$", "")) (__source_path @$S|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$S|strip=::|split_last("::"))))'
         tag: { import_type: Autoload }
         tag_on: __import
-      # Parameters: a default value types the parameter
       - match: '(optional_parameter name: $N:identifier value: $V)'
         replace: '(__binding @$N (__rhs $V))'
       - match: '(keyword_parameter name: $N:identifier value: $V)'
@@ -202,13 +197,10 @@ stages:
 
   - name: retag-calls
     rules:
-      # self.m() → this-call
       - match: '(call receiver: (self) method: $M:identifier arguments:? $A block:? $B)'
         replace: '(__call (__callee (__ivar @$M)) $A $B)'
-      # @x.m()
       - match: '(call receiver: $R:instance_variable method: $M:identifier arguments:? $A block:? $B)'
         replace: '(__call (__callee (__member @$M (__object (__ivar @$R|strip=@)))) $A $B)'
-      # Const.new / Const::Nested.new → constructor call plus autoload import
       - match: '(call receiver: $R:constant method: (identifier "new") arguments:? $A block:? $B)'
         replace: '(rb_ref (__import (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
         tag: { import_type: Autoload }
@@ -217,7 +209,6 @@ stages:
         replace: '(rb_ref (__import (__source @$R $R) (__source_path @$R|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R|split_last("::"))) (__call (__callee @$R|split_last("::")) $A $B))'
         tag: { import_type: Autoload }
         tag_on: __import
-      # Const.m / Const::Nested.m → member call plus autoload import
       - match: '(call receiver: $R:constant method: $M:identifier arguments:? $A block:? $B)'
         replace: '(rb_ref (__import (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee (__member @$M (__object @$R))) $A $B))'
         tag: { import_type: Autoload }
@@ -226,7 +217,6 @@ stages:
         replace: '(rb_ref (__import (__source @$R $R) (__source_path @$R|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R|split_last("::"))) (__call (__callee (__member @$M (__object @$R|split_last("::")))) $A $B))'
         tag: { import_type: Autoload }
         tag_on: __import
-      # chained: f().m() and x.m()
       - match: '(call receiver: $R:__call method: $M:identifier arguments:? $A block:? $B)'
         replace: '(__call (__callee (__member @$M (__object $R))) $A $B)'
       - match: '(call receiver: $R:rb_ref method: $M:identifier arguments:? $A block:? $B)'
@@ -235,19 +225,16 @@ stages:
         replace: '(__call (__callee (__member @$M (__object @$R))) $A $B)'
       - match: '(call receiver: $R method: $M:identifier arguments:? $A block:? $B)'
         replace: '(__call (__callee (__member @$M (__object @$R $R))) $A $B)'
-      # m(...) → implicit self
       - match: '(call method: $M:identifier arguments:? $A block:? $B)'
         replace: '(__call (__callee @$M) $A $B)'
         tag: { implicit_self: "true" }
 
   - name: classify
     rules:
-      # Bindings
       - match: '(assignment left: $L:instance_variable right: $R:__call)'
         replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
       - match: '(assignment left: $L:instance_variable right: $R:rb_ref)'
         replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
-      # begin ... end and ( ... ) stand for their last expression
       - match: '(assignment left: $L:instance_variable right: $R:begin)'
         replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
       - match: '(assignment left: $L:instance_variable right: $R:parenthesized_statements)'
@@ -274,14 +261,11 @@ stages:
         tag_on: __call
       - match: '(assignment left: $L:identifier right: $R)'
         replace: '(__binding @$L (__rhs @$R $R))'
-      # @x ||= v binds only v, ivar types are collected per class
       - match: '(operator_assignment left: $L:instance_variable ("||=") right: $R)'
         replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
-      # x ||= v leaves a set x alone, so x is its old value or v
       - match: '(operator_assignment left: $L:identifier ("||=") right: $R)'
         replace: '(__binding @$L (__rhs (__ssa_branch (__ssa_arm (__call (__callee @$L))) (__ssa_arm $R))))'
 
-      # Control flow
       - match: '(if condition: $C consequence:? $Q alternative:? $A)'
         replace: '(__ssa_branch $C (__ssa_arm? $Q) (__ssa_arm? $A))'
       - match: '(elsif condition: $C consequence:? $Q alternative:? $A)'
@@ -296,7 +280,6 @@ stages:
         replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm $A))'
       - match: '(case value:? $V $$$W:when|else)'
         replace: '(__ssa_branch $V $$$W->__ssa_arm)'
-      # ensure clauses never supply the value; rescue modifier handlers are not typed on purpose, so x rescue y types from x
       - match: '(begin $$$BODY $R:rescue $$$ALTS $E:ensure)'
         replace: '(begin (__ssa_branch (__ssa_arm $$$BODY) (__ssa_arm $R) $$$ALTS->__ssa_arm) (__side_effect $E))'
       - match: '(begin $$$BODY $E:ensure)'
@@ -314,7 +297,6 @@ stages:
       - match: '(for body: $B)'
         replace: '(__ssa_loop $B)'
 
-      # Definitions
       - match: '(method name: $N parameters:? $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) $P $B)'
       - match: '(singleton_method object: (self) name: $N parameters:? $P body:? $B)'
@@ -330,11 +312,9 @@ stages:
 
   - name: refs
     rules:
-      # Remaining bare identifiers: implicit-self calls (may be locals)
       - match: '(identifier)'
         replace: '(__call (__callee @$ROOT))'
         tag: { implicit_self: "true" }
-      # Remaining bare constants: references
       - match: '(constant)'
         replace: '(__call (__callee @$ROOT))'
       - match: '(instance_variable)'

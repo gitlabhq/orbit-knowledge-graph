@@ -16,17 +16,10 @@ use treesitter_visit::{Node, SupportLang};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-/// Tree-sitter-elixir parses every keyword construct (`defmodule`,
-/// `def`, `alias`, ...) as a `call` whose `target` field holds the
-/// keyword identifier, so rules dispatch on the target text. `target`
-/// is the only field on `call`; `arguments` and `do_block` are plain
-/// named children.
 fn target_text(t: &'static str) -> Pred {
     Pred::Exists(Box::new(Extract::one(Field("target"), Text(t))))
 }
 
-/// Forms whose head parses as a nested `call` (`def greet(name)`);
-/// the head must not emit a self-reference.
 const DEF_HEAD_KEYWORDS: &[&str] = &[
     "def",
     "defp",
@@ -37,7 +30,6 @@ const DEF_HEAD_KEYWORDS: &[&str] = &[
     "defdelegate",
 ];
 
-/// Definition and import keywords; never references.
 const ELIXIR_KEYWORDS: &[&str] = &[
     "def",
     "defp",
@@ -58,8 +50,6 @@ const ELIXIR_KEYWORDS: &[&str] = &[
     "require",
 ];
 
-/// Kernel.SpecialForms: control flow parses as plain calls but is
-/// not callable.
 const SPECIAL_FORMS: &[&str] = &[
     "if",
     "unless",
@@ -84,9 +74,6 @@ fn target_is_keyword() -> Pred {
         .expect("non-empty keyword list")
 }
 
-/// The def head is either a direct `arguments` child or, with a
-/// `when` guard, the left operand of the `binary_operator`. The guard
-/// call on the right is a real reference.
 fn is_def_head() -> Pred {
     DEF_HEAD_KEYWORDS
         .iter()
@@ -108,10 +95,6 @@ fn is_def_head() -> Pred {
         .expect("non-empty keyword list")
 }
 
-/// Attributes (`@doc`, `@spec`) parse as `unary_operator` with an
-/// anonymous `@` child; their contents are docs and typespecs, not
-/// calls. The outermost ancestor is checked so a nested `!` inside
-/// `@spec a :: !b` does not mask the `@`.
 fn is_inside_module_attribute() -> Pred {
     Pred::Exists(Box::new(
         text()
@@ -120,7 +103,6 @@ fn is_inside_module_attribute() -> Pred {
     ))
 }
 
-/// True when a call's dot target has an `alias` (module) receiver.
 fn dot_receiver_is_alias() -> Pred {
     Pred::Exists(Box::new(
         Extract::one(Field("target"), Kind("dot")).nav(Field("left"), Kind("alias")),
@@ -148,19 +130,10 @@ impl DslLanguage for ElixirDsl {
 
     fn scopes() -> Vec<ScopeRule> {
         vec![
-            // The module name is a single `alias` token, so a dotted
-            // `defmodule Foo.Bar` lands as one FQN-aligned segment.
             scope("call", "Module")
                 .def_kind(DefKind::Class)
                 .when(target_text("defmodule"))
                 .name_from(child_of_kind("arguments").child_of_kind("alias")),
-            // The head is the first named child of `arguments`: an
-            // inner call, a bare identifier (zero arity), or the left
-            // operand of a `when` guard. The identifier guard drops
-            // dynamic heads (`def unquote(name)()`). Other def-like
-            // forms (defmacro/defguard/defdelegate) have their heads
-            // suppressed via DEF_HEAD_KEYWORDS but do not emit
-            // definitions yet.
             scope("call", "Function")
                 .def_kind(DefKind::Function)
                 .when(target_text("def").or(target_text("defp")))
@@ -176,10 +149,6 @@ impl DslLanguage for ElixirDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // Remote call (`Baz.hello(name)`). Without parentheses,
-            // field access (`user.name`) parses identically to a
-            // zero-arity call, so an argument-less dot only counts
-            // when the receiver is an `alias` (`x |> String.downcase`).
             reference("call")
                 .when(
                     field_kind("target", &["dot"])
@@ -188,7 +157,6 @@ impl DslLanguage for ElixirDsl {
                 )
                 .name_from(field("target").field("right"))
                 .receiver_via(field("target").field("left")),
-            // Local call (`helper(x)`).
             reference("call")
                 .when(
                     field_kind("target", &["identifier"])
@@ -231,8 +199,6 @@ fn elixir_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> b
         "use" => "Use",
         _ => return false,
     };
-    // An import keyword without arguments is malformed; consume it
-    // so no rule processes it further.
     let Some(args) = node.find(Child, Kind("arguments")) else {
         return true;
     };
@@ -245,8 +211,6 @@ fn elixir_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> b
         .and_then(|p| p.field("value"))
         .map(|v| v.text().to_string());
 
-    // Multi-alias `alias Foo.{Bar, Baz}`: dot(left: alias, right: tuple).
-    // Members may be dotted; the bound name is the last segment.
     if let Some(dot) = args.find(Child, Kind("dot")) {
         let prefix = dot
             .field("left")
@@ -269,17 +233,12 @@ fn elixir_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> b
         }
     }
 
-    // Single form: one `alias` token carries the dotted module name.
     let Some(module) = args.find(Child, Kind("alias")) else {
         return true;
     };
     let full = module.text().to_string();
 
     if import_type == "Import" {
-        // Wildcard keyed on the full module path: the wildcard
-        // strategy looks up `{path}{sep}{name}` for bare calls.
-        // `only:`/`except:` are not modeled; restricted imports
-        // over-approximate to the whole module.
         let last = full
             .rsplit_once('.')
             .map_or(full.as_str(), |(_, n)| n)
@@ -288,7 +247,6 @@ fn elixir_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> b
         return true;
     }
 
-    // alias/require/use bind the last segment as the local name.
     let (path, name) = match full.rsplit_once('.') {
         Some((p, n)) => (p.to_string(), n.to_string()),
         None => (String::new(), full),
@@ -297,8 +255,6 @@ fn elixir_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> b
     true
 }
 
-/// Find the pair in a `keywords` node whose key matches. Keyword
-/// tokens include the trailing colon and whitespace (`as: `).
 fn find_pair<'a>(keywords: &N<'a>, key: &str) -> Option<N<'a>> {
     keywords
         .children()
@@ -334,8 +290,6 @@ fn push_import(
     });
 }
 
-/// Resolve a chain base like `Baz` in `Baz.hello(name)` to a module
-/// FQN when no alias or SSA binding covers it.
 fn elixir_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
     let nodes = graph.resolve_scope_nodes(name);
     for &node in &nodes {
@@ -467,7 +421,6 @@ mod tests {
         assert!(names.contains(&"keyword"), "keyword do: form: {names:?}");
         assert!(names.contains(&"add"), "when-guard head: {names:?}");
 
-        // Arity overloads collapse to the same name-only FQN.
         let add_fqns = result
             .definitions
             .iter()
@@ -540,7 +493,6 @@ mod tests {
             imports.contains(&("Require", "", "Logger", None, false)),
             "{imports:?}"
         );
-        // alias Foo.{Bar, Baz} plus alias Foo.Bar, as: Fb → two Bar rows
         assert_eq!(
             imports
                 .iter()

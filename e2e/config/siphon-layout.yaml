@@ -6,7 +6,6 @@
 # starts deploying GitLab with sharded databases.
 #
 # Identifiers MUST match `application_identifier` values in `values/siphon.yaml.gotmpl`.
-
 # Required since siphon 0.0.99-beta; must match the producer's queueing.stream_name.
 stream_name: e2e_siphon_event_stream
 
@@ -24,7 +23,4 @@ consumers:
 reconcilers:
   - e2e_siphon_reconciler_1
 
-# `inline` keeps refresh packages on the same NATS consumer as CDC events.
-# Staging uses `separate` to give refresh its own consumer position; for e2e the
-# extra consumer adds noise without buying anything.
 refresh_mode: inline

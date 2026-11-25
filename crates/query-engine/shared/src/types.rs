@@ -75,18 +75,14 @@ pub struct PipelineOutput {
     pub row_count: usize,
     pub redacted_count: usize,
     pub execution_log: Vec<QueryExecution>,
-    /// Pagination metadata; always present (`Option` only spares test fixtures).
     pub pagination: Option<PaginationMeta>,
 }
 
 pub struct PaginationMeta {
-    /// Whether the fetched window overflowed: more matching rows exist in the dataset.
     pub has_more: bool,
-    /// Same signal as `has_more`, kept explicit so clients can detect incomplete results.
     pub truncated: bool,
 }
 
-/// Trims the overfetched probe row and derives honest pagination metadata.
 pub fn paginate(query_result: &mut QueryResult, input: &compiler::Input) -> PaginationMeta {
     let window = input.limit as usize;
     let has_more = query_result.len() > window;

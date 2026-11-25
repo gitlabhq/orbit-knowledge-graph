@@ -1,5 +1,3 @@
-# config/ontology/nodes/plan/milestone.yaml
-
 node_type: Milestone
 domain: plan
 description: A milestone for tracking progress toward a goal within a project or group

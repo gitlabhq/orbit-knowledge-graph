@@ -29,7 +29,6 @@ impl SnowplowAnalyticsTracker {
         Self::start(&config.collector_url)
     }
 
-    /// The tracker for `analytics.local_collector_url`, if one applies.
     pub fn local_from_config(
         config: &AnalyticsConfig,
     ) -> Result<Option<Self>, labkit_events::Error> {
@@ -92,7 +91,6 @@ impl AnalyticsTracker for SnowplowAnalyticsTracker {
     }
 }
 
-/// Sends each event to every tracker it holds.
 pub struct ComposedAnalyticsTracker {
     trackers: Vec<Arc<dyn AnalyticsTracker>>,
 }

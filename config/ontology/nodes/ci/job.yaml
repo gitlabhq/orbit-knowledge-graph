@@ -1,5 +1,3 @@
-# config/ontology/nodes/ci/job.yaml
-
 node_type: Job
 domain: ci
 description: A CI/CD job that executes scripts within a pipeline stage

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Shared variables and functions for e2e scripts. Source, don't execute.
 set -euo pipefail
 
 _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,8 +1,6 @@
 name: "Ruby GitLab monolith patterns — controllers, services, models, workers, concerns"
 
 fixtures:
-  # ── Base classes ───────────────────────────────────────────────
-
   - path: app/models/application_record.rb
     content: |
       class ApplicationRecord
@@ -50,8 +48,6 @@ fixtures:
         end
       end
 
-  # ── Concerns / Mixins ─────────────────────────────────────────
-
   - path: app/models/concerns/issuable.rb
     content: |
       module Issuable
@@ -75,8 +71,6 @@ fixtures:
           []
         end
       end
-
-  # ── Model ──────────────────────────────────────────────────────
 
   - path: app/models/merge_request.rb
     content: |
@@ -130,8 +124,6 @@ fixtures:
           @team
         end
       end
-
-  # ── Service ────────────────────────────────────────────────────
 
   - path: app/services/merge_requests/create_service.rb
     content: |
@@ -188,8 +180,6 @@ fixtures:
         end
       end
 
-  # ── Worker ─────────────────────────────────────────────────────
-
   - path: app/workers/new_merge_request_worker.rb
     content: |
       class NewMergeRequestWorker
@@ -211,8 +201,6 @@ fixtures:
           end
         end
       end
-
-  # ── Controller ─────────────────────────────────────────────────
 
   - path: app/controllers/projects/merge_requests_controller.rb
     content: |
@@ -255,10 +243,6 @@ fixtures:
       end
 
 tests:
-  # ══════════════════════════════════════════════════════════════
-  # INHERITANCE CHAIN
-  # ══════════════════════════════════════════════════════════════
-
   - name: "MergeRequest extends ApplicationRecord"
     query: |
       MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
@@ -286,10 +270,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ══════════════════════════════════════════════════════════════
-  # MIXINS / INCLUDES
-  # ══════════════════════════════════════════════════════════════
-
   - name: "MergeRequest includes Issuable and Noteable"
     query: |
       MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
@@ -299,10 +279,6 @@ tests:
     assert:
       - { row_count: 2 }
       - { unique: mixin }
-
-  # ══════════════════════════════════════════════════════════════
-  # RAILS DSL SYNTHETIC DEFS
-  # ══════════════════════════════════════════════════════════════
 
   - name: "MergeRequest associations"
     query: |
@@ -361,10 +337,6 @@ tests:
     assert:
       - { row_count: 3 }
 
-  # ══════════════════════════════════════════════════════════════
-  # CONTROLLER → SERVICE → MODEL (the full Rails stack)
-  # ══════════════════════════════════════════════════════════════
-
   - name: "Controller#index calls MergeRequest.opened (scope)"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -392,10 +364,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ══════════════════════════════════════════════════════════════
-  # SERVICE INTERNALS
-  # ══════════════════════════════════════════════════════════════
-
   - name: "CreateService#execute calls set_projects!, create, after_create"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -415,9 +383,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # KNOWN GAP: mr.save! where mr is a method parameter. The
-  # parameter type is inferrable from context (mr was just created
-  # via MergeRequest.new) but we don't track parameter types yet.
   - name: "(gap) CreateService#create calls mr.save! via parameter type"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -435,10 +400,6 @@ tests:
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
-
-  # ══════════════════════════════════════════════════════════════
-  # WORKER → SERVICE CHAIN
-  # ══════════════════════════════════════════════════════════════
 
   - name: "Worker calls MergeRequest.find (class method)"
     query: |
@@ -458,10 +419,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ══════════════════════════════════════════════════════════════
-  # MIXIN METHOD RESOLUTION (via Extends ancestor walk)
-  # ══════════════════════════════════════════════════════════════
-
   - name: "AfterCreateService calls mergeable? which calls draft? (intra-model)"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -471,10 +428,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ══════════════════════════════════════════════════════════════
-  # CROSS-SERVICE CALLS
-  # ══════════════════════════════════════════════════════════════
-
   - name: "UpdateService calls NotificationService.send_notification via constructor chain"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -483,10 +436,6 @@ tests:
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
-
-  # ══════════════════════════════════════════════════════════════
-  # FILE COUNT
-  # ══════════════════════════════════════════════════════════════
 
   - name: "All 14 files discovered"
     query: |

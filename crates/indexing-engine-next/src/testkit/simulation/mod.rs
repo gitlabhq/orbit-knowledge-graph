@@ -9,6 +9,7 @@ mod world;
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::runtime::{Handle, RuntimeFlavor};
@@ -16,6 +17,7 @@ use tokio::task::JoinHandle;
 
 use crate::builder::Engine;
 use crate::config::{EngineConfig, LaneConfig};
+use crate::event::Observer;
 use crate::lane::{Lane, LaneId};
 use crate::lease::{HolderId, LeaseRules};
 use crate::payload::{TaskInput, Tenant};
@@ -43,12 +45,13 @@ const FAULT_TICKS: u32 = 16;
 const HEAL_TICKS: u32 = 30;
 const LANE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Simulation {
     processes: usize,
     submits: usize,
     faults: FaultBudget,
     step_order: StepOrder,
+    observers: Vec<Arc<dyn Observer>>,
 }
 
 #[derive(Clone, Debug)]
@@ -63,6 +66,7 @@ struct Cluster {
     world: SharedWorld,
     processes: Vec<JoinHandle<()>>,
     restarts: Vec<usize>,
+    observers: Vec<Arc<dyn Observer>>,
 }
 
 impl Simulation {
@@ -78,6 +82,7 @@ impl Simulation {
                 losses: 0,
             },
             step_order: StepOrder::Atomic,
+            observers: Vec::new(),
         }
     }
 
@@ -93,6 +98,11 @@ impl Simulation {
 
     pub fn faults(mut self, faults: FaultBudget) -> Self {
         self.faults = faults;
+        self
+    }
+
+    pub fn observer<O: Observer>(mut self, observer: O) -> Self {
+        self.observers.push(Arc::new(observer));
         self
     }
 
@@ -114,7 +124,7 @@ impl Simulation {
             self.faults,
             self.step_order,
         );
-        let mut cluster = Cluster::start(world, self.processes);
+        let mut cluster = Cluster::start(world, self.processes, self.observers.clone());
 
         let start = tokio::time::Instant::now();
         for tick in 0..=(FAULT_TICKS + HEAL_TICKS) {
@@ -154,11 +164,12 @@ impl SimulationReport {
 }
 
 impl Cluster {
-    fn start(world: SharedWorld, processes: usize) -> Self {
+    fn start(world: SharedWorld, processes: usize, observers: Vec<Arc<dyn Observer>>) -> Self {
         let mut cluster = Self {
             world,
             processes: Vec::new(),
             restarts: vec![0; processes],
+            observers,
         };
         cluster.processes = (0..processes)
             .map(|process| cluster.spawn_process(process))
@@ -196,7 +207,7 @@ impl Cluster {
         if !drawn {
             return;
         }
-        let ports = build_ports(&self.world, Actor::Planner);
+        let ports = build_ports(&self.world, Actor::Planner).observed_by(&self.observers);
         if submit_task(&ports, build_write_message()).await.is_err() {
             self.world.lock().record_planner_crash();
         }
@@ -239,10 +250,14 @@ impl Cluster {
         let lane = LaneId::new(SimulatedWrite::NAME, Lane::DEFAULT);
         let config =
             EngineConfig::default().with_lane(lane, LaneConfig::new(NonZeroU32::MIN, LANE_TIMEOUT));
+        let observers = self.observers.clone();
         let engine = match Engine::builder()
             .config(config)
             .module(|module| {
                 module.worker(worker);
+                for observer in observers {
+                    module.observer(observer);
+                }
             })
             .build()
         {

@@ -1,19 +1,11 @@
-//! Sizes datalake pages by bytes: the page budget, the next page's row limit
-//! and the read block size derived from the previous page's row width.
-
-/// Two pages are resident during read-ahead, so the indexer peak is about twice this.
 pub(super) const PAGE_BYTE_BUDGET: u64 = 2 << 30;
 
-/// Floor for a shrunken limit so a page of a few giant rows cannot turn paging into a row-by-row crawl.
 const ADAPTIVE_MIN_ROWS: u64 = 1_000;
 
-/// Row width is unknown before the first page, so it starts small enough for wide rows and grows from there.
 const FIRST_PAGE_ROWS: u64 = 50_000;
 
-/// A few blocks wait in the decode queue while a page fills; 64 MiB keeps that queue small next to the budget.
 const TARGET_BLOCK_BYTES: u64 = 64 << 20;
 
-/// ClickHouse's default `max_block_size` in rows; a hint at or above it changes nothing, so none is sent.
 const CLICKHOUSE_DEFAULT_MAX_BLOCK_SIZE: u64 = 65_409;
 
 pub(super) fn block_size_for(rows: u64, bytes: u64, floor: u64) -> Option<u64> {

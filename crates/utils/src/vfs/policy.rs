@@ -1,8 +1,3 @@
-//! Passes classify files by path, size and content. They do not enforce limits or see symlinks.
-//! Metadata `Pending` requests content during loading; after content it becomes `Keep(Default)`.
-//! Every offered file remains cataloged. Rejected content reads as `Unsupported`.
-//! Passes return decisions; file metadata and cached decisions remain owned by the store.
-
 use std::{borrow::Cow, sync::OnceLock};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-#
-# Open (or refresh) the rolling e2e pin-bump MR. Runs from a scheduled
-# pipeline (.gitlab/ci/e2e-pin-bump.yml); DRY_RUN=true logs the diff and
-# stops before pushing.
 
 set -euo pipefail
 

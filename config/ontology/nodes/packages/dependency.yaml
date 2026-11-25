@@ -1,5 +1,3 @@
-# config/ontology/nodes/packages/dependency.yaml
-
 node_type: Dependency
 domain: packages
 description: A dependency declared by a package in the GitLab package registry (name and version pattern)

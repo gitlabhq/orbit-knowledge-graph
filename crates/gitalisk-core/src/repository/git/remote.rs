@@ -1,7 +1,6 @@
 use std::path::Path;
 use std::process::Command;
 
-/// `git remote get-url` exits with 2 when the remote does not exist.
 const NO_SUCH_REMOTE: i32 = 2;
 
 pub fn remote_url(repo_path: &Path, name: &str) -> Result<Option<String>, std::io::Error> {

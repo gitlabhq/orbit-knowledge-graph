@@ -2,21 +2,9 @@ use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 use treesitter_visit::SupportLang;
 
-/// Groups of languages that can resolve symbols across each other's
-/// files. Languages in the same family share a single `CodeGraph`
-/// during pipeline processing, so cross-language imports (e.g. C++
-/// `#include`-ing a C header) resolve naturally.
-///
-/// Languages not in a multi-language family get their own
-/// single-language family via `Standalone`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LanguageFamily {
-    /// C and C++ share an include-based resolution graph. The C++
-    /// tree-sitter grammar is a superset of C, so `.h` headers
-    /// parsed with the C grammar coexist cleanly with `.cpp` files.
     CFamily,
-    /// Java and Kotlin compile to the same bytecode and share
-    /// package-based FQN resolution. Fully bidirectional.
     Jvm,
     Standalone(Language),
 }
@@ -37,13 +25,10 @@ impl std::fmt::Display for LanguageFamily {
     }
 }
 
-/// Case-insensitive file-name rules for languages whose files often carry no
-/// language extension. They apply only when the extension names no language.
 pub struct FileNames {
     pub exact: &'static [&'static str],
     pub prefixes: &'static [&'static str],
     pub suffixes: &'static [&'static str],
-    /// Extensions that mark a template or backup, never the language itself.
     pub ignored_extensions: &'static [&'static str],
 }
 
@@ -132,8 +117,6 @@ macro_rules! define_languages {
                 match self { $(Self::$variant => &[$($name),+]),+ }
             }
 
-            /// Returns the tree-sitter grammar for this language, if one exists.
-            /// Custom-parser languages (e.g. Vue, Svelte) return `None`.
             pub const fn to_support_lang(&self) -> Option<SupportLang> {
                 match self {
                     $(Self::$variant => define_languages!(@support_lang $($sl)?),)+
@@ -154,7 +137,6 @@ macro_rules! define_languages {
                 }
             }
 
-            /// Parse with tree-sitter, optionally CPU-budgeted; `Err` if there is no grammar or the parse aborted.
             pub fn parse_ast(
                 &self,
                 code: &str,

@@ -26,8 +26,6 @@ struct ReconciliationGroup {
     edge_sort_key: String,
 }
 
-/// Tombstones edges a node's pipeline stopped emitting. Stateless: each run scans a
-/// fixed lookback rather than resuming from a cursor.
 pub struct StaleEdgeReconciliation {
     graph: ArrowClickHouseClient,
     checkpoint_store: Arc<dyn CheckpointStore>,
@@ -158,7 +156,6 @@ impl StaleEdgeReconciliation {
             .map_err(TaskError::new)
     }
 
-    /// A set cursor means the run is mid-flight, so its edges may not have landed yet.
     async fn find_namespaces_with_pending_writes(&self) -> Result<Vec<i64>, TaskError> {
         let checkpoints = self
             .checkpoint_store
@@ -245,7 +242,6 @@ fn group_mutable_edges_by_emitting_node(ontology: &Ontology) -> Vec<Reconciliati
         .collect()
 }
 
-/// `None` when neither side binds the emitting node's `id`, so there is no node row to compare against.
 fn find_emitting_node_id_column(mapping: &EdgeMapping, node_name: &str) -> Option<&'static str> {
     let binds_emitting_node = |node_ref: &NodeRef| {
         matches!(&node_ref.kind, NodeRefKind::Literal(kind) if kind == node_name)
@@ -487,8 +483,6 @@ mod tests {
         assert!(!sql.contains("FINAL"), "{sql}");
         assert_eq!(sql.matches("LIMIT 1 BY").count(), 2, "{sql}");
 
-        // A `_deleted` filter inside either dedup would drop a tombstoned newest
-        // row and let a superseded one win, which is how valid edges get retired.
         for dedup in [
             "LIMIT 1 BY traversal_path, id",
             "LIMIT 1 BY traversal_path, relationship_kind",

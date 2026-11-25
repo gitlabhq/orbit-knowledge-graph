@@ -27,7 +27,7 @@ fixtures:
 tests:
   - name: Test name
     severity: error            # "error" (default) or "warning"
-    skip: false                # skip this test
+    known_gap: "<reason>"     # skip the assertions of a test that hits a known gap
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'run'
@@ -149,8 +149,9 @@ Four test targets run the suites and the pipeline checks:
 | `cancellation` | a job that runs past its budget cancels the run, and its work stops |
 | `vanished_tree` | a repository tree that disappears does not fail the other files |
 
-A suite that mixes languages declares `pipeline:`. A known gap is a `skip: true`
-with a comment that gives the reason. The incremental runner still executes the
+A suite that mixes languages declares `pipeline:`. A known gap is a
+`known_gap: <reason>` field on the test; the runner skips its assertions, and a
+bare `skip: true` fails the suite. The incremental runner still executes the
 queries of a skipped test without its assertions, so a query that no longer runs,
 or needs a LIMIT, fails the suite while it stays skipped.
 

@@ -1,16 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Publish the local CLI to npm as @gitlab/orbit plus per-platform binary
-# packages, staged from the checked-in templates under npm/. Authentication
-# uses npm trusted publishing (OIDC); the CI job provides NPM_ID_TOKEN and no
-# npm token is involved. Platform packages ship the signed release archives;
-# Linux uses the static musl builds so one package covers glibc and musl
-# distributions.
-#
-# Required env (provided by GitLab CI on tag pipelines):
-#   CI_COMMIT_TAG
-
 : "${CI_COMMIT_TAG:?CI_COMMIT_TAG is required}"
 
 VERSION="${CI_COMMIT_TAG#v}"

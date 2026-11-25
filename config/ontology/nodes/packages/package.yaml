@@ -1,5 +1,3 @@
-# config/ontology/nodes/packages/package.yaml
-
 node_type: Package
 domain: packages
 description: A package published to the GitLab package registry (npm, Maven, PyPI, NuGet, and other formats)

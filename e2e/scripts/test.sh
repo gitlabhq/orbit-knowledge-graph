@@ -10,12 +10,10 @@ POLL_INTERVAL=3
 log "E2E Tests (SHA: $E2E_SHA)"
 mkdir -p "$DIAG_DIR"
 
-# Cleanup previous run
 helm uninstall "$RELEASE_NAME" -n "$NS_GKG" --kube-context "$KCTX" 2>/dev/null || true
 $KC delete configmap e2e-robot-tests -n "$NS_GKG" --ignore-not-found 2>/dev/null
 $KC delete configmap e2e-robot-fixtures -n "$NS_GKG" --ignore-not-found 2>/dev/null
 
-# Upload test files
 log "Creating ConfigMap from test files"
 $KC create configmap e2e-robot-tests -n "$NS_GKG" \
   --from-file="$E2E_DIR/tests/"
@@ -31,7 +29,6 @@ tar czf "$FIX_TMP/fixtures.tar.gz" -C "$E2E_DIR/fixtures" .
 $KC create configmap e2e-robot-fixtures -n "$NS_GKG" \
   --from-file=fixtures.tar.gz="$FIX_TMP/fixtures.tar.gz"
 
-# Install robot-runner chart
 log "Launching Robot Framework job"
 HELM_ARGS=(install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner"
   --namespace "$NS_GKG"
@@ -52,9 +49,6 @@ helm "${HELM_ARGS[@]}"
 CHAOS_PID=$!
 trap 'rm -rf "$FIX_TMP"; kill "$CHAOS_PID" 2>/dev/null || true' EXIT
 
-# Poll job status until terminal condition or timeout. Heartbeat keeps the
-# pipeline trace alive without the complexity (and orphaned-kubectl bugs) of
-# streaming `kubectl logs -f` from a background subshell.
 log "Waiting for tests to complete (timeout: ${TIMEOUT_SECONDS}s)"
 result=timeout
 SECONDS=0
@@ -118,7 +112,6 @@ fi
 
 log "Tests $result"
 
-# In CI the failure-gated after_script dumps diagnostics; don't dump twice.
 if [ -z "${CI:-}" ]; then
   bash "$(dirname "${BASH_SOURCE[0]}")/dump-diagnostics.sh"
 fi

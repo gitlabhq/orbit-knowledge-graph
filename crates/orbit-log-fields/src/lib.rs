@@ -19,7 +19,6 @@
 //! `#[instrument]` and `Span::record` use the constants: `fields({ safe::GL_PROJECT_ID } = id)`.
 //!
 //! Record safe fields as plain values, never with `%` or `?`: the allowlist checks only the name.
-
 mod macros;
 
 #[doc(hidden)]
@@ -35,7 +34,6 @@ macro_rules! fields {
     ($($(#[$doc:meta])* $name:ident = $value:expr;)*) => {
         $($(#[$doc])* pub const $name: &str = $value;)*
 
-        /// Every field name declared in this module.
         pub const ALL: &[&str] = &[$($name),*];
     };
 }
@@ -47,7 +45,6 @@ pub mod safe {
     fields! {
         CORRELATION_ID = labkit::CORRELATION_ID;
         GL_ORGANIZATION_ID = labkit::GL_ORGANIZATION_ID;
-        /// The expanded logs predicate reads it.
         GL_ROOT_NAMESPACE_ID = labkit::GL_ROOT_NAMESPACE_ID;
         GL_NAMESPACE_ID = labkit::GL_NAMESPACE_ID;
         GL_PROJECT_ID = labkit::GL_PROJECT_ID;
@@ -57,31 +54,24 @@ pub mod safe {
         GL_GOVERNING_NAMESPACE_ID = "gl_governing_namespace_id";
         /// Numeric IDs, `<org_id>/<root_namespace_id>/.../`. The expanded logs predicate reads it.
         TRAVERSAL_PATH = "traversal_path";
-        /// Comma separated; the expanded logs predicate does not read it.
         TRAVERSAL_PATHS = "traversal_paths";
         INSTANCE_ID = "instance_id";
         UNIQUE_INSTANCE_ID = "unique_instance_id";
         EVENT_ID = "event_id";
-        /// Comma separated. Orbit generates the IDs.
         EVENT_IDS = "event_ids";
         IID = "iid";
         NOTEABLE_ID = "noteable_id";
         DIFF_ID = "diff_id";
         TASK_ID = "task_id";
         DISPATCH_ID = "dispatch_id";
-        /// Orbit generates it (`migration-v<N>`).
         CAMPAIGN_ID = "campaign_id";
-        /// Orbit builds it as `<stream>.<stream_seq>.<consumer_seq>`.
         MESSAGE_ID = "message_id";
-        /// Orbit generates it for one redaction exchange.
         RESULT_ID = "result_id";
         COMMIT_SHA = "commit_sha";
         FROM_COMMIT_SHA = "from_commit_sha";
         TO_COMMIT_SHA = "to_commit_sha";
 
-        /// Whether a trusted caller asked for expanded logs. The expanded logs predicate reads it.
         EXPANDED_LOGS_REQUESTED = "expanded_logs_requested";
-        /// Only the values Orbit normalizes to (`SaaS` or `SM`).
         REALM = "realm";
         DEPLOYMENT_TYPE = "deployment_type";
         SOURCE_TYPE = "source_type";
@@ -100,65 +90,44 @@ pub mod safe {
         ACTIVE_SCHEMA_VERSION = "active_schema_version";
         MIGRATING_SCHEMA_VERSION = "migrating_schema_version";
         MIGRATION_VERSION = "migration_version";
-        /// Comma separated.
         RETIRED_SCHEMA_VERSIONS = "retired_schema_versions";
         CLICKHOUSE_VERSION = "clickhouse_version";
-        /// Sanitized Orbit build version of versioned NATS streams and subjects.
         RELEASE = "release";
         AWS_LC_VERSION = "aws_lc_version";
         SYSROOT_VERSION = "sysroot_version";
 
-        /// From the infrastructure config.
         GITALY_STORAGE = "gitaly_storage";
         TABLE = "table";
-        /// Comma separated.
         TABLES = "tables";
-        /// Table a statement reads from, when `table` is the target.
         SOURCE_TABLE = "source_table";
         TABLE_PREFIX = "table_prefix";
         CLICKHOUSE_TYPE = "clickhouse_type";
         ENTITY = "entity";
-        /// Comma separated.
         ENTITIES = "entities";
-        /// Comma separated.
         REQUESTED_ENTITIES = "requested_entities";
-        /// Entity or relationship kind that an SDLC indexing plan writes.
         PLAN_TARGET = "plan_target";
-        /// Comma separated.
         RELATIONSHIP_KINDS = "relationship_kinds";
 
         NATS_STREAM = "nats_stream";
         NATS_CONSUMER = "nats_consumer";
-        /// Subject pattern that Orbit defines.
         NATS_SUBSCRIPTION = "nats_subscription";
-        /// Subject patterns that Orbit defines, comma separated.
         NATS_SUBSCRIPTIONS = "nats_subscriptions";
         NATS_STREAM_SEQUENCE = "nats_stream_sequence";
         NATS_DELIVERY_COUNT = "nats_delivery_count";
-        /// Bucket name that Orbit defines.
         NATS_KV_BUCKET = "nats_kv_bucket";
 
-        /// Starts at 1.
         ATTEMPT = "attempt";
         MAX_ATTEMPTS = "max_attempts";
-        /// Starts at 1.
         ITERATION = "iteration";
-        /// Starts at 1.
         PAGE_NUMBER = "page_number";
-        /// Zero-based.
         BATCH_INDEX = "batch_index";
         BYTE_OFFSET = "byte_offset";
 
-        /// Use it when the message names what is counted.
         COUNT = "count";
         ROW_COUNT = "row_count";
-        /// Number of values in a saved pagination cursor.
         CURSOR_LENGTH = "cursor_length";
-        /// Number of columns in the sort key of an indexing plan.
         SORT_KEY_LENGTH = "sort_key_length";
-        /// Rows that a ClickHouse query read and returned.
         READ_ROWS = "read_rows";
-        /// Rows that ClickHouse scanned to answer a query.
         SCANNED_ROWS = "scanned_rows";
         WRITTEN_ROWS = "written_rows";
         BATCH_COUNT = "batch_count";
@@ -169,7 +138,6 @@ pub mod safe {
         PROJECT_COUNT = "project_count";
         INDEXED_PROJECT_COUNT = "indexed_project_count";
         PARTITION_COUNT = "partition_count";
-        /// Number of cut points that a partition probe returned.
         CUT_COUNT = "cut_count";
         HANDLER_COUNT = "handler_count";
         GLOBAL_HANDLER_COUNT = "global_handler_count";
@@ -183,7 +151,6 @@ pub mod safe {
         SDLC_INDEXED_NAMESPACE_COUNT = "sdlc_indexed_namespace_count";
         CODE_ELIGIBLE_PROJECT_COUNT = "code_eligible_project_count";
         CODE_INDEXED_PROJECT_COUNT = "code_indexed_project_count";
-        /// From 0 to 1.
         CODE_COVERAGE_RATIO = "code_coverage_ratio";
         ITERATION_COUNT = "iteration_count";
         THREAD_COUNT = "thread_count";
@@ -206,18 +173,13 @@ pub mod safe {
         WRITE_DURATION_S = "write_duration_s";
         TIMEOUT_S = "timeout_s";
         RETRY_DELAY_S = "retry_delay_s";
-        /// Unix time in seconds.
         EXPIRES_AT = "expires_at";
-        /// Unix time in seconds.
         REFRESH_AT = "refresh_at";
-        /// Timestamp that Orbit formats.
         WATERMARK = "watermark";
 
         SIZE_BYTES = "size_bytes";
         MEMORY_LIMIT_BYTES = "memory_limit_bytes";
-        /// Bytes that a ClickHouse query read and returned.
         READ_BYTES = "read_bytes";
-        /// Bytes that ClickHouse scanned to answer a query.
         SCANNED_BYTES = "scanned_bytes";
         WRITTEN_BYTES = labkit::WRITTEN_BYTES;
         LIMIT = "limit";
@@ -225,7 +187,6 @@ pub mod safe {
         BATCH_SIZE = "batch_size";
         CONCURRENCY = "concurrency";
 
-        /// Address that the server listens on, `host:port`.
         TCP_ADDRESS = labkit::TCP_ADDRESS;
         LISTENER_GROUP = "listener_group";
         SNOWPLOW_APP_ID = "snowplow_app_id";
@@ -233,29 +194,24 @@ pub mod safe {
         AUTH_MODE = "auth_mode";
         SERVER_MODE = "server_mode";
         INDEXING_MODE = "indexing_mode";
-        /// Comma separated.
         INDEXER_MODULES = "indexer_modules";
         HANDLER = "handler";
         TASK = "task";
         TRIGGER = "trigger";
         WORKER_GROUP = "worker_group";
-        /// Comma separated `group=limit` pairs from the config.
         WORKER_GROUPS = "worker_groups";
         COMPONENT = "component";
         K8S_NAMESPACE = "k8s_namespace";
         K8S_KIND = "k8s_kind";
-        /// Orbit detects it from the file.
         LANGUAGE = "language";
         LANGUAGE_FAMILY = "language_family";
         /// From a closed set that Orbit defines.
         REASON = "reason_code";
         OUTCOME = "outcome";
         PHASE = "phase";
-        /// From a closed set that Orbit defines.
         KIND = "kind";
         FROM_STATE = "from_state";
         MIGRATION_SCOPE = "migration_scope";
-        /// Scope before Orbit widens it.
         REQUESTED_MIGRATION_SCOPE = "requested_migration_scope";
 
         TLS_ENABLED = "tls_enabled";
@@ -264,62 +220,49 @@ pub mod safe {
         CACHED_TOKEN_EXPIRED = "cached_token_expired";
         ENABLED = "enabled";
         FULL_SWEEP = "full_sweep";
-        /// Whether an error message is safe to return to the client.
         CLIENT_SAFE = "client_safe";
 
         /// Fixed error kind. Never the error text.
         ERROR_TYPE = labkit::ERROR_TYPE;
         HTTP_STATUS_CODE = "http_status_code";
-        /// `file:line:column` in Orbit or dependency code.
         PANIC_LOCATION = "panic_location";
     }
 }
 
-/// Fields that are written only on expanded log lines.
 pub mod expanded {
     use labkit_fields as labkit;
 
     fields! {
         GLOBAL_USER_ID = "global_user_id";
 
-        /// Realm from a token, before Orbit validates it.
         RAW_REALM = "raw_realm";
         /// Free text that CustomersDot returns.
         BLOCK_REASON = "block_reason";
-        /// Name that a client sends for a skill, a command or a tool.
         REQUESTED_NAME = "requested_name";
-        /// Rails copies it from a client header.
         CLIENT_SESSION_ID = "client_session_id";
         CLIENT_REQUEST_ID = "client_request_id";
-        /// A client sends it back.
         RECEIVED_RESULT_ID = "received_result_id";
         CLIENT_ERROR_CODE = "client_error_code";
-        /// From the client user agent.
         CODING_AGENT = "coding_agent";
         /// Without query string or fragment.
         URL = labkit::HTTP_URL;
         HOST = labkit::HTTP_HOST;
-        /// Host name that Orbit resolves in place of [`HOST`].
         RESOLVE_HOST = "resolve_host";
         REMOTE_ADDR = labkit::REMOTE_ADDR;
 
         SQL = "sql";
         QUERY_PARAMETER = "query_parameter";
 
-        /// Can hold an encoded branch name.
         NATS_SUBJECT = "nats_subject";
         KV_KEY = "kv_key";
 
-        /// Path inside a repository.
         FILE_PATH = "file_path";
-        /// Path on the local disk of the Orbit server.
         LOCAL_PATH = "local_path";
         MANIFEST_PATH = "manifest_path";
         SYMLINK_TARGET = "symlink_target";
         BRANCH = "branch";
         PACKAGE_NAME = "package_name";
 
-        /// Log a fixed [`ERROR_TYPE`](super::safe::ERROR_TYPE) next to it.
         ERROR_MESSAGE = labkit::ERROR_MESSAGE;
         ADDITIONAL_DETAILS = labkit::ADDITIONAL_DETAILS;
     }

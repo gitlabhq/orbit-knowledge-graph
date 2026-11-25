@@ -1,5 +1,3 @@
-//! Terminal widgets shared by interactive commands. The only module that imports cliclack.
-
 use std::fmt::Display;
 use std::io::IsTerminal;
 
@@ -7,7 +5,6 @@ use anyhow::{Result, bail};
 use cliclack::{Theme, ThemeState};
 
 const COLUMN_GAP: &str = "   ";
-/// cliclack wraps card bodies to the terminal width minus this, without a hanging indent.
 const CARD_BORDERS: usize = 6;
 
 pub(crate) struct Choice {
@@ -95,7 +92,6 @@ pub(crate) fn format_with_thousands(count: usize) -> String {
 static TERMINAL_BEFORE_ECHO_OFF: std::sync::Mutex<Option<rustix::termios::Termios>> =
     std::sync::Mutex::new(None);
 
-/// The terminal echoes Ctrl-C as `^C`, which shifts the progress bars cliclack redraws in place.
 pub(crate) struct ControlEchoOff;
 
 pub(crate) fn turn_off_control_echo() -> ControlEchoOff {
@@ -234,7 +230,6 @@ pub(crate) fn is_cancelled(error: &anyhow::Error) -> bool {
         .is_some_and(|io| io.kind() == std::io::ErrorKind::Interrupted)
 }
 
-/// A single-choice picker that starts on `initial`, the key of one of `choices`.
 pub(crate) fn select(prompt: &str, choices: &[Choice], initial: &str) -> Result<String> {
     let mut picker = cliclack::select(prompt);
     for choice in choices {
@@ -267,7 +262,6 @@ struct Stock;
 
 impl Theme for Stock {}
 
-/// Set for the whole run: cards without the empty top row.
 struct CompactCards;
 
 impl Theme for CompactCards {
@@ -283,7 +277,6 @@ impl Theme for CompactCards {
     }
 }
 
-/// Set only while a picker is open: every active widget shares this footer.
 struct KeyHintsFooter {
     sections: Vec<(String, String)>,
 }

@@ -10,7 +10,6 @@ use indexer::modules::sdlc::{
 };
 use orbit_arrow::prepare_batch;
 
-/// Every transform shares one in-memory database, so the process runs one DuckDB thread pool.
 pub fn sql_transform() -> duckdb_client::Result<SqlTransformFactory> {
     let database = Arc::new(Mutex::new(DuckDbClient::open(OpenMode::InMemoryArrow)?));
     Ok(Arc::new(move |name, transforms| {
@@ -27,7 +26,6 @@ pub fn sql_transform() -> duckdb_client::Result<SqlTransformFactory> {
     }))
 }
 
-/// Row-wise SQL projection over the extracted block, one destination table per [`Transformation`].
 struct DuckDbTransform {
     name: String,
     outputs: Vec<String>,

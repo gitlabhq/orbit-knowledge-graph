@@ -105,9 +105,6 @@ pub(super) fn virtual_path(path: &Path) -> std::io::Result<String> {
     virtual_components(path.components())
 }
 
-/// Windows `read_link` returns absolute targets with a drive, UNC or `\\?\`
-/// prefix, where Unix returns `/…`. The prefix names a host location that the
-/// catalog cannot hold, so it is dropped and the target stays root-relative.
 fn symlink_target(target: &Path) -> std::io::Result<String> {
     virtual_components(
         target

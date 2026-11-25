@@ -1,5 +1,3 @@
-# config/ontology/nodes/code_review/merge_request.yaml
-
 node_type: MergeRequest
 domain: code_review
 description: A merge request for code review and merging changes into a target branch

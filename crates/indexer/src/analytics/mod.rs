@@ -1,7 +1,3 @@
-//! Snowplow analytics for the indexer: per-dispatch `gkg_indexing_completed`
-//! events carrying the resource cost of each indexing run, for cost
-//! attribution and throughput baselines (see issue #750).
-
 mod context;
 mod graph_stats;
 mod observer;

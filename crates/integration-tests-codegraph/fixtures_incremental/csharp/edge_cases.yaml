@@ -132,7 +132,6 @@ fixtures:
       }
 
 tests:
-  # ── Multiple constructors (overloads) ─────────────────────────
   - name: "Point has two constructors"
     query: |
       MATCH (d:Definition)
@@ -142,7 +141,6 @@ tests:
     assert:
       - { row_count: 2 }
 
-  # ── Nested namespaces ─────────────────────────────────────────
   - name: "Nested namespace FQN correct"
     query: |
       MATCH (d:Definition)
@@ -153,7 +151,6 @@ tests:
       - { row_count: 1 }
       - { row: { fqn: Geo.Models.Line, type: Class } }
 
-  # ── Cross-file member chain ──────────────────────────────────
   - name: "Line.Length calls Point.DistanceTo via typed property"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -164,7 +161,6 @@ tests:
       - { row_count: 1 }
       - { row: { caller: Geo.Models.Line.Length, callee: Geo.Models.Point.DistanceTo } }
 
-  # ── var inference + chained call ──────────────────────────────
   - name: "var p1 = service.Create() → line = new Line(p1, p2) → line.Length()"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -175,7 +171,6 @@ tests:
       - { row_count: 1 }
       - { row: { caller: Geo.App.Runner.Run, callee: Geo.Models.Line.Length } }
 
-  # ── Null-conditional ?.  ──────────────────────────────────────
   - name: "_cached?.Normalize() resolves despite ?."
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -186,7 +181,6 @@ tests:
       - { row_count: 1 }
       - { row: { caller: Geo.App.Runner.Run, callee: Geo.Models.Point.Normalize } }
 
-  # ── Partial class — methods from both files ───────────────────
   - name: "Partial class Create from first file"
     query: |
       MATCH (d:Definition)
@@ -229,7 +223,6 @@ tests:
       - { row: { callee: Geo.Services.PointService.IsValid } }
       - { row: { callee: Geo.Services.PointService.Clamp } }
 
-  # ── Async method ──────────────────────────────────────────────
   - name: "Async method defined with correct type"
     query: |
       MATCH (d:Definition)
@@ -250,7 +243,6 @@ tests:
       - { row_count: 1 }
       - { row: { caller: Geo.App.Runner.RunAsync, callee: Geo.Services.PointService.CreateAsync } }
 
-  # ── Runner calls PointService.Create via typed field ──────────
   - name: "Runner.Run calls PointService.Create"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

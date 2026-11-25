@@ -59,8 +59,6 @@ impl TlsConfig {
         listener: &'a ListenerTlsConfig,
         group: &'static str,
     ) -> Result<Option<(&'a str, &'a str)>, IdentityError> {
-        // A group carries an identity as a pair or not at all; falling back
-        // per-half would silently mix one group's certificate with another's key.
         let own = match (listener.cert_path.as_deref(), listener.key_path.as_deref()) {
             (Some(cert), Some(key)) => Some((cert, key)),
             (None, None) => None,
@@ -168,9 +166,6 @@ mod tests {
 
     #[test]
     fn a_misspelled_key_is_rejected_rather_than_ignored() {
-        // Both halves matter: a typo in the group name and a typo in a key
-        // inside it would each leave the listener plaintext while the config
-        // looks right.
         for overlay in [
             "tls:\n  internal:\n    enable: true\n",
             "tls:\n  internl:\n    enabled: true\n",

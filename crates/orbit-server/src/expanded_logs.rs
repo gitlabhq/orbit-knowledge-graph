@@ -7,7 +7,6 @@ use orbit_server_config::ExpandedLogsConfig;
 use orbit_utils::traversal_path::TraversalPath;
 use tracing_subscriber::EnvFilter;
 
-/// Rails sends this token when its `gkg_verbose_logs` feature flag is on.
 pub static VERBOSE_LOGS: LazyLock<VerboseLogsConfig> = LazyLock::new(|| {
     VerboseLogsConfig::default()
         .with_feature_flags_header("x-gitlab-enabled-feature-flags")
@@ -37,7 +36,6 @@ fn valid_rust_log() -> Option<String> {
         .filter(|directive| EnvFilter::try_new(directive).is_ok())
 }
 
-/// The variant of a typed error inside an `anyhow` error, else `fatal`: many webserver errors carry no kind.
 pub fn anyhow_error_type(error: &anyhow::Error) -> &'static str {
     if let Some(error) = error.downcast_ref::<indexer::config::IndexerError>() {
         return error.into();

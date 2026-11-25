@@ -1,7 +1,3 @@
-# MODE and SKILLS_REF in setup: README.md in this folder.
-# Each step writes .docs-write/route/<file>; a read_file step reads it and the
-# router branches on the exact token. A missing file ends the flow.
-# The image has no python3: steps run through .docs-write/step, which uses uv.
 version: v1
 environment: ambient
 components:

@@ -1,7 +1,3 @@
-//! Tar.gz extraction as a [`FileStreamHooks`] source: untar, safety-check each
-//! path, hand the entry to the hooks, and write the bytes of the files they
-//! load ([`Decision::Parse`] or [`Decision::Load`]). No filtering of its own.
-
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -13,9 +9,6 @@ use crate::fs_walk::{
     Decision, FileInventory, FileInventoryEntry, FileStreamHooks, StreamError, step,
 };
 
-/// Extract a gzipped tar from `reader` into `target_dir`, running every regular
-/// file through `hooks`. Loaded files are written to disk; every non-dropped
-/// file (and symlink) is returned in the inventory.
 pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
     reader: R,
     target_dir: &Path,
@@ -26,8 +19,6 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
     let mut archive = tar::Archive::new(GzDecoder::new(reader));
     let target_canonical = target_dir.canonicalize()?;
 
-    // The first entry sets the Gitaly archive root (`<slug>-<ref>/`); all others
-    // must share it.
     let mut archive_root: Option<OsString> = None;
 
     // Symlinks are deferred until all regular files and directories exist, so no
@@ -37,8 +28,6 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
     let mut inventory = Vec::new();
     let mut content = Vec::new();
 
-    // False + a truncation-shaped error on the first `next()` means the body
-    // ended before any tar header could be read (empty/truncated repo).
     let mut any_entry_seen = false;
     let entries = archive
         .entries()
@@ -62,8 +51,6 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
         };
 
         let entry_type = entry.header().entry_type();
-        // PAX metadata entries are not real files; XGlobalHeader would otherwise
-        // be mistaken for the archive root.
         if entry_type == tar::EntryType::XGlobalHeader || entry_type == tar::EntryType::XHeader {
             continue;
         }
@@ -137,12 +124,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             match meta.decision {
                 Decision::Drop => continue,
                 Decision::ListOnly => inventory.push(meta),
-                // Both loaded states materialize the bytes; only the parse axis
-                // differs, which the pipeline acts on, not the extractor.
                 Decision::Parse | Decision::Load => {
-                    // A containment escape (PermissionDenied from resolve_dest_within)
-                    // is fatal; any other error — a path the filesystem rejects such
-                    // as an over-long file or directory component — skips the entry.
                     let written = crate::fs::resolve_dest_within(&target_canonical, &dest)
                         .and_then(std::fs::File::create)
                         .and_then(|mut file| file.write_all(&content));
@@ -205,8 +187,6 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
     Ok(FileInventory::new(inventory))
 }
 
-/// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry records the
-/// root; later entries must share it. Returns an empty path for the root entry.
 fn strip_archive_root(
     path: &Path,
     detected_root: &mut Option<OsString>,
@@ -240,8 +220,6 @@ mod tests {
     struct ParseAll;
     impl FileStreamHooks for ParseAll {}
 
-    /// Drops files by extension (header) and by a NUL in content; mirrors the
-    /// shape of the production `CodeFilter` without depending on code-graph.
     struct TestFilter;
     impl FileStreamHooks for TestFilter {
         fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
@@ -517,8 +495,6 @@ mod tests {
         assert_eq!(std::fs::read(dir.path().join("big.txt")).unwrap(), body);
     }
 
-    /// Skips files above a byte limit, so the test can observe which size the
-    /// guard was handed.
     struct MaxSize(u64);
     impl FileStreamHooks for MaxSize {
         fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
@@ -526,9 +502,6 @@ mod tests {
         }
     }
 
-    /// An entry can carry its real size in a PAX record with the base header
-    /// size left at zero. The guard has to be given the real size, otherwise
-    /// the file is read into memory before anything can reject it.
     #[test]
     fn oversize_entry_is_filtered_when_the_size_comes_from_a_pax_record() {
         let dir = tempfile::tempdir().unwrap();

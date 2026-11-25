@@ -24,8 +24,6 @@ fn canonical_json(value: &impl serde::Serialize) -> String {
     value.to_string()
 }
 
-/// Splits a paginated GQL statement ending in `SKIP 0 LIMIT n` into the
-/// statement prefix and the page size.
 fn window(frontend: Frontend, base_query: &str) -> (&str, u32) {
     assert_eq!(frontend, Frontend::Gql, "pages require a GQL query");
     let message = "paginated GQL must end with SKIP 0 LIMIT N";

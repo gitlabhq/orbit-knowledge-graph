@@ -1,13 +1,5 @@
 name: "Ruby: lambda and Proc assignments as named definitions — gitlab-org/orbit/knowledge-graph#715"
 
-# Assignments whose RHS constructs a callable are indexed as `Lambda`
-# definitions keyed on the LHS name, so queries can enumerate callable
-# constants ("what callable constants exist?") and resolve references to
-# them, instead of seeing an opaque `Constant`. Covers all four Ruby
-# callable forms — stabby `->`, `lambda {}`, `proc {}`, `Proc.new {}` —
-# plus a lowercase-identifier LHS. A plain value constant and an ordinary
-# `.new` constructor must NOT be reclassified.
-
 fixtures:
   - path: lib/callables.rb
     content: |
@@ -99,9 +91,6 @@ tests:
     assert:
       - { row: { n: 0 } }
 
-  # Mirrors the proven same-class ImplicitMember resolution in
-  # top_level_constants.yaml: a bare `AUTH` reference inside `initialize`
-  # resolves to the enclosing class's callable constant.
   - name: "a reference to a callable constant resolves to its Lambda definition"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

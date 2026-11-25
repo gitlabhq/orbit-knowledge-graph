@@ -1,5 +1,3 @@
-# config/ontology/nodes/source_code/branch.yaml
-
 node_type: Branch
 domain: source_code
 description: A Git branch in a repository

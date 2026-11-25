@@ -42,7 +42,6 @@ const ZERO_DAY = {
   ],
 };
 
-// On a phone, the ripple runs top to bottom, so the labels fit: the package, then its files, then the projects.
 const ZERO_DAY_NARROW = {
   source: { ...ZERO_DAY.source, x: 0.5, y: 0.06 },
   nodes: [

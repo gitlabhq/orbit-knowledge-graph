@@ -1,5 +1,3 @@
-# config/ontology/edges/in_group.yaml
-
 description: Entity belongs to a group
 
 variants:

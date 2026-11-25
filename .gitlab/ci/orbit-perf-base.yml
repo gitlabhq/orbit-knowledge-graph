@@ -9,13 +9,12 @@
     - docker:dind
   variables:
     MISE_DISABLE_TOOLS: lefthook
-    # docker:dind, mirrors caproni .integration-base
     DOCKER_HOST: tcp://docker:2376
     DOCKER_TLS_CERTDIR: "/certs"
     DOCKER_TLS_VERIFY: 1
     DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
     FF_NETWORK_PER_BUILD: 1
-    SYNTH_CONFIG: crates/xtask/simulator_medium.yaml  # ~12M nodes / ~59M edges
+    SYNTH_CONFIG: crates/xtask/simulator_medium.yaml
     ROUNDS: "10"
     CONCURRENCY: "20"
     WARMUP_ROUNDS: "1"

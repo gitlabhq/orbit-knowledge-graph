@@ -49,10 +49,3 @@ tests:
       RETURN caller.fqn AS caller
     assert:
       - { empty: true }
-
-  # LIMITATION: cross-class instance attrs (self.db.cursor.execute() where
-  # cursor is set in Database.__init__) don't resolve correctly with a decoy.
-  # The compound SSA key "self.db" resolves to Database, but "cursor" is an
-  # instance attr on Database, not a graph definition. The resolver falls back
-  # to bare name lookup which picks the wrong class if a decoy exists.
-  # Fix requires storing instance attr types as graph metadata on the class.

@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Compute SLOs from Cloud Monitoring (GMP) + CH query_log + kubectl.
-# Survives pod restarts because GMP ships metrics every 15s to Cloud Monitoring.
-# Usage: KCTX=... RUN_ID=bench7 TIER=small bash bench/scripts/slos.sh
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,7 +11,6 @@ PROJECT=$(cd "${TF_DIR}" && "$TF" output -raw project 2>/dev/null)
 
 ch() { timeout 15 $KC exec -n "${CH_NS}" clickhouse-0 -- clickhouse-client -q "$1" 2>/dev/null || echo ""; }
 
-# --- Cloud Monitoring query helper ---
 ACCESS_TOKEN=$(gcloud auth print-access-token 2>/dev/null)
 START=$(date -u -v-${SLO_WINDOW_HOURS}H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
      || date -u -d "${SLO_WINDOW_HOURS} hours ago" +%Y-%m-%dT%H:%M:%SZ)
@@ -26,7 +22,6 @@ cm() {
     "https://monitoring.googleapis.com/v3/projects/${PROJECT}/timeSeries?filter=metric.type%3D%22prometheus.googleapis.com%2F${metric}%22%20AND%20resource.labels.namespace%3D%22${GKG_NS}%22&interval.startTime=${START}&interval.endTime=${END}&pageSize=10000" 2>/dev/null
 }
 
-# --- Targets ---
 T_P90=$(tier '.slos.query_p90_ms')
 T_RATE=$(tier '.slos.query_success_rate')
 T_LAG=$(tier '.slos.sdlc_watermark_lag_p99_s')
@@ -34,8 +29,6 @@ T_OOM=$(tier '.slos.oom_count')
 
 log "Querying Cloud Monitoring (${SLO_WINDOW_HOURS}h window)"
 
-# --- 1. Watermark lag (Cloud Monitoring gauge, all pods) ---
-# Full window for informational, last hour for SLO (steady-state).
 STEADY_START=$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
             || date -u -d "1 hour ago" +%Y-%m-%dT%H:%M:%SZ)
 LAG_DATA=$(cm "gkg_indexer_sdlc_watermark_lag_seconds/gauge" | python3 -c "
@@ -60,8 +53,6 @@ print(f'{lag_max:.0f}\t{lag_p99_full:.0f}\t{lag_p99_steady:.0f}\t{lag_current:.3
 " 2>/dev/null || echo "0	0	0	0	0	0")
 IFS=$'\t' read -r LAG_MAX LAG_P99_FULL LAG_P99 LAG_CURRENT LAG_SAMPLES LAG_STEADY_SAMPLES <<< "${LAG_DATA}"
 
-# --- 2. Messages processed (Cloud Monitoring counter, all pods) ---
-# SDLC success rate excludes code tasks (retries/dead-letters are expected for empty repos).
 MSG_DATA=$(cm "gkg_etl_messages_processed_total/counter" | python3 -c "
 import json,sys
 d=json.load(sys.stdin)
@@ -90,7 +81,6 @@ else
   MSG_RATE="1.0"
 fi
 
-# --- 3. CH query stats (survives restarts, on disk) ---
 CH_STATS=$(ch "
   SELECT count(),
          countIf(type='ExceptionWhileProcessing'),
@@ -105,7 +95,6 @@ if [[ -n "${CH_STATS}" ]]; then
   IFS=$'\t' read -r CH_TOTAL CH_ERR CH_P90 CH_RATE <<< "${CH_STATS}"
 fi
 
-# --- 4. OOM count (kubectl) ---
 OOM_COUNT=0
 for ns in "${GKG_NS}" "${CH_NS}"; do
   while IFS= read -r reason; do
@@ -114,7 +103,6 @@ for ns in "${GKG_NS}" "${CH_NS}"; do
     -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.lastState.terminated.reason}{"\n"}{end}{end}' 2>/dev/null || true)
 done
 
-# --- 5. Code indexing stats (Cloud Monitoring, all pods) ---
 CODE_LANGS=$(cm "gkg_indexer_code_language_files_total/counter" | python3 -c "
 import json,sys
 d=json.load(sys.stdin)
@@ -139,13 +127,11 @@ for k,c in sorted(kinds.items(), key=lambda x:-x[1]):
     print(f'{k}={int(c)}', end=' ')
 " 2>/dev/null || echo "")
 
-# --- 6. Graph + disk (CH) ---
 GRAPH_ROWS=$(ch "SELECT formatReadableQuantity(sum(total_rows)) FROM system.tables WHERE database='gkg' AND total_rows > 0 FORMAT TSV")
 DL_ROWS=$(ch "SELECT formatReadableQuantity(sum(total_rows)) FROM system.tables WHERE database='datalake' AND total_rows > 0 FORMAT TSV")
 DISK=$(ch "SELECT concat(toString(round(100 * (total_bytes - available_bytes) / total_bytes)), '% of ', formatReadableSize(total_bytes)) FROM system.disks WHERE name='default' FORMAT TSV")
 CH_PEAK=$(ch "SELECT formatReadableSize(max(memory_usage)) FROM system.query_log WHERE type='QueryFinish' AND current_database IN ('gkg','datalake') FORMAT TSV")
 
-# --- Evaluate ---
 pass() { python3 -c "print('PASS' if $1 else 'FAIL')"; }
 P_P90=$(pass "${CH_P90:-0} <= ${T_P90}")
 P_RATE=$(pass "${MSG_RATE} >= ${T_RATE}")
