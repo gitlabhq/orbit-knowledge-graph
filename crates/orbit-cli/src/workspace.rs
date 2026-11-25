@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::OnceLock;
 
 use crate::database::{GraphReader, IncompleteRevision, schema::graph_lacks_commit};
@@ -420,40 +419,26 @@ pub fn git_working_changes(repo_path: &Path) -> Result<GitChanges> {
     Ok(GitChanges::from_statuses(repo_path, &working))
 }
 
-pub fn git_tracked_ignored(repo_path: &Path) -> Result<Vec<String>> {
-    let listed = git_output(
-        repo_path,
-        &[
-            "ls-files",
-            "-z",
-            "--cached",
-            "--ignored",
-            "--exclude-standard",
-        ],
-    )?;
-    Ok(listed
-        .split(|byte| *byte == 0)
-        .filter(|path| !path.is_empty())
-        .filter_map(|path| std::str::from_utf8(path).ok())
-        .map(str::to_string)
-        .collect())
-}
-
-fn git_output(repo_path: &Path, args: &[&str]) -> Result<Vec<u8>> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(repo_path)
-        .output()
-        .with_context(|| format!("failed to run git in {}", repo_path.display()))?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "git {} failed in {}: {}",
-            args.join(" "),
-            repo_path.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    Ok(output.stdout)
+pub fn git_index_files(repo_path: &Path) -> Result<Vec<String>> {
+    let listed = repository_at(repo_path)
+        .index_files()
+        .with_context(|| format!("failed to list files in {}", repo_path.display()))?;
+    let files = listed
+        .into_iter()
+        .filter(|file| !file.skip_worktree)
+        .filter_map(|file| match file.path.into_os_string().into_string() {
+            Ok(path) => Some(path),
+            Err(name) => {
+                orbit_log_fields::warn!(
+                    expanded(FILE_PATH) = ?name,
+                    safe(ERROR_TYPE) = "non_utf8_path",
+                    "skipping a file whose name is not UTF-8"
+                );
+                None
+            }
+        })
+        .collect();
+    Ok(files)
 }
 
 pub fn project_id_from_path(path: &str) -> i64 {
@@ -499,6 +484,7 @@ fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
 mod tests {
     use super::*;
     use crate::test_support::git;
+    use std::process::Command;
 
     fn init_repo(path: &Path) {
         std::fs::create_dir_all(path).unwrap();
