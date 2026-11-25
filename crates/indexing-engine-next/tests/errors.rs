@@ -3,7 +3,7 @@ mod support;
 use anyhow::anyhow;
 use indexing_engine_next::prelude::*;
 use indexing_engine_next::testkit::Testkit;
-use indexing_engine_next::{EngineConfig, LaneConfig};
+use indexing_engine_next::{EngineConfig, LaneConfig, LaneId};
 use support::{
     BIG, HOUR, MINUTE, Run, SECOND, TestPlanner, TestWorker, events, nonzero, task_key, tenant,
 };
@@ -21,7 +21,7 @@ fn test_flow(config: EngineConfig, worker: TestWorker) -> Testkit {
 }
 
 fn with_default_lane(lane: LaneConfig) -> EngineConfig {
-    EngineConfig::default().with_lane("test.worker/default", lane)
+    EngineConfig::default().with_lane(LaneId::new("test.worker", Lane::DEFAULT), lane)
 }
 
 #[tokio::test(start_paused = true)]
@@ -166,7 +166,8 @@ async fn an_incompatible_task_is_redelivered_and_uses_no_attempt() {
 
 #[tokio::test(start_paused = true)]
 async fn a_timed_out_task_moves_to_its_on_timeout_lane_and_uses_an_attempt() {
-    let lane = LaneConfig::new(nonzero(1), SECOND).on_timeout("test.worker/big");
+    let lane = LaneConfig::new(nonzero(1), SECOND)
+        .on_timeout(LaneId::new("test.worker", Lane::new("big")));
     let worker = TestWorker::default().runs(1, [Run::Sleep(5 * SECOND)]);
     let kit = test_flow(with_default_lane(lane), worker);
 

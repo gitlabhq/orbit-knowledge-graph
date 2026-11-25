@@ -1,0 +1,101 @@
+"packages/agent-plugins-nightly/output-guard/claude.mjs":
+- category: magic-value
+  reason: "Claude Code re-persists results above about 30,000 characters with a 2 KB preview, so the limit stays below."
+  preview: "// Claude Code re-persists a replaced result over about 30,000 characte…"
+  hash: f09a13b0b9cd17a9
+  lines: 2
+- category: upstream
+  reason: "Without the persisted-output fields Claude Code shows only the head of cut output and hides the marker."
+  preview: "// Without the persisted-output fields Claude Code does not wrap the re…"
+  hash: 38312ef4d6524149
+  lines: 2
+"packages/agent-plugins-nightly/output-guard/pi.mjs":
+- category: invariant
+  reason: "Without the codemode header and status, a truncated failure would read as a success."
+  preview: "/**"
+  hash: 7077aa205f414a50
+  lines: 1
+"packages/agent-plugins-nightly/search-guard/claude.mjs":
+- category: upstream
+  reason: "Claude Code copies the file as is, so the launcher must be resolved at run time."
+  preview: "// Claude Code copies this file as is, so the launcher is found at run …"
+  hash: de536532b757a714
+  lines: 2
+- category: security
+  reason: "Write-then-rename replaces a planted symlink instead of following it."
+  preview: "/** Written to a fresh file and renamed over the state, so a planted sy…"
+  hash: 417a67fcf7b5f1ee
+  lines: 1
+"packages/agent-plugins-nightly/search-guard/core.mjs":
+- category: invariant
+  reason: "An index run's lock must fail the lookup now, or it holds until the budget kills the hook."
+  preview: "// A lock held by an index run must fail the lookup now, not hold it un…"
+  hash: c7e4e7ae46b8e91a
+  lines: 1
+- category: invariant
+  reason: "A launcher that prompts must see end of input, or it hangs."
+  preview: "// A launcher that wants to prompt (for a download, say) must see end o…"
+  hash: ba333ed8b85e4e85
+  lines: 1
+"packages/agent-plugins-nightly/tests/search-guard-support.ts":
+- category: contract
+  reason: "These shapes must match the ones crates/orbit-cli/tests/no_index.rs pins against the real binary."
+  preview: "// Output shaped like the CLI's for `parse_widget`, which lib.rs define…"
+  hash: 3e2e9abb2f3a47df
+  lines: 3
+"packages/agent-plugins/core/stats.ts":
+- category: contract
+  reason: "The response has no DISTINCT flag, so the derived name is the only signal."
+  preview: "// The response has no DISTINCT flag: a property count is plain only un…"
+  hash: 5d19f85b56b33ef1
+  lines: 1
+"packages/agent-plugins/opencode/index.ts":
+- category: invariant
+  reason: "Awaiting or throwing here would slow down or fail the agent's tool call."
+  preview: "// Never awaited and never thrown: the UI must not slow down or fail a …"
+  hash: ec703526fb32430b
+  lines: 1
+"packages/agent-plugins/opencode/tui.tsx":
+- category: upstream
+  reason: "OpenCode compiles TUI JSX from source, so this file must import nothing but rpc.ts."
+  preview: "// The TUI part of the OpenCode 2 plugin. It ships as source, not bundl…"
+  hash: 89985bde4f32bc74
+  lines: 10
+- category: upstream
+  reason: "Events are not awaited, so a fast call's end can arrive before its start."
+  preview: "// Calls whose end arrived. Events are not awaited, so a fast call's en…"
+  hash: 8362464c67bfacee
+  lines: 1
+- category: upstream
+  reason: "Memory storage outlives a plugin reload but timers do not, so old lines would never clear."
+  preview: "// Memory storage outlives a plugin reload but these timers do not, so …"
+  hash: 7ca587d26b96a178
+  lines: 2
+- category: upstream
+  reason: "The slot render runs once, so reads must stay inside JSX expressions to remain reactive."
+  preview: "// render runs once; the reads inside the JSX expressions keep each slo…"
+  hash: 5377b8448dfd2269
+  lines: 1
+"packages/agent-plugins/pi/index.ts":
+- category: upstream
+  reason: "Older Pi lacks the renderer hook, and a throw on load is reported at every start."
+  preview: "// Older Pi has no renderer hook, and an extension that throws on load …"
+  hash: 7e919508eeff5ebd
+  lines: 1
+"packages/agent-plugins/scripts/build.ts":
+- category: upstream
+  reason: "OpenCode resolves @opencode/plugin at runtime and parts share rpc.ts as installed, so inlining breaks them."
+  preview: "// OpenCode resolves @opencode/plugin at runtime, and the server and TU…"
+  hash: 349229a71dd61b9c
+  lines: 2
+- category: upstream
+  reason: "OpenCode compiles TUI JSX with its own OpenTUI, so the TUI must ship as source."
+  preview: "// The TUI part ships as source: OpenCode compiles TUI JSX with its own…"
+  hash: 82f900e0f7de8bb3
+  lines: 1
+"packages/site/src/styles/site.css":
+- category: upstream
+  reason: "Site-kit's glow extends 10rem past each side and would scroll the page sideways on phones."
+  preview: "/* site-kit's glow reaches 10rem past each side, which would scroll the…"
+  hash: f0cd3ef65a9dcddc
+  lines: 1

@@ -164,6 +164,8 @@ stages:
     rules:
       - match: '(program $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
+      - match: '(return (argument_list $V:identifier))'
+        replace: '(__ssa_return (__rhs @$V $V))'
       - match: '(return $$$V)'
         replace: '(__ssa_return $$$V)'
       - match: '(superclass $S:constant)'

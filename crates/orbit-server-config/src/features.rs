@@ -8,12 +8,9 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, strum::VariantNames,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, strum::VariantNames)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum Feature {
@@ -23,7 +20,7 @@ pub enum Feature {
 
 /// A feature flag scoped to root namespaces: `enabled` toggles it, an empty
 /// `namespaces` list means every namespace, otherwise only those ids.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FeatureScope {
     pub enabled: bool,
@@ -39,7 +36,7 @@ impl FeatureScope {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct FeaturesConfig(HashMap<Feature, FeatureScope>);
 

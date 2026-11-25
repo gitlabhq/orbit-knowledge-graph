@@ -1,0 +1,42 @@
+"crates/gitlab-client/src/cc_token.rs":
+- category: magic-value
+  reason: "The timeout covers only a valid cached token; with none, waiting out a slow Rails beats failing early."
+  preview: "/// Caps the fetch while the cached token is still valid, so it can cov…"
+  hash: f0dfda6540a1fc8e
+  lines: 4
+- category: invariant
+  reason: "Serving the stale token on refresh failure makes the collector 401 surface, not a silent local event drop."
+  preview: "/// Serves the cached token even past its `exp` on a failed refresh, so"
+  hash: 55c5f142b2d22779
+  lines: 2
+- category: invariant
+  reason: "Without the real suspension point the burst never exercises single-flight dedup, and the test passes vacuously."
+  preview: "// Without a real suspension point, a concurrent burst resolves the"
+  hash: 463e0e54d7f86023
+  lines: 3
+"crates/gitlab-client/src/client.rs":
+- category: contract
+  reason: "Rails validates this issuer value; changing it breaks token validation."
+  preview: "/// Rails expects this value when validating incoming tokens."
+  hash: 68077e5a78224b47
+  lines: 1
+- category: contract
+  reason: "Rails validates tokens against this exact audience string; a rename breaks auth across repositories."
+  preview: "/// Rails expects this value when validating incoming tokens."
+  hash: 68077e5a78224b47
+  lines: 1
+- category: contract
+  reason: "Rails validates the JWT subject prefix; changing this value breaks authentication with the monolith."
+  preview: "/// Rails validates that the subject starts with an expected prefix (e.…"
+  hash: cfac66b437cb38d9
+  lines: 1
+- category: contract
+  reason: "The GitLab side reads the raw JWT in this header with no Bearer prefix."
+  preview: "/// The raw JWT token is sent directly as this header value (no `Bearer…"
+  hash: fb7d24198c73e992
+  lines: 1
+- category: upstream
+  reason: "Reqwest uses rustls-no-provider, so a provider must be installed before any client."
+  preview: "// reqwest is compiled with `rustls-no-provider`, so a CryptoProvider"
+  hash: 68e4a337607d7dcb
+  lines: 4
