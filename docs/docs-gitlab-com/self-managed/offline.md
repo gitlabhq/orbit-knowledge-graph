@@ -22,12 +22,14 @@ Prepare the values files from those pages first.
 
 Prerequisites:
 
-- A host that can reach your registry, `registry.gitlab.com`, and `gitlab.com`. With `initCopy`, also `gcr.io` and `docker.io`.
+- A host that can reach your registry, `registry.gitlab.com`, and `gitlab.com`.
+  With `splitTables.volumeMode: initCopy` in the Siphon chart, the host must also reach `gcr.io` and `docker.io`.
 - [Helm](https://helm.sh/docs/intro/install/) 3 or later and [skopeo](https://github.com/containers/skopeo/blob/main/install.md).
 
 To mirror the images and charts:
 
 1. Pull both charts.
+   For the GitLab Orbit chart version, see [Helm chart](version-requirements.md#helm-chart).
    To list Siphon chart versions, run `helm search repo siphon/siphon --versions` after `helm repo add`:
 
    ```shell
@@ -68,21 +70,21 @@ To mirror the images and charts:
 
 1. Point each image setting in your values files at the mirror:
 
-   | Image | Setting |
-   |-------|---------|
-   | GitLab Orbit | `image.repository` in `orbit-values.yaml` |
-   | Dashboards, if `dashboards.enabled: true` | `dashboards.applyImage` in `orbit-values.yaml` |
-   | Siphon | `image.repository` |
-   | `gitlab-siphon-tables` | `splitTables.image.registry`, `splitTables.image.repository` |
-   | `kubectl`, for the migration check, which is on by default | `waitForMigrations.image.repository` |
-   | `kubectl`, if `dashboards.source: image` | `dashboards.image.repository` |
+   | Image | Values file | Setting |
+   |-------|-------------|---------|
+   | GitLab Orbit | `orbit-values.yaml` | `image.repository` |
+   | Dashboards, if `dashboards.enabled: true` | `orbit-values.yaml` | `dashboards.applyImage` |
+   | Siphon | `siphon-values.yaml` | `image.repository` |
+   | `gitlab-siphon-tables` | `siphon-values.yaml` | `splitTables.image.registry`, `splitTables.image.repository` |
+   | `kubectl`, for the migration check, which is on by default in split mode | `siphon-values.yaml` | `waitForMigrations.image.repository` |
+   | `kubectl`, if `dashboards.source: image` | `siphon-values.yaml` | `dashboards.image.repository` |
 
-   If the mirror needs credentials, set `imagePullSecrets`.
+   If the mirror needs credentials, set `imagePullSecrets` in `orbit-values.yaml` and `podSpec.imagePullSecrets` in `siphon-values.yaml`.
 
 ### Siphon with `splitTables.volumeMode: initCopy`
 
 With `initCopy`, the `grep` does not list the tables image.
-Its reference is `splitTables.image.registry`/`splitTables.image.repository`:`splitTables.image.tag`.
+Its reference is `<registry>/<repository>:<tag>`, from `splitTables.image.registry`, `splitTables.image.repository`, and `splitTables.image.tag`.
 An empty tag means `v<global.gitlabVersion>`, for example `v19.5.0`.
 
 Also mirror the `crane` and `busybox` images, and set `splitTables.initCopy.fetch.image.repository` and `splitTables.initCopy.extract.image.repository`.
@@ -90,9 +92,9 @@ Also mirror the `crane` and `busybox` images, and set `splitTables.initCopy.fetc
 
 `crane` cannot trust a private certificate authority.
 If your mirror uses one and the cluster has no image volume support, set `splitTables.volumeMode: toolbox`.
-Then mirror `registry.gitlab.com/gitlab-org/build/cng/gitlab-rails-ee`, tagged like the tables image, and set `splitTables.toolbox.image.repository`.
+Then mirror `registry.gitlab.com/gitlab-org/build/cng/gitlab-rails-ee`, tagged `v<global.gitlabVersion>`, with `-fips` when FIPS is on, and set `splitTables.toolbox.image.repository`.
 
-## Verify and install
+## Verify and install the charts
 
 Prerequisites:
 
@@ -131,6 +133,8 @@ To verify and install the charts:
    If your mirror uses a private certificate authority, add its certificate to the host's trust store,
    or add `--ca-file <ca_certificate>` to the command.
 
+Then continue with [Verify replication](data-replication.md#verify-replication) and [Turn on indexing for a group](orbit-setup.md#turn-on-indexing-for-a-group).
+
 ## Add a license with the GitLab Orbit add-on
 
 For an offline instance, the license file must include the GitLab Orbit add-on.
@@ -144,12 +148,13 @@ If you add the license from the Rails console, see [Provision add-on purchases](
 
 To use the local graph offline:
 
-1. Copy the `glab` and `orbit` binaries into the network.
+1. On a host with internet access, download `glab` and the [standalone `orbit` binary](../cli.md#install-the-standalone-binary), then copy both into the network.
 1. Set the binary path and turn off telemetry:
 
    ```shell
    export GLAB_ORBIT_CLI_BINARY_PATH=/opt/orbit/orbit
    export ORBIT_TELEMETRY_ENABLED=false
+   export GLAB_CHECK_UPDATE=false
    ```
 
    `GLAB_SEND_TELEMETRY=false` does not turn off GitLab Orbit CLI telemetry.

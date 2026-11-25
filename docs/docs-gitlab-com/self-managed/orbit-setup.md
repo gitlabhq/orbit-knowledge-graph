@@ -223,7 +223,7 @@ For pod sizes, see [GitLab Orbit sizing](sizing.md).
 
 ### Billing requirements
 
-GitLab Orbit reports usage to GitLab and checks that your subscription has GitLab Credits available.
+With an online cloud license, GitLab Orbit reports usage to GitLab and checks that your subscription has GitLab Credits available.
 The Helm chart configures billing by default.
 If the instance has an online cloud license, allow outbound HTTPS from the webserver to `customers.gitlab.com` and `billing.prdsub.gitlab.net`.
 For more information, see [Billing connections](networking.md#billing-connections).
