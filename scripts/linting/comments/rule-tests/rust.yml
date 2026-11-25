@@ -1,0 +1,9 @@
+id: comments-rust
+valid:
+  - 'fn main() { let url = "https://example.com//path"; }'
+  - "/// Doc comments belong to comments-rust-doc.\nfn a() {}"
+invalid:
+  - '// a line comment'
+  - "fn a() {\n    let x = 1; // trailing comment\n}"
+  - '/* a block comment */'
+  - '//// four slashes are not a doc comment'
