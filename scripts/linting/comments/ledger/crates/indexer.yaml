@@ -150,6 +150,11 @@
   preview: "// Reference token grammar, derived from Rails:"
   hash: 629ca0fdf116ec1a
   lines: 12
+- category: security
+  reason: "The 20-digit IID cap stops unbounded regex backtracking on hostile input. Rails IIDs fit in it."
+  preview: "// The `\\d{1,20}` cap exists to prevent unbounded backtracking on"
+  hash: 513d5b32c9dbac6d
+  lines: 3
 "crates/indexer/src/modules/sdlc/transform/system_notes/resolve.rs":
 - category: upstream
   reason: "The clickhouse crate puts params in the URL query string, so lookup arrays must stay bounded."

@@ -39,6 +39,16 @@
   preview: "/// Without query string or fragment."
   hash: 7868545181bbee52
   lines: 1
+- category: security
+  reason: "The field logs only that a license checksum exists. It must never log the checksum value."
+  preview: "/// Never the checksum."
+  hash: f6c308e68d32313f
+  lines: 1
+- category: security
+  reason: "The field is safe to log only because its values come from a closed set that Orbit defines."
+  preview: "/// From a closed set that Orbit defines."
+  hash: 82671496ddab91c3
+  lines: 1
 "crates/orbit-log-fields/src/macros.rs":
 - category: tool-read
   reason: "The compile_fail doctests are the only tests that prove unsafe values are rejected by safe() fields."

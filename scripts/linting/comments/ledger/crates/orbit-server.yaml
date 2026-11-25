@@ -50,6 +50,11 @@
   preview: "/// The default hook prints the panic text, which can hold parsed sourc…"
   hash: 6d7f0de92193dcb5
   lines: 1
+- category: security
+  reason: "A customer path in an internal span must not get expanded logs, or customer data leaks."
+  preview: "/// A customer path inside an internal span must not be expanded."
+  hash: 9fed48c6b9773edc
+  lines: 1
 "crates/orbit-server/src/fips.rs":
 - category: compliance
   reason: "FIPS 140-3 control: a mislinked binary must refuse to start instead of serving traffic."

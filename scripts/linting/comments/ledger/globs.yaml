@@ -26,12 +26,15 @@
 "scripts/vendored/**":
 - category: vendored
   reason: "Copies of upstream sources"
-"config/setup/agents/opencode_ui/**":
+"config/setup/agents/opencode_ui/index.js":
 - category: generated
-  reason: "Bun build copies packages/agent-plugins into this folder, and CI diffs it against the build"
-"config/setup/agents/pi_ui/**":
+  reason: "packages/agent-plugins/scripts/build.ts writes this file, and CI diffs it against the build"
+"config/setup/agents/opencode_ui/tui.tsx":
 - category: generated
-  reason: "Bun build copies packages/agent-plugins into this folder, and CI diffs it against the build"
+  reason: "packages/agent-plugins/scripts/build.ts writes this file, and CI diffs it against the build"
+"config/setup/agents/pi_ui/index.js":
+- category: generated
+  reason: "packages/agent-plugins/scripts/build.ts writes this file, and CI diffs it against the build"
 "packages/agent-plugins/core/lib.js":
 - category: generated
   reason: "Bun build writes this license header into the bundle, and CI diffs the build output"

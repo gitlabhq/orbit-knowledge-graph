@@ -48,6 +48,12 @@
   preview: "# Temporary: aligned with source-code entities so Project + code traver…"
   hash: 7a141bf858682697
   lines: 4
+"config/ontology/nodes/source_code/commit.yaml":
+- category: contract
+  reason: "decoded_sha and the masked hash must match merge_request.yaml, or MERGED_AT_COMMIT points at no node."
+  preview: "# DRIFT WARNING: keep decoded_sha and the masked hash in sync with"
+  hash: 347b30c902a346c1
+  lines: 2
 "config/setup/agents/duo.yaml":
 - category: upstream
   reason: "Duo creates its config dir only on first run, so the glab-installed binary path must also count."

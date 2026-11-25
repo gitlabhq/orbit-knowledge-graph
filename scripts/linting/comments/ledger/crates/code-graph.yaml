@@ -4,6 +4,12 @@
   preview: "/// oxc has no recursion limit and aborts the process past depth 4000-8…"
   hash: d1fa0cf674dd3c4c
   lines: 3
+"crates/code-graph/src/v2/config/lang.rs":
+- category: invariant
+  reason: "OXC accepts Svelte and Astro, but no fixture suite tests them, so Orbit must not claim them."
+  preview: "// `.svelte` and `.astro` are intentionally absent: OXC's"
+  hash: 3e7f8cc689193194
+  lines: 4
 "crates/code-graph/src/v2/dsl/ssa.rs":
 - category: magic-value
   reason: "Raising the depth lets deep input overflow the worker stack, an uncatchable SIGSEGV."
@@ -123,6 +129,16 @@
   preview: "/// Load a rust-analyzer `ProjectWorkspace` into a fresh `RootDatabase`…"
   hash: d1825edb749ba417
   lines: 5
+- category: security
+  reason: "The test guards the RUSTSEC-2023-0089 mitigation: the loader must not start a proc-macro server."
+  preview: "/// Guards the atomic-polyfill advisory mitigation (RUSTSEC-2023-0089).…"
+  hash: 21cf7ccfcac65dd6
+  lines: 3
+- category: security
+  reason: "The const pins the RUSTSEC-2023-0089 mitigation: this loader starts no proc-macro server."
+  preview: "// Invariant: this function never starts a proc-macro server."
+  hash: 25f7748354992a2d
+  lines: 1
 "crates/code-graph/src/v2/langs/generic/hcl.rs":
 - category: invariant
   reason: "Tradeoff: ScopeFqnWalk on HCL fans one ref out to every same-named variable repo-wide."
