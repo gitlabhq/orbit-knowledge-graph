@@ -20,8 +20,6 @@ CREATE TABLE IF NOT EXISTS signoz_index_v3 (
 ORDER BY (ts_bucket_start, timestamp)
 ";
 
-/// Relative to now: the resolver drops keys past the tenant's trace
-/// retention, so a fixed timestamp would age out of the window.
 fn pipeline_started() -> i64 {
     now_unix() - 3_600
 }
@@ -39,8 +37,6 @@ fn bucket(unix: i64) -> u64 {
 
 const ORBIT_READER_PASSWORD: &str = "orbit-test-secret";
 
-/// Users and profiles are server-wide while databases are per test, so both
-/// are named after the database to keep parallel tests from sharing them.
 fn reader_user(ctx: &TestContext) -> String {
     format!("orbit_reader_{}", ctx.config.database)
 }
@@ -49,12 +45,6 @@ fn reader_profile(ctx: &TestContext) -> String {
     format!("orbit_reader_profile_{}", ctx.config.database)
 }
 
-/// The settings profile o11y_provisioner declares in
-/// clickhouse_configs/users.xml, and the user and grants
-/// ClickhouseMigrationRunner#grant_orbit_reader_script creates against it.
-/// Production also restricts the user with HOST IP, which a container test
-/// cannot reproduce, and caps concurrency and log_queries, which this profile
-/// leaves out because neither affects a single query.
 async fn create_orbit_reader(ctx: &TestContext) {
     let user = reader_user(ctx);
     let profile = reader_profile(ctx);
@@ -242,9 +232,6 @@ async fn every_requested_id_is_resolved_in_one_query() {
     assert_ne!(rows.get("3000"), rows.get("3001"));
 }
 
-/// The index table is sorted by time bucket, so a lookup whose window does not
-/// cover the span must not return it. This is what keeps a lookup from
-/// scanning the tenant's whole retention.
 #[tokio::test]
 async fn a_span_outside_the_time_window_is_not_returned() {
     let ctx = seeded_pipeline().await;
@@ -259,10 +246,6 @@ async fn a_span_outside_the_time_window_is_not_returned() {
     assert!(rows.is_empty());
 }
 
-/// Every limit the profile fixes is READONLY, so a client that tries to raise
-/// one is rejected with code 452 and the lookup resolves to null for every
-/// row. Settings the profile does not fix are accepted under readonly = 2;
-/// readonly = 1 rejects those with code 164, which is why it is not used.
 #[tokio::test]
 async fn a_lookup_succeeds_as_the_provisioned_reader() {
     let ctx = seeded_pipeline().await;

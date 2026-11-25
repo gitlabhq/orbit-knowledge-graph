@@ -9,11 +9,6 @@ use query_engine::shared::content::{
 
 const SERVICE: &str = "observability";
 
-// SeededColumnResolver yields every value as a string, so these cover the
-// compiler and hydration path rather than the typing ObservabilityService
-// applies. The int64 columns are Int64 in production; server/observability_resolver.rs
-// covers that.
-
 fn registry() -> ColumnResolverRegistry {
     let mut registry = ColumnResolverRegistry::new();
     registry.register(SERVICE, Arc::new(SeededColumnResolver::from_seed_file()));
@@ -115,9 +110,6 @@ async fn resolves_several_pipeline_columns_in_one_pass() {
     );
 }
 
-/// A seeded null and an unseeded row both resolve to nothing, so the seed is
-/// only meaningful if it is reached: 3001 matches an entry whose value is
-/// null, 9999 matches no entry at all.
 #[tokio::test]
 async fn a_pipeline_without_a_trace_resolves_to_null() {
     let seeded_null = resolve(
