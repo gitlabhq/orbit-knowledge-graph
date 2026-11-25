@@ -82,6 +82,7 @@ HINTS = [
     (re.compile(r"\b(because|why|so that|in order to|reason)\b", re.I), "put this reason in the MR description"),
     (re.compile(r"^(///|//!|/\*\*|\"\"\"|''')"), "make the name and the types say this"),
 ]
+PLACEHOLDER = "why no change to the code can replace this comment"
 DEFAULT_HINT = "rename or extract so the code says this"
 
 Finding = collections.namedtuple("Finding", "path line text rule")
@@ -151,14 +152,27 @@ def glob_to_regex(glob: str) -> re.Pattern:
     return re.compile("".join(tokens.get(part, re.escape(part)) for part in parts))
 
 
+class UniqueKeyLoader(yaml.SafeLoader):
+    def construct_mapping(self, node, deep=False):
+        keys = [self.construct_object(key, deep=deep) for key, _ in node.value]
+        duplicate = next((key for key in keys if keys.count(key) > 1), None)
+        if duplicate is not None:
+            raise yaml.constructor.ConstructorError(None, None, f"duplicate key {duplicate!r}", node.start_mark)
+        return super().construct_mapping(node, deep)
+
+
 def load_ledger() -> list[Entry]:
     entries = []
     for file in sorted(LEDGER.rglob("*.yaml")):
         source = str(file.relative_to(HERE))
-        for path, items in (yaml.safe_load(file.read_text()) or {}).items():
+        try:
+            data = yaml.load(file.read_text(), Loader=UniqueKeyLoader) or {}
+        except yaml.YAMLError as error:
+            sys.exit(f"comment check: {source}: {error}")
+        for path, items in data.items():
             for raw in items:
                 unknown = set(raw) - LEDGER_KEYS
-                if unknown or raw.get("category") not in CATEGORIES or not str(raw.get("reason", "")).strip():
+                if unknown or raw.get("category") not in CATEGORIES or str(raw.get("reason", "")).strip() in ("", PLACEHOLDER):
                     sys.exit(f"comment check: {source}: entry for {path} needs a category from {sorted(CATEGORIES)}, a reason, and only {sorted(LEDGER_KEYS)}")
                 if ("hash" in raw) != ("lines" in raw):
                     sys.exit(f"comment check: {source}: entry for {path} needs both hash and lines, or neither")
@@ -234,7 +248,7 @@ def block_at(findings: list[Finding], path: str, line: int) -> list[Finding]:
 def entry_for(location: str) -> int:
     path, _, line = location.rpartition(":")
     run = block_at(scan(), path, int(line))
-    item = {"category": "invariant", "reason": "why no change to the code can replace this comment", "preview": preview(run[0].text), "hash": block_hash(run), "lines": len(run)}
+    item = {"category": "invariant", "reason": PLACEHOLDER, "preview": preview(run[0].text), "hash": block_hash(run), "lines": len(run)}
     print(f"# scripts/linting/comments/ledger/{area_file(path)}")
     print(yaml.safe_dump({path: [item]}, sort_keys=False, allow_unicode=True, width=1000), end="")
     return 0

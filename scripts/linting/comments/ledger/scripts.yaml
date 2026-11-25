@@ -1,0 +1,279 @@
+"scripts/checks/check-go-version-policy.sh":
+- category: upstream
+  reason: "CNG cuts the stable branch before release, so the newest branch waits for its tag."
+  preview: "# CNG cuts a stable branch a few days before the release, and the policy"
+  hash: fadde623c0c8406c
+  lines: 3
+"scripts/checks/ci-skip-utils.sh":
+- category: upstream
+  reason: "GitLab CI snapshots the MR description at pipeline start, so commit messages are the fallback."
+  preview: "# Commit messages in the MR range. This is the reliable fallback"
+  hash: a876eac618cf80f9
+  lines: 2
+- category: upstream
+  reason: "Grep -q SIGPIPEs the producer under pipefail, so output is buffered first."
+  preview: "# Buffer git log output before grepping to avoid SIGPIPE."
+  hash: 0af8f922ed4becfd
+  lines: 5
+"scripts/checks/fips/aws-lc/check-binary.sh":
+- category: compliance
+  reason: "FIPS control: DuckDB mbedtls TLS, X.509, and network code must never link."
+  preview: "# DuckDB compiles mbedtls in for hashing and its encryption fallback. I…"
+  hash: 54d1366ff09c6656
+  lines: 2
+"scripts/checks/fips/aws-lc/check-graph.sh":
+- category: compliance
+  reason: "FIPS control: server must resolve AWS-LC FIPS and no ring; the CLI stays non-FIPS for platform reasons."
+  preview: "# Checks the dependency graphs from Cargo.lock: the server must resolve…"
+  hash: 893abb7bf39de799
+  lines: 3
+"scripts/ci/cargo-home-cache.sh":
+- category: security
+  reason: "States the cache trust model and unverified paths; keep the cached paths in sync with .gitlab-ci.yml."
+  preview: "# GitLab only caches paths under $CI_PROJECT_DIR, so symlink the downlo…"
+  hash: 6c852a50b3c63c0c
+  lines: 15
+- category: security
+  reason: "Find skips symlinks, so a symlinked crate would bypass hash verification."
+  preview: "# `find -type f` in drop_unverified_crates skips symlinks, so a symlink…"
+  hash: 33ca6b65824d5bb3
+  lines: 3
+"scripts/ci/create-deploy-mr.sh":
+- category: upstream
+  reason: "The deployed tag predates the shallow clone, so it must be fetched explicitly."
+  preview: "# The deployed tag predates the shallow CI clone, so fetch it explicitl…"
+  hash: 963b387a8dd08aad
+  lines: 2
+"scripts/ci/install-llvm-mingw.sh":
+- category: upstream
+  reason: "Removing the import libs stops orbit.exe from silently needing libc++.dll and libunwind.dll at runtime."
+  preview: "# Install llvm-mingw under /opt/llvm-mingw. We delete libc++/libunwind"
+  hash: 480d9b9b8388a278
+  lines: 4
+"scripts/ci/mr-housekeeping/lib.sh":
+- category: tool-read
+  reason: "Shellcheck directive that the lint reads; removing it fails the shellcheck job."
+  preview: "# shellcheck shell=bash disable=SC2034  # variables are for the sourcin…"
+  hash: 6dd743a0ae8fdf96
+  lines: 2
+"scripts/ci/mr-housekeeping/milestone-assignee.sh":
+- category: tool-read
+  reason: "Shellcheck directive; the lint gate reads it."
+  preview: "# shellcheck disable=SC2329  # invoked through for_each_open_mr"
+  hash: 2bfb781dfea05b91
+  lines: 1
+- category: tool-read
+  reason: "A shellcheck directive, not prose; removing it fails the shellcheck lint on jq variables."
+  preview: "# shellcheck disable=SC2016  # $-names are jq variables"
+  hash: f9c53eafd74cfe72
+  lines: 1
+- category: tool-read
+  reason: "Shellcheck directive that the lint reads; removing it fails the shellcheck job."
+  preview: "# shellcheck disable=SC2016  # $-names are jq variables"
+  hash: f9c53eafd74cfe72
+  lines: 1
+"scripts/ci/mr-housekeeping/run.sh":
+- category: invariant
+  reason: "Stale must run first so MRs it closes do not get a milestone in the same run."
+  preview: "# stale runs first so the MRs it closes are not given a milestone in th…"
+  hash: 2eed7904c3d2e722
+  lines: 1
+"scripts/ci/mr-housekeeping/stale.sh":
+- category: upstream
+  reason: "Errexit is suspended in this context, so each API step needs an explicit return on failure."
+  preview: "# process_mr runs in a context where errexit is suspended (the caller i…"
+  hash: 9d7a1c2661bdd4cd
+  lines: 3
+- category: upstream
+  reason: "Scoped labels make GitLab drop the scheduled label when keep is added; the skip logic relies on it."
+  preview: "# KEEP_LABEL and SCHEDULED_LABEL share the \"stale\" scope, so adding kee…"
+  hash: 420a44e013f5f232
+  lines: 3
+- category: invariant
+  reason: "Without removing the label a reopened MR closes again immediately off the old warning."
+  preview: "# Drop the label so a later reopen starts a fresh warn/grace cycle inst…"
+  hash: ae77e4eed583be17
+  lines: 2
+"scripts/ci/open-e2e-bump-mr.sh":
+- category: security
+  reason: "The named remote keeps git from echoing the token into the job log."
+  preview: "# Named remote so git never echoes the token back into the job log."
+  hash: 1ff7fff4025381b3
+  lines: 1
+- category: upstream
+  reason: "Quick actions silently ignore unknown usernames, so the user is checked first."
+  preview: "# Quick actions silently ignore unknown usernames."
+  hash: b5fd15450d551075
+  lines: 1
+"scripts/ci/orbit-perf.sh":
+- category: invariant
+  reason: "Logging in first stops a registry auth failure from passing silently as image not pushed yet."
+  preview: "# Log in like the other registry scripts, so an auth failure can't pass…"
+  hash: aff92dac3b6ac0f2
+  lines: 1
+- category: invariant
+  reason: "ClickHouse must be pinned before the bulk load so the restart loses no data."
+  preview: "# Once the webserver is Ready (DDL done, schema active): stop backgroun…"
+  hash: bcde54f3b373b8e7
+  lines: 2
+- category: upstream
+  reason: "Refreshable views refresh mid-test, and STOP VIEWS does not survive a restart, so it must run last."
+  preview: "# Refreshable views would refresh mid-test; STOP VIEWS does not survive…"
+  hash: da8db43f1f3e9613
+  lines: 1
+- category: invariant
+  reason: "A lexical DESC sort ranks v9 above v72 and silently picks the wrong schema prefix."
+  preview: "# Sort by version number, not lexically: a plain DESC ranks v9 above v7…"
+  hash: 7a40a17444df6d04
+  lines: 1
+- category: tool-read
+  reason: "Shellcheck reads this directive; removing it fails the lint."
+  preview: "# Largest first so the edge table does not start last; LOAD_JOBS insert…"
+  hash: e4a23fea523a8b45
+  lines: 2
+- category: upstream
+  reason: "OPTIMIZE can outlast the default 300s receive timeout, and merges must finish for stable perf runs."
+  preview: "# Merge every table down to its final parts, so background merges canno…"
+  hash: 570cabe24c280f4e
+  lines: 3
+- category: upstream
+  reason: "A missing key reads as empty with exit 0, so the value check is the only failure signal."
+  preview: "# A missing key reads as empty with exit 0, so check the value too."
+  hash: c5fcae006931df23
+  lines: 1
+"scripts/ci/orbit-perf/caproni/values/gitlab-dev-stack.yaml":
+- category: upstream
+  reason: "GitLab rejects ClickHouse 26.7+ tables, so the floating tag must stay pinned."
+  preview: "# The chart defaults to the floating clickhouse:lts-jammy tag, which no…"
+  hash: dea519f28140f8c7
+  lines: 5
+"scripts/ci/sync-doc-principles.sh":
+- category: security
+  reason: "The named remote keeps git from echoing the token into the job log."
+  preview: "# Named remote so git never echoes the token back into the job log."
+  hash: 1ff7fff4025381b3
+  lines: 1
+- category: upstream
+  reason: "GitLab quick actions silently ignore unknown usernames, so the user is checked first."
+  preview: "# Quick actions silently ignore unknown usernames."
+  hash: b5fd15450d551075
+  lines: 1
+- category: upstream
+  reason: "MacOS bash 3.2 scans command substitutions for the closing paren first, so an apostrophe breaks bash -n."
+  preview: "# No apostrophes in this body: bash 3.2, which is what macOS ships, sca…"
+  hash: 13c77e7d319a0b00
+  lines: 3
+"scripts/dev/apply-graph-schema.sh":
+- category: security
+  reason: "The header keeps the ClickHouse password out of URLs and ps output."
+  preview: "# ClickHouse reads the password from the X-ClickHouse-Key header, so it…"
+  hash: 5dbc9426e19292fc
+  lines: 2
+"scripts/dev/caproni-edit-mode.sh":
+- category: upstream
+  reason: "Watchexec honours parent .gitignore files and would silently never build without --ignore-nothing."
+  preview: "# What the host-side watcher watches and how. --ignore-nothing matters:…"
+  hash: b9745df16220111b
+  lines: 6
+- category: upstream
+  reason: "The server refuses a disagreeing prometheus port, and errexit does not apply inside command substitution."
+  preview: "# Copies the pod config with the probe port replaced; prints the path. …"
+  hash: 7f9faaa87d6d169e
+  lines: 5
+- category: upstream
+  reason: "Mirrord cannot serve a file to a statically linked Go yq on Linux, so a pipe is required."
+  preview: "# A pipe, not a path or redirect: mirrord cannot serve a file to a stat…"
+  hash: eced7a32c3e26064
+  lines: 1
+- category: upstream
+  reason: "MacOS cargo re-copies the binary on every no-op build, so inode cannot detect changes."
+  preview: "# Size and mtime, not inode: on macOS cargo re-copies the binary on eve…"
+  hash: 7c78913b1a4ca425
+  lines: 2
+- category: upstream
+  reason: "The CI image lacks ps and macOS lacks /proc, so both paths are needed."
+  preview: "# Command line of a process. /proc is authoritative on Linux and needs …"
+  hash: eba163a559b752c4
+  lines: 3
+- category: invariant
+  reason: "The lock protocol needs O_EXCL creation and claim-based stale removal, or a racer steals the lock."
+  preview: "# Every reloader declares the build watcher so that any subset of reloa…"
+  hash: a6adc54b625b4444
+  lines: 10
+- category: invariant
+  reason: "Lock race: a late racer can win after an earlier owner replaced the lock and dropped it."
+  preview: "# A late racer can win the claim after an earlier owner replaced the lo…"
+  hash: 49459f86047ffd89
+  lines: 1
+- category: tool-read
+  reason: "Shellcheck directive that the lint reads; removing it fails the shellcheck job."
+  preview: "# shellcheck disable=SC2012 # ls -t is the point; the paths carry no od…"
+  hash: 4cd7c619c82def92
+  lines: 1
+"scripts/dev/orbit-native-dev.sh":
+- category: upstream
+  reason: "Errexit does not apply inside $(...) on bash 3.2; a header-only overlay would run on embedded defaults."
+  preview: "# yq's status is checked explicitly: callers run this inside $(...), wh…"
+  hash: 1b436c506bcc0940
+  lines: 2
+- category: invariant
+  reason: "Restoring a zero replica count would park Orbit for good after a killed session."
+  preview: "# State file lines are `<deployment>=<replicas>`. A zero is never resto…"
+  hash: 41c9734ef3404d80
+  lines: 2
+- category: invariant
+  reason: "A RETURN trap does not run when errexit kills the shell; an orphaned forward confuses dev:connect."
+  preview: "# Runs a command with a ClickHouse port-forward if none is open (dev:se…"
+  hash: b1f1211fbd5b279d
+  lines: 4
+- category: security
+  reason: "Passing the password through env would show it in ps argv."
+  preview: "# Exported rather than passed through `env`, whose argv (password inclu…"
+  hash: e7d2b06b112c7d52
+  lines: 1
+"scripts/dev/run-unit-tests.sh":
+- category: upstream
+  reason: "Nextest skips doctests, and --all-features enables regenerate-protos, which writes into src/proto."
+  preview: "# Doctests: nextest does not run them. indexer/testkit gates items that"
+  hash: d7f40e1546bff1cf
+  lines: 3
+- category: upstream
+  reason: "Cargo exits 0 when doctests are ignored, so rustdoc's summary must be parsed."
+  preview: "# cargo exits 0 when doctests are ignored, so count them from rustdoc's…"
+  hash: 65c2335dfb2c4ec3
+  lines: 2
+"scripts/dev/tests/caproni-edit-mode_test.sh":
+- category: upstream
+  reason: "The trailing colon stops bash from exec'ing sleep in place of the sourced script."
+  preview: "# A live holder looks like a watcher that has not exec'd watchexec yet:…"
+  hash: b6c66f6932803575
+  lines: 2
+- category: upstream
+  reason: "MacOS SIP purges DYLD_* on exec of protected binaries, so the test shadows exec instead."
+  preview: "# launch_sets_library_path: a raw gkg-server needs the aws-lc-fips-sys …"
+  hash: 9177640eb63fbabc
+  lines: 5
+"scripts/linting/prose_lint.py":
+- category: upstream
+  reason: "GitLab sets the variable to an empty string outside merged-results pipelines, so a lookup default never applies."
+  preview: "# GitLab defines the variable as an empty string outside merged-results"
+  hash: 40a4786d80250e80
+  lines: 2
+"scripts/release/publish-manifest.sh":
+- category: security
+  reason: "Signing before any final tag exists keeps a moved registry tag out of the signed index."
+  preview: "# Publishes a multi-arch index from the digests the build jobs stored a…"
+  hash: 0e40381318ba94cd
+  lines: 3
+"scripts/release/sign-image.sh":
+- category: security
+  reason: "Keyless signing in forks would publish their path to Rekor; CI variables can be overridden."
+  preview: "# Signs image digests with keyless cosign and verifies each result."
+  hash: aa14ff52c297109c
+  lines: 7
+"scripts/release/upload-local-cli-release.sh":
+- category: upstream
+  reason: "Semantic-release creates the release after the tag pipeline starts, so asset-link calls must poll."
+  preview: "# semantic-release's @semantic-release/git plugin pushes the tag, which…"
+  hash: d47c74352020b7d0
+  lines: 3
