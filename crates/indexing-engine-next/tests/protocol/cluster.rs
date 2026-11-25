@@ -8,6 +8,7 @@ use indexing_engine_next::task::TaskId;
 use indexing_engine_next::testkit::simulation::{
     FaultBudget, MessageState, SimulatedBroker, SimulatedKeyValue, TickClock,
 };
+use indexing_engine_next::versioned::Versioned;
 use uuid::Uuid;
 
 pub use tlc::{StateGraph, StateId, read_spec_graph};
@@ -256,7 +257,7 @@ impl Cluster {
         }
     }
 
-    fn lease_entry(&self) -> indexing_engine_next::lease::LeaseEntry {
+    fn lease_entry(&self) -> Versioned<Lease> {
         self.lease.entry()
     }
 
@@ -493,9 +494,11 @@ impl Cluster {
         if let Some(c) = self.holders[h].held {
             self.broker.ack(c);
         }
+        let entry = self.lease_entry();
         let release = self
             .holds(h)
-            .and_then(|hold| hold.revision_to_release(&self.lease_entry()));
+            .filter(|hold| hold.still_holds(&entry))
+            .map(Hold::seen_revision);
         if let Some(expected) = release
             && self.lease.put(expected, None).is_ok()
         {}

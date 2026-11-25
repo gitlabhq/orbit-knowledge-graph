@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::task::{JoinError, JoinSet};
 
 use crate::builder::{Engine, Registry};
-use crate::event::{EngineEvent, Failure, LaneEvent, LaneStep, TaskStep};
+use crate::event::{EngineEvent, Failure, LaneEvent, LaneStep, Observer, TaskStep};
 use crate::lane::LaneId;
 use crate::lease::{HolderId, LeaseRules, Leases};
 use crate::ports::Ports;
@@ -19,11 +19,27 @@ struct Runner {
     registry: Arc<Registry>,
     pools: Arc<Pools>,
     ports: Ports,
+    observer: Arc<dyn Observer>,
     leases: Leases,
 }
 
-pub(crate) async fn serve(engine: &Engine, ports: Ports, holder: HolderId, rules: LeaseRules) {
-    let ports = ports.observed_by(&engine.observers);
+impl Engine {
+    pub async fn serve(
+        &self,
+        ports: Ports,
+        holder: HolderId,
+        rules: LeaseRules,
+    ) -> anyhow::Result<()> {
+        let queue = Arc::clone(&ports.queue);
+        tokio::select! {
+            () = serve_lanes(self, ports, holder, rules) => Ok(()),
+            closed = queue.wait_until_closed() => Err(closed),
+        }
+    }
+}
+
+async fn serve_lanes(engine: &Engine, ports: Ports, holder: HolderId, rules: LeaseRules) {
+    let observer = engine.build_observer();
     let pools = Pools::new(
         engine.registry.list_registered_pools().clone(),
         engine.config.pools.clone(),
@@ -31,8 +47,9 @@ pub(crate) async fn serve(engine: &Engine, ports: Ports, holder: HolderId, rules
     let runner = Arc::new(Runner {
         registry: Arc::clone(&engine.registry),
         pools: Arc::new(pools),
-        leases: Leases::new(&ports, holder, rules),
+        leases: Leases::new(&ports, Arc::clone(&observer), holder, rules),
         ports,
+        observer,
     });
 
     let mut lanes = JoinSet::new();
@@ -65,10 +82,7 @@ async fn serve_lane(runner: Arc<Runner>, lane: LaneId, slots: NonZeroU32) {
                     lane: lane.clone(),
                     step: LaneStep::PullFailed(Failure::new("pull_failed", error)),
                 };
-                runner
-                    .ports
-                    .observer
-                    .observe(&EngineEvent::Lane(pull_failed));
+                runner.observer.observe(&EngineEvent::Lane(pull_failed));
                 runner.ports.clock.sleep(PULL_RETRY).await;
                 continue;
             }
@@ -85,7 +99,7 @@ async fn serve_lane(runner: Arc<Runner>, lane: LaneId, slots: NonZeroU32) {
 
         for delivery in deliveries {
             let delivered = delivery.message.build_event(now, TaskStep::Delivered);
-            runner.ports.observer.observe(&delivered);
+            runner.observer.observe(&delivered);
             runs.spawn(Arc::clone(&runner).run_delivered_task(delivery));
         }
     }

@@ -10,8 +10,9 @@ use tokio::time::Instant;
 
 use super::{FaultBudget, SimulatedBroker, SimulatedKeyValue};
 use crate::event::{TaskEvent, TaskStep};
-use crate::lease::{Lease, Revision};
+use crate::lease::Lease;
 use crate::task::{TaskId, TaskMessage};
+use crate::versioned::Revision;
 
 pub(super) const TICK: Duration = Duration::from_secs(20);
 pub(super) const ACK_WAIT_TICKS: u64 = 2;
@@ -221,6 +222,10 @@ impl SharedWorld {
 }
 
 impl World {
+    pub(super) fn start_of_tick(&self, tick: u64) -> Instant {
+        self.started_at + TICK * u32::try_from(tick).unwrap_or(u32::MAX)
+    }
+
     pub(super) fn now_tick(&self) -> u64 {
         let elapsed = Instant::now().duration_since(self.started_at);
         u64::try_from(elapsed.as_millis() / TICK.as_millis()).unwrap_or(u64::MAX)

@@ -1,7 +1,7 @@
 #![deny(clippy::allow_attributes, clippy::allow_attributes_without_reason)]
 
 mod builder;
-mod clock;
+pub mod clock;
 mod config;
 mod disposition;
 mod event;
@@ -11,7 +11,7 @@ mod ledger;
 mod payload;
 mod pending;
 mod planner;
-mod ports;
+pub mod ports;
 pub mod prelude;
 mod reconciler;
 mod runner;
@@ -19,6 +19,7 @@ mod submit;
 pub mod task;
 pub mod testkit;
 mod trigger;
+pub mod versioned;
 mod worker;
 
 pub use builder::{BuildError, Engine, EngineBuilder};

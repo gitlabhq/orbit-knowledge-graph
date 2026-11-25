@@ -8,11 +8,12 @@ use rand::RngExt;
 use crate::clock::Clock;
 use crate::event::{EngineEvent, Observer};
 use crate::lane::LaneId;
-use crate::lease::{Lease, LeaseEntry, LeaseStore, LeaseWrite, Revision};
-use crate::pending::{PendingEntry, PendingStore, PendingWrite};
+use crate::lease::Lease;
 use crate::ports::Ports;
 use crate::task::{Delivery, InFlight, TaskMessage, TaskQueue, WorkerKey};
+use crate::versioned::{DeleteOutcome, Revision, Versioned, VersionedStore, WriteOutcome};
 
+use super::SimulatedKeyValue;
 use super::world::{Actor, SharedWorld, StepKind, ticks_in};
 
 struct SimulatedPorts {
@@ -36,9 +37,15 @@ pub(super) fn build_ports(world: &SharedWorld, actor: Actor) -> Ports {
         clock: ports.clone(),
         queue: ports.clone(),
         leases: ports.clone(),
-        pending: ports.clone(),
-        observer: ports,
+        pending: ports,
     }
+}
+
+pub(super) fn build_world_observer(world: &SharedWorld, actor: Actor) -> Arc<dyn Observer> {
+    Arc::new(SimulatedPorts {
+        world: world.clone(),
+        actor,
+    })
 }
 
 #[async_trait]
@@ -60,6 +67,7 @@ impl TaskQueue for SimulatedPorts {
         {
             let mut world = self.world.lock();
             if world.consume_planner_crash() {
+                world.record_planner_crash();
                 return Err(anyhow!("the planner crashed before it published the task"));
             }
             world.publish(&message);
@@ -102,6 +110,10 @@ impl TaskQueue for SimulatedPorts {
         self.world.stop_unless_allowed(self.actor).await;
         self.world.wait_for_ready_message().await;
     }
+
+    async fn wait_until_closed(&self) -> anyhow::Error {
+        std::future::pending().await
+    }
 }
 
 #[async_trait]
@@ -130,8 +142,8 @@ impl InFlight for SimulatedInFlight {
 }
 
 #[async_trait]
-impl LeaseStore for SimulatedPorts {
-    async fn read(&self, _key: &WorkerKey) -> anyhow::Result<LeaseEntry> {
+impl VersionedStore<Lease> for SimulatedPorts {
+    async fn read(&self, _key: &WorkerKey) -> anyhow::Result<Versioned<Lease>> {
         self.world.interleave_inside_step(self.actor).await;
         let world = self.world.lock();
         Ok(world.lease.entry())
@@ -141,52 +153,64 @@ impl LeaseStore for SimulatedPorts {
         &self,
         _key: &WorkerKey,
         expected: Revision,
-        lease: Option<&Lease>,
-    ) -> anyhow::Result<LeaseWrite> {
+        lease: &Lease,
+    ) -> anyhow::Result<WriteOutcome> {
         self.world.interleave_inside_step(self.actor).await;
         let mut world = self.world.lock();
         if let Actor::Process { index, .. } = self.actor
-            && lease.is_some()
             && world.consume_renewal_failure(index)
         {
             return Err(anyhow!("the renewal did not reach the key-value store"));
         }
-        match world.lease.put(expected, lease.cloned()) {
-            Ok(revision) => Ok(LeaseWrite::Written(revision)),
-            Err(_) => {
-                world.count("LeaseConflict");
-                Ok(LeaseWrite::Conflict)
-            }
+        let Some(written) = put_versioned(&mut world.lease, expected, Some(lease.clone())) else {
+            world.count("LeaseConflict");
+            return Ok(WriteOutcome::Conflict);
+        };
+        Ok(WriteOutcome::Written(written))
+    }
+
+    async fn delete(&self, _key: &WorkerKey, expected: Revision) -> anyhow::Result<DeleteOutcome> {
+        self.world.interleave_inside_step(self.actor).await;
+        let mut world = self.world.lock();
+        if put_versioned(&mut world.lease, expected, None).is_none() {
+            world.count("LeaseConflict");
+            return Ok(DeleteOutcome::Conflict);
         }
+        Ok(DeleteOutcome::Deleted)
     }
 }
 
 #[async_trait]
-impl PendingStore for SimulatedPorts {
-    async fn read(&self, _key: &WorkerKey) -> anyhow::Result<PendingEntry> {
+impl VersionedStore<TaskMessage> for SimulatedPorts {
+    async fn read(&self, _key: &WorkerKey) -> anyhow::Result<Versioned<TaskMessage>> {
         self.world.interleave_inside_step(self.actor).await;
         let world = self.world.lock();
-        Ok(PendingEntry {
-            task: world.pending.get().cloned(),
-            revision: world.pending.revision(),
-        })
+        Ok(world.pending.entry())
     }
 
     async fn write(
         &self,
         _key: &WorkerKey,
         expected: Revision,
-        task: Option<&TaskMessage>,
-    ) -> anyhow::Result<PendingWrite> {
+        task: &TaskMessage,
+    ) -> anyhow::Result<WriteOutcome> {
         self.world.interleave_inside_step(self.actor).await;
         let mut world = self.world.lock();
-        match world.pending.put(expected, task.cloned()) {
-            Ok(_) => Ok(PendingWrite::Written),
-            Err(_) => {
-                world.count("PendingConflict");
-                Ok(PendingWrite::Conflict)
-            }
+        let Some(written) = put_versioned(&mut world.pending, expected, Some(task.clone())) else {
+            world.count("PendingConflict");
+            return Ok(WriteOutcome::Conflict);
+        };
+        Ok(WriteOutcome::Written(written))
+    }
+
+    async fn delete(&self, _key: &WorkerKey, expected: Revision) -> anyhow::Result<DeleteOutcome> {
+        self.world.interleave_inside_step(self.actor).await;
+        let mut world = self.world.lock();
+        if put_versioned(&mut world.pending, expected, None).is_none() {
+            world.count("PendingConflict");
+            return Ok(DeleteOutcome::Conflict);
         }
+        Ok(DeleteOutcome::Deleted)
     }
 }
 
@@ -202,4 +226,12 @@ impl Observer for SimulatedPorts {
             EngineEvent::Lane(_) => {}
         }
     }
+}
+
+fn put_versioned<V>(
+    store: &mut SimulatedKeyValue<V>,
+    expected: Revision,
+    value: Option<V>,
+) -> Option<Revision> {
+    store.put(expected, value).ok()
 }

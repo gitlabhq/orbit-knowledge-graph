@@ -1,27 +1,14 @@
 use std::sync::Arc;
 
 use crate::clock::Clock;
-use crate::event::{LogObserver, Observer, Observers};
-use crate::lease::LeaseStore;
-use crate::pending::PendingStore;
-use crate::task::TaskQueue;
+use crate::lease::Lease;
+use crate::task::{TaskMessage, TaskQueue};
+use crate::versioned::VersionedStore;
 
 #[derive(Clone)]
-pub(crate) struct Ports {
-    pub(crate) clock: Arc<dyn Clock>,
-    pub(crate) queue: Arc<dyn TaskQueue>,
-    pub(crate) leases: Arc<dyn LeaseStore>,
-    pub(crate) pending: Arc<dyn PendingStore>,
-    pub(crate) observer: Arc<dyn Observer>,
-}
-
-impl Ports {
-    pub(crate) fn observed_by(self, observers: &[Arc<dyn Observer>]) -> Self {
-        let mut all: Vec<Arc<dyn Observer>> = vec![Arc::new(LogObserver), self.observer];
-        all.extend(observers.iter().cloned());
-        Self {
-            observer: Arc::new(Observers::new(all)),
-            ..self
-        }
-    }
+pub struct Ports {
+    pub clock: Arc<dyn Clock>,
+    pub queue: Arc<dyn TaskQueue>,
+    pub leases: Arc<dyn VersionedStore<Lease>>,
+    pub pending: Arc<dyn VersionedStore<TaskMessage>>,
 }

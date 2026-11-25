@@ -2,6 +2,7 @@ mod broker;
 mod faults;
 mod key_value;
 mod ports;
+mod simulated_nats;
 mod tick_clock;
 mod worker;
 mod world;
@@ -19,18 +20,16 @@ use crate::config::{EngineConfig, LaneConfig};
 use crate::event::Observer;
 use crate::lane::{Lane, LaneId};
 use crate::lease::{HolderId, LeaseRules};
-use crate::payload::{TaskInput, Tenant};
-use crate::runner::serve;
-use crate::submit::submit_task;
-use crate::task::TaskMessage;
+use crate::payload::Tenant;
 use crate::worker::Worker;
 
 pub use broker::{BrokerMessage, MessageState, SimulatedBroker};
 pub use faults::FaultBudget;
 pub use key_value::{RevisionConflict, SimulatedKeyValue};
+pub use simulated_nats::SimulatedNats;
 pub use tick_clock::TickClock;
 
-use ports::build_ports;
+use ports::{build_ports, build_world_observer};
 use worker::{SimulatedWrite, WriteInput};
 use world::{Actor, SharedWorld, StepOrder, TICK};
 
@@ -62,6 +61,7 @@ pub struct SimulationReport {
 
 struct Cluster {
     world: SharedWorld,
+    planner: Engine,
     processes: Vec<JoinHandle<()>>,
     restarts: Vec<usize>,
     observers: Vec<Arc<dyn Observer>>,
@@ -163,8 +163,16 @@ impl SimulationReport {
 
 impl Cluster {
     fn start(world: SharedWorld, processes: usize, observers: Vec<Arc<dyn Observer>>) -> Self {
+        let planner = build_engine(
+            &world,
+            Actor::Planner,
+            0,
+            EngineConfig::default(),
+            &observers,
+        );
         let mut cluster = Self {
             world,
+            planner,
             processes: Vec::new(),
             restarts: vec![0; processes],
             observers,
@@ -204,10 +212,12 @@ impl Cluster {
         if !drawn {
             return;
         }
-        let ports = build_ports(&self.world, Actor::Planner).observed_by(&self.observers);
-        if submit_task(&ports, build_write_message()).await.is_err() {
-            self.world.lock().record_planner_crash();
-        }
+        let ports = build_ports(&self.world, Actor::Planner);
+        let tenant = Tenant::new("simulation");
+        let _recorded_by_the_world = self
+            .planner
+            .submit::<SimulatedWrite>(&ports, tenant, &WriteInput, Lane::DEFAULT)
+            .await;
     }
 
     fn has_ended(&self, healed: bool) -> bool {
@@ -243,32 +253,40 @@ impl Cluster {
     fn spawn_process(&self, process: usize) -> JoinHandle<()> {
         let holder = HolderId::new(format!("p{}-{}", process + 1, self.restarts[process]));
         let actor = self.world.lock().start_process(process);
-        let worker = SimulatedWrite::new(&self.world, actor, process);
         let lane = LaneId::new(SimulatedWrite::NAME, Lane::DEFAULT);
         let config =
             EngineConfig::default().with_lane(lane, LaneConfig::new(NonZeroU32::MIN, LANE_TIMEOUT));
-        let observers = self.observers.clone();
-        let engine = match Engine::builder()
-            .config(config)
-            .module(|module| {
-                module.worker(worker);
-                for observer in observers {
-                    module.observer(observer);
-                }
-            })
-            .build()
-        {
-            Ok(engine) => engine,
-            Err(error) => panic!("the simulated engine failed to build: {error}"),
-        };
+        let engine = build_engine(&self.world, actor, process, config, &self.observers);
         let ports = build_ports(&self.world, actor);
-        tokio::spawn(async move { serve(&engine, ports, holder, RULES).await })
+        tokio::spawn(async move {
+            if let Err(error) = engine.serve(ports, holder, RULES).await {
+                panic!("the simulated task queue never closes, yet it did: {error:#}");
+            }
+        })
     }
 }
 
-fn build_write_message() -> TaskMessage {
-    match TaskInput::encode::<SimulatedWrite>(&WriteInput) {
-        Ok(input) => TaskMessage::from_input(Tenant::new("simulation"), input, Lane::DEFAULT),
-        Err(error) => panic!("the simulated input failed to encode: {error}"),
+fn build_engine(
+    world: &SharedWorld,
+    actor: Actor,
+    process: usize,
+    config: EngineConfig,
+    observers: &[Arc<dyn Observer>],
+) -> Engine {
+    let worker = SimulatedWrite::new(world, actor, process);
+    let world_observer = build_world_observer(world, actor);
+    let built = Engine::builder()
+        .config(config)
+        .module(|module| {
+            module.worker(worker);
+            module.observer(world_observer);
+            for observer in observers {
+                module.observer(Arc::clone(observer));
+            }
+        })
+        .build();
+    match built {
+        Ok(engine) => engine,
+        Err(error) => panic!("the simulated engine failed to build: {error}"),
     }
 }

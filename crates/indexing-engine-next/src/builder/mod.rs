@@ -4,7 +4,7 @@ mod validate;
 use std::sync::Arc;
 
 use crate::config::EngineConfig;
-use crate::event::Observer;
+use crate::event::{LogObserver, Observer, Observers};
 use crate::planner::Planner;
 use crate::reconciler::Reconciler;
 use crate::worker::Worker;
@@ -34,6 +34,12 @@ pub struct EngineBuilder {
 impl Engine {
     pub fn builder() -> EngineBuilder {
         EngineBuilder::default()
+    }
+
+    pub(crate) fn build_observer(&self) -> Arc<dyn Observer> {
+        let mut observers: Vec<Arc<dyn Observer>> = vec![Arc::new(LogObserver)];
+        observers.extend(self.observers.iter().cloned());
+        Arc::new(Observers::new(observers))
     }
 }
 

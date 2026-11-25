@@ -1,12 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::builder::EngineBuilder;
-use crate::lane::LaneId;
+use crate::lane::{LaneId, is_valid_name};
 use crate::trigger::Trigger;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum BuildError {
-    #[error("the {kind} name {name:?} must not be empty, and must not hold a slash or a space")]
+    #[error(
+        "the {kind} name {name:?} must be parts of lowercase letters, digits, - or _ joined by dots"
+    )]
     InvalidName { kind: &'static str, name: String },
     #[error("two of the registered {kind}s have the name {name}")]
     DuplicateName { kind: &'static str, name: String },
@@ -109,7 +111,7 @@ fn reject_invalid_or_duplicate(
 ) -> Result<(), BuildError> {
     let mut seen = BTreeSet::new();
     for name in names {
-        if name.is_empty() || name.contains(['/', ' ']) {
+        if !is_valid_name(name) {
             return Err(BuildError::InvalidName {
                 kind,
                 name: name.to_owned(),

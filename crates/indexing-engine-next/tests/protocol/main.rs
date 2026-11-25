@@ -8,10 +8,9 @@ use cluster::{
     Bounds, SMALL_CLUSTER, SMALL_CLUSTER_WITH_DUPLICATE, SMALL_CLUSTER_WITH_NATS_WIPE,
     SMALL_CLUSTER_WITH_TWO_TASKS, StateGraph, explore_graph, read_spec_graph,
 };
-use indexing_engine_next::lease::{
-    Claim, HolderId, Lease, LeaseEntry, LeaseRules, Renewal, Revision,
-};
+use indexing_engine_next::lease::{Claim, HolderId, Lease, LeaseRules, Renewal};
 use indexing_engine_next::task::TaskId;
+use indexing_engine_next::versioned::{Revision, Versioned};
 use uuid::Uuid;
 
 const SMALL_CLUSTERS: [(&str, Bounds); 4] = [
@@ -39,9 +38,9 @@ fn holder(name: &str) -> HolderId {
     HolderId::new(name)
 }
 
-fn held_by(name: &str, expires_at: u64, revision: u64) -> LeaseEntry {
-    LeaseEntry {
-        lease: Some(Lease {
+fn held_by(name: &str, expires_at: u64, revision: u64) -> Versioned<Lease> {
+    Versioned {
+        value: Some(Lease {
             holder: holder(name),
             expires_at: at(expires_at),
         }),
@@ -145,11 +144,8 @@ fn a_renewal_is_lost_once_another_holder_took_the_lease() {
         hold.build_renewal(&RULES, &held_by("p2", 200, 5), at(90)),
         Renewal::Lost
     );
-    assert_eq!(hold.revision_to_release(&held_by("p2", 200, 5)), None);
-    assert_eq!(
-        hold.revision_to_release(&held_by("p1", 70, 4)),
-        Some(Revision(4))
-    );
+    assert!(!hold.still_holds(&held_by("p2", 200, 5)));
+    assert!(hold.still_holds(&held_by("p1", 70, 4)));
 }
 
 #[test]
@@ -164,7 +160,7 @@ fn a_renewal_is_lost_once_the_same_holder_took_the_lease_again_for_another_run()
         hold.build_renewal(&RULES, &held_by("p1", 200, 6), at(90)),
         Renewal::Lost
     );
-    assert_eq!(hold.revision_to_release(&held_by("p1", 200, 6)), None);
+    assert!(!hold.still_holds(&held_by("p1", 200, 6)));
 }
 
 #[test]

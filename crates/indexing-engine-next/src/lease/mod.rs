@@ -3,27 +3,22 @@ mod store;
 
 use std::time::SystemTime;
 
+use serde::{Deserialize, Serialize};
+
 pub use rules::{Claim, Hold, LeaseRules, Renewal};
 
-pub(crate) use store::{Acquisition, LeaseStore, LeaseWrite, Leases};
+pub(crate) use store::{Acquisition, Leases};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+use crate::versioned::{Revision, Versioned};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lease {
     pub holder: HolderId,
     pub expires_at: SystemTime,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct HolderId(String);
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LeaseEntry {
-    pub lease: Option<Lease>,
-    pub revision: Revision,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Revision(pub u64);
 
 impl HolderId {
     pub fn new(id: impl Into<String>) -> Self {
@@ -35,11 +30,11 @@ impl HolderId {
     }
 }
 
-impl LeaseEntry {
+impl Versioned<Lease> {
     fn is_held_by(&self, holder: &HolderId, revision: Revision) -> bool {
         self.revision == revision
             && self
-                .lease
+                .value
                 .as_ref()
                 .is_some_and(|lease| lease.holder == *holder)
     }

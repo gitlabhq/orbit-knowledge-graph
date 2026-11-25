@@ -1,12 +1,12 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use indexing_engine_next::lease::Revision;
 use indexing_engine_next::task::TaskId;
 use indexing_engine_next::testkit::simulation::{
     FaultBudget, MessageState, RevisionConflict, SimulatedBroker, SimulatedKeyValue, Simulation,
     SimulationReport, TickClock,
 };
+use indexing_engine_next::versioned::Revision;
 use indexing_engine_next::{EngineEvent, Observer, TaskEvent, TaskStep, Tenant};
 use uuid::Uuid;
 

@@ -1,4 +1,4 @@
-use crate::lease::{Lease, LeaseEntry, Revision};
+use crate::versioned::{Revision, Versioned};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RevisionConflict {
@@ -50,10 +50,10 @@ impl<V> SimulatedKeyValue<V> {
     }
 }
 
-impl SimulatedKeyValue<Lease> {
-    pub fn entry(&self) -> LeaseEntry {
-        LeaseEntry {
-            lease: self.value.clone(),
+impl<V: Clone> SimulatedKeyValue<V> {
+    pub fn entry(&self) -> Versioned<V> {
+        Versioned {
+            value: self.value.clone(),
             revision: self.revision,
         }
     }

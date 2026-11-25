@@ -50,8 +50,16 @@ fn lane() -> LaneConfig {
 }
 
 #[test]
-fn a_name_must_not_be_empty_or_hold_a_slash_or_a_space() {
-    for name in ["", "parse/big", "parse big"] {
+fn a_name_must_be_lowercase_parts_joined_by_dots() {
+    for name in [
+        "",
+        "parse/big",
+        "parse big",
+        "Parse",
+        "parse..big",
+        ".parse",
+        "parse*",
+    ] {
         let built = Engine::builder()
             .module(|engine| {
                 engine.pool(name);

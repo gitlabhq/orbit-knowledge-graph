@@ -1,29 +1,12 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use async_trait::async_trait;
-
-use super::{Claim, Hold, HolderId, Lease, LeaseEntry, LeaseRules, Renewal, Revision};
+use super::{Claim, Hold, HolderId, Lease, LeaseRules, Renewal};
 use crate::clock::Clock;
 use crate::event::{Failure, Observer, TaskStep};
 use crate::ports::Ports;
 use crate::task::{InFlight, TaskMessage, WorkerKey};
-
-#[async_trait]
-pub(crate) trait LeaseStore: Send + Sync {
-    async fn read(&self, key: &WorkerKey) -> anyhow::Result<LeaseEntry>;
-    async fn write(
-        &self,
-        key: &WorkerKey,
-        expected: Revision,
-        lease: Option<&Lease>,
-    ) -> anyhow::Result<LeaseWrite>;
-}
-
-pub(crate) enum LeaseWrite {
-    Written(Revision),
-    Conflict,
-}
+use crate::versioned::{DeleteOutcome, VersionedStore, WriteOutcome};
 
 pub(crate) enum Acquisition {
     Held(Hold),
@@ -36,7 +19,7 @@ enum Extension {
 }
 
 pub(crate) struct Leases {
-    store: Arc<dyn LeaseStore>,
+    store: Arc<dyn VersionedStore<Lease>>,
     clock: Arc<dyn Clock>,
     observer: Arc<dyn Observer>,
     holder: HolderId,
@@ -44,11 +27,16 @@ pub(crate) struct Leases {
 }
 
 impl Leases {
-    pub(crate) fn new(ports: &Ports, holder: HolderId, rules: LeaseRules) -> Self {
+    pub(crate) fn new(
+        ports: &Ports,
+        observer: Arc<dyn Observer>,
+        holder: HolderId,
+        rules: LeaseRules,
+    ) -> Self {
         Self {
             store: Arc::clone(&ports.leases),
             clock: Arc::clone(&ports.clock),
-            observer: Arc::clone(&ports.observer),
+            observer,
             holder,
             rules,
         }
@@ -120,11 +108,11 @@ impl Leases {
 
     pub(crate) async fn release(&self, hold: &Hold, key: &WorkerKey) -> anyhow::Result<bool> {
         let entry = self.store.read(key).await?;
-        let Some(revision) = hold.revision_to_release(&entry) else {
+        if !hold.still_holds(&entry) {
             return Ok(false);
-        };
-        let written = self.store.write(key, revision, None).await?;
-        Ok(matches!(written, LeaseWrite::Written(_)))
+        }
+        let deleted = self.store.delete(key, hold.seen_revision()).await?;
+        Ok(matches!(deleted, DeleteOutcome::Deleted))
     }
 
     async fn take_if_free(
@@ -137,11 +125,11 @@ impl Leases {
         let Some(lease) = claim.lease_if_free(&self.rules, &entry, now) else {
             return Ok(None);
         };
-        let written = self.store.write(key, entry.revision, Some(&lease)).await?;
-        let LeaseWrite::Written(revision) = written else {
+        let written = self.store.write(key, entry.revision, &lease).await?;
+        let WriteOutcome::Written(written) = written else {
             return Ok(None);
         };
-        Ok(Some(claim.into_hold(&self.rules, &lease, revision, now)))
+        Ok(Some(claim.into_hold(&self.rules, &lease, written, now)))
     }
 
     async fn extend_if_ours(
@@ -155,11 +143,11 @@ impl Leases {
             Renewal::Extend(lease) => lease,
             Renewal::Lost => return Ok(Extension::Lost),
         };
-        let written = self.store.write(key, entry.revision, Some(&lease)).await?;
-        let LeaseWrite::Written(revision) = written else {
+        let written = self.store.write(key, hold.seen_revision(), &lease).await?;
+        let WriteOutcome::Written(written) = written else {
             return Ok(Extension::Lost);
         };
-        hold.record_renewal(&self.rules, &lease, revision, now);
+        hold.record_renewal(&self.rules, &lease, written, now);
         Ok(Extension::Extended)
     }
 }

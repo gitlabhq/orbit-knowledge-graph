@@ -1,7 +1,8 @@
 use std::time::{Duration, SystemTime};
 
-use super::{HolderId, Lease, LeaseEntry, Revision};
+use super::{HolderId, Lease};
 use crate::task::TaskId;
+use crate::versioned::{Revision, Versioned};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LeaseRules {
@@ -39,10 +40,10 @@ impl Claim {
     pub fn lease_if_free(
         &self,
         rules: &LeaseRules,
-        entry: &LeaseEntry,
+        entry: &Versioned<Lease>,
         local_now: SystemTime,
     ) -> Option<Lease> {
-        let free = match &entry.lease {
+        let free = match &entry.value {
             None => true,
             Some(lease) => local_now >= lease.expires_at + rules.skew_margin,
         };
@@ -74,10 +75,10 @@ impl Hold {
     pub fn build_renewal(
         &self,
         rules: &LeaseRules,
-        entry: &LeaseEntry,
+        entry: &Versioned<Lease>,
         local_now: SystemTime,
     ) -> Renewal {
-        if entry.is_held_by(&self.holder, self.seen) {
+        if self.still_holds(entry) {
             Renewal::Extend(rules.lease_for(&self.holder, local_now))
         } else {
             Renewal::Lost
@@ -96,10 +97,8 @@ impl Hold {
         self.renew_at = local_now + rules.renew_every;
     }
 
-    pub fn revision_to_release(&self, entry: &LeaseEntry) -> Option<Revision> {
-        entry
-            .is_held_by(&self.holder, self.seen)
-            .then_some(entry.revision)
+    pub fn still_holds(&self, entry: &Versioned<Lease>) -> bool {
+        entry.is_held_by(&self.holder, self.seen)
     }
 
     pub fn task(&self) -> TaskId {

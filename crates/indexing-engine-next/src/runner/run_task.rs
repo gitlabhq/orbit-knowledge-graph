@@ -71,9 +71,7 @@ impl Runner {
         let now = self.ports.clock.now().await;
         let cleared_pending = self.ports.pending.clear_if_still_pending(message).await?;
         let started = TaskStep::Started { cleared_pending };
-        self.ports
-            .observer
-            .observe(&message.build_event(now, started));
+        self.observer.observe(&message.build_event(now, started));
         Ok(now)
     }
 
@@ -82,7 +80,7 @@ impl Runner {
         for child in outcome.children {
             let child =
                 TaskMessage::from_input(message.tenant.clone(), child, message.lane.clone());
-            if let Err(error) = submit_task(&self.ports, child).await {
+            if let Err(error) = submit_task(&self.ports, self.observer.as_ref(), child).await {
                 return self
                     .abandon_run(message, "child_submit_failed", error)
                     .await;
@@ -104,23 +102,17 @@ impl Runner {
             false
         });
         let finished = TaskStep::Finished { released_lease };
-        self.ports
-            .observer
-            .observe(&message.build_event(now, finished));
+        self.observer.observe(&message.build_event(now, finished));
     }
 
     async fn abandon_run(&self, message: &TaskMessage, kind: &'static str, error: impl Display) {
         let now = self.ports.clock.now().await;
         let abandoned = TaskStep::Abandoned(Failure::new(kind, error));
-        self.ports
-            .observer
-            .observe(&message.build_event(now, abandoned));
+        self.observer.observe(&message.build_event(now, abandoned));
     }
 
     fn observe_port_call_failure(&self, message: &TaskMessage, at: SystemTime, failure: Failure) {
         let failed = TaskStep::PortCallFailed(failure);
-        self.ports
-            .observer
-            .observe(&message.build_event(at, failed));
+        self.observer.observe(&message.build_event(at, failed));
     }
 }

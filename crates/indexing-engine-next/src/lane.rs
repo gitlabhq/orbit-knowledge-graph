@@ -2,9 +2,9 @@ use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Lane(Cow<'static, str>);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
@@ -62,7 +62,7 @@ impl FromStr for LaneId {
     fn from_str(id: &str) -> Result<Self, Self::Err> {
         let invalid = || InvalidLaneId(id.to_owned());
         let (worker, lane) = id.split_once('/').ok_or_else(invalid)?;
-        if worker.is_empty() || lane.is_empty() || lane.contains('/') {
+        if !is_valid_name(worker) || !is_valid_name(lane) {
             return Err(invalid());
         }
         Ok(Self::new(worker, Lane(Cow::Owned(lane.to_owned()))))
@@ -75,4 +75,13 @@ impl TryFrom<String> for LaneId {
     fn try_from(id: String) -> Result<Self, Self::Error> {
         id.parse()
     }
+}
+
+pub(crate) fn is_valid_name(name: &str) -> bool {
+    name.split('.').all(|part| {
+        !part.is_empty()
+            && part
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+    })
 }
