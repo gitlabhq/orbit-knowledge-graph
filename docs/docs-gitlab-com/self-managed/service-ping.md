@@ -16,7 +16,7 @@ title: Set up Service Ping for GitLab Orbit
 GitLab Orbit reports its usage through [Service Ping](https://docs.gitlab.com/administration/settings/usage_statistics/).
 On GitLab Self-Managed, two components next to GitLab Orbit do this:
 
-- The Data Insights Platform (DIP) receives the usage events from GitLab Orbit and stores them in ClickHouse on your cluster.
+- The Data Insights Platform (DIP) receives the usage events from GitLab Orbit and stores them in ClickHouse.
 - The Service Ping exporter counts them once a week and sends the counts to `version.gitlab.com`.
 
 Raw events are never sent to GitLab. They stay in the ClickHouse database that DIP writes to.
@@ -27,8 +27,10 @@ GitLab Orbit still sends its usage events to DIP, and ClickHouse stores them, un
 Prerequisites:
 
 - GitLab Orbit 1.3.0 or later, with Helm chart 7.1.0 or later.
-- GitLab 19.6 or later. <!-- TODO: name the first GitLab version with gitlab-org/gitlab!273677 (19.7, or the 19.6 patch release if it is backported). Before it, the exporter sends no Orbit metrics unless Enable Registration Features is on. -->
+- GitLab 19.6 or later.
   The exporter reads the Service Ping settings through an API that earlier versions do not have.
+  On GitLab 19.6, also turn on **Enable Registration Features** under **Admin** > **Settings** > **Metrics and profiling** > **Usage statistics**. Without it, the exporter sends no GitLab Orbit metrics. GitLab 19.7 and later do not need it.
+  <!-- TODO: name the 19.6 patch release here once gitlab-org/gitlab!273677 is backported. -->
 - The NATS server and the ClickHouse server that GitLab Orbit uses.
 - A ClickHouse account that can create databases and users, for the DIP migrations.
 - Outbound HTTPS from the exporter pod to `version.gitlab.com`.
@@ -186,6 +188,7 @@ To install the exporter:
 
    - `<gitlab_url>`: A GitLab address that goes through Workhorse: the public URL of your GitLab instance, or, when the exporter runs in the GitLab cluster, the `webservice` Service's Workhorse port, for example `http://<release>-webservice-default.<gitlab_namespace>.svc:8181`.
      The exporter chart has no setting for a custom CA, host aliases, or a proxy. The exporter pod must resolve this address and trust its certificate with its default settings.
+     With the `http://` address inside the cluster, every run logs a warning that the token is sent unencrypted. This is expected.
    - `<clickhouse_host>`: The host name of your ClickHouse server.
    - `<orbit_version>`: The GitLab Orbit version you run, 1.3.0 or later. Use the same value you set as `image.tag` in [Point GitLab Orbit at the Data Insights Platform](#point-gitlab-orbit-at-the-data-insights-platform). To see the version that runs today:
 
@@ -209,6 +212,7 @@ Then set `command: run` and upgrade the release.
 From then on the CronJob posts every Monday at 03:00 UTC.
 
 For ClickHouse over TLS, store a full DSN for the `serviceping_exporter` user under the key `CLICKHOUSE_DSN` in a Secret, for example `clickhouse://serviceping_exporter:<exporter_password>@<clickhouse_host>:9440?secure=true`. Then set `clickhouse.existingSecret` to its name instead of `clickhouse.host` and `clickhouse.passwordSecret`.
+The exporter cannot trust a private CA for ClickHouse either, so the ClickHouse certificate must be signed by a public CA.
 For every value, see the [exporter chart](https://gitlab.com/gitlab-org/analytics-section/analytics-instrumentation/serviceping-exporter/-/tree/main/charts/serviceping-exporter).
 
 ## Point GitLab Orbit at the Data Insights Platform
@@ -266,6 +270,7 @@ To verify the setup:
    A window closes on Monday at 00:00 UTC, so the first payload appears after the first Monday that follows your first event.
    Until then, the log shows `nothing to send`.
    If Service Ping or **Include optional data in Service Ping** is off in GitLab, the log shows `nothing to send, the Service Ping settings allow no metrics`, because every GitLab Orbit metric is optional.
+   On GitLab 19.6, the log shows the same line while **Enable Registration Features** is off.
    To change it, see [Usage statistics](https://docs.gitlab.com/administration/settings/usage_statistics/).
 
 ## Upgrade
