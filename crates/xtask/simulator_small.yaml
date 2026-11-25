@@ -1,6 +1,3 @@
-# Small simulator configuration for query plan analysis
-# ~1M edges, ~100k nodes - enough for EXPLAIN to show real plans
-
 clickhouse:
   url: http://localhost:8123
   database: default
@@ -158,7 +155,5 @@ evaluation:
   output:
     format: text
 
-  # ClickHouse query-level SETTINGS appended to every evaluated query.
-  # These are passed as key=value pairs in the SETTINGS clause.
   settings:
     join_algorithm: full_sorting_merge

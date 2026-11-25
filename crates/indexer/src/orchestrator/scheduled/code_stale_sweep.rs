@@ -67,7 +67,6 @@ impl CodeStaleSweep {
         }
     }
 
-    /// Capped per tick so a burst of drained namespaces cannot hold up the next dispatch ticks.
     pub async fn run_for_drained(&self, drained_paths: &[TraversalPath]) -> Result<(), TaskError> {
         if drained_paths.is_empty() || self.sweeps_per_tick == 0 {
             return Ok(());

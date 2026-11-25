@@ -1,15 +1,4 @@
 #!/usr/bin/env bash
-#
-# Stale merge-request sweeper. Runs from a daily scheduled pipeline.
-#
-# Phase 1 (warn):  open MRs idle >= STALE_IDLE_DAYS get the
-#                  "<prefix>::scheduled_for_closing" label and a warning comment.
-# Phase 2 (act):   MRs already carrying that label are closed once it has been
-#                  present >= STALE_GRACE_DAYS, unless the author opted out with
-#                  "<prefix>::keep" or activity resumed (then the label is removed).
-#
-# State lives entirely in GitLab labels, so the job is stateless and idempotent.
-# Set DRY_RUN=true to log decisions without mutating anything.
 
 set -euo pipefail
 

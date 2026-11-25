@@ -1,9 +1,5 @@
 name: "Python: relative import depth resolution (one-dot, two-dot, bare-dot)"
 
-# Exercises resolve_python_relative_import for multi-level relative imports.
-# The one-dot case is already covered by relative_imports.yaml; this suite
-# focuses on two-dot, bare-dot, and unresolvable paths.
-
 fixtures:
   - path: pkg/__init__.py
     content: ""

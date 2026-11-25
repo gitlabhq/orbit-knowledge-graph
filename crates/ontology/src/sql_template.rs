@@ -1,7 +1,3 @@
-//! Single MiniJinja entry point for every ontology SQL template — `.sql.j2`
-//! extracts, extract filters, and refreshable-view selects — so callers share
-//! one strict-undefined environment instead of hand-rolled marker substitution.
-
 use std::collections::HashSet;
 
 use minijinja::{Environment, UndefinedBehavior};

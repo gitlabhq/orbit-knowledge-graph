@@ -1,11 +1,3 @@
-//! Pinned versions from `config/versions.yaml`, embedded at compile time.
-//! Dependency-light on purpose so build scripts can use it too.
-//!
-//! Format and security constraints (key patterns, hex lengths, path
-//! restrictions) are enforced by `config/schemas/versions.schema.json`
-//! and validated in CI. The Rust structs provide typed access and
-//! `deny_unknown_fields` catches structural drift at compile time.
-
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
@@ -35,7 +27,6 @@ pub struct VendoredDependency {
 pub static VERSIONS: LazyLock<Versions> =
     LazyLock::new(|| parse(include_str!(env!("VERSIONS_FILE"))).expect("config/versions.yaml"));
 
-/// Parses any revision's `versions.yaml` text, e.g. `git show` output.
 pub fn parse(yaml: &str) -> Result<Versions, serde_saphyr::Error> {
     serde_saphyr::from_str(yaml)
 }

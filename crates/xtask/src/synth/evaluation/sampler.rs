@@ -88,8 +88,6 @@ impl ParameterSampler {
         Ok(ids.sample(&mut rng, count).copied().collect())
     }
 
-    /// Ensures sampled IDs exist within the security context's scope,
-    /// preventing empty results from path mismatches.
     pub async fn random_ids_in_path(
         &self,
         entity: &str,
@@ -123,8 +121,6 @@ impl ParameterSampler {
         Ok(ids)
     }
 
-    /// Fallback when path-scoped sampling returns no results,
-    /// ensuring we still sample from the correct organization.
     pub async fn random_ids_in_org(
         &self,
         entity: &str,
@@ -187,8 +183,6 @@ impl ParameterSampler {
         Ok(values)
     }
 
-    /// Returns (org_id, traversal_path) pairs.
-    /// The first segment of traversal_path is the org_id.
     pub async fn sample_traversal_paths(
         &self,
         namespace_entity: &str,

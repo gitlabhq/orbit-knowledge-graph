@@ -1,5 +1,3 @@
-# config/ontology/nodes/core/user.yaml
-
 node_type: User
 domain: core
 global: true

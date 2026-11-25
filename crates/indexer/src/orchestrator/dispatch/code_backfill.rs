@@ -1,6 +1,3 @@
-//! Shared, trigger-agnostic code-backfill operations: namespace/project
-//! enumeration, checkpoint filtering, and publishing code-indexing requests.
-
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -84,7 +81,6 @@ impl CodeBackfill {
         }
     }
 
-    /// Uncapped, a namespace larger than the window holds the work queue until it drains.
     fn share_per_namespace(&self, namespaces: usize) -> usize {
         let active = match self.namespaces_with_pending.load(Ordering::Relaxed) {
             0 => namespaces,
@@ -100,7 +96,6 @@ impl CodeBackfill {
     pub async fn dispatch_enabled(&self, dispatch_id: Uuid) -> Result<DispatchOutcome, TaskError> {
         let enabled = self.fetch_enabled_namespaces().await?;
         let outcome = self.dispatch_for_namespaces(&enabled, dispatch_id).await?;
-        // Only this path sees the whole fleet; a CDC dispatch carries a handful of namespaces.
         self.namespaces_with_pending.store(
             enabled.len().saturating_sub(outcome.drained_paths.len()),
             Ordering::Relaxed,
@@ -116,7 +111,6 @@ impl CodeBackfill {
         let mut outcome = DispatchOutcome::default();
         let mut window: Vec<PendingProject> = Vec::new();
         let share = self.share_per_namespace(namespaces.len());
-        // Random order so the remainder does not always fall on the same namespaces.
         let mut order: Vec<usize> = (0..namespaces.len()).collect();
         order.shuffle(&mut rand::rng());
         for index in order {
@@ -213,7 +207,6 @@ impl CodeBackfill {
         traversal_path: &TraversalPath,
         share: usize,
     ) -> Result<Vec<PendingProject>, TaskError> {
-        // Checkpoints first so each project batch is filtered on arrival, holding only the remainder.
         let checkpointed = self.fetch_checkpointed_project_ids(traversal_path).await?;
         let (projects, already_checkpointed) = self
             .fetch_pending_projects(traversal_path, &checkpointed, share)
@@ -236,7 +229,6 @@ impl CodeBackfill {
         Ok(projects)
     }
 
-    /// Shuffled so FIFO consumption interleaves the namespaces in a window instead of draining one first.
     async fn publish_window(
         &self,
         window: &mut Vec<PendingProject>,
@@ -264,7 +256,6 @@ impl CodeBackfill {
                 TaskError::new(error)
             })?;
 
-            // Recorded as they happen so a failure mid-batch cannot drop what is already on the wire.
             match self.nats.publish(&subscription, &envelope).await {
                 Ok(()) => {
                     outcome.dispatched += 1;

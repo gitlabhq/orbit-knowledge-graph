@@ -1,5 +1,3 @@
-# config/ontology/nodes/code_review/merge_request_diff.yaml
-
 node_type: MergeRequestDiff
 domain: code_review
 description: A snapshot of changes (commits and file diffs) associated with a merge request at a point in time

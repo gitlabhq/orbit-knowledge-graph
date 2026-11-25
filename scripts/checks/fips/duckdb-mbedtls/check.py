@@ -1,15 +1,4 @@
 #!/usr/bin/env python3
-"""Pins every place the compiled DuckDB code reaches mbedtls.
-
-DuckDB links mbedtls into gkg-server unconditionally. This check scans the sources and
-headers that the locked libduckdb-sys version compiles, counts each mbedtls entry point per
-file, and compares the counts with uses.tsv, where every entry carries a
-reviewed category. A DuckDB upgrade that adds, moves, or repeats an entry point fails until
-someone reviews it.
-
-Run it with `mise run fips:duckdb:check`. Pass --update to rewrite the pins for the locked version.
-"""
-
 import argparse
 import json
 import posixpath
@@ -19,6 +8,17 @@ import sys
 import tarfile
 from collections import Counter
 from pathlib import Path
+
+USAGE = """Pins every place the compiled DuckDB code reaches mbedtls.
+
+DuckDB links mbedtls into gkg-server unconditionally. This check scans the sources and
+headers that the locked libduckdb-sys version compiles, counts each mbedtls entry point per
+file, and compares the counts with uses.tsv, where every entry carries a
+reviewed category. A DuckDB upgrade that adds, moves, or repeats an entry point fails until
+someone reviews it.
+
+Run it with `mise run fips:duckdb:check`. Pass --update to rewrite the pins for the locked version.
+"""
 
 PINS = Path(__file__).with_name("uses.tsv")
 UNREVIEWED = "unreviewed"
@@ -137,7 +137,7 @@ def write_pins(version: str, found: Counter[tuple[str, str]], pins: dict[tuple[s
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=USAGE.splitlines()[0])
     parser.add_argument("--update", action="store_true", help="rewrite the pins for the locked version")
     args = parser.parse_args()
 

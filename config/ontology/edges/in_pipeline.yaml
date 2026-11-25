@@ -1,5 +1,3 @@
-# config/ontology/edges/in_pipeline.yaml
-
 description: Entity belongs to a pipeline
 table: gl_ci_edge
 

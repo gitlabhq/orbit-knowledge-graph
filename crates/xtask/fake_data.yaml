@@ -1,10 +1,3 @@
-# Fake data configuration for the simulator.
-#
-# Controls string pools, boolean probabilities, integer ranges, AND the
-# classification rules that decide which generator strategy applies to each
-# ontology field. Edit this file to change generated values or add new
-# field-specific behaviour without recompilation.
-
 strings:
   pools:
     name_prefixes:
@@ -60,9 +53,6 @@ strings:
       - "main/branch-"
       - "develop/branch-"
 
-  # Classification rules for string fields (first match wins).
-  # Each rule checks if the lowercased field name contains any pattern.
-  # Fields that match no rule get the generic_string generator.
   classify:
     - contains: [name, title]
       kind: name_or_title
@@ -83,8 +73,6 @@ strings:
     - contains: [ref, branch]
       kind: ref_or_branch
 
-# Boolean probabilities (0.0–1.0) keyed by lowercased field name.
-# Fields not listed here use `default`.
 bools:
   default: 0.50
   fields:
@@ -99,8 +87,6 @@ bools:
     discussion_locked: 0.05
     tag: 0.10
 
-# Integer ranges [min, max] (inclusive) keyed by lowercased field name.
-# Fields not listed here use `default`.
 ints:
   default: [1, 99999]
   fields:

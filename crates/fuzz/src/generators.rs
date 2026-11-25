@@ -1,7 +1,3 @@
-//! Generates JSON query strings that conform to (or partially conform to)
-//! the GKG query DSL schema, allowing fuzzing to reach deeper compiler logic
-//! beyond initial JSON parsing.
-
 use bolero::generator::TypeGenerator;
 use bolero::generator::bolero_generator::Driver;
 use compiler::Ontology;

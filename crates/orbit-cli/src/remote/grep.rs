@@ -13,7 +13,6 @@ use super::error::{EXIT_FORBIDDEN, EXIT_GENERIC, EXIT_UNAVAILABLE, RemoteError};
 use super::retry::Policy;
 use super::server_schema::{Anchor, Entities, Entity};
 
-/// Node kinds that GitLab grep searches. The API maps a kind to its scope, so requests send kinds as-is.
 const SEARCHED_KINDS: &[&str] = &[
     "WorkItem",
     "MergeRequest",
@@ -27,7 +26,6 @@ const SEARCHED_KINDS: &[&str] = &[
 ];
 const BRANCH: &str = "Branch";
 const MAX_SEARCHES: usize = 5;
-/// GitLab rejects a search with no term this long as an abusive tiny search.
 const MIN_SEARCH_CHARS: usize = 2;
 
 pub(crate) fn provider(name: &str) -> Option<&'static str> {
@@ -44,7 +42,6 @@ pub(crate) fn searched_kinds() -> &'static [&'static str] {
     SEARCHED_KINDS
 }
 
-/// The node kind GitLab grep searches for `kind`, a node name in any case or snake case.
 pub(crate) fn searched_kind(kind: &str) -> Option<&'static str> {
     let flat = kind.replace('_', "");
     SEARCHED_KINDS
@@ -262,7 +259,6 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         _ => return Outcome::Skipped("no GitLab `origin` remote".into()),
     };
     let api_scopes: Vec<String> = request.kinds.iter().map(|kind| kind.to_string()).collect();
-    // Branches belong to a project, so for the `origin` they are searched in its project, not its group.
     let branch_project = home_project
         .as_ref()
         .filter(|_| request.kinds.contains(&BRANCH))
@@ -412,7 +408,6 @@ fn nothing_found(request: &Request, api_scopes: &[String], project: &str) -> Str
     message
 }
 
-/// `MergeRequest` reads as `merge requests`, and a default scope such as `work_items` as `work items`.
 fn plural(scope: &str) -> String {
     let mut words = String::new();
     for (index, c) in scope.chars().enumerate() {
@@ -429,7 +424,6 @@ fn plural(scope: &str) -> String {
     }
 }
 
-/// The API answers 404 for a target it cannot find, cannot read, or whose top-level group has Orbit off.
 fn outcome_for(target: &Target, error: &RemoteError) -> Outcome {
     let missing = first_line(&error.message).ends_with(" not found");
     match error.exit_code {

@@ -1,4 +1,3 @@
-// pub: consumed by orbit-server's content resolver for Workhorse wire format parsing.
 pub mod blob_stream;
 pub mod cache;
 pub mod resolver;
@@ -8,7 +7,6 @@ pub mod storage_lease;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Sets a shared flag when dropped, so a detached blocking reader stops once its owning future is dropped.
 #[derive(Default)]
 pub(in crate::modules::code) struct CancelOnDrop(Arc<AtomicBool>);
 

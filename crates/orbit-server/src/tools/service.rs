@@ -57,12 +57,9 @@ pub(crate) enum AgentCommand {
 
 struct CommandSchema {
     validator: Validator,
-    /// Carried so a validation error can name the valid parameters.
     property_names: Vec<String>,
 }
 
-// `jsonschema::Validator` is not `Debug`, so derive it manually to keep
-// `ToolService` (a public type) `Debug`.
 impl std::fmt::Debug for CommandSchema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CommandSchema")
@@ -113,9 +110,6 @@ impl Default for ToolService {
 }
 
 impl ToolService {
-    /// The error lists the valid parameter names so an agent that passed an
-    /// unknown one (e.g. a hallucinated `node_types`) can self-correct without
-    /// first calling `list_commands`.
     fn validate_arguments(
         &self,
         command_name: &str,
@@ -214,31 +208,24 @@ impl ToolService {
         })
     }
 
-    /// TOON-encoded condensed query DSL grammar (issue #553).
     pub fn build_query_dsl_toon() -> Result<String, ExecutorError> {
         let version = Self::build_query_dsl_version();
         let schema = condensed_query_schema().map_err(ExecutorError::InvalidArguments)?;
         Ok(format!("QueryDSL v{version}:\n{schema}"))
     }
 
-    /// Full query DSL JSON Schema as a JSON string (verbatim from disk).
     pub fn build_query_dsl_raw() -> &'static str {
         raw_query_schema()
     }
 
-    /// Semver string for the query DSL grammar. Matches `config/QUERY_DSL_VERSION`.
     pub fn build_query_dsl_version() -> String {
         query_dsl_version()
     }
 
-    /// JSON Schema describing the query response shape (formatter output).
-    /// Returned verbatim from `config/schemas/query_response.json`.
     pub fn build_response_format_schema() -> &'static str {
         super::schema::query_response_schema()
     }
 
-    /// Semver string for the response format. Matches `config/RAW_OUTPUT_FORMAT_VERSION`
-    /// and the `format_version` field stamped on every query response.
     pub fn build_response_format_version() -> String {
         query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string()
     }

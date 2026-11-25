@@ -9,15 +9,20 @@ pub struct Args {
     pub command: Option<Command>,
     #[arg(long, value_enum, default_value = "webserver")]
     pub mode: Mode,
-    /// Config overlay applied over the embedded config/default.yaml; defaults to config/config.yaml when present.
-    #[arg(long, value_name = "PATH", global = true)]
+    #[arg(
+        long,
+        value_name = "PATH",
+        global = true,
+        help = "Config overlay applied over the embedded config/default.yaml; defaults to config/config.yaml when present"
+    )]
     pub config: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Load the config as startup does, reject unknown keys, and exit without
-    /// starting a server. Secret files are not read.
+    #[command(
+        about = "Load the config as startup does, reject unknown keys, and exit without starting a server. Secret files are not read"
+    )]
     CheckConfig,
 }
 

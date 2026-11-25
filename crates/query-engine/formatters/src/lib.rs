@@ -27,8 +27,6 @@ pub static RAW_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
         .expect("RAW_OUTPUT_FORMAT_VERSION must be valid semver")
 });
 
-/// Concrete encoding of a formatter's output. Mirrors the proto `FormatName`
-/// enum but lives here so the formatters crate stays proto-agnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::AsRefStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum FormatName {
@@ -42,8 +40,6 @@ pub trait ResultFormatter: Send + Sync {
     fn format_version(&self) -> Option<&Version>;
     fn format(&self, output: &PipelineOutput) -> Value;
 
-    /// Stamps the formatted output with its version string and format name so
-    /// callers build transport metadata in one call.
     fn format_stamped(&self, output: &PipelineOutput) -> (Value, String, FormatName) {
         let formatted = self.format(output);
         let version = self
@@ -71,9 +67,6 @@ mod tests {
 
     #[test]
     fn query_response_schema_id_major_matches_raw_output_format_version() {
-        // The `$id` in crates/orbit-server/schemas/query_response.json ends with
-        // `/vN` where N is the major component of RAW_OUTPUT_FORMAT_VERSION.
-        // Guards against the two drifting silently when the semver major bumps.
         let schema: Value = serde_json::from_str(include_str!(concat!(
             env!("SCHEMA_DIR"),
             "/query_response.json"

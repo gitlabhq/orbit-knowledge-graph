@@ -1,10 +1,3 @@
-//! Tags each ClickHouse query with the request correlation ID. Sub-queries carry
-//! a per-query `query_id` (`<correlation_id>-<stage>-<ulid>`, unique even when
-//! parallel requests share one correlation ID) and a lightweight `gkg;<kind>;correlation_id=<id>`
-//! comment; the base query additionally carries an attribution payload
-//! (`gkg;<base64(json)>`) so retention can recover who ran which query, in which
-//! language, with which compiler and schema version.
-
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use query_engine::compiler::Frontend;

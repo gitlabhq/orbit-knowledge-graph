@@ -40,7 +40,6 @@ nats:
 gitlab:
   baseUrl: "http://gitlab-webservice-default:8181"
 
-# requests = limits: a fixed CPU and memory budget, the same on every run.
 webserver:
   replicas: 1
   resources:
@@ -50,11 +49,8 @@ webserver:
     limits:
       cpu: "2"
       memory: "8Gi"
-# No indexing: the graph is bulk-loaded, so the indexer and health check only add noise.
 indexer:
   enabled: false
-# Runs the migrations that create the tables and mark the schema active; the
-# script scales it to 0 once the webserver is Ready.
 dispatcher:
   enabled: true
 healthCheck:
@@ -62,7 +58,6 @@ healthCheck:
 analytics:
   enabled: false
 
-# Keeps the metrics port open; the chart's PodMonitors are not used here.
 metrics:
   prometheus:
     enabled: true

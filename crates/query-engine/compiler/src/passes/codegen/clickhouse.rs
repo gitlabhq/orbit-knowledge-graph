@@ -1,5 +1,3 @@
-//! Emits parameterized SQL using ClickHouse's `{name:Type}` bind syntax.
-
 use orbit_server_config::QueryConfig;
 
 use crate::ast::{
@@ -27,9 +25,6 @@ pub fn codegen(
         return Err(crate::error::QueryError::Codegen(error));
     }
 
-    // SETTINGS — only on SELECT queries, not INSERT or subqueries/UNION arms.
-    // Values are pre-formatted as SQL-safe literals by to_clickhouse_settings()
-    // (bare integers, 0/1 bools, escaped quoted strings).
     if matches!(ast, Node::Query(_)) {
         let settings = query_config
             .to_clickhouse_settings()
@@ -50,10 +45,8 @@ pub fn codegen(
     })
 }
 
-/// A CTE's name, its body as a statement of its own with the other CTEs attached, and its parameters.
 pub type CteStatement = (String, String, HashMap<String, ParamValue>);
 
-/// Each CTE body as a statement tests can EXPLAIN.
 pub fn cte_statements(ast: &Node) -> Result<Vec<CteStatement>> {
     let Node::Query(query) = ast else {
         return Ok(Vec::new());
@@ -1002,9 +995,6 @@ mod tests {
             QueryConfig::default(),
         )
         .unwrap();
-        // Outer LIMIT must apply to the whole union, not just the last branch.
-        // ClickHouse binds a trailing LIMIT after a bare UNION ALL to the last
-        // SELECT only, so the union is wrapped in a subquery.
         assert_eq!(
             result.sql,
             "SELECT * FROM (SELECT u.id AS id FROM gl_user AS u UNION ALL \

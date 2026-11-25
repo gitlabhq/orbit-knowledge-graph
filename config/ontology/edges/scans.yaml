@@ -1,5 +1,3 @@
-# config/ontology/edges/scans.yaml
-
 description: VulnerabilityScanner scans a project for security vulnerabilities
 table: gl_sec_edge
 

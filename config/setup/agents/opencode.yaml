@@ -1,9 +1,4 @@
 # yaml-language-server: $schema=../../schemas/setup_agent.schema.json
-# OpenCode has no PreToolUse-style context injection, so orbit.js appends a one-per-session graph
-# reminder to the first shell command's output. orbit-ui/ is an OpenCode 2 plugin directory: its
-# server part (index.js) reports each Orbit call and its TUI part (tui.tsx) draws it above the
-# prompt. OpenCode discovers both under its plugins directory, so neither is registered in
-# opencode.json; OpenCode 2 skips a single-file entry there with a warning.
 name: opencode
 title: OpenCode
 detect: ["$XDG_CONFIG_HOME/opencode", "~/.config/opencode"]

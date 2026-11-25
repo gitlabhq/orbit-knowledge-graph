@@ -1,5 +1,3 @@
-# config/ontology/edges/has_finding.yaml
-
 description: Entity has associated finding or vulnerability occurrence
 table: gl_sec_edge
 

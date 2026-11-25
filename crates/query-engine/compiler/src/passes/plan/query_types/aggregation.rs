@@ -1,6 +1,3 @@
-//! Aggregation: plan the pattern like a traversal, then derive groups, measures, and the deferred
-//! latest-row condition from the relation graph.
-
 use std::collections::HashMap;
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
@@ -170,7 +167,6 @@ fn add_group(groups: &mut Vec<Group>, group: Group) {
     }
 }
 
-/// The condition a single edge relation defers past its latest-row pick, so the measures apply it instead of the scan.
 fn latest_row_condition(execution: &ExecutionPlan) -> Vec<Predicate> {
     let mut source = execution.root;
     loop {

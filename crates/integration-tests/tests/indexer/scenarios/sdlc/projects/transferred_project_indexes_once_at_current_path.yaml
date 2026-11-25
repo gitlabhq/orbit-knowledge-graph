@@ -1,5 +1,3 @@
-# The `projects` pseudo-table writes its traversal-path row with version
-# DEFAULT now(), so the explicitly-dated stale row is always the older one.
 description: A project with a stale traversal-path row indexes once, at its current path
 scope: { namespace: 100 }
 

@@ -1,10 +1,3 @@
-# Simulator configuration - 100M edge scale test
-#
-# Workflow:
-#   1. Generate data:  cargo synth generate
-#   2. Load to CH:     cargo synth load
-#   3. Evaluate:       cargo synth evaluate
-
 clickhouse:
   url: http://localhost:8123
   database: default
@@ -19,26 +12,18 @@ clickhouse:
     engine: MergeTree
     index_granularity: 8192
 
-    # Use per-node sort_key from ontology YAML (matches graph.sql).
-    # gl_user: ORDER BY (id), code tables: ORDER BY (traversal_path, project_id, branch, id),
-    # most SDLC nodes: ORDER BY (traversal_path, id).
     use_ontology_sort_keys: true
 
-    # Edge table schema matches graph.sql exactly.
     edge_primary_key: [traversal_path, relationship_kind]
     edge_order_by: [traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind]
 
     indexes:
-      # -- Node indexes (all tables) --
       - name: idx_id
         table: "*"
         expression: id
         type: bloom_filter(0.01)
         granularity: 1
 
-      # -- Per-table skip indexes (matching graph.sql) --
-
-      # gl_user
       - { name: idx_state, table: gl_user, expression: state, type: "set(10)", granularity: 2 }
       - { name: idx_user_type, table: gl_user, expression: user_type, type: "set(26)", granularity: 2 }
       - { name: idx_private_profile, table: gl_user, expression: private_profile, type: minmax, granularity: 1 }
@@ -46,55 +31,44 @@ clickhouse:
       - { name: idx_is_auditor, table: gl_user, expression: is_auditor, type: minmax, granularity: 1 }
       - { name: idx_is_external, table: gl_user, expression: is_external, type: minmax, granularity: 1 }
 
-      # gl_project
       - { name: idx_archived, table: gl_project, expression: archived, type: minmax, granularity: 1 }
 
-      # gl_merge_request
       - { name: idx_state, table: gl_merge_request, expression: state, type: "set(6)", granularity: 2 }
       - { name: idx_draft, table: gl_merge_request, expression: draft, type: minmax, granularity: 1 }
       - { name: idx_squash, table: gl_merge_request, expression: squash, type: minmax, granularity: 1 }
       - { name: idx_discussion_locked, table: gl_merge_request, expression: discussion_locked, type: minmax, granularity: 1 }
 
-      # gl_note
       - { name: idx_noteable_type, table: gl_note, expression: noteable_type, type: "set(14)", granularity: 2 }
       - { name: idx_internal, table: gl_note, expression: internal, type: minmax, granularity: 1 }
       - { name: idx_confidential, table: gl_note, expression: confidential, type: minmax, granularity: 1 }
 
-      # gl_work_item
       - { name: idx_state, table: gl_work_item, expression: state, type: "set(10)", granularity: 2 }
       - { name: idx_work_item_type, table: gl_work_item, expression: work_item_type, type: "set(10)", granularity: 2 }
       - { name: idx_confidential, table: gl_work_item, expression: confidential, type: minmax, granularity: 1 }
 
-      # gl_pipeline
       - { name: idx_status, table: gl_pipeline, expression: status, type: "set(16)", granularity: 2 }
       - { name: idx_tag, table: gl_pipeline, expression: tag, type: minmax, granularity: 1 }
 
-      # gl_job
       - { name: idx_status, table: gl_job, expression: status, type: "set(16)", granularity: 2 }
       - { name: idx_allow_failure, table: gl_job, expression: allow_failure, type: minmax, granularity: 1 }
       - { name: idx_retried, table: gl_job, expression: retried, type: minmax, granularity: 1 }
 
-      # gl_vulnerability
       - { name: idx_state, table: gl_vulnerability, expression: state, type: "set(4)", granularity: 2 }
       - { name: idx_severity, table: gl_vulnerability, expression: severity, type: "set(8)", granularity: 2 }
       - { name: idx_report_type, table: gl_vulnerability, expression: report_type, type: "set(4)", granularity: 2 }
       - { name: idx_resolved_on_default_branch, table: gl_vulnerability, expression: resolved_on_default_branch, type: minmax, granularity: 1 }
       - { name: idx_present_on_default_branch, table: gl_vulnerability, expression: present_on_default_branch, type: minmax, granularity: 1 }
 
-      # gl_finding
       - { name: idx_deduplicated, table: gl_finding, expression: deduplicated, type: minmax, granularity: 1 }
 
-      # gl_merge_request_diff_file
       - { name: idx_too_large, table: gl_merge_request_diff_file, expression: too_large, type: minmax, granularity: 1 }
       - { name: idx_new_file, table: gl_merge_request_diff_file, expression: new_file, type: minmax, granularity: 1 }
       - { name: idx_renamed_file, table: gl_merge_request_diff_file, expression: renamed_file, type: minmax, granularity: 1 }
       - { name: idx_deleted_file, table: gl_merge_request_diff_file, expression: deleted_file, type: minmax, granularity: 1 }
       - { name: idx_binary, table: gl_merge_request_diff_file, expression: binary, type: minmax, granularity: 1 }
 
-      # gl_security_scan
       - { name: idx_latest, table: gl_security_scan, expression: latest, type: minmax, granularity: 1 }
 
-      # -- Edge table --
       - name: idx_relationship
         table: edges
         expression: relationship_kind
@@ -121,54 +95,40 @@ generation:
   seed: 42
   fake_data_path: crates/xtask/fake_data.yaml
 
-  # Single org, scaled for ~100M edges with ~10M nodes
   organizations: 1
   namespace_entity: Group
 
   roots:
-    User: 10000                       # 10k users
-    Group: 20                         # 20 top-level groups
-
-  # Node estimates (~10M nodes):
-  # - 300 groups × 10 projects = 3k projects
-  # - 3k × 100 MRs = 300k MRs
-  # - 300k × 2 diffs = 600k diffs
-  # - 600k × 4 files = 2.4M files
-  # - 3k × 100 pipelines = 300k pipelines  
-  # - 300k × 3 stages = 900k stages
-  # - 900k × 4 jobs = 3.6M jobs
-  #
-  # Edge estimates (~100M edges):
-  # - Relationship edges: ~10M (from hierarchy)
-  # - Association edges:  ~90M (high fanout associations)
+    User: 10000
+    Group: 20
 
   relationships:
     CONTAINS:
-      "Group -> Group":               # Self-referential: 3 levels x 2 per parent = 300 total groups
+      "Group -> Group":
         count: 2
         max_depth: 3
-      "Group -> Project": 10          # 10 projects per group = 3k projects
+      "Group -> Project": 10
 
     IN_PROJECT:
-      "MergeRequest -> Project": 100  # 100 MRs per project = 300k MRs
-      "WorkItem -> Project": 100      # 100 work items = 300k
-      "Pipeline -> Project": 100      # 100 pipelines = 300k
+      "MergeRequest -> Project": 100
+      "WorkItem -> Project": 100
+      "Pipeline -> Project": 100
       "Vulnerability -> Project": 5
       "Finding -> Project": 10
       "Milestone -> Project": 3
       "Label -> Project": 5
 
     HAS_STAGE:
-      "Pipeline -> Stage": 3          # 900k stages
+      "Pipeline -> Stage": 3
 
     HAS_JOB:
-      "Stage -> Job": 4               # 3.6M jobs
+      "Stage -> Job": 4
 
     HAS_DIFF:
-      "MergeRequest -> MergeRequestDiff": 2  # 600k diffs
+      "MergeRequest -> MergeRequestDiff": 2
 
     HAS_FILE:
-      "MergeRequestDiff -> MergeRequestDiffFile": 4  # 2.4M files
+      "MergeRequestDiff -> MergeRequestDiffFile": 4
 
     HAS_NOTE:
       "MergeRequest -> Note": 2
@@ -180,25 +140,17 @@ generation:
     HAS_IDENTIFIER:
       "Finding -> VulnerabilityIdentifier": 1
 
-  # High-volume associations to reach ~90M edges
-  # Using high counts per target to create dense connectivity
   associations:
     AUTHORED:
-      # 300k MRs × 100 = 30M edges
       "User -> MergeRequest": 100
-      # 300k WorkItems × 100 = 30M edges
       "User -> WorkItem": 100
-      # ~1.5M Notes × 10 = 15M edges
       "User -> Note": 10
 
     MEMBER_OF:
-      # 300 groups × 100 = 30k edges (small)
       "User -> Group": 100
 
     ASSIGNED:
-      # 300k MRs × 50 = 15M edges
       "User -> MergeRequest": 50
-      # 300k WorkItems × 10 = 3M edges
       "User -> WorkItem": 10
 
     REVIEWER:

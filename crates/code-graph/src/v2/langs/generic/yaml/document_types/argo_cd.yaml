@@ -1,7 +1,3 @@
-# ArgoCD Application manifests: the application name is a definition
-# spanning the whole document, and deploy sources become imports.
-# Import columns: path = repoURL as written, name = path (or chart for
-# Helm-repo sources) within it, alias = pinned targetRevision.
 name: argo_cd
 match:
   document_keys:

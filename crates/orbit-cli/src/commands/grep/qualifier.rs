@@ -121,8 +121,6 @@ fn kind_for(name: &str) -> Option<String> {
     })
 }
 
-/// Splits a query on whitespace outside double quotes. An unpaired quote is part of the
-/// pattern, as in `'runtime"' file:x`, so it does not swallow the qualifiers after it.
 fn tokens(query: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();

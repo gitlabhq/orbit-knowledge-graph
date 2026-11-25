@@ -1,5 +1,3 @@
-//! Tree-sitter specific implementations.
-
 pub mod traversal;
 
 use crate::Language;
@@ -43,20 +41,13 @@ pub struct StrDoc<L: LanguageExt> {
     pub src: String,
     pub lang: L,
     pub tree: Tree,
-    // Node-kind names by `kind_id`. `tree_sitter::Node::kind()` reruns
-    // `str::from_utf8` on the C kind string every call; this lets the walk
-    // index by id in O(1) instead.
     kind_names: std::sync::Arc<[&'static str]>,
 }
 
-/// Default stall limit for the progress callback. 100K iterations at the same
-/// byte offset is clearly pathological -- normal parsing always advances.
 const DEFAULT_MAX_STALL: u64 = 100_000;
 
-/// Abort the parse when the worker stack drops below this, before a deep native recursion overflows it.
 const PARSE_STACK_RED_ZONE: usize = 256 * 1024;
 
-/// Per-thread CPU-time budget (create and check on the same thread); ignores preempted time, unlike a wall-clock deadline.
 #[derive(Clone, Copy)]
 pub struct CpuBudget {
     start: ThreadTime,
@@ -71,13 +62,11 @@ impl CpuBudget {
         }
     }
 
-    /// True once this thread has spent `budget` of CPU since `start`.
     pub fn expired(&self) -> bool {
         self.start.elapsed() >= self.budget
     }
 }
 
-/// Cooperative limits enforced from the parser's progress callback, the only hook into tree-sitter's uninterruptible C parse.
 #[derive(Clone)]
 pub struct ParseGuard {
     pub max_stall: u64,
@@ -94,7 +83,6 @@ impl Default for ParseGuard {
 }
 
 impl ParseGuard {
-    /// Bound the parse to `budget` of CPU time on the parsing thread.
     pub fn with_budget(mut self, budget: Duration) -> Self {
         self.budget = Some(CpuBudget::start(budget));
         self
@@ -102,7 +90,6 @@ impl ParseGuard {
 }
 
 impl<L: LanguageExt> StrDoc<L> {
-    /// Parse, aborting if the [`ParseGuard`] trips (stall or CPU budget); an abort surfaces as `Err`.
     pub fn try_new(src: &str, lang: L, guard: &ParseGuard) -> Result<Self, String> {
         let src = src.to_string();
         let kind_names = lang.kind_names();
@@ -154,7 +141,6 @@ impl<L: LanguageExt> StrDoc<L> {
             ts_lang,
         )
         .map_err(|e| {
-            // The only error here is the progress callback breaking (budget or stall), never a syntax error; name the budget case.
             if guard.budget.is_some_and(|b| b.expired()) {
                 "per-file CPU budget exceeded".to_string()
             } else {
@@ -188,15 +174,12 @@ impl<L: LanguageExt> Doc for StrDoc<L> {
     }
 
     fn get_node_text<'a>(&'a self, node: &Self::Node<'a>) -> Cow<'a, str> {
-        // `src` is valid UTF-8 and node offsets land on char boundaries, so
-        // slice it (O(1)) instead of revalidating bytes with `str::from_utf8`.
         Cow::Borrowed(&self.src[node.start_byte()..node.end_byte()])
     }
 
     fn node_kind<'a>(&'a self, node: &Self::Node<'a>) -> Cow<'a, str> {
         match self.kind_names.get(node.kind_id() as usize) {
             Some(&name) => Cow::Borrowed(name),
-            // Out-of-range ids (e.g. ERROR/MISSING) fall back to the slow path.
             None => Cow::Borrowed(Node::kind(node)),
         }
     }
@@ -382,9 +365,6 @@ impl<'r> SgNode<'r> for Node<'r> {
 pub trait LanguageExt: Language {
     fn get_ts_language(&self) -> TSLanguage;
 
-    /// Grammar node-kind names indexed by `kind_id`. Implementations should
-    /// memoize per language; the default rebuilds on each call and
-    /// `SupportLang` overrides with a per-language cache.
     fn kind_names(&self) -> std::sync::Arc<[&'static str]> {
         let ts = self.get_ts_language();
         (0..ts.node_kind_count())
@@ -437,8 +417,6 @@ mod tests {
         assert_eq!(check(1), ControlFlow::Continue(()));
         assert_eq!(check(2), ControlFlow::Continue(()));
 
-        // fetch_add returns the previous value, so with max_stall=3 the >= check
-        // only fires on the 4th increment (the 5th visit to the same offset).
         assert_eq!(check(5), ControlFlow::Continue(()));
         assert_eq!(check(5), ControlFlow::Continue(()));
         assert_eq!(check(5), ControlFlow::Continue(()));

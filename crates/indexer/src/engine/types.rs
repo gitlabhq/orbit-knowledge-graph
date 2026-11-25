@@ -16,8 +16,6 @@ pub enum SerializationError {
     Json(#[from] serde_json::Error),
 }
 
-/// Identity (Hash/Eq) uses only `stream` + `subject`. The remaining fields
-/// are message-level processing config applied at handler registration time.
 #[derive(Clone, Debug)]
 pub struct Subscription {
     pub stream: Arc<str>,
@@ -91,8 +89,6 @@ impl Subscription {
         self.retry_interval_secs.map(Duration::from_secs)
     }
 
-    /// The global retry policy, or `None` when no retry is configured (a transient failure is
-    /// acked, not retried).
     pub fn retry_policy(&self) -> Option<GlobalRetry> {
         self.max_attempts.map(|max_attempts| GlobalRetry {
             max_attempts,
@@ -110,70 +106,19 @@ impl MessageId {
     }
 }
 
-/// A message envelope containing payload and metadata.
-///
-/// Envelopes wrap the raw message payload with tracking information
-/// like unique IDs, timestamps, and retry counts.
-///
-/// # Creating an Envelope
-///
-/// ```
-/// use indexer::types::{Envelope, Event, Subscription};
-/// use serde::{Serialize, Deserialize};
-///
-/// #[derive(Serialize, Deserialize)]
-/// struct UserCreated {
-///     user_id: String,
-///     email: String,
-/// }
-///
-/// impl Event for UserCreated {
-///     fn subscription() -> Subscription {
-///         Subscription::new("users-stream", "user.created")
-///     }
-/// }
-///
-/// let event = UserCreated { user_id: "123".into(), email: "user@example.com".into() };
-/// let envelope = Envelope::new(&event).unwrap();
-/// ```
 #[derive(Clone)]
 pub struct Envelope {
     pub id: MessageId,
 
-    /// Empty for outbound envelopes created via `Envelope::new`.
     pub subject: Arc<str>,
 
     pub payload: Bytes,
 
     pub timestamp: DateTime<Utc>,
 
-    /// Starts at 1.
     pub attempt: u32,
 }
 
-/// A typed event that can be published to a specific subscription.
-///
-/// Implement this trait for your domain events to enable type-safe
-/// serialization and subscription routing.
-///
-/// # Example
-///
-/// ```
-/// use indexer::types::{Event, Subscription};
-/// use serde::{Serialize, Deserialize};
-///
-/// #[derive(Serialize, Deserialize)]
-/// struct OrderPlaced {
-///     order_id: String,
-///     total: f64,
-/// }
-///
-/// impl Event for OrderPlaced {
-///     fn subscription() -> Subscription {
-///         Subscription::new("orders-stream", "orders.placed")
-///     }
-/// }
-/// ```
 pub trait Event: Serialize + DeserializeOwned + Send + Sync + 'static {
     fn subscription() -> Subscription;
 }

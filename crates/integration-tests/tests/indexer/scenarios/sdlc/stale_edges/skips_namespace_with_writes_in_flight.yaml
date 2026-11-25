@@ -1,6 +1,3 @@
-# A set `cursor_values` means the pipeline has pages still draining, so this
-# namespace's edges may not have landed yet. Comparing versions there would
-# retire edges that are about to be written.
 description: A namespace whose pipeline has writes in flight is not reconciled
 
 seed:

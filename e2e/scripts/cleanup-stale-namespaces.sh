@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Delete e2e namespaces older than a threshold to reclaim cluster capacity.
-#
-# The CI after_script teardown has a 5-minute hard timeout and can be killed
-# by the runner, leaving namespaces (and their pods) behind indefinitely.
-# On the 3-node e2e cluster, 2-3 orphaned runs exhaust all capacity.
-#
-# Usage: cleanup-stale-namespaces.sh [max-age-hours]
-#   max-age-hours: namespaces older than this are deleted (default: 2)
 
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"

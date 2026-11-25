@@ -1,18 +1,5 @@
 name: "Java enums — constants, constructor, fields, methods, interface implementation"
 
-# Coverage note: java.rs maps enum_declaration to definition_type "Enum"
-# (scope("enum_declaration", "Enum")) and enum_constant to "EnumVariant"
-# (scope("enum_constant", "EnumVariant").no_scope()). Before this fixture only
-# e2e_weather_app.yaml touched an enum incidentally; there was no focused
-# exercise of enum constants, enum constructors, enum instance methods, or an
-# enum implementing an interface.
-#
-# Known gap (not asserted here): the compiler-synthesised enum members values(),
-# valueOf(), and ordinal() are not present in the source AST, so they are not
-# indexed — only members written in source are extracted. Record component
-# accessors get synthetic definitions from the java.rs on_scope hook; enum
-# members have no equivalent yet.
-
 fixtures:
   - path: com/example/enums/Describable.java
     content: |

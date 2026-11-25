@@ -10,7 +10,6 @@ use arrow::datatypes::{ArrowNativeType, DataType};
 use arrow::downcast_dictionary_array;
 use arrow::record_batch::RecordBatch;
 
-/// A column's Arrow type has no [`logical_byte_size`] counting rule.
 #[derive(Debug, thiserror::Error)]
 #[error("column {column} has Arrow type {data_type} with no logical-byte-size rule")]
 pub struct UnsupportedTypeError {
@@ -18,18 +17,6 @@ pub struct UnsupportedTypeError {
     pub data_type: DataType,
 }
 
-/// Deterministic, split-invariant count of the customer-data bytes in a [`RecordBatch`], excluding serialization overhead; unsupported Arrow types return [`UnsupportedTypeError`] rather than counting as 0.
-///
-/// | Arrow logical type                                  | bytes per non-null value     |
-/// |-----------------------------------------------------|------------------------------|
-/// | fixed-width primitive (ints, floats, dates, times,  | its width in bytes           |
-/// | timestamps, durations, intervals, decimals)         |                              |
-/// | `Boolean`                                            | 1                            |
-/// | `Utf8`/`LargeUtf8`/`Utf8View`, `Binary` family       | byte length                  |
-/// | `Dictionary(<int key>, Utf8)`                        | byte length of decoded value |
-/// | `List`/`LargeList` of a supported type               | sum of element counts        |
-/// | NULL (any type, incl. an all-null `Null` column)     | 0                            |
-/// | anything else (Struct, Map, Union, …)                | [`UnsupportedTypeError`]     |
 pub fn logical_byte_size(batch: &RecordBatch) -> Result<u64, UnsupportedTypeError> {
     let schema = batch.schema();
     let mut total = 0u64;
@@ -40,10 +27,6 @@ pub fn logical_byte_size(batch: &RecordBatch) -> Result<u64, UnsupportedTypeErro
     Ok(total)
 }
 
-/// Whether [`logical_byte_size`] has a counting rule for this Arrow type.
-///
-/// Probes the sizing dispatch with an empty array of the type, so this predicate
-/// cannot drift from what [`logical_byte_size`] actually accepts.
 pub fn has_logical_byte_size(data_type: &DataType) -> bool {
     array_logical_byte_size("", data_type, new_empty_array(data_type).as_ref()).is_ok()
 }
@@ -174,8 +157,6 @@ mod tests {
         tags: &'static [&'static str],
     }
 
-    /// Every counted type that [`BatchBuilder`] can express, with a null string and an
-    /// empty list so a slice can land on a zero-byte row.
     fn builder_fixture() -> RecordBatch {
         let specs = [
             spec("int", ColumnType::Int, false),
@@ -233,8 +214,6 @@ mod tests {
             .unwrap()
     }
 
-    /// Counted types [`BatchBuilder`] has no [`ColumnSpec`] for; built directly to keep the
-    /// primitive-width, i64-offset, binary, and view code paths under the split-invariance check.
     fn unbuildable_types_fixture() -> RecordBatch {
         let fields = vec![
             Field::new("int16", DataType::Int16, false),

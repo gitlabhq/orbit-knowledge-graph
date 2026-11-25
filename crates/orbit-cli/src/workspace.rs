@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::OnceLock;
 
 use crate::database::{GraphReader, IncompleteRevision, schema::graph_lacks_commit};
@@ -67,10 +66,6 @@ impl Workspace {
         .collect()
     }
 
-    /// Discover git repos in a directory, including nested repos when
-    /// the path itself is a git repo. A folder inside a repository, with no
-    /// repositories below it, resolves to that repository's root. Returns
-    /// canonical paths.
     pub fn resolve_repos(&self, path: &Path) -> Result<Vec<PathBuf>> {
         let canonical = dunce::canonicalize(path)?;
 
@@ -83,8 +78,6 @@ impl Workspace {
         if is_git_repo(&canonical) {
             return Ok(vec![canonical]);
         }
-        // Climbing after repos were found but filtered out would index an
-        // enclosing repository the user did not point at.
         if found_any {
             return Ok(Vec::new());
         }
@@ -163,8 +156,6 @@ pub fn open_indexed_if_present(repo: Option<PathBuf>, db: Option<PathBuf>) -> Op
     Some(IndexedRepo { git, client })
 }
 
-/// Indexes the current repository first when it was never indexed (even if others are, like
-/// `grep`) or has no complete revision; a stale HEAD is left to refresh.
 pub fn open_graph_reader(db: Option<PathBuf>) -> Result<GraphReader> {
     let here = git_toplevel(Path::new("."))
         .ok()
@@ -235,9 +226,6 @@ fn locate_graph(repo: Option<PathBuf>, db: &Option<PathBuf>) -> Result<(GitInfo,
     Ok((git, db_path))
 }
 
-/// The repo-relative `files` whose working-tree contents differ from the indexed commit:
-/// modified, added, renamed, or untracked. The graph describes the commit, so its definitions
-/// and line spans do not fit these files. Empty when git cannot answer.
 pub fn edited_since_index(repo: &Path, files: &[&str]) -> std::collections::BTreeSet<String> {
     let mut edited = std::collections::BTreeSet::new();
     if files.is_empty() {
@@ -271,9 +259,6 @@ pub fn edited_since_index(repo: &Path, files: &[&str]) -> std::collections::BTre
     edited
 }
 
-/// Repo-relative forms of `paths` given relative to the current directory, the repo, or absolute.
-/// `a,b` lists are split; `path:120-180` ranges keep only the path; unresolvable entries are kept as
-/// written (trimmed) so globs still work.
 pub fn repo_relative_paths(repo: &Path, paths: &[String]) -> Vec<String> {
     let cwd = std::env::current_dir().unwrap_or_default();
     let root = dunce::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
@@ -322,12 +307,9 @@ fn absolutize(path: PathBuf) -> Result<PathBuf> {
 #[derive(Clone)]
 pub struct GitInfo {
     pub repo_path: PathBuf,
-    /// Deterministic project ID derived from `repo_path`.
     pub project_id: i64,
     pub branch: String,
     pub commit_sha: String,
-    /// For worktrees, the parent repo's canonical path. For regular
-    /// repos, same as `repo_path`.
     pub parent_repo_path: PathBuf,
 }
 
@@ -367,15 +349,6 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
     })
 }
 
-/// Resolve the working-tree root of the repo containing `path`.
-///
-/// Indexing stores file paths relative to this root and keys the manifest by it, so
-/// `grep`, `context`, `sql`, and `setup` run from a subdirectory must resolve here
-/// too: the checkout lookup finds the indexed revision, and `grep` scopes and scans
-/// with paths that match what the graph stored. This is the git
-/// working-tree root (`git rev-parse --show-toplevel`), not
-/// [`GitInfo::parent_repo_path`], which for a worktree points at the origin
-/// repo instead of this checkout's own root.
 pub fn git_toplevel(path: &Path) -> Result<PathBuf> {
     let top = repository_at(path)
         .toplevel()
@@ -446,44 +419,28 @@ pub fn git_working_changes(repo_path: &Path) -> Result<GitChanges> {
     Ok(GitChanges::from_statuses(repo_path, &working))
 }
 
-/// Names that are not UTF-8 are left out, since the graph cannot hold them.
-pub fn git_tracked_ignored(repo_path: &Path) -> Result<Vec<String>> {
-    let listed = git_output(
-        repo_path,
-        &[
-            "ls-files",
-            "-z",
-            "--cached",
-            "--ignored",
-            "--exclude-standard",
-        ],
-    )?;
-    Ok(listed
-        .split(|byte| *byte == 0)
-        .filter(|path| !path.is_empty())
-        .filter_map(|path| std::str::from_utf8(path).ok())
-        .map(str::to_string)
-        .collect())
+pub fn git_index_files(repo_path: &Path) -> Result<Vec<String>> {
+    let listed = repository_at(repo_path)
+        .index_files()
+        .with_context(|| format!("failed to list files in {}", repo_path.display()))?;
+    let files = listed
+        .into_iter()
+        .filter(|file| !file.skip_worktree)
+        .filter_map(|file| match file.path.into_os_string().into_string() {
+            Ok(path) => Some(path),
+            Err(name) => {
+                orbit_log_fields::warn!(
+                    expanded(FILE_PATH) = ?name,
+                    safe(ERROR_TYPE) = "non_utf8_path",
+                    "skipping a file whose name is not UTF-8"
+                );
+                None
+            }
+        })
+        .collect();
+    Ok(files)
 }
 
-fn git_output(repo_path: &Path, args: &[&str]) -> Result<Vec<u8>> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(repo_path)
-        .output()
-        .with_context(|| format!("failed to run git in {}", repo_path.display()))?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "git {} failed in {}: {}",
-            args.join(" "),
-            repo_path.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    Ok(output.stdout)
-}
-
-/// Mask clears the sign bit so the result is always a positive i64.
 pub fn project_id_from_path(path: &str) -> i64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -527,6 +484,7 @@ fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
 mod tests {
     use super::*;
     use crate::test_support::git;
+    use std::process::Command;
 
     fn init_repo(path: &Path) {
         std::fs::create_dir_all(path).unwrap();
@@ -618,8 +576,6 @@ mod tests {
         let legacy = home.path().join(".orbit");
         std::fs::create_dir_all(&legacy).unwrap();
         std::fs::write(legacy.join("graph.duckdb"), b"data").unwrap();
-        // A file where the parent directory must go makes create_dir_all fail
-        // without relying on permissions, which root ignores in CI containers.
         std::fs::write(home.path().join(".gitlab"), b"").unwrap();
 
         let root = resolve_root(None, home.path()).unwrap();

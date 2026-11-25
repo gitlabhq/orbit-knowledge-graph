@@ -158,7 +158,6 @@ fixtures:
       }
 
 tests:
-  # ── Definitions ────────────────────────────────────────────────
   - name: "Router class indexed with namespaced FQN"
     query: |
       MATCH (d:Definition)
@@ -198,7 +197,6 @@ tests:
       - { row_count: 2 }
       - { unique: fqn }
 
-  # ── Extends ────────────────────────────────────────────────────
   - name: "Backed enum implements interface (Extends edge)"
     query: |
       MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
@@ -217,7 +215,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Calls inside match arms ────────────────────────────────────
   - name: "Match arm: \\$this->ok() resolves to Router.ok"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -272,7 +269,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── throw-as-expression (PHP 8.0) ──────────────────────────────
   - name: "Match arm: throw Errors::code(500) -> Errors.code Calls edge"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -300,8 +296,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Enum body match arms ───────────────────────────────────────
-  # Both match arms call self::format(), so the edge resolves (once per arm).
   - name: "Enum method match arm: self::format resolves to Status.format"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -311,7 +305,6 @@ tests:
     assert:
       - { row: { c: 'App\Domain\Status\label' } }
 
-  # ── Attributes ─────────────────────────────────────────────────
   - name: "Method with #[Route] attribute keeps its parameters / body indexed (no parse error)"
     query: |
       MATCH (d:Definition)
@@ -329,7 +322,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Cross-file calls through match ─────────────────────────────
   - name: "boot() match arm: new Router() resolves to App\\Http\\Router"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

@@ -1,5 +1,3 @@
-# config/ontology/edges/in_milestone.yaml
-
 description: Entity belongs to a milestone
 
 variants:

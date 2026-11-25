@@ -1,9 +1,3 @@
-//! YAML as a graph language. Anchors become definitions and aliases
-//! become references in every file; mapping keys become definitions
-//! and imports only where an embedded document-type config claims
-//! them (see [`document_types`]). Unclaimed YAML keeps its `File` node
-//! and nothing else.
-
 mod config;
 mod document_types;
 

@@ -48,7 +48,6 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
     let catalog = OntologyCatalog::open(services.nats_client.clone())
         .await
         .unwrap();
-    // A served version that differs from this binary's proves the task reads what users query.
     let served = *SCHEMA_VERSION - 1;
     catalog
         .publish(&OntologyArchive::from_sources(served, &embedded_sources()).unwrap())

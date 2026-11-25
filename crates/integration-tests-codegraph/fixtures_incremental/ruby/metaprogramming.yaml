@@ -224,10 +224,6 @@ tests:
       - { row_count: 3 }
       - { unique: callee }
 
-  # ══════════════════════════════════════════════════════════════
-  # RAILS ASSOCIATIONS
-  # ══════════════════════════════════════════════════════════════
-
   - name: "has_many/belongs_to/has_one generate association methods"
     query: |
       MATCH (d:Definition)
@@ -237,10 +233,6 @@ tests:
     assert:
       - { row_count: 3 }
       - { unique: fqn }
-
-  # ══════════════════════════════════════════════════════════════
-  # RAILS SCOPES
-  # ══════════════════════════════════════════════════════════════
 
   - name: "scope generates class method defs"
     query: |
@@ -252,10 +244,6 @@ tests:
       - { row: { fqn: "Post::published", type: Method } }
       - { row: { fqn: "Post::recent", type: Method } }
 
-  # ══════════════════════════════════════════════════════════════
-  # CLASS ATTRIBUTES
-  # ══════════════════════════════════════════════════════════════
-
   - name: "class_attribute generates synthetic def"
     query: |
       MATCH (d:Definition)
@@ -264,14 +252,6 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
-
-  # ══════════════════════════════════════════════════════════════
-  # CALLS TO GENERATED METHODS
-  # ══════════════════════════════════════════════════════════════
-
-  # ══════════════════════════════════════════════════════════════
-  # SEND / PUBLIC_SEND
-  # ══════════════════════════════════════════════════════════════
 
   - name: "send(:notify) resolves to Dispatcher::notify"
     query: |
@@ -292,14 +272,6 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "Dispatcher::dispatch", callee: "Dispatcher::alert" } }
-
-  # ══════════════════════════════════════════════════════════════
-  # CALLS TO GENERATED METHODS
-  # ══════════════════════════════════════════════════════════════
-
-  # ══════════════════════════════════════════════════════════════
-  # CROSS-CLASS CHAIN RESOLUTION (Controller -> Service -> Model)
-  # ══════════════════════════════════════════════════════════════
 
   - name: "PostsController.index calls Post.published (qualified receiver chain)"
     query: |
@@ -331,10 +303,6 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "PostsController::index", callee: "Post::recent" } }
 
-  # ══════════════════════════════════════════════════════════════
-  # CALLS TO GENERATED METHODS
-  # ══════════════════════════════════════════════════════════════
-
   - name: "Post.summarize calls association and scope methods"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -346,10 +314,6 @@ tests:
       - { row: { callee: "Post::comments" } }
       - { row: { callee: "Post::author" } }
       - { row: { callee: "Post::max_length" } }
-
-  # ══════════════════════════════════════════════════════════════
-  # NEGATIVE TESTS
-  # ══════════════════════════════════════════════════════════════
 
   - name: "delegate to: target does NOT produce synthetic def for target"
     query: |

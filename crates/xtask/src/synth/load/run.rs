@@ -113,13 +113,11 @@ pub async fn run(
         );
     }
 
-    // Build indexes after the data load so the writes aren't slowed by index maintenance.
     if !no_indexes && !config.clickhouse.schema.indexes.is_empty() {
         println!("\n=== Indexes ===");
         writer.add_indexes(&ontology, &config.clickhouse).await?;
     }
 
-    // Build projections after the data load so the writes aren't slowed by projection maintenance.
     if !no_projections && !config.clickhouse.schema.projections.is_empty() {
         println!("\n=== Projections ===");
         writer

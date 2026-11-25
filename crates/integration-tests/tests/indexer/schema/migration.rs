@@ -39,7 +39,6 @@ async fn setup() -> (TestContext, ontology::Ontology, MigrationMetrics) {
     let ontology = ontology::Ontology::load_embedded().unwrap();
     let metrics = MigrationMetrics::new();
 
-    // Mirror indexer startup: version table must exist before migration runs.
     ensure_version_table(&ctx.create_client()).await.unwrap();
 
     (ctx, ontology, metrics)
@@ -336,7 +335,6 @@ async fn held_lock_causes_timeout() {
     mock.set_lock("schema_migration");
     let lock_svc: Arc<dyn LockService> = Arc::new(mock);
 
-    // Migration polls every 5s × 60 iterations. Use paused time to skip the wait.
     tokio::time::pause();
 
     let result = migration::run_if_needed(

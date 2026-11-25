@@ -8,10 +8,8 @@ link: https://docs.gitlab.com/development/documentation/testing/vale/#uppercase-
 vocab: false
 level: suggestion
 ignorecase: false
-# Ensures that the existence of 'first' implies the existence of 'second'.
 first: '\b([A-Z]{3,5})\b'
 second: '(?:\b[A-Z][a-z]+ )+\(([A-Z]{3,5})\)'
-# ... with the exception of these:
 exceptions:
   - ACL
   - AJAX

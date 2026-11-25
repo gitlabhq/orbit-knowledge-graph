@@ -1,5 +1,3 @@
-# config/ontology/edges/merged_at_commit.yaml
-
 description: >-
   The commit a merge request was merged at, sourced from the merge_requests row.
 

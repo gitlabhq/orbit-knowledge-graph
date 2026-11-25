@@ -1,10 +1,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Flat 100ms hot-poll for the unbounded fetch supervisor loop.
 const FETCH_RETRY: crate::retry::LocalRetry = crate::retry::LocalRetry {
     backoff: crate::retry::Backoff::Fixed(&[Duration::from_millis(100)]),
-    max_attempts: u32::MAX, // unused by drive_forever; the loop is unbounded by design
+    max_attempts: u32::MAX,
 };
 const DEAD_LETTER_MAX_AGE: Duration = Duration::ZERO;
 
@@ -318,7 +317,6 @@ impl NatsBroker {
         let cancel_token = self.cancellation_token.clone();
 
         let handle = tokio::spawn(async move {
-            // Forward each fetch error downstream, back off, and run until cancel/consumer-close.
             drive_forever(&FETCH_RETRY, |_failures| {
                 let consumer = &consumer;
                 let sender = &sender;
@@ -413,7 +411,6 @@ impl NatsBroker {
             ack_wait: self.config.ack_wait(),
             max_deliver: -1,
             durable_name: Some(durable_name.clone()),
-            // ConsumerConfig::max_ack_pending uses 0 to mean "NATS server default" (currently 1000).
             max_ack_pending: max_ack_pending_to_i64(subscription.max_ack_pending),
             ..Default::default()
         };

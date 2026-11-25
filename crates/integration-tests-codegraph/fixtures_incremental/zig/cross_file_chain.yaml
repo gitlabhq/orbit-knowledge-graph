@@ -29,8 +29,7 @@ tests:
       - { row: { name: run, file: src/c.zig } }
 
   - name: "a call through the imported namespaces links to the definition"
-    # Known gap: Zig calls through an @import namespace do not link, even with a direct import.
-    skip: true
+    known_gap: "Zig calls through an @import namespace do not link, even with a direct import."
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'run'

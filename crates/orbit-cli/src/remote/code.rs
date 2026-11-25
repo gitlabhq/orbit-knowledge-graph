@@ -48,7 +48,6 @@ impl std::fmt::Display for Code {
     }
 }
 
-/// Splits `group/project/path/to/file` at the longest project path the graph knows, in one query.
 pub(crate) async fn split_project_path(
     client: &OrbitClient,
     path: &str,
@@ -89,7 +88,6 @@ async fn query_nodes(client: &OrbitClient, query: &str) -> Result<Vec<Value>, Re
         .unwrap_or_default())
 }
 
-/// The project id and default branch name from the graph.
 async fn project_branch(client: &OrbitClient, project: &str) -> Result<(i64, String), RemoteError> {
     let query = format!(
         "MATCH (p:Project {{full_path: {}}})-[:CONTAINS]->(b:Branch) WHERE b.is_default = true \
@@ -127,7 +125,6 @@ pub(crate) async fn read(
     Ok(render(project, &branch, code, &nodes))
 }
 
-/// Finds the file without content, which costs no Gitaly call, then reads only the one it picks.
 async fn file_nodes(
     client: &OrbitClient,
     id: i64,

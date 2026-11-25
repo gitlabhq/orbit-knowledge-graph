@@ -16,7 +16,6 @@ pub async fn load_seed(ctx: &TestContext, name: &str) {
     }
 }
 
-/// Siphon tables (`siphon_*`) and system tables are never prefixed.
 fn prefix_graph_tables(sql: &str, prefix: &str) -> String {
     if prefix.is_empty() {
         return sql.to_string();
@@ -33,9 +32,6 @@ fn prefix_graph_tables(sql: &str, prefix: &str) -> String {
     result
 }
 
-/// Split a SQL seed file into individual statement strings, validated
-/// by a real SQL parser. Fails on any parse error, empty input, or
-/// non-INSERT statement.
 pub fn split_sql_statements(sql: &str) -> Result<Vec<String>, SplitError> {
     let dialect = ClickHouseDialect {};
     let stmts = Parser::parse_sql(&dialect, sql).map_err(|e| SplitError::Parse(e.to_string()))?;

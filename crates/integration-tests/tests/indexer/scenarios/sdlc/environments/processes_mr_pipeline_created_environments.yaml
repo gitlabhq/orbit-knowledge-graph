@@ -1,6 +1,3 @@
-# Two review apps created by MR pipelines plus one independent production
-# environment. Only the review apps carry merge_request_id, so only they
-# produce CREATED_FOR_MR edges.
 description: MR-pipeline-created environments link back to their merge request
 scope: { namespace: 100 }
 

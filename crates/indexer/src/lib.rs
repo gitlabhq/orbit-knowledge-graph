@@ -1,28 +1,3 @@
-//! # Indexer
-//!
-//! Message processing framework and domain modules for GitLab Orbit.
-//!
-//! This crate contains both the engine (message routing, concurrency)
-//! and the domain modules (SDLC, Code) that implement indexing logic.
-//!
-//! ## Engine
-//!
-//! You provide:
-//! - A [`NatsBroker`](nats::NatsBroker) for message streaming
-//! - A [`ClickHouseWriter`](clickhouse::ClickHouseWriter) for writing record batches
-//! - One or more [`Handler`](engine::handler::Handler)s registered in a [`HandlerRegistry`](engine::handler::HandlerRegistry)
-//!
-//! ```text
-//! NatsBroker ──▶ Engine ──▶ HandlerRegistry
-//!                              └─ Handler (owns Destination)
-//!                              └─ Handler (owns Destination)
-//! ```
-//!
-//! ## Domain modules
-//!
-//! - [`modules::sdlc`] - SDLC entities (users, projects, MRs, CI, etc.)
-//! - [`modules::code`] - Code indexing (call graphs, definitions, references)
-//!
 pub mod analytics;
 pub use orbit_migrations::campaign;
 pub mod checkpoint;
@@ -40,11 +15,9 @@ pub mod topic;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
 
-// Re-export engine submodules at crate root for external API stability.
 pub use config::*;
 pub use engine::{dead_letter, durability, handler, retry, types, worker_pool};
 
-/// Re-export metrics from their canonical locations for external API stability.
 pub mod metrics {
     pub use crate::engine::metrics::*;
     pub use crate::schema::metrics::*;

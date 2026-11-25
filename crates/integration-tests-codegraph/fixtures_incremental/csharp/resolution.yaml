@@ -88,7 +88,6 @@ fixtures:
       }
 
 tests:
-  # ── Definition types ──────────────────────────────────────────
   - name: "All class definitions with correct FQNs"
     query: |
       MATCH (d:Definition)
@@ -158,7 +157,6 @@ tests:
       - { row: { fqn: MyApp.Models.Role.Editor } }
       - { row: { fqn: MyApp.Models.Role.Viewer } }
 
-  # ── Containment (DEFINES edges) ────────────────────────────────
   - name: "Class defines method with correct edge"
     query: |
       MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
@@ -181,7 +179,6 @@ tests:
       - { row: { fqn: MyApp.Models.Role.Editor } }
       - { row: { fqn: MyApp.Models.Role.Viewer } }
 
-  # ── CALLS edges (cross-file resolution) ────────────────────────
   - name: "Controller.GetUser calls UserService.FindById"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
