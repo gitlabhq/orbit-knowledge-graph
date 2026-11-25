@@ -1,7 +1,7 @@
 mod support;
 
 use indexing_engine_next::testkit::Testkit;
-use indexing_engine_next::{EngineConfig, LaneConfig};
+use indexing_engine_next::{EngineConfig, Lane, LaneConfig, LaneId};
 use support::{
     ExclusivePlanner, ExclusiveWorker, MINUTE, Run, SECOND, TestPlanner, TestWorker, events,
     manual, nonzero,
@@ -88,7 +88,10 @@ async fn a_submit_while_the_task_runs_queues_one_more_task() {
 async fn two_runs_of_an_exclusive_key_never_overlap_but_other_keys_run_beside_it() {
     let two_slots = LaneConfig::new(nonzero(2), MINUTE);
     let kit = Testkit::new()
-        .config(EngineConfig::default().with_lane("exclusive.worker/default", two_slots))
+        .config(
+            EngineConfig::default()
+                .with_lane(LaneId::new("exclusive.worker", Lane::DEFAULT), two_slots),
+        )
         .module(|engine| {
             engine
                 .worker(ExclusiveWorker::default().runs(1, [Run::Sleep(5 * SECOND)]))

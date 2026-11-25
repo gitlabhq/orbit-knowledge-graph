@@ -1,0 +1,90 @@
+"crates/utils/arrow/src/lib.rs":
+- category: upstream
+  reason: "ClickHouse range-checks null temporal slots before it applies the column default."
+  preview: "/// Column type fixup for a RecordBatch before ClickHouse insertion."
+  hash: 34598cc321514e3f
+  lines: 5
+"crates/utils/src/archive.rs":
+- category: security
+  reason: "Deferring symlinks stops an archive symlink from redirecting directory creation outside the target."
+  preview: "// Symlinks are deferred until all regular files and directories exist,…"
+  hash: f4bd07f4c561d971
+  lines: 3
+- category: security
+  reason: "The within-root deferral is the source's symlink security mechanism and must stay."
+  preview: "// A symlink is never a parse candidate — we'd be parsing the link, not"
+  hash: 5a60eab264bb3827
+  lines: 3
+"crates/utils/src/fs.rs":
+- category: security
+  reason: "Plain create_dir_all follows planted symlinks outside root; this check must not be simplified away."
+  preview: "/// Create parent directories for `path`, validating that no existing"
+  hash: 433abe7ae6eef3db
+  lines: 7
+- category: security
+  reason: "The scan must never short-circuit, or a malicious archive keeps escaping symlinks."
+  preview: "/// Walk a directory tree and remove any symlink that resolves outside"
+  hash: 0ddb04879c6f3520
+  lines: 8
+- category: security
+  reason: "A change to this module can open a path-traversal or symlink escape, so it needs a security review."
+  preview: "//! Filesystem security utilities (safe directory creation, symlink"
+  hash: 13becb997c4145b7
+  lines: 3
+- category: security
+  reason: "Every read of a user-supplied path must go through this guard, and the caller must canonicalize root first."
+  preview: "/// Canonicalize `path` and return it only if the real target lives"
+  hash: a87cbb0c714adb77
+  lines: 13
+"crates/utils/src/markdown.rs":
+- category: contract
+  reason: "Expected anchors come from the GitLab 19.6 renderer, not local output, so they must not be regenerated locally."
+  preview: "/// Expected anchors come from GitLab 19.6's renderer (`POST /api/v4/ma…"
+  hash: 8cbedea156b5e2c0
+  lines: 1
+"crates/utils/src/safe_fs/mod.rs":
+- category: security
+  reason: "Security caveat: reads verify size but are not immutable snapshots, so callers must not assume content is stable."
+  preview: "//! Host file access without following symlinks in any path component."
+  hash: c91a985f49ae7085
+  lines: 2
+- category: security
+  reason: "File::read re-validates each component, so a swapped ancestor can only misreport metadata."
+  preview: "// Looks up the leaf by path, not relative to `parent`. `File::read` re…"
+  hash: 1e97c030dd3928de
+  lines: 2
+"crates/utils/src/safe_fs/syscalls.rs":
+- category: security
+  reason: "The kernel enforces no-symlink in one open; a separate check would add a TOCTOU race."
+  preview: "//! OS-specific file access refuses host symlinks, including parent com…"
+  hash: 3c2e5b61b2dec7f6
+  lines: 3
+"crates/utils/src/strings.rs":
+- category: contract
+  reason: "The quoting drops control bytes and is not JSON-compatible, so callers that need byte fidelity must not use it."
+  preview: "/// Wraps a string in quotes, escaping backslash, quote, newline, carri…"
+  hash: 8843d0e1862e5a47
+  lines: 5
+"crates/utils/src/traversal_path/mod.rs":
+- category: security
+  reason: "An empty or malformed path makes startsWith match every row in the table."
+  preview: "/// A traversal path is valid when it matches `<org_id>/<namespace_id>/`"
+  hash: 17df840bcbdf3436
+  lines: 5
+- category: security
+  reason: "Returning None stops a malformed path from producing startsWith(traversal_path, '') that matches every row."
+  preview: "/// The top-level-namespace prefix of a traversal path: the first two"
+  hash: 064d8588df6c8273
+  lines: 8
+"crates/utils/src/vfs/scratch.rs":
+- category: upstream
+  reason: "Windows seek_read/seek_write can transfer fewer bytes than asked, so the loop is required for correctness."
+  preview: "// Windows seek_read/seek_write take an explicit offset but may transfer"
+  hash: 18314c428131768f
+  lines: 2
+"crates/utils/src/vfs/sources/archive.rs":
+- category: security
+  reason: "Entry paths must be validated before the archive root is stripped; reversing the order weakens the traversal guard."
+  preview: "//! Gitaly tar.gz input is processed sequentially. Rejected bodies are …"
+  hash: 91c3dd2b71683272
+  lines: 3

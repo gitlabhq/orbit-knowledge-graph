@@ -1,0 +1,9 @@
+id: comments-python-docstring
+valid:
+  - 'x = "a string value"'
+  - 'print("a string argument")'
+invalid:
+  - "def a():\n    \"\"\"A function docstring.\"\"\"\n    return 1"
+  - '"""A module docstring."""'
+  - '("a parenthesized docstring")'
+  - "class A:\n    'A class docstring.'"

@@ -7,7 +7,6 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -30,8 +29,7 @@ const QUERY_CACHE_UNCACHEABLE_HANDLING: [(&str, &str); 2] = [
 /// `None` means "not specified at this layer" -- the merge logic in
 /// [`QuerySettings::resolve`] fills in from the default. The derived
 /// `Default` is therefore all-`None`: nothing specified, nothing emitted.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct QueryConfig {
     /// ClickHouse `max_execution_time` in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -83,9 +81,8 @@ pub struct QueryConfig {
 
     /// Compiler-derived ClickHouse settings. Set by the compiler's settings
     /// pass based on AST inspection (e.g. materialized CTEs). Invisible to
-    /// serde and the JSON schema — never loaded from YAML or user input.
+    /// serde, so never loaded from YAML or user input.
     #[serde(skip)]
-    #[schemars(skip)]
     pub compiler_derived: CompilerDerivedSettings,
 }
 
@@ -217,7 +214,7 @@ impl QueryConfig {
 ///     aggregation:
 ///       max_execution_time: 60
 /// ```
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QuerySettings {
     pub default: QueryConfig,

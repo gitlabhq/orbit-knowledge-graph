@@ -2,12 +2,10 @@
 
 use std::net::SocketAddr;
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// A namespace with lists of deployments and/or statefulsets to monitor.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NamespaceTarget {
     pub namespace: String,
     #[serde(default)]
@@ -16,8 +14,7 @@ pub struct NamespaceTarget {
     pub stateful_sets: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HealthCheckConfig {
     pub bind_address: SocketAddr,
     #[serde(default)]

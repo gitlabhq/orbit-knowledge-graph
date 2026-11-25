@@ -11,7 +11,6 @@ mod metrics_catalog;
 mod migration_ledger;
 mod proto;
 mod query_docs;
-mod schema;
 mod synth;
 
 /// GKG development task runner.
@@ -49,12 +48,6 @@ enum Command {
     /// Regenerate the prost types and descriptor set for the server
     /// configuration schema.
     ProtoConfig,
-    /// Generate JSON Schema for the server configuration.
-    Schema {
-        /// Write schema to a file instead of stdout.
-        #[arg(short, long)]
-        output: Option<std::path::PathBuf>,
-    },
     /// Generate the shared metrics catalog consumed by runbooks dashboards.
     MetricsCatalog {
         /// Write catalog JSON to this path instead of the default.
@@ -386,7 +379,6 @@ async fn main() -> Result<()> {
             }
         },
         Command::ProtoConfig => proto::run(),
-        Command::Schema { output } => schema::run(output),
         Command::MigrationLedger { command } => match command {
             MigrationLedgerCommand::Bump {
                 scope,

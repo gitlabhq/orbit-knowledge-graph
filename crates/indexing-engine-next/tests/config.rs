@@ -2,14 +2,14 @@ mod support;
 
 use std::time::Duration;
 
-use indexing_engine_next::{ClusterPoolConfig, EngineConfig, LaneConfig, PoolConfig};
+use indexing_engine_next::{ClusterPoolConfig, EngineConfig, Lane, LaneConfig, LaneId, PoolConfig};
 use support::nonzero;
 
 fn read_lane_timeout(timeout: &str) -> Result<Duration, String> {
     let json =
         format!(r#"{{ "lanes": {{ "a/default": {{ "slots": 1, "timeout": "{timeout}" }} }} }}"#);
     serde_json::from_str::<EngineConfig>(&json)
-        .map(|config| config.lanes["a/default"].timeout)
+        .map(|config| config.lanes[&LaneId::new("a", Lane::DEFAULT)].timeout)
         .map_err(|error| error.to_string())
 }
 
@@ -32,7 +32,7 @@ fn the_config_reads_lanes_and_pools_as_helm_writes_them() {
         slots: nonzero(16),
         timeout: Duration::from_secs(15 * 60),
         max_age: Duration::from_secs(24 * 60 * 60),
-        on_timeout: Some("code.index/big".to_owned()),
+        on_timeout: Some(LaneId::new("code.index", Lane::new("big"))),
     };
     let archives = PoolConfig::Cluster(ClusterPoolConfig {
         cluster: true,
@@ -41,10 +41,34 @@ fn the_config_reads_lanes_and_pools_as_helm_writes_them() {
         max_wait: Duration::from_secs(60),
     });
     let expected = EngineConfig::default()
-        .with_lane("code.index/default", lane)
+        .with_lane(LaneId::new("code.index", Lane::DEFAULT), lane)
         .with_pool("parse", PoolConfig::Pod(nonzero(10)))
         .with_pool("gitaly_archives", archives);
     assert_eq!(config, expected);
+}
+
+#[test]
+fn a_config_lane_must_look_like_worker_slash_lane() {
+    for id in ["default", "/default", "code.index/", "code.index/big/extra"] {
+        let json = format!(r#"{{ "lanes": {{ "{id}": {{ "slots": 1, "timeout": "1m" }} }} }}"#);
+
+        let error = serde_json::from_str::<EngineConfig>(&json)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("must look like <worker>/<lane>"), "{error}");
+    }
+}
+
+#[test]
+fn an_on_timeout_lane_must_look_like_worker_slash_lane() {
+    let json = r#"{ "lanes": { "code.index/default": { "slots": 1, "timeout": "1m", "on_timeout": "big" } } }"#;
+
+    let error = serde_json::from_str::<EngineConfig>(json)
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("must look like <worker>/<lane>"), "{error}");
 }
 
 #[test]

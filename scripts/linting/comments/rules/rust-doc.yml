@@ -1,0 +1,16 @@
+id: comments-rust-doc
+language: rust
+severity: error
+message: Remove this comment and fix the root cause in the code. Run `mise run lint:comments` for the steps.
+rule:
+  any:
+    - all:
+        - any:
+            - kind: line_comment
+            - kind: block_comment
+        - regex: '^(///([^/]|$)|//!|/\*\*([^*/]|$)|/\*!)'
+    - all:
+        - any:
+            - kind: attribute_item
+            - kind: inner_attribute_item
+        - regex: '(?s)^#!?\s*\[.*\bdoc\s*='

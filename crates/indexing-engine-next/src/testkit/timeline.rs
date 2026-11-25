@@ -3,7 +3,7 @@ use std::fmt;
 use tokio::time::Instant;
 
 use crate::config::format_duration;
-use crate::lane::Lane;
+use crate::lane::{Lane, LaneId};
 use crate::payload::TaskInput;
 
 pub(super) struct Timeline {
@@ -36,7 +36,7 @@ impl Default for Timeline {
 impl Timeline {
     pub(super) fn record(&mut self, input: &TaskInput, lane: &Lane, event: TaskEvent) {
         let at = format_duration(self.origin.elapsed());
-        let lane = lane.format_id(input.worker);
+        let lane = LaneId::new(input.worker, lane.clone());
         self.lines
             .push(format!("{at} {lane} {key} {event}", key = input.key));
     }

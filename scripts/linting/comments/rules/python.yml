@@ -1,0 +1,39 @@
+id: comments-python
+language: python
+severity: error
+message: Remove this comment and fix the root cause in the code. Run `mise run lint:comments` for the steps.
+utils:
+  first-comment-run:
+    not:
+      follows:
+        not:
+          kind: comment
+        stopBy: end
+  metadata-open:
+    all:
+      - regex: '^# /// script$'
+      - matches: first-comment-run
+  metadata-line:
+    regex: '^#( [\w-]+ = .+| +".*",?| *\]|)$'
+rule:
+  kind: comment
+  not:
+    any:
+      - matches: metadata-open
+      - all:
+          - any:
+              - regex: '^# ///$'
+              - matches: metadata-line
+          - follows:
+              matches: metadata-open
+              stopBy:
+                not:
+                  any:
+                    - matches: metadata-line
+          - any:
+              - regex: '^# ///$'
+              - precedes:
+                  regex: '^# ///$'
+                  stopBy:
+                    not:
+                      matches: metadata-line

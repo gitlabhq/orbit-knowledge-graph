@@ -10,7 +10,7 @@ use crate::worker::Worker;
 
 pub use validate::BuildError;
 
-pub(crate) use registry::{ErasedPlanner, Registry};
+pub(crate) use registry::{ErasedPlanner, ErasedWorker, Registry};
 
 use registry::{PlannerEntry, ReconcilerEntry, WorkerEntry};
 
