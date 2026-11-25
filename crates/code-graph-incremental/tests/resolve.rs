@@ -481,3 +481,63 @@ fn a_join_chain_resolves_in_work_linear_in_its_reaching_pairs() {
         "resolving 8x the joins went from {small:.0} ms to {large:.0} ms"
     );
 }
+
+#[test]
+fn include_directory_fallback_survives_noop_reindex_and_yields_to_a_local_header() {
+    let repo = tempfile::tempdir().unwrap();
+    for dir in ["include/calc", "src", "src/calc"] {
+        std::fs::create_dir_all(repo.path().join(dir)).unwrap();
+    }
+    write_all(
+        repo.path(),
+        &[
+            ("include/calc/calc.hpp", "int add(int a, int b);\n"),
+            (
+                "src/calc.cpp",
+                "#include \"calc/calc.hpp\"\nint add(int a, int b) { return a + b; }\n",
+            ),
+            (
+                "src/main.cpp",
+                "#include \"calc/calc.hpp\"\nint run() { return add(1, 2); }\n",
+            ),
+        ],
+    );
+    let env = Env::with_limits(SupportLang::Cpp, Limits::UNLIMITED).unwrap();
+    let (resolved, _) = resolve_repo(&env, repo.path());
+    let calls = [pair("src/main.cpp:run", "src/calc.cpp:add")];
+    assert_eq!(cross_file(&env, &resolved.state, EdgeKind::Calls), calls);
+
+    let (context, resolved) = templates::reindex(
+        Context::new(
+            &env,
+            common::load(orbit_utils::vfs::sources::Memory(vec![])),
+        ),
+        resolved.state,
+        vec![],
+    )
+    .unwrap()
+    .finish();
+    assert!(context.report.files.is_empty());
+    assert!(resolved.resolved.is_empty());
+    assert_eq!(cross_file(&env, &resolved.state, EdgeKind::Calls), calls);
+
+    write_all(
+        repo.path(),
+        &[(
+            "src/calc/calc.hpp",
+            "inline int add(int a, int b) { return b + a; }\n",
+        )],
+    );
+    let changes = common::load(orbit_utils::vfs::sources::Diff {
+        root: repo.path(),
+        paths: vec!["src/calc/calc.hpp".into()],
+    });
+    let (_, resolved) = templates::reindex(Context::new(&env, changes), resolved.state, vec![])
+        .unwrap()
+        .finish();
+    assert!(resolved_paths(&resolved).contains(&"src/main.cpp"));
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        [pair("src/main.cpp:run", "src/calc/calc.hpp:add")]
+    );
+}

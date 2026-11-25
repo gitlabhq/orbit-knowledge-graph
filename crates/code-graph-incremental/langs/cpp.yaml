@@ -61,6 +61,7 @@ config:
       { module: vector }, { module: version }
     ]
   resolve:
+    root_include_fallback: true
     lookup_from:
       - __source_root
 
