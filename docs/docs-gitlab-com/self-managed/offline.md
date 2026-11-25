@@ -22,10 +22,18 @@ Prepare the values files from those pages first.
 
 Prerequisites:
 
-- A host that can reach your registry, `registry.gitlab.com`, and `gitlab.com`.
-  With `splitTables.volumeMode: initCopy` in the Siphon chart, the host must also reach `gcr.io` and `docker.io`.
+- A host that can reach your registry, `registry.gitlab.com`, `gitlab.com`, and `docker.io` for the NATS images.
+  With `splitTables.volumeMode: initCopy` in the Siphon chart, the host must also reach `gcr.io`.
 - [Helm](https://helm.sh/docs/intro/install/) 3 or later and [skopeo](https://github.com/containers/skopeo/blob/main/install.md).
 - A registry that serves HTTPS.
+  If its certificate comes from a private certificate authority, add the authority's certificate to the host's trust store.
+  Or pass the certificate to each tool that contacts the mirror:
+  - `skopeo copy`: `--dest-cert-dir <ca_directory>`.
+    The directory holds the certificate as a `.crt` file and no `.key` file, because `skopeo` reads a `.key` file as a client key.
+  - `cosign verify`: `--registry-cacert <ca_certificate>`.
+  - `helm upgrade --install`: `--ca-file <ca_certificate>`.
+
+  Without the certificate, each tool fails with `x509: certificate signed by unknown authority`.
 
 To mirror the images and charts:
 
@@ -43,11 +51,15 @@ To mirror the images and charts:
    Include the `--set` flags that you install with:
 
    ```shell
-   helm template orbit orbit-<orbit_chart_version>.tgz -f orbit-values.yaml | grep -E '^\s+image:'
-   helm template siphon siphon-<siphon_chart_version>.tgz -f siphon-values.yaml | grep -E '^\s+(image|reference):'
+   helm template orbit orbit-<orbit_chart_version>.tgz -f orbit-values.yaml \
+     | grep -E '^\s+image:\s*\S' | sed -E 's/^.*image:[[:space:]]*"?([^"]*)"?$/\1/' | sort -u
+   helm template siphon siphon-<siphon_chart_version>.tgz -f siphon-values.yaml \
+     | grep -E '^\s+(image|reference):\s*\S' | sed -E 's/^.*(image|reference):[[:space:]]*"?([^"]*)"?$/\2/' | sort -u
    ```
 
-   Do the same for the NATS chart and any object storage chart that you deploy.
+   Do the same for the [NATS Helm chart](https://github.com/nats-io/k8s/tree/main/helm/charts/nats) with your NATS values, and for any object storage chart that you deploy.
+   The NATS chart images carry no registry, so they come from `docker.io`.
+   To point them at your mirror, set `global.image.registry` in the NATS values.
 
 1. Copy each listed image to your registry.
    Replace `<mirror>` with the host and port of your registry, and `<path>` with the image path without its registry:
@@ -79,6 +91,10 @@ To mirror the images and charts:
    | `gitlab-siphon-tables` | `siphon-values.yaml` | `splitTables.image.registry`, `splitTables.image.repository` |
    | `kubectl`, for the migration check, which is on by default in split mode | `siphon-values.yaml` | `waitForMigrations.image.repository` |
    | `kubectl`, if `dashboards.source: image` | `siphon-values.yaml` | `dashboards.image.repository` |
+
+   For a FIPS deployment, set `global.fips.enabled: true` in `siphon-values.yaml`.
+   The chart then appends `-fips` to the Siphon image tag, and the command lists that tag.
+   Mirror the tag that the command lists.
 
    If the mirror needs credentials, set `imagePullSecrets` in `orbit-values.yaml` and `podSpec.imagePullSecrets` in `siphon-values.yaml`.
 
@@ -131,9 +147,6 @@ To verify and install the charts:
      --version <orbit_chart_version> --namespace gitlab-orbit --values orbit-values.yaml
    ```
 
-   If your mirror uses a private certificate authority, add its certificate to the host's trust store,
-   or add `--ca-file <ca_certificate>` to the command.
-
 Then continue with [Verify replication](data-replication.md#verify-replication) and [Turn on indexing for a group](orbit-setup.md#turn-on-indexing-for-a-group).
 
 ## Add a license with the GitLab Orbit add-on
@@ -156,9 +169,11 @@ To use the local graph offline:
    export GLAB_ORBIT_CLI_BINARY_PATH=/opt/orbit/orbit
    export ORBIT_TELEMETRY_ENABLED=false
    export GLAB_CHECK_UPDATE=false
+   export GLAB_SEND_TELEMETRY=false
    ```
 
-   `GLAB_SEND_TELEMETRY=false` does not turn off GitLab Orbit CLI telemetry.
+   `GLAB_SEND_TELEMETRY=false` turns off `glab` usage data only.
+   `ORBIT_TELEMETRY_ENABLED=false` turns off GitLab Orbit CLI telemetry.
 
 For the persisted setting, see [Settings, storage, and telemetry](../cli.md#settings-storage-and-telemetry).
 
@@ -170,8 +185,9 @@ It does not include hosts that GitLab connects to.
 | Host | Used for | Offline |
 |------|----------|---------|
 | `registry.gitlab.com` | Images and the GitLab Orbit chart | Use a mirror. |
-| `gitlab.com` | Siphon chart, the `orbit` binary download, and the `glab` update check | Copy the files in. Set `GLAB_CHECK_UPDATE=false`. |
-| `gcr.io`, `docker.io` | `crane` and `busybox`, with `initCopy` only | Use a mirror. |
+| `gitlab.com` | Siphon chart, the `orbit` binary download, the `glab` update check, and `glab` usage data, which goes to the host that `glab` uses | Copy the files in. Set `GLAB_CHECK_UPDATE=false` and `GLAB_SEND_TELEMETRY=false`. |
+| `docker.io` | NATS chart images, and `busybox` with `initCopy` | Use a mirror. |
+| `gcr.io` | `crane`, with `initCopy` only | Use a mirror. |
 | `tuf-repo-cdn.sigstore.dev` | `cosign verify` | Use `--trusted-root`. |
 | `customers.gitlab.com`, `billing.prdsub.gitlab.net` | Credits check and usage, from the webserver | Used only with an online cloud license. |
 | `snowplowprd.trx.gitlab.net` | Product analytics (`analytics.enabled`) | Off by default. |
@@ -191,8 +207,11 @@ To resolve this issue, confirm that the license file has an unexpired add-on, th
 When `cosign verify` cannot reach `tuf-repo-cdn.sigstore.dev`, it prints:
 
 ```plaintext
-Error: setting trusted material: getting trusted root from TUF for new bundle verification: error getting live trusted root: failed to create TUF client failed to load metadata: tuf refresh failed: Get "https://tuf-repo-cdn.sigstore.dev/15.root.json": <network_error>
+Error: setting trusted material: getting trusted root from TUF for new bundle verification: error getting live trusted root: failed to create TUF client failed to load metadata: tuf refresh failed: Get "https://tuf-repo-cdn.sigstore.dev/<root_number>.root.json": <network_error>
 ```
+
+The root number changes between `cosign` releases.
+For example, it is `15` in 3.1.3 and `17` in 3.1.6.
 
 To resolve this issue, add `--trusted-root trusted_root.json` to the command.
 The deprecated `--offline` flag does not prevent the connection.
