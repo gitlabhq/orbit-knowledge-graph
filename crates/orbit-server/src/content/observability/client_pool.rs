@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
-use orbit_server_config::{AppConfig, ClickHouseConfiguration, ProfilingConfig};
+use orbit_server_config::{ClickHouseConfiguration, ProfilingConfig};
 
 use super::host_map::TenantRoute;
 
@@ -80,8 +80,6 @@ impl TenantClientPool {
             .build_client("observability")
     }
 
-    /// No session settings: the tenant user carries a READONLY settings
-    /// profile, and ClickHouse rejects any setting it does not already fix.
     fn configuration_for(&self, route: &TenantRoute, database: &str) -> ClickHouseConfiguration {
         ClickHouseConfiguration {
             database: database.to_string(),
@@ -90,7 +88,7 @@ impl TenantClientPool {
             password: Some(route.password.clone()),
             session_settings: HashMap::new(),
             replicated: false,
-            compatibility: AppConfig::embedded_defaults().graph.compatibility,
+            compatibility: String::new(),
             insert_settings: HashMap::new(),
             profiling: ProfilingConfig {
                 enabled: false,
@@ -185,18 +183,27 @@ mod tests {
         );
     }
 
-    /// The tenant user carries a READONLY settings profile, so any session
-    /// setting outside it is rejected with code 164 and the query never runs.
     #[test]
-    fn no_session_settings_are_sent_to_a_tenant() {
+    fn tenant_clients_leave_profile_limits_and_compatibility_to_the_server() {
         let pool = TenantClientPool::new();
 
-        let config = pool.configuration_for(&route("12345", "10.0.1.5"), "12345_signoz_traces");
+        let client = pool.build_client(&route("12345", "10.0.1.5"), "12345_signoz_traces");
 
-        assert!(
-            config.session_settings.is_empty(),
-            "the server profile owns the limits: {:?}",
-            config.session_settings
-        );
+        for fixed_by_profile in [
+            "readonly",
+            "max_execution_time",
+            "max_result_rows",
+            "max_bytes_to_read",
+            "max_memory_usage",
+            "max_concurrent_queries_for_user",
+            "log_queries",
+        ] {
+            assert_eq!(
+                client.inner().get_setting(fixed_by_profile),
+                None,
+                "{fixed_by_profile}"
+            );
+        }
+        assert_eq!(client.inner().get_setting("compatibility"), Some(""));
     }
 }
