@@ -1,0 +1,74 @@
+"config/default.yaml":
+- category: upstream
+  reason: "ClickHouse 26.6 bug skips the Siphon watermark index and scans whole tables when this setting is on."
+  preview: "# Must stay 0 to avoid a ClickHouse 26.6 bug that skips the Siphon wate…"
+  hash: 61419013b4ac8913
+  lines: 1
+- category: upstream
+  reason: "The drain window pairing avoids the tonic 0.14.5 panic (hyperium/tonic#2522)."
+  preview: "# 5 min, for L4 ILB rebalancing; null turns it off (behind the Orbit Ga…"
+  hash: 5b18a028e097629f
+  lines: 2
+- category: magic-value
+  reason: "Upstream: the tonic and hyper default is too small for GitLab JWTs with many traversal IDs."
+  preview: "# 64 KiB; tonic/hyper default of 16 KiB is too small for GitLab JWTs ca…"
+  hash: 311855d94e87b4cf
+  lines: 1
+- category: security
+  reason: "Static object-storage credentials must come from secret files, never plain config."
+  preview: "# Static credentials are Option fields meant for secret files:"
+  hash: 192781fd663a38d7
+  lines: 2
+"config/dev.yaml":
+- category: contract
+  reason: "Dev tuning must not reach default.yaml, which underlays production; 127.0.0.1 is unreachable from the Caproni VM."
+  preview: "# Local-development overlay applied on top of the embedded config/defau…"
+  hash: 9a53748aafb0add8
+  lines: 12
+- category: contract
+  reason: "Native and Caproni modes share one JetStream stream; a different consumer name makes them reject each other for an hour."
+  preview: "# consumer_name matches the Helm chart. Native mode and Caproni edit mo…"
+  hash: 1340be6a1b89841f
+  lines: 3
+"config/ontology/edges/reopened.yaml":
+- category: contract
+  reason: "Rails enum maps reopened to state 5; nothing in this repo checks the value against Rails."
+  preview: "# Reopen is a `resource_state_events` row (state = 5), never a system-n…"
+  hash: 4e49cff1d47cbb00
+  lines: 8
+"config/ontology/nodes/agents/agent_session.yaml":
+- category: security
+  reason: "Project delegation is a deliberate access decision; read_duo_workflow would hide sessions from Reporter+ users."
+  preview: "# Project-delegated on purpose: the session's existence is visible to a…"
+  hash: 4889e069583eda1f
+  lines: 4
+"config/ontology/nodes/core/project.yaml":
+- category: contract
+  reason: "Temporary: Rails returns 400 on duplicate redaction entries until the discriminator fix lands; do not revert early."
+  preview: "# Temporary: aligned with source-code entities so Project + code traver…"
+  hash: 7a141bf858682697
+  lines: 4
+"config/ontology/nodes/security/vulnerability.yaml":
+- category: security
+  reason: "Security Manager (25) is the minimum role for security resources, so the security pass drops Reporter-only paths."
+  preview: "# Security Manager is the minimum GitLab role designed to view security"
+  hash: 008fd3f5d9479678
+  lines: 8
+"config/ontology/nodes/source_code/commit.yaml":
+- category: contract
+  reason: "decoded_sha and the masked hash must match merge_request.yaml, or MERGED_AT_COMMIT points at no node."
+  preview: "# DRIFT WARNING: keep decoded_sha and the masked hash in sync with"
+  hash: 347b30c902a346c1
+  lines: 2
+"config/setup/agents/duo.yaml":
+- category: upstream
+  reason: "Duo creates its config dir only on first run, so the glab-installed binary path must also count."
+  preview: "# Duo creates its config dir on first run, so the binary glab installs …"
+  hash: d211b563a999907f
+  lines: 1
+"config/setup/opencode_plugin.js":
+- category: upstream
+  reason: "OpenCode 2 calls setup() and OpenCode 1 calls server(), so the file must import nothing from OpenCode."
+  preview: "// One default export carries both plugin APIs and imports nothing from…"
+  hash: 2ccdc406e4995aa2
+  lines: 2

@@ -1,30 +1,25 @@
 //! Schema version and retention configuration.
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Schema configuration: version retention and related settings.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SchemaConfig {
     /// Number of schema version table-sets to retain.
     ///
     /// After migrating to version N, the indexer keeps the N active tables plus
     /// the N-1 rollback target. Must be at least 2.
-    #[schemars(range(min = 2))]
     pub max_retained_versions: u32,
 
     /// How long the webserver waits before retrying a failed snapshot install
     /// or reopening a lost active-version watch, in seconds. Also the base
     /// backoff of the indexer readiness gate. Must be at least 1.
-    #[schemars(range(min = 1))]
     pub version_poll_interval_secs: u64,
 
     /// How long the indexer waits for the dispatcher to prepare its schema
     /// version before exiting non-zero (relying on the orchestrator to restart
     /// it). The indexer retries with backoff within this budget. Must be at
     /// least 1.
-    #[schemars(range(min = 1))]
     pub indexer_schema_wait_timeout_secs: u64,
 }
 

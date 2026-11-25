@@ -1,0 +1,6 @@
+id: comments-bash
+valid:
+  - 'echo "# not a comment"'
+invalid:
+  - "# a comment\necho ok"
+  - 'echo ok # trailing comment'

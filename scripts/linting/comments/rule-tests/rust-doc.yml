@@ -1,0 +1,13 @@
+id: comments-rust-doc
+valid:
+  - '// a plain comment belongs to comments-rust'
+  - '#[doc(hidden)] pub fn a() {}'
+  - '//// four slashes are not a doc comment'
+invalid:
+  - "/// An outer doc comment.\npub fn a() {}"
+  - '//! An inner doc comment.'
+  - "/** A block doc comment. */\npub fn a() {}"
+  - '#[doc = "An attribute doc comment."] pub fn a() {}'
+  - '#![doc = include_str!("README.md")]'
+  - '#[cfg_attr(all(), doc = "A conditional doc.")] pub fn a() {}'
+  - '# [doc = "A spaced attribute doc."] pub fn a() {}'

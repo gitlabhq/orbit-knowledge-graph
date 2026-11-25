@@ -1,25 +1,18 @@
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ObservabilityConfig {
     pub provisioner_url: Option<String>,
     pub provisioner_api_key: Option<String>,
-    #[schemars(range(min = 1))]
     pub host_map_refresh_seconds: u64,
     /// Minimum wait before retrying the provisioner after a failed refresh, so
     /// a provisioner outage does not add the request timeout to every query.
-    #[schemars(range(min = 1))]
     pub host_map_retry_after_seconds: u64,
-    #[schemars(range(min = 1))]
     pub request_timeout_seconds: u64,
     /// Client-side wait on a tenant ClickHouse query. The server-side bound is
     /// max_execution_time in the reader's settings profile, which the
     /// provisioner pins.
-    #[schemars(range(min = 1))]
     pub query_timeout_seconds: u64,
-    #[schemars(range(min = 1))]
     pub max_result_rows: u64,
 }
 

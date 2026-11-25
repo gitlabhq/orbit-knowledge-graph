@@ -3,14 +3,12 @@
 use std::path::Path;
 use std::time::Duration;
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// NATS connection settings.
 ///
 /// Matches siphon's QueuingConfig fields.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NatsConfiguration {
     /// Server address, e.g. "localhost:4222".
     pub url: String,
@@ -102,14 +100,12 @@ pub struct NatsConfiguration {
     /// versioned work streams, so a retired release's consumers reap
     /// themselves and stop vetoing release GC. A connected consumer's fetch
     /// loop keeps it active. At least 60 seconds.
-    #[schemars(range(min = 60))]
     pub consumer_inactive_threshold_secs: u64,
 
     /// How long another release's streams must show no activity (creation,
     /// publishes, attached consumers) before a starting dispatcher deletes
     /// them. A live release's dispatcher publishes every minute, so activity
     /// doubles as liveness. At least 600 seconds.
-    #[schemars(range(min = 600))]
     pub release_gc_idle_threshold_secs: u64,
 }
 

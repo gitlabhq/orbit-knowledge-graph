@@ -1,0 +1,28 @@
+"crates/xtask/src/loadtest.rs":
+- category: invariant
+  reason: "The failure check must run after the report so CI still publishes it."
+  preview: "// After the report, so CI still publishes it; a failing exit marks the…"
+  hash: c78755da4a189b67
+  lines: 1
+- category: contract
+  reason: "Orbit-perf.sh inserts a line after the first report line, so the run line must stay first."
+  preview: "/// Markdown report: the run line (kept first; orbit-perf.sh inserts a …"
+  hash: c713085651f1abee
+  lines: 3
+- category: contract
+  reason: "Rails base64-decodes the secret before signing; without this the JwtValidator rejects the token."
+  preview: "// Rails base64-decodes the secret before signing; mirror that so the"
+  hash: 89737ea1802a05eb
+  lines: 3
+"crates/xtask/src/synth/generator/fake_data.rs":
+- category: safety
+  reason: "SAFETY argument for the unsafe UTF-8 buffer write."
+  preview: "// SAFETY: we only write ASCII hex digits (0-9, a-f) into positions"
+  hash: 873ea7dab5423444
+  lines: 2
+"crates/xtask/src/synth/generator/run.rs":
+- category: upstream
+  reason: "DefaultHasher output can change across Rust builds, so seeds must use FNV-1a and splitmix64."
+  preview: "/// Stable per-stream seed (FNV-1a + splitmix64); unlike DefaultHasher …"
+  hash: 5f77bf0c05ba401d
+  lines: 1
