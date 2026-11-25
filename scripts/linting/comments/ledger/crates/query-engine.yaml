@@ -1,0 +1,104 @@
+"crates/query-engine/compiler/src/ast/dml.rs":
+- category: upstream
+  reason: "Embedding avoids ClickHouse correlated-subquery rejection that CTE references trigger in parameterized mode."
+  preview: "/// Like InSubquery but embeds the query directly instead of referencing"
+  hash: d29f59cb82c0da33
+  lines: 3
+"crates/query-engine/compiler/src/input.rs":
+- category: security
+  reason: "Hydration skips security context injection, so it must never be deserializable from user input."
+  preview: "/// Internal-only: consolidated hydration for multiple entity types."
+  hash: 626fe13c80004ea0
+  lines: 3
+"crates/query-engine/compiler/src/lib.rs":
+- category: security
+  reason: "Security boundary: local compile skips security and hydration phases, so server paths must never call it."
+  preview: "/// Compile a graph query into DuckDB SQL for local execution."
+  hash: ddd5fa4ca6426be9
+  lines: 4
+"crates/query-engine/compiler/src/passes/codegen/clickhouse.rs":
+- category: security
+  reason: "This path bypasses the security passes, so it must never take user-supplied query input."
+  preview: "/// # Trust boundary"
+  hash: f2efc43fdce60052
+  lines: 6
+- category: upstream
+  reason: "ClickHouse binds trailing ORDER BY/LIMIT to the last UNION ALL branch, so removing the wrap silently changes results."
+  preview: "// ClickHouse binds a trailing ORDER BY / LIMIT to the last branch of an"
+  hash: 41440c62a2975aae
+  lines: 3
+"crates/query-engine/compiler/src/passes/errors.rs":
+- category: upstream
+  reason: "Jsonschema Display truncates enum candidates and hides oneOf choices, so reverting to it hides valid values from agents."
+  preview: "/// Render a JSON Schema validation error into an actionable message."
+  hash: d05e6fae12bcc0fc
+  lines: 6
+"crates/query-engine/compiler/src/passes/lower/query_types/neighbors.rs":
+- category: invariant
+  reason: "ArrayFilter, not multiIf, keeps self-loop semantics when both arms match the same edge."
+  preview: "/// Direction::Both collapsed into a single edge scan (see `fused_both_…"
+  hash: c281d9db75052207
+  lines: 7
+"crates/query-engine/compiler/src/passes/lower/query_types/pathfinding.rs":
+- category: invariant
+  reason: "Edges across namespace depths carry only the deeper path, so intersect yields an empty scope."
+  preview: "// UNION, not intersect: endpoints at different namespace depths are li…"
+  hash: 19695881455d0b33
+  lines: 2
+"crates/query-engine/compiler/src/passes/plan/predicates.rs":
+- category: invariant
+  reason: "A text match on a changing column cannot bound a keyed re-read, so that scan must keep FINAL."
+  preview: "/// A text match on a changing column finds rows through the text index…"
+  hash: 14231195e142a4e1
+  lines: 1
+"crates/query-engine/compiler/src/passes/restrict.rs":
+- category: security
+  reason: "Aggregation bypasses the Rails redaction layer, so unscoped global nodes must be rejected."
+  preview: "//! Field-level access restriction."
+  hash: efa160486bbde578
+  lines: 9
+"crates/query-engine/compiler/src/passes/security.rs":
+- category: security
+  reason: "Role scoping closes the aggregation oracle on higher-privilege entities; removing it reopens the leak."
+  preview: "//! Security filter injection for multi-tenant isolation."
+  hash: 04184e98f915cba3
+  lines: 21
+- category: security
+  reason: "An empty security context must fail closed with an error; empty results would hide the bug."
+  preview: "// An entirely empty security context is treated as a fail-closed bug:"
+  hash: a8f33c2fd7edc573
+  lines: 8
+"crates/query-engine/compiler/src/passes/validate/mod.rs":
+- category: magic-value
+  reason: "The tighter anchor cap exists because BFS cost grows as anchors times E^depth; the const name cannot carry this."
+  preview: "/// Whether a path_finding endpoint has bounded selectivity."
+  hash: 70223976c1be9e42
+  lines: 3
+- category: invariant
+  reason: "Guard covers code paths that bypass schema validation; both-direction OR joins defeat ClickHouse indexes."
+  preview: "// \"both\" generates OR joins that defeat CH index usage; schema also re…"
+  hash: 5af540363cbef78f
+  lines: 2
+- category: upstream
+  reason: "ClickHouse rejects lower() and startsWith on non-string columns at run time, which shows as an opaque 500."
+  preview: "// ClickHouse rejects lower()/startsWith on non-string columns at"
+  hash: 5a9766ba035eca30
+  lines: 2
+"crates/query-engine/compiler/src/types.rs":
+- category: contract
+  reason: "Values must match Rails Gitlab::Access constants sent in the JWT."
+  preview: "/// GitLab access levels as sent in the JWT `min_access_level` field."
+  hash: 1e21e61a02ceda4e
+  lines: 2
+"crates/query-engine/formatters/src/graph.rs":
+- category: upstream
+  reason: "ReplacingMergeTree can leak several _version copies of an edge between merges, inflating identical paths."
+  preview: "// Dedupe paths by canonical (node_seq, edge_kinds) tuple. ReplacingMer…"
+  hash: 9968cc9a14ba2f94
+  lines: 4
+"crates/query-engine/shared/src/hydration.rs":
+- category: security
+  reason: "Traversal_paths is the authorized scope; a center-path fallback would widen access."
+  preview: "/// Uses pre-resolved column specs from the compilation plan; no ontolo…"
+  hash: 945d6d748c5ba1ab
+  lines: 5

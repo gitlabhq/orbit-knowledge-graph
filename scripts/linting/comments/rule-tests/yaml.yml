@@ -1,0 +1,7 @@
+id: comments-yaml
+valid:
+  - 'key: "# not a comment"'
+  - "key: |\n  # not a comment inside a block scalar"
+invalid:
+  - "# a comment\nkey: value"
+  - 'key: value # trailing comment'

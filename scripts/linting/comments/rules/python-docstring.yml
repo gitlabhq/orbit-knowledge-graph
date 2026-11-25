@@ -1,0 +1,23 @@
+id: comments-python-docstring
+language: python
+severity: error
+message: Remove this comment and fix the root cause in the code. Run `mise run lint:comments` for the steps.
+utils:
+  only-child-is-string:
+    all:
+      - has:
+          nthChild: 1
+          matches: string-like
+      - not:
+          has:
+            nthChild: 2
+  string-like:
+    any:
+      - kind: string
+      - kind: concatenated_string
+      - all:
+          - kind: parenthesized_expression
+          - matches: only-child-is-string
+rule:
+  kind: expression_statement
+  matches: only-child-is-string

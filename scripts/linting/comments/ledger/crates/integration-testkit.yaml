@@ -1,0 +1,11 @@
+"crates/integration-testkit/src/scenario/seed.rs":
+- category: upstream
+  reason: "A ClickHouse VALUES insert saturates out-of-range Date32 even with the overflow setting; JSONEachRow honours it."
+  preview: "/// `seed_settings` inserts go through JSONEachRow because some setting…"
+  hash: 460972d1cc684beb
+  lines: 4
+- category: upstream
+  reason: "A FORMAT insert consumes the rest of the request body, so it needs the raw HTTP interface."
+  preview: "// A FORMAT-bearing insert consumes the rest of the request body as dat…"
+  hash: d9502174b21c081b
+  lines: 2

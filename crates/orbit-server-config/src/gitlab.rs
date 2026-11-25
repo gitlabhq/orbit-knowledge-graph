@@ -1,11 +1,9 @@
 //! GitLab client and server-side GitLab configuration.
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for connecting to the GitLab internal API.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GitlabClientConfiguration {
     /// Base URL for the GitLab API (e.g. "https://staging.gitlab.com:11443").
     pub base_url: String,
@@ -18,15 +16,13 @@ pub struct GitlabClientConfiguration {
     pub resolve_host: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JwtConfig {
     pub signing_key: Option<String>,
     pub verifying_key: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GitlabConfig {
     pub base_url: Option<String>,
     pub jwt: JwtConfig,

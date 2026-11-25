@@ -1,0 +1,95 @@
+name: "Ruby: methods that return a local"
+
+fixtures:
+  - path: lib/client.rb
+    content: |
+      class Client
+        def get; end
+      end
+
+  - path: lib/other.rb
+    content: |
+      class Other
+        def get; end
+      end
+
+  - path: return_local.rb
+    content: |
+      class ReturnLocal
+        def make
+          c = Client.new
+          return c
+        end
+
+        def run
+          x = make
+          x.get
+        end
+      end
+
+  - path: return_reassigned.rb
+    content: |
+      class ReturnReassigned
+        def make
+          c = Other.new
+          c = Client.new
+          return c
+        end
+
+        def run
+          x = make
+          x.get
+        end
+      end
+
+  - path: return_method.rb
+    content: |
+      class ReturnMethod
+        def helper; end
+
+        def run
+          return helper
+        end
+      end
+
+  - path: return_call.rb
+    content: |
+      class ReturnCall
+        def make
+          return Client.new
+        end
+
+        def run
+          x = make
+          x.get
+        end
+      end
+
+tests:
+  - name: "return of a local types the method's result"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN ['return_local.rb', 'return_reassigned.rb'] AND callee.name = 'get'
+      RETURN caller.file_path AS file, callee.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { file: return_local.rb, target: Client::get } }
+      - { row: { file: return_reassigned.rb, target: Client::get } }
+
+  - name: "Control: return of a method name still calls the method"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'return_method.rb' AND caller.name = 'run'
+      RETURN callee.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: ReturnMethod::helper } }
+
+  - name: "Control: return of a call still types the method's result"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'return_call.rb' AND callee.name = 'get'
+      RETURN callee.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: Client::get } }

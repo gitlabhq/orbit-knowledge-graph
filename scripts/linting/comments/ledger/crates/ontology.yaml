@@ -1,0 +1,43 @@
+"crates/ontology/build.rs":
+- category: upstream
+  reason: "Rust-embed release builds miss file adds and removes, so the rerun line must stay."
+  preview: "// The embedded ontology is a `rust-embed` folder. Release builds expan…"
+  hash: 5788449587729c81
+  lines: 3
+"crates/ontology/src/entities.rs":
+- category: contract
+  reason: "Discriminants must equal Rails Gitlab::Access values so YAML, JWT claims, and compiler comparisons agree."
+  preview: "/// GitLab access levels. Discriminants match `Gitlab::Access` in Rails…"
+  hash: f0ec1feec99a064e
+  lines: 5
+- category: contract
+  reason: "The value must be a key of the Rails Authz::RedactionService::RESOURCE_CLASSES map."
+  preview: "/// Rails resource type (e.g., \"projects\", \"merge_requests\", \"groups\", …"
+  hash: ea888bae3d4fc74f
+  lines: 2
+- category: invariant
+  reason: "A tombstone missing an immutable column fails pre-pick filters and resurrects an older live row."
+  preview: "/// Column-backed fields marked `mutable: false` outside the sort key. …"
+  hash: 3b56c100a0ce105b
+  lines: 2
+"crates/ontology/src/lib.rs":
+- category: security
+  reason: "Callers that need per-variant accuracy must inspect EdgeEntity::scope; misuse as exact check leaks scope."
+  preview: "/// Returns `true` when **at least one** variant of `relationship_kind`…"
+  hash: f27488cb379362ab
+  lines: 7
+- category: invariant
+  reason: "PRIMARY KEY may omit leading columns; only sort_key is the real dedup key that path pruning depends on."
+  preview: "/// True when a `startsWith(traversal_path, P)` predicate prunes granul…"
+  hash: 2467207985e0f6ac
+  lines: 6
+- category: security
+  reason: "Only the exact triple check is safe for mixed-variant edges like CONTAINS; the coarse check widens scope."
+  preview: "/// Whether the specific `(relationship_kind, source_kind, target_kind)`"
+  hash: e8247395a1550f82
+  lines: 4
+- category: invariant
+  reason: "The FK-projecting guard is sound only while every FK edge declares fk_column on all its variants."
+  preview: "// An FK edge is indexed from the node holding the key, so only that si…"
+  hash: 3c1cec08d1138cfe
+  lines: 7

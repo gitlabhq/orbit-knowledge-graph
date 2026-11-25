@@ -1,0 +1,12 @@
+"crates/orbit-migrations/src/completion.rs":
+- category: upstream
+  reason: "Before a ClickHouse merge, FINAL would drop a completed row after an overlapping late page write."
+  preview: "// Not `FINAL`: until a merge, a completed row still counts after an ov…"
+  hash: 5a73f0e744c52648
+  lines: 1
+"crates/orbit-migrations/src/schema/mod.rs":
+- category: upstream
+  reason: "ClickHouse runs dictionary loads and view refreshes without session settings."
+  preview: "/// ClickHouse runs dictionary loads and view refreshes without the cli…"
+  hash: 58bbb463a0fdbeff
+  lines: 2

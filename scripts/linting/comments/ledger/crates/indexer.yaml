@@ -1,0 +1,215 @@
+"crates/indexer/duckdb/src/lib.rs":
+- category: invariant
+  reason: "Poison recovery is safe only while the lock guards nothing but a clone."
+  preview: "// The lock only guards cloning, so a panic while it is held leaves no …"
+  hash: f1f165e1ddaac29b
+  lines: 1
+"crates/indexer/src/checkpoint.rs":
+- category: invariant
+  reason: "A page write from an overlapping run must not hide a completion, so indexed_at uses its own rule."
+  preview: "// The newest row wins per key, except `indexed_at`: a page write from …"
+  hash: 3a7325f70c198705
+  lines: 2
+- category: upstream
+  reason: "Tradeoff: per-row inserts explode part count, but ClickHouse rejects async inserts with quorum."
+  preview: "// Single-row inserts must pin async batching regardless of durability,…"
+  hash: 91ade09fa369fb25
+  lines: 3
+- category: invariant
+  reason: "Flush-time now64 defaults let a buffered progress row outrank a later durable completion."
+  preview: "/// Flush-time `now64` defaults would let a buffered progress row outra…"
+  hash: d9fb5b96965ae93f
+  lines: 1
+"crates/indexer/src/clickhouse/writer.rs":
+- category: upstream
+  reason: "ClickHouse insert error codes are not stable enough to classify, so all transient inserts retry."
+  preview: "/// Blanket-retries a transient ClickHouse insert (its error codes are …"
+  hash: 92e2178d8d6aa815
+  lines: 1
+"crates/indexer/src/engine/durability.rs":
+- category: invariant
+  reason: "Durable is mandatory where a dropped write is unrecoverable: the watermark advances with no NATS retry."
+  preview: "/// Whether a write blocks until the store confirms it durably landed. …"
+  hash: cccf6b4d9897f676
+  lines: 2
+"crates/indexer/src/engine/worker_pool.rs":
+- category: invariant
+  reason: "Lock order: group permit before global permit, or a group waiter reserves global capacity."
+  preview: "/// Acquires the group permit first, then the global permit. This order…"
+  hash: dc78315827db5d9c
+  lines: 4
+"crates/indexer/src/modules/code/pipeline.rs":
+- category: invariant
+  reason: "Dropping the timed-out fetch is the only stop; nothing in that phase polls the token."
+  preview: "// Dropping the timed-out fetch is what stops it; nothing in that phase…"
+  hash: 54d4ca8cda6e6e9a
+  lines: 1
+- category: invariant
+  reason: "Fetch plus the longest wait can reach ack_wait; without the refresh NATS redelivers mid-job."
+  preview: "// Fetch plus the longest allowed wait can reach ack_wait; refresh the …"
+  hash: a9e5743c9d102b1d
+  lines: 1
+- category: contract
+  reason: "Fetch bound protects Gitaly from concurrent downloads; without the reason a future change may widen or remove the limit."
+  preview: "// Phase 1: Fetch — bounded by fetch_slots so we don't overwhelm"
+  hash: fabf0378f25f1c31
+  lines: 3
+- category: invariant
+  reason: "Tradeoff: the reserved big lane stops a flood of small repos from starving monorepos."
+  preview: "// A reserved big lane keeps a flood of small repos from starving monor…"
+  hash: 188168e3b8086abf
+  lines: 1
+- category: invariant
+  reason: "A cancelled run returns a partial graph with no error; without this check it would be committed."
+  preview: "// A cancelled run yields a partial graph with no error, so the fatal-e…"
+  hash: e520c0d4291b3e2a
+  lines: 1
+"crates/indexer/src/modules/code/repository/cache.rs":
+- category: invariant
+  reason: "The detached blocking reader outlives a dropped future; without the flag it keeps reading."
+  preview: "// The detached blocking reader outlives a dropped future; the flag mak…"
+  hash: 91f00d4ee07a6f26
+  lines: 1
+- category: invariant
+  reason: "If the future drops on timeout, the detached task still owns the TempDir, so extraction never writes into cleaned-up dirs."
+  preview: "// The blocking task owns the `TempDir` for the duration of extraction …"
+  hash: 09894129bd2e7611
+  lines: 4
+"crates/indexer/src/modules/code/repository/resolver.rs":
+- category: upstream
+  reason: "Rails returns 500, not 404, for a missing repository; do not treat it as transient."
+  preview: "/// Rails raises 500 for a repository that does not exist."
+  hash: 5eb8e32b88533a6f
+  lines: 1
+- category: upstream
+  reason: "Only the size cap is permanent; other empty reasons can be Gitaly visibility lag that a retry clears."
+  preview: "/// Only the size cap is known to be permanent; the other reasons can be"
+  hash: ee344536e6160bb4
+  lines: 2
+"crates/indexer/src/modules/code/repository/storage_lease.rs":
+- category: invariant
+  reason: "An expired lease may already be another pod's slot, so fencing without a Lost reply prevents double writers."
+  preview: "// An expired lease may already be another pod's slot, so fence even wi…"
+  hash: f7e4a757ff82344d
+  lines: 1
+- category: invariant
+  reason: "Past the stored expiry the lease key may belong to another pod, so releasing it would break their lock."
+  preview: "/// Releases the slot when the run future is dropped mid-work, unless t…"
+  hash: 29be6464976b47d2
+  lines: 2
+"crates/indexer/src/modules/code/stale_data_cleaner.rs":
+- category: invariant
+  reason: "Correct only while gl_edge holds one branch per project; a UNION wedges ClickHouse mutation replay."
+  preview: "// gl_edge has no project_id/branch, so scope by code source_kind: a fl…"
+  hash: ff7581cf73eb00fa
+  lines: 5
+"crates/indexer/src/modules/namespace_deletion/lower.rs":
+- category: upstream
+  reason: "Without FINAL a raw scan sees the old live row and writes a new tombstone on every run."
+  preview: "// FINAL reads the latest row per key. A raw scan still sees the old li…"
+  hash: 79d9e71610ede194
+  lines: 2
+"crates/indexer/src/modules/sdlc/datalake.rs":
+- category: upstream
+  reason: "Arrow output overflows at 2GB, so the retry must byte-cap blocks."
+  preview: "// Retry after a datalake failure (the Arrow 2GB overflow): byte-cap"
+  hash: 09ac961317213ac2
+  lines: 2
+"crates/indexer/src/modules/sdlc/pipeline.rs":
+- category: upstream
+  reason: "Each halving step re-scans the page, so jumping to the floor avoids repeated full scans on overflow."
+  preview: "// An overflow only clears once blocks are small, and each halving step"
+  hash: da8cc2de97fd5523
+  lines: 2
+"crates/indexer/src/modules/sdlc/plan/build.rs":
+- category: upstream
+  reason: "The INNER JOIN form hit a ClickHouse FillingRightJoinSide OOM, so the scan must stay bare."
+  preview: "// Bare siphon_notes scan, not the INNER JOIN that caused FillingRightJ…"
+  hash: eda3465ebfbc171e
+  lines: 1
+"crates/indexer/src/modules/sdlc/plan/extract/generated.rs":
+- category: upstream
+  reason: "Postgres date exceeds ClickHouse Date32 range; one bad row poisons the whole Arrow batch."
+  preview: "// Postgres `date` exceeds ClickHouse `Date32` (1900..2299); one bad ro…"
+  hash: e374d9abb436efb1
+  lines: 1
+"crates/indexer/src/modules/sdlc/plan/mod.rs":
+- category: upstream
+  reason: "A bare id range makes ClickHouse rescan the namespace on each page."
+  preview: "/// Half-open `[lower, upper)` window over the sort-key prefix; a bare …"
+  hash: c0a1f86f00967b7e
+  lines: 1
+- category: upstream
+  reason: "ClickHouse prunes the OR-of-ANDs form; a packed tuple compare full-scans."
+  preview: "/// OR-of-ANDs `(c0 > v0) OR (c0 = v0 AND c1 > v1) …` — ClickHouse prun…"
+  hash: 150312adbaeecf35
+  lines: 1
+"crates/indexer/src/modules/sdlc/plan/transform.rs":
+- category: upstream
+  reason: "DuckDB casts the string column for an int literal, so an ordinal compare on a string enum fails."
+  preview: "// DuckDB resolves `<string column> = <int literal>` by casting the col…"
+  hash: 2bd45a63fa344629
+  lines: 2
+"crates/indexer/src/modules/sdlc/transform/system_notes/mod.rs":
+- category: upstream
+  reason: "Strict ClickHouse rejects an INSERT that omits a no-DEFAULT column, so the empty tag lists must stay."
+  preview: "// Strict ClickHouse rejects an INSERT omitting a no-DEFAULT column, so…"
+  hash: a421ef39fc6e3d25
+  lines: 2
+"crates/indexer/src/modules/sdlc/transform/system_notes/parse.rs":
+- category: contract
+  reason: "Bounds derive from Rails reference patterns and constants that no code in this repo can check."
+  preview: "// Reference token grammar, derived from Rails:"
+  hash: 629ca0fdf116ec1a
+  lines: 12
+- category: security
+  reason: "The 20-digit IID cap stops unbounded regex backtracking on hostile input. Rails IIDs fit in it."
+  preview: "// The `\\d{1,20}` cap exists to prevent unbounded backtracking on"
+  hash: 513d5b32c9dbac6d
+  lines: 3
+"crates/indexer/src/modules/sdlc/transform/system_notes/resolve.rs":
+- category: upstream
+  reason: "The clickhouse crate puts params in the URL query string, so lookup arrays must stay bounded."
+  preview: "/// The clickhouse crate serializes params into the URL query string, s…"
+  hash: 88df4f18c25a7078
+  lines: 2
+- category: upstream
+  reason: "ClickHouse rejects the JSON param channel's tuple encoding for Array(Tuple), so two zipped arrays are required."
+  preview: "/// Batch `(target_project_id, iid)` -> MR id lookup. Same `argMax` ded…"
+  hash: b6190509dc483051
+  lines: 7
+"crates/indexer/src/nats/broker.rs":
+- category: invariant
+  reason: "Siphon history comes from backfill, so events lost after consumer recreation are skipped by design."
+  preview: "// Unmanaged (Siphon) streams: historical data comes from the datalake …"
+  hash: b8448e354bd5da5a
+  lines: 3
+"crates/indexer/src/nats/versioning.rs":
+- category: invariant
+  reason: "The constant has no writer, but GC needs it to delete streams of older schema versions."
+  preview: "// No writer since the KV progress store was removed. Kept so GC delete…"
+  hash: 0a088761a577b036
+  lines: 1
+- category: invariant
+  reason: "A listing error must abort before deletion; a partial survey could delete a live release stream."
+  preview: "// A listing error must abort before any deletion: sweeping on a partial"
+  hash: ab95513e8d6ee0f2
+  lines: 2
+"crates/indexer/src/orchestrator/max_deliveries.rs":
+- category: upstream
+  reason: "One message per subject means an exhausted message blocks its subject forever without this reconciler."
+  preview: "//! Reconciles NATS JetStream messages that have exhausted `max_deliver…"
+  hash: 5b23acc4b825fb90
+  lines: 7
+"crates/indexer/src/orchestrator/scheduled/backfill_sweep.rs":
+- category: invariant
+  reason: "A migration-gated sweep stranded projects before; coverage-driven dispatch must not be reverted."
+  preview: "//! Coverage-driven code-backfill sweep."
+  hash: 5c0b7ca82b0c9b9c
+  lines: 8
+"crates/indexer/src/testkit/logs.rs":
+- category: upstream
+  reason: "Tracing-core caches callsite interest from the first registering thread, so concurrent subscriber-less tests could disable captured lines."
+  preview: "// With one live dispatcher, tracing-core caches callsite interest from…"
+  hash: f23bc22fc7ecefed
+  lines: 2

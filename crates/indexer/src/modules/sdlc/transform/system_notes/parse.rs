@@ -27,7 +27,7 @@ pub struct Reference {
     /// For Issue / MR references, the internal id. For Commit references,
     /// `None` (use `commit_sha`).
     pub iid: Option<i64>,
-    /// For Commit references, the SHA (7–40 hex chars). `None` otherwise.
+    /// For Commit references, the SHA (7–64 hex chars). `None` otherwise.
     pub commit_sha: Option<String>,
 }
 
@@ -127,7 +127,7 @@ impl Action {
 //   path segment matches `[a-zA-Z0-9_][a-zA-Z0-9_\-\.]{0,254}`.
 // * `Issue.reference_pattern` is `(<project>?)#<digits>`.
 // * `MergeRequest.reference_pattern` is `(<project>?)!<digits>`.
-// * `Commit.reference_pattern` is `(<project>@)?<sha 7..40>`.
+// * `Commit.reference_pattern` is `(<project>@)?<sha 7..64>`.
 //
 // We bound the namespace depth at 20 segments to match
 // `Namespace::NUMBER_OF_ANCESTORS_ALLOWED`. The IID is bounded at 20 digits to
@@ -173,7 +173,7 @@ static MR_REF: LazyLock<Regex> = LazyLock::new(|| {
 static COMMIT_REF: LazyLock<Regex> = LazyLock::new(|| {
     let project = project_path_re();
     Regex::new(&format!(
-        r"\b(?:(?P<project>{project})@)?(?P<sha>[0-9a-f]{{7,40}})\b"
+        r"\b(?:(?P<project>{project})@)?(?P<sha>[0-9a-f]{{7,64}})\b"
     ))
     .expect("commit regex compiles")
 });
@@ -221,7 +221,7 @@ pub fn extract(action: Action, body: &str) -> Vec<Reference> {
         Action::Duplicate => first_ref_any(body).into_iter().collect(),
 
         // Body: "added N commit(s)\n\n* <short_sha> - <title>\n..."
-        // Each `<li>` line starts with a 7-40 hex run.
+        // Each `<li>` line starts with a 7-64 hex run.
         Action::Commit => extract_commit_shas_from_list(body),
 
         // Body: variants
@@ -302,7 +302,7 @@ fn extract_commit_shas_from_list(body: &str) -> Vec<Reference> {
         reason = "static regex literal is verified by tests and cannot fail at runtime"
     )]
     static LINE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?m)^[^\w]*\b(?P<sha>[0-9a-f]{7,40})\b\s*-\s").unwrap());
+        LazyLock::new(|| Regex::new(r"(?m)^[^\w]*\b(?P<sha>[0-9a-f]{7,64})\b\s*-\s").unwrap());
 
     LINE.captures_iter(body)
         .filter_map(|caps| {
@@ -324,7 +324,7 @@ fn extract_merge_ref(body: &str) -> Vec<Reference> {
         reason = "static regex literal is verified by tests and cannot fail at runtime"
     )]
     static SHA_AFTER_FOR: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\bfor\s+(?P<sha>[0-9a-f]{7,40})\b").expect("sha-after-for regex compiles")
+        Regex::new(r"\bfor\s+(?P<sha>[0-9a-f]{7,64})\b").expect("sha-after-for regex compiles")
     });
     if let Some(caps) = SHA_AFTER_FOR.captures(body) {
         return vec![Reference {
@@ -590,6 +590,44 @@ mod tests {
             "marked #1234 as a duplicate of this issue",
         );
         assert_eq!(refs, vec![issue_ref(None, 1234)]);
+    }
+
+    #[test]
+    fn cross_reference_commit_with_full_sha256() {
+        let sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let refs = extract(Action::CrossReference, &format!("mentioned in {sha}"));
+        assert_eq!(refs, vec![commit_ref(None, sha)]);
+    }
+
+    #[test]
+    fn cross_reference_cross_project_commit_with_full_sha256() {
+        let sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let body = format!("mentioned in gitlab-org/gitlab@{sha}");
+        let refs = extract(Action::CrossReference, &body);
+        assert_eq!(refs, vec![commit_ref(Some("gitlab-org/gitlab"), sha)]);
+    }
+
+    #[test]
+    fn body_with_too_long_sha_is_rejected() {
+        let body = format!("mentioned in {}", "a".repeat(65));
+        let refs = extract(Action::CrossReference, &body);
+        assert!(refs.is_empty(), "got refs: {refs:?}");
+    }
+
+    #[test]
+    fn commit_action_extracts_full_sha256_from_li_list() {
+        let sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let body = format!("added 1 commit\n\n* {sha} - Fix the bug\n");
+        let refs = extract(Action::Commit, &body);
+        assert_eq!(refs, vec![commit_ref(None, sha)]);
+    }
+
+    #[test]
+    fn merge_extracts_full_sha256_auto_merge_sha() {
+        let sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let body = format!("enabled an automatic merge when all merge checks for {sha} pass");
+        let refs = extract(Action::Merge, &body);
+        assert_eq!(refs, vec![commit_ref(None, sha)]);
     }
 
     #[test]
