@@ -993,8 +993,9 @@ billing-boundary-check:
     - sccache --show-stats || true
 
 # Fails when the MR adds a dependency that breaks a rule in
-# .gitlab/orbit-quality.yml or closes a dependency cycle. Existing violations
-# do not fail it.
+# .gitlab/orbit-quality.yml, closes a dependency cycle, or makes a module
+# shallow (one caller uses most of its functions and types). Existing
+# findings do not fail it.
 # allow_failure until it has run quietly on real MRs.
 orbit-quality-gate:
   stage: test
@@ -1010,7 +1011,7 @@ orbit-quality-gate:
   script:
     - cargo build -p orbit-cli --bin orbit
     - target/debug/orbit workspace index . > /dev/null
-    - target/debug/orbit quality layers cycles --diff "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --gate
+    - target/debug/orbit quality layers cycles shallow --diff "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --gate
     - sccache --show-stats || true
 
 integration-tests-codegraph:

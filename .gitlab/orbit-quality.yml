@@ -128,3 +128,10 @@ dead:
 # path, and by definition name for test modules inside source files.
 test_paths: ["**/tests.rs", "**/testkit/**", "**/test_helpers.rs", "**/test_util*.rs", "crates/integration-testkit/**"]
 test_symbols: ["::tests?::", "::[a-z_]+_tests::", "::fencing::", "::regression::", "::build_validations::"]
+
+# A module is shallow when one caller uses this share or more of its
+# functions and types, so it hands out its internals instead of a few entry
+# points. Methods are partly counted: the graph misses some method calls.
+shallow:
+  min_surface: 6
+  max_used_share: 0.5
