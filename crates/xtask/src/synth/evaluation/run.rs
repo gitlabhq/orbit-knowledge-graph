@@ -13,14 +13,6 @@ pub struct QueryEntry {
     pub query: String,
 }
 
-/// Load queries from a YAML file.
-///
-/// ```yaml
-/// q1:
-///   desc: List active users
-///   query: |
-///     MATCH (u:User {state: 'active'}) RETURN * LIMIT 30
-/// ```
 pub fn load_queries(path: &Path) -> Result<HashMap<String, QueryEntry>> {
     use anyhow::Context;
 

@@ -6,7 +6,6 @@ use super::term::Term;
 const VARIANT_MIN: usize = 3;
 const PREFERRED_VARIANTS: &[&str] = &["en", "en-GB", "en-US", "en_US", "en_GB", "default"];
 
-/// Doc comments and attributes put a definition's name a few lines below its first line.
 const DECLARATION_LINES: usize = 10;
 
 pub(super) fn is_code(path: &str) -> bool {
@@ -130,8 +129,6 @@ fn collapse_variants(files: Vec<(String, Vec<&Hit>)>) -> (Vec<(String, Vec<&Hit>
 
 type Row<'a> = (String, Vec<&'a Hit>);
 
-/// Files in reading order: defining code first, then other code, tests, and text files, each
-/// group by match count.
 pub(super) fn ranked<'a>(hits: &'a [Hit], alternatives: &[Term], collapse: bool) -> Vec<Row<'a>> {
     let mut files: Vec<Row<'a>> = Vec::new();
     for hit in hits {

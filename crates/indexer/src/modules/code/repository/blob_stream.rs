@@ -31,8 +31,8 @@ impl InProgressBlob {
     }
 }
 
-const MAX_FRAME_LENGTH: usize = 4 * 1024 * 1024; // 4 MiB
-const MAX_BLOB_SIZE: usize = 1024 * 1024; // 1 MiB
+const MAX_FRAME_LENGTH: usize = 4 * 1024 * 1024;
+const MAX_BLOB_SIZE: usize = 1024 * 1024;
 
 type ChunkStream = Pin<Box<dyn Stream<Item = Result<BlobChunk, BlobDecodeError>> + Send>>;
 

@@ -32,12 +32,6 @@ pub struct Claims {
     pub organization_id: Option<u64>,
     #[serde(default)]
     pub min_access_level: Option<u32>,
-    /// Traversal paths the user can query, each paired with the exact
-    /// access-level set on that path. Rails derives this from
-    /// `Search::GroupsFinder`. The compiler security pass consumes it to filter
-    /// paths per-entity: for example, a user with
-    /// `[("1/2/", [Reporter]), ("1/3/", [Security Manager])]` sees Project rows
-    /// from both paths but only Vulnerability rows from `1/3/`.
     #[serde(default)]
     pub group_traversal_ids: Vec<TraversalPathClaim>,
     #[serde(deserialize_with = "deserialize_source_type")]
@@ -62,9 +56,6 @@ pub struct Claims {
     pub deployment_type: Option<String>,
     #[serde(default)]
     pub realm: Option<String>,
-    /// Whether the user is a GitLab team member. Set by Rails via
-    /// `Gitlab::Com.gitlab_com_group_member?(user)`. Always false on
-    /// self-managed / Dedicated instances.
     #[serde(default)]
     pub is_gitlab_team_member: Option<bool>,
     /// Set by Rails on GitLab.com when the user's Orbit billing namespace has the
@@ -72,11 +63,8 @@ pub struct Claims {
     /// `is_gitlab_team_member`.
     #[serde(default)]
     pub orbit_quota_exempt: Option<bool>,
-    /// Rails `User#user_type`, such as `human`, `project_bot`, or `service_account`.
     #[serde(default)]
     pub user_type: Option<String>,
-    /// Credential the caller used, such as `personal_access_token` or
-    /// `oauth_access_token`. Rails omits it for browser session requests.
     #[serde(default)]
     pub token_type: Option<String>,
     /// SHA-256 of the instance's online cloud license, sent by Rails on self-managed
@@ -91,8 +79,6 @@ pub struct Claims {
     pub license_checksum: Option<SecretString>,
 }
 
-/// Source type of the request, matching the Iglu `orbit_query` enum.
-/// Unknown JWT values deserialize to `Rest` (the catch-all).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, strum::IntoStaticStr)]
 #[cfg_attr(test, derive(strum::EnumIter))]
 #[serde(rename_all = "snake_case")]

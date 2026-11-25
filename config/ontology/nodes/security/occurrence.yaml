@@ -1,5 +1,3 @@
-# config/ontology/nodes/security/occurrence.yaml
-
 node_type: VulnerabilityOccurrence
 domain: security
 description: A specific occurrence of a vulnerability detected in a project

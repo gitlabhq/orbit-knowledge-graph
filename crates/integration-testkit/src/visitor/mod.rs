@@ -1,24 +1,3 @@
-//! Typed helpers for walking formatted query pipeline responses.
-//!
-//! Built on top of [`GraphResponse`], [`GraphNode`], and [`GraphEdge`] —
-//! the same types produced by [`GraphFormatter`] and validated by
-//! `query_response.json`.
-//!
-//! # Usage
-//!
-//! ```no_run
-//! use integration_testkit::visitor::ResponseView;
-//! # use query_engine::compiler::input::Input;
-//! # use query_engine::formatters::GraphResponse;
-//! # fn check(input: &Input, pipeline_response: GraphResponse) {
-//!
-//! // With assertion enforcement — parses the query and requires matching assertions:
-//! let resp = ResponseView::for_query(input, pipeline_response);
-//! resp.assert_node_order("User", &[1, 2, 3]); // required because query has order_by
-//! // Drop panics if required assertions were not called.
-//! # }
-//! ```
-
 mod enforcement;
 
 use enforcement::AssertionTracker;
@@ -33,11 +12,6 @@ use query_engine::formatters::ColumnDescriptor;
 use query_engine::formatters::{GraphEdge, GraphNode, GraphResponse, GroupColumnDescriptor};
 use serde_json::{Map, Value};
 
-/// Wrapper that panics on drop if the inner value was never inspected.
-///
-/// Returned by [`ResponseView`] methods that satisfy enforcement requirements
-/// (`node_ids`, `edges_of_type`, `path_ids`). Panics on drop only if the
-/// value was never accessed at all (the "satisfy and discard" pattern).
 pub struct MustInspect<T> {
     value: Option<T>,
     accessed: std::cell::Cell<bool>,
@@ -86,17 +60,9 @@ impl<T> Drop for MustInspect<T> {
     }
 }
 
-/// Typed view over a formatted query pipeline response.
-///
-/// When created via [`for_query`](Self::for_query), the query JSON is parsed
-/// to derive assertion requirements. If the test drops the view without
-/// satisfying all requirements, the drop impl panics with a list of what
-/// was missed.
 pub struct ResponseView {
     pub response: GraphResponse,
     tracker: AssertionTracker,
-    /// Edge types positively asserted by the test; consumed by
-    /// [`assert_all_edge_types_covered`] to detect silently-ignored types.
     asserted_edge_types: RefCell<HashSet<String>>,
 }
 
@@ -150,8 +116,6 @@ fn group_node_property<'a>(
 }
 
 impl ResponseView {
-    /// Create a view without assertion enforcement. External crates must use
-    /// [`for_query`](Self::for_query); this is gated to in-crate unit tests.
     #[cfg(test)]
     pub(crate) fn new(response: GraphResponse) -> Self {
         Self {
@@ -161,12 +125,6 @@ impl ResponseView {
         }
     }
 
-    /// Create a view with assertion enforcement derived from the compiled [`Input`].
-    ///
-    /// Validates structural invariants on construction:
-    /// - `response.query_type` matches the input
-    /// - Search and aggregation responses have zero edges (the formatter never
-    ///   produces edges for these query types)
     pub fn for_query(input: &Input, response: GraphResponse) -> Self {
         let response_type: QueryType = serde_json::from_value(Value::String(
             response.query_type.clone(),
@@ -199,7 +157,6 @@ impl ResponseView {
         }
     }
 
-    /// Explicitly skip a requirement that doesn't apply to this test case.
     pub fn skip_requirement(&self, req: Requirement) {
         self.tracker.skip(req);
     }
@@ -240,7 +197,6 @@ impl ResponseView {
         self.response.nodes.len()
     }
 
-    /// Assert exact node count. Satisfies [`Requirement::Skip`].
     pub fn assert_node_count(&self, expected: usize) {
         self.tracker.satisfy(Requirement::Skip);
         assert_eq!(
@@ -281,7 +237,6 @@ impl ResponseView {
         MustInspect::new(ids, "node_ids()")
     }
 
-    /// Return IDs of nodes with the given type, preserving response order.
     pub fn node_ids_ordered(&self, entity_type: &str) -> Vec<i64> {
         self.response
             .nodes
@@ -316,16 +271,11 @@ impl ResponseView {
         })
     }
 
-    /// Satisfies [`Requirement::Relationship`] for the given edge type, and [`Requirement::Neighbors`].
     pub fn edges_of_type(&self, edge_type: &str) -> MustInspect<Vec<&GraphEdge>> {
         self.tracker.satisfy(Requirement::Relationship {
             edge_type: edge_type.to_string(),
         });
         self.tracker.satisfy(Requirement::Neighbors);
-        // Edge type is tracked eagerly here (before MustInspect is returned).
-        // If the caller discards the MustInspect, both panics fire — MustInspect
-        // first (discard), then edge_type is already tracked. In practice this is
-        // fine: MustInspect prevents the discard pattern entirely.
         self.asserted_edge_types
             .borrow_mut()
             .insert(edge_type.to_string());
@@ -354,8 +304,6 @@ impl ResponseView {
             .collect()
     }
 
-    /// Return the distinct path_ids present in edges, in first-seen order.
-    /// Satisfies [`Requirement::PathFinding`].
     pub fn path_ids(&self) -> MustInspect<Vec<usize>> {
         self.tracker.satisfy(Requirement::PathFinding);
         let mut seen = HashSet::new();
@@ -369,8 +317,6 @@ impl ResponseView {
         MustInspect::new(ids, "path_ids()")
     }
 
-    /// Return edges belonging to a specific `path_id`, sorted by `step`.
-    /// Empty if no edges have this path_id.
     pub fn path(&self, path_id: usize) -> Vec<&GraphEdge> {
         let mut edges: Vec<&GraphEdge> = self
             .response
@@ -397,13 +343,6 @@ impl ResponseView {
         );
     }
 
-    /// Assert a node exists and satisfies a predicate.
-    ///
-    /// Panics if the predicate also passes for a blank node (same type/id,
-    /// empty properties) — this catches trivial predicates like `|_| true`
-    /// that don't actually inspect the data.
-    ///
-    /// Satisfies [`Requirement::Aggregation`] (property value was checked).
     pub fn assert_node(&self, entity_type: &str, id: i64, predicate: impl Fn(&GraphNode) -> bool) {
         self.tracker.satisfy(Requirement::Aggregation);
         assert_predicate_is_nontrivial(entity_type, id, &predicate);
@@ -416,7 +355,6 @@ impl ResponseView {
         );
     }
 
-    /// Assert that an aggregation response returned zero rows.
     pub fn assert_empty_aggregation(&self) {
         assert!(
             self.response.nodes.is_empty(),
@@ -432,7 +370,6 @@ impl ResponseView {
         );
     }
 
-    /// Assert exact scalar row count for property-grouped aggregation responses.
     pub fn assert_row_count(&self, expected: usize) {
         self.tracker.satisfy(Requirement::Aggregation);
         self.tracker.satisfy(Requirement::Skip);
@@ -650,8 +587,6 @@ impl ResponseView {
         );
     }
 
-    /// Assert row values by position. Satisfies [`Requirement::AggregationSort`]
-    /// when every row is listed.
     pub fn assert_row_values(&self, expected: &[std::collections::BTreeMap<String, Value>]) {
         for (index, row) in expected.iter().enumerate() {
             for (column, value) in row {
@@ -725,10 +660,6 @@ impl ResponseView {
         );
     }
 
-    /// Assert the integer value of a column on an ungrouped aggregation response.
-    ///
-    /// Ungrouped aggregations expose their values on the first table row.
-    /// Satisfies [`Requirement::Aggregation`].
     pub fn assert_aggregation_value_i64(&self, alias: &str, expected: i64) {
         self.tracker.satisfy(Requirement::Aggregation);
         let row = self
@@ -743,7 +674,6 @@ impl ResponseView {
         );
     }
 
-    /// Satisfies [`Requirement::Relationship`] for the given edge type, and [`Requirement::Neighbors`].
     pub fn assert_edge_exists(
         &self,
         from: &str,
@@ -767,12 +697,6 @@ impl ResponseView {
         );
     }
 
-    /// Assert that a specific edge does NOT exist.
-    ///
-    /// Does NOT satisfy [`Requirement::Relationship`] or [`Requirement::Neighbors`] —
-    /// a negative assertion proves nothing about what edges exist. Use
-    /// [`assert_edge_exists`](Self::assert_edge_exists) or
-    /// [`edges_of_type`](Self::edges_of_type) for positive verification.
     pub fn assert_edge_absent(
         &self,
         from: &str,
@@ -788,17 +712,6 @@ impl ResponseView {
         );
     }
 
-    /// Assert that a filter on `field` produced correct results for nodes of
-    /// `entity_type`. Checks that every node of the given type satisfies the predicate.
-    ///
-    /// Panics if:
-    /// - Zero nodes match `entity_type` (use [`assert_node_count`](Self::assert_node_count)
-    ///   to assert empty results instead — `assert_filter` requires at least one node
-    ///   because there is nothing to run the predicate against).
-    /// - The predicate passes for a blank node with no properties
-    ///   (catches trivial predicates like `|_| true`).
-    ///
-    /// Satisfies [`Requirement::Filter`] for the specific `field`.
     pub fn assert_filter(
         &self,
         entity_type: &str,
@@ -840,7 +753,6 @@ impl ResponseView {
         );
     }
 
-    /// Assert that the IDs of nodes with `entity_type` match `expected` exactly (unordered).
     pub fn assert_node_ids(&self, entity_type: &str, expected: &[i64]) {
         let actual: HashSet<i64> = self
             .response
@@ -853,8 +765,6 @@ impl ResponseView {
         assert_eq!(actual, expected_set, "{entity_type} node IDs mismatch");
     }
 
-    /// Assert the exact set of `(from_id, to_id)` pairs for edges of `edge_type`.
-    /// Satisfies [`Requirement::Relationship`] and [`Requirement::Neighbors`].
     pub fn assert_edge_set(&self, edge_type: &str, expected: &[(i64, i64)]) {
         self.tracker.satisfy(Requirement::Relationship {
             edge_type: edge_type.to_string(),
@@ -874,8 +784,6 @@ impl ResponseView {
         assert_eq!(actual, expected_set, "{edge_type} edge set mismatch");
     }
 
-    /// Assert the number of edges with `edge_type`.
-    /// Satisfies [`Requirement::Relationship`] and [`Requirement::Neighbors`].
     pub fn assert_edge_count(&self, edge_type: &str, expected: usize) {
         self.tracker.satisfy(Requirement::Relationship {
             edge_type: edge_type.to_string(),
@@ -896,8 +804,6 @@ impl ResponseView {
         );
     }
 
-    /// Assert that nodes of the given type appear in exactly this ID order.
-    /// Satisfies [`Requirement::OrderBy`] and [`Requirement::AggregationSort`].
     pub fn assert_node_order(&self, entity_type: &str, expected_ids: &[i64]) {
         self.tracker.satisfy(Requirement::OrderBy);
         self.tracker.satisfy(Requirement::AggregationSort);
@@ -905,7 +811,6 @@ impl ResponseView {
         assert_eq!(actual, expected_ids, "{entity_type} nodes in wrong order");
     }
 
-    /// Assert that every node referenced by an edge exists in the nodes array.
     pub fn assert_referential_integrity(&self) {
         let all = self.all_node_ids();
         for edge in &self.response.edges {
@@ -921,24 +826,6 @@ impl ResponseView {
             );
         }
     }
-    /// Assert that every edge type present in the response has been verified
-    /// by at least one edge assertion method.
-    ///
-    /// Call at the end of a neighbors test (or any test with edges) to ensure
-    /// the test has not silently ignored entire edge types. This closes the
-    /// coverage gap where asserting a single edge type satisfies the generic
-    /// [`Requirement::Neighbors`] but leaves other edge types unchecked.
-    ///
-    /// # Panics
-    ///
-    /// Panics with a prescriptive message listing the uncovered edge types
-    /// and which assertion methods to use:
-    ///
-    /// ```text
-    /// Uncovered edge types in response:
-    ///   - ASSIGNED (call assert_edge_exists, edges_of_type, assert_edge_set, or assert_edge_count)
-    ///   - AUTHORED (call assert_edge_exists, edges_of_type, assert_edge_set, or assert_edge_count)
-    /// ```
     pub fn assert_all_edge_types_covered(&self) {
         let response_types: HashSet<String> = self
             .response
@@ -966,9 +853,6 @@ impl ResponseView {
     }
 }
 
-/// Panic if the predicate returns `true` for a blank node (same type/id, no
-/// properties). Catches trivial predicates like `|_| true` or `|n| n.has_prop("x")`
-/// that don't actually verify a value.
 fn assert_predicate_is_nontrivial(
     entity_type: &str,
     id: i64,
@@ -986,7 +870,6 @@ fn assert_predicate_is_nontrivial(
     );
 }
 
-/// Property access and assertion helpers on [`GraphNode`].
 pub trait NodeExt {
     fn prop(&self, key: &str) -> Option<&Value>;
     fn prop_str(&self, key: &str) -> Option<&str>;

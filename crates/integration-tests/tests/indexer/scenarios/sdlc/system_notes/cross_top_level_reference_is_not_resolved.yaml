@@ -1,8 +1,3 @@
-# v1 limitation guard (ADR 013): the resolver bounds every datalake scan to
-# the source note's top-level namespace prefix so it never full-scans the
-# shared datalake; cross-top-level references are deliberately deferred.
-# The cross-top-level target's route and work item are fully present — the
-# only reason the edge must not materialize is the bound.
 description: Cross-top-level-namespace references are deliberately not resolved
 scope: { namespace: 100 }
 

@@ -1,5 +1,3 @@
-# config/ontology/edges/built_by.yaml
-
 description: Package or package file was built by a CI/CD pipeline
 table: gl_ci_edge
 

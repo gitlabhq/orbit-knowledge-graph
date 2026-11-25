@@ -1,24 +1,3 @@
-//! Ontology loading from YAML files.
-//!
-//! This crate loads ontology definitions from YAML files and converts them
-//! into strongly-typed entity definitions for Orbit.
-//!
-//! # Example
-//!
-//! ```no_run
-//! use ontology::Ontology;
-//!
-//! # fn load() -> Result<(), ontology::OntologyError> {
-//! // Load from embedded files (compiled into binary)
-//! let ontology = Ontology::load_embedded()?;
-//!
-//! // Or load from a directory on disk
-//! let ontology = Ontology::load_from_dir("config/ontology")?;
-//! let user = ontology.get_node("User").expect("User node exists");
-//! # Ok(())
-//! # }
-//! ```
-
 pub mod archive;
 pub mod constants;
 pub mod denormalized;
@@ -57,8 +36,6 @@ use std::path::Path;
 
 use loading::EtlSettings;
 
-/// A query-graph edge for [`Ontology::propagate_scope_proofs`]. Abstracts
-/// over compiler-specific types so the taint walk lives in the ontology crate.
 #[derive(Debug)]
 pub struct ScopeEdge<'a> {
     pub from: &'a str,
@@ -132,7 +109,6 @@ pub struct Ontology {
     schema_version: String,
     pub(crate) table_prefix: String,
     pub(crate) default_edge_table: String,
-    /// Default ORDER BY columns for node tables (dedup key for ReplacingMergeTree).
     pub(crate) default_entity_sort_key: Vec<String>,
     pub(crate) edge_table_configs: BTreeMap<String, EdgeTableConfig>,
     pub(crate) domains: BTreeMap<String, DomainInfo>,
@@ -140,35 +116,23 @@ pub struct Ontology {
     pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
     pub(crate) edge_descriptions: BTreeMap<String, String>,
     pub(crate) edge_pipelines: BTreeMap<String, Vec<Pipeline>>,
-    /// Reindex trigger tables per edge relationship kind, resolved from each
-    /// edge's `indexer` block. Parallels `edge_pipelines`; the pipeline model
-    /// itself carries no reindex information.
     pub(crate) edge_reindex_sources: BTreeMap<String, Vec<ReindexSource>>,
     pub(crate) etl_settings: EtlSettings,
     pub(crate) internal_column_prefix: String,
-    /// Local entity configs keyed by entity name. Each entry lists
-    /// properties to exclude from the local DuckDB table.
     pub(crate) local_entities: BTreeMap<String, Vec<String>>,
     pub(crate) local_edge_table_name: Option<String>,
     pub(crate) local_edge_columns: Vec<EdgeColumn>,
     pub(crate) auxiliary_tables: Vec<AuxiliaryTable>,
     pub(crate) auxiliary_dictionaries: Vec<AuxiliaryDictionary>,
-    /// Node properties denormalized onto edge tables for query optimization.
     pub(crate) denormalized_properties: Vec<DenormalizedProperty>,
-    /// Declared pre-joined table chains; see [`denormalized`].
     pub(crate) denormalized_joins: Vec<denormalized::DenormalizedJoin>,
     pub(crate) reordered_tables: Vec<denormalized::ReorderedTable>,
-    /// Edge-producing entities derived by a Rust transform (keyed by name).
-    /// These have no node table; they extract from the datalake and emit edges.
     pub(crate) derived_entities: BTreeMap<String, DerivedEntity>,
     pub(crate) materialized_views: Vec<MaterializedViewDefinition>,
     pub(crate) refreshable_materialized_views: Vec<RefreshableMaterializedViewDefinition>,
     pub(crate) statistics: Option<StatisticsConfig>,
     pub(crate) partition: Option<PartitionConfig>,
     pub(crate) traversal_path_lookups: Vec<TraversalPathLookup>,
-    /// Regex patterns for `v<N>_*` objects that the GC sweep must never drop.
-    /// Matched against the base name (after stripping the `v<N>_` prefix).
-    /// Empty by default: everything outside the keep-set is dropped.
     pub(crate) gc_preserve_patterns: Vec<String>,
 }
 
@@ -346,7 +310,6 @@ impl Ontology {
         self
     }
 
-    /// Test builder for a `denormalized_joins` entry; runs the loader's own validation.
     #[must_use]
     pub fn with_denormalized_join(mut self, name: &str, hops: &[(&str, &str, &str, bool)]) -> Self {
         let declared: Vec<loading::DeclaredHop<'_>> = hops
@@ -372,8 +335,6 @@ impl Ontology {
         self
     }
 
-    /// The edge must already be added via `with_edges()` and the table
-    /// via `with_edge_table()`. Sets `destination_table` on all variants.
     #[must_use]
     pub fn with_edge_for_table(
         mut self,
@@ -386,9 +347,6 @@ impl Ontology {
             for v in variants.iter_mut() {
                 v.destination_table = table.clone();
             }
-            // If the edge has no variants (common in builder-constructed
-            // ontologies), insert a placeholder so edge_table_for_relationship
-            // can look it up.
             if variants.is_empty() {
                 variants.push(EdgeEntity {
                     relationship_kind: edge_name,
@@ -420,11 +378,6 @@ impl Ontology {
             .map(|c| c.data_type)
     }
 
-    /// Add fields to an existing node.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the node doesn't exist.
     pub fn try_with_fields(
         mut self,
         node_name: &str,
@@ -455,12 +408,6 @@ impl Ontology {
         Ok(self)
     }
 
-    /// Add fields to an existing node (convenience method, fields default to nullable).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the node doesn't exist. Use [`try_with_fields`](Self::try_with_fields)
-    /// for fallible version.
     #[must_use]
     pub fn with_fields(
         self,
@@ -472,11 +419,6 @@ impl Ontology {
             .unwrap_or_else(|e| panic!("{e}"))
     }
 
-    /// Set `default_columns` for an existing node.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the node doesn't exist or if any column name is not a declared field.
     #[must_use]
     pub fn with_default_columns(
         mut self,
@@ -499,11 +441,6 @@ impl Ontology {
         self
     }
 
-    /// Mutate a field on a node.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the node or field doesn't exist.
     pub fn modify_field(
         mut self,
         node_name: &str,
@@ -553,10 +490,6 @@ impl Ontology {
         self
     }
 
-    /// Override the `required_role` on a node's existing redaction config.
-    /// Panics if the node is missing or has no redaction block. Builder-style
-    /// helper for ontologies constructed in tests; production ontologies
-    /// load the role directly from YAML.
     #[must_use]
     pub fn with_redaction_role(mut self, node_name: &str, role: RequiredRole) -> Self {
         let redaction = self
@@ -576,49 +509,20 @@ impl Ontology {
         self
     }
 
-    /// Load ontology from a directory containing schema.yaml and referenced files.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - Any referenced file cannot be read
-    /// - YAML parsing fails
-    /// - Validation fails (duplicate nodes, invalid edge references, etc.)
     #[must_use = "this returns the loaded ontology, which should not be discarded"]
     pub fn load_from_dir(dir: impl AsRef<Path>) -> Result<Self, OntologyError> {
         loading::load_from_dir(dir.as_ref())
     }
 
-    /// The embedded ontology with a directory mirroring `config/ontology/` merged over it.
     pub fn load_embedded_with_overlay(dir: impl AsRef<Path>) -> Result<Self, OntologyError> {
         loading::load_with(&loading::DirOverlay(dir.as_ref()))
     }
 
-    /// Load ontology from embedded files compiled into the binary.
-    ///
-    /// This uses the ontology files from `config/ontology/` that were
-    /// embedded at compile time.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - Any referenced file cannot be found in embedded assets
-    /// - YAML parsing fails
-    /// - Validation fails (duplicate nodes, invalid edge references, etc.)
     #[must_use = "this returns the loaded ontology, which should not be discarded"]
     pub fn load_embedded() -> Result<Self, OntologyError> {
         loading::load_embedded()
     }
 
-    /// Returns a clone with all physical table names prefixed for the given
-    /// schema version.
-    ///
-    /// This prepends `prefix` to every `destination_table` on nodes and edges,
-    /// the default edge table, edge table config keys, and auxiliary table
-    /// names. Local (DuckDB) table names are not affected.
-    ///
-    /// An empty prefix returns a clone with table names unchanged (v0 backward
-    /// compatibility).
     #[must_use]
     pub fn with_schema_version_prefix(mut self, prefix: &str) -> Self {
         if prefix.is_empty() {
@@ -714,9 +618,6 @@ impl Ontology {
             .collect()
     }
 
-    /// Get relationship kinds whose variants match any of the supplied endpoint pairs.
-    ///
-    /// Passing `None` for an endpoint leaves that side unconstrained.
     pub fn relationship_kinds_matching<'a>(
         &self,
         endpoints: impl IntoIterator<Item = (Option<&'a str>, Option<&'a str>)>,
@@ -749,16 +650,6 @@ impl Ontology {
         self.get_node(entity_name)?.redaction.as_ref()
     }
 
-    /// Minimum access level required to include rows of the node backing
-    /// `table` in a query result. Returns `None` if no node owns this
-    /// physical table.
-    ///
-    /// A `v{N}_` schema-version prefix on the input is stripped before the
-    /// lookup because the compiler may receive either the base
-    /// `destination_table` or the version-prefixed form produced by
-    /// [`Ontology::with_schema_version_prefix`]. Callers that pass edge
-    /// tables or CTE names get `None` and should fall back to a default
-    /// role.
     #[must_use]
     pub fn min_access_level_for_table(&self, table: &str) -> Option<u32> {
         let normalized = strip_schema_version_prefix(table);
@@ -769,8 +660,6 @@ impl Ontology {
             .map(|r| r.required_role.as_access_level())
     }
 
-    /// Whether `field_name` on `entity_name` is marked `admin_only`.
-    /// Returns false if either the entity or the field does not exist.
     #[must_use]
     pub fn is_admin_only(&self, entity_name: &str, field_name: &str) -> bool {
         self.get_node(entity_name)
@@ -843,8 +732,6 @@ impl Ontology {
         self.edge_table_configs.keys().map(|s| s.as_str()).collect()
     }
 
-    /// Collapse all edge routing to a single table. Used by the local/DuckDB
-    /// pipeline where only one edge table exists.
     pub fn collapse_edge_tables(&mut self, table: &str) {
         let table = table.to_string();
         self.default_edge_table = table.clone();
@@ -1055,10 +942,6 @@ impl Ontology {
         })
     }
 
-    /// True when `entity` declares a `traversal_path_lookup`, i.e. its
-    /// `traversal_path` can be resolved from an `id`/`full_path` filter so a
-    /// query anchored on it can be scope-pruned. `Project`, `Group`, and
-    /// `MergeRequest` today.
     #[must_use]
     pub fn is_anchor(&self, entity: &str) -> bool {
         self.traversal_path_lookups
@@ -1083,7 +966,6 @@ impl Ontology {
         node.sort_key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN)
     }
 
-    /// Path columns a scan of `table` is filtered on, each with its source table's role floor.
     #[must_use]
     pub fn traversal_path_columns(&self, table: &str) -> Vec<(String, Option<u32>)> {
         match self.denormalized_join_by_table(table) {
@@ -1112,7 +994,6 @@ impl Ontology {
         &self.reordered_tables
     }
 
-    /// The join whose table is `table`, with or without a schema-version prefix.
     #[must_use]
     pub fn denormalized_join_by_table(
         &self,
@@ -1139,7 +1020,6 @@ impl Ontology {
         })
     }
 
-    /// The exact `scope` annotation for a `(kind, source, target)` variant.
     #[must_use]
     pub fn edge_scope_for(
         &self,
@@ -1155,15 +1035,6 @@ impl Ontology {
         })
     }
 
-    /// Propagate scope proofs across scope-preserving edges with a two-pass taint walk.
-    ///
-    /// **Pass A (taint):** marks every alias reachable from a seed node only
-    /// through a non-scope-preserving edge. These aliases cannot receive a proof.
-    ///
-    /// **Pass B (BFS):** from the seed aliases, walks scope-preserving edges
-    /// and copies the proof to untainted neighbours.
-    ///
-    /// Pure: no DB calls, no widening past the seed.
     #[must_use]
     pub fn propagate_scope_proofs<P: Clone>(
         &self,
@@ -1185,7 +1056,6 @@ impl Ontology {
             })
             .collect();
 
-        // Pass A: taint aliases reachable only through non-scope-preserving edges.
         let mut tainted: HashSet<&str> = HashSet::new();
         loop {
             let mut changed = false;
@@ -1204,7 +1074,6 @@ impl Ontology {
             }
         }
 
-        // Pass B: flood proofs across scope-preserving edges, skipping tainted.
         let mut result = seed.clone();
         loop {
             let mut changed = false;
@@ -1244,9 +1113,6 @@ impl Ontology {
         &self.internal_column_prefix
     }
 
-    /// Physical tables of `global` nodes — non-namespaced hubs (User, Runner).
-    /// These are excluded from traversal-path security filters because they
-    /// carry no `traversal_path` to scope on.
     #[must_use]
     pub fn global_tables(&self) -> Vec<&str> {
         self.nodes
@@ -1269,18 +1135,11 @@ impl Ontology {
         self.local_entities.keys().map(|s| s.as_str()).collect()
     }
 
-    /// Returns the exclude list for a local entity.
-    ///
-    /// Returns `None` if the entity is not in `local_entities`.
     #[must_use]
     pub fn local_entity_excludes(&self, entity_name: &str) -> Option<&[String]> {
         self.local_entities.get(entity_name).map(|v| v.as_slice())
     }
 
-    /// Returns the fields for a local entity, filtered to exclude virtual
-    /// fields and properties listed in the entity's `exclude_properties`.
-    ///
-    /// Returns `None` if the entity is not in `local_entities`.
     #[must_use]
     pub fn local_entity_fields(&self, entity_name: &str) -> Option<Vec<&Field>> {
         let exclude = self.local_entities.get(entity_name)?;
@@ -1332,9 +1191,6 @@ impl Ontology {
         self.partition.as_ref()
     }
 
-    /// Returns the partition key column for a given entity's statistics MV,
-    /// or `None` if the entity lacks the configured partition column (global
-    /// entities like User, Runner get an empty partition key).
     #[must_use]
     pub fn stats_partition_key_for(&self, entity: &str) -> Option<&str> {
         let config = self.statistics.as_ref()?;
@@ -1346,9 +1202,6 @@ impl Ontology {
         }
     }
 
-    /// Categorize a node entity's filterable fields into stat types.
-    /// Returns (categorical, token, histogram) column name lists.
-    /// Skips: uuid, virtual, filterable:false, and excluded columns.
     #[must_use]
     pub fn stats_columns_for(&self, entity: &str) -> (Vec<&str>, Vec<&str>, Vec<&str>) {
         if self.statistics.is_none() {
@@ -1391,7 +1244,7 @@ impl Ontology {
                 DataType::Int | DataType::Float | DataType::Date | DataType::DateTime => {
                     histogram.push(field.name.as_str());
                 }
-                DataType::Uuid => {} // skip: selectivity is always 1/row_count
+                DataType::Uuid => {}
             }
         }
 
@@ -1429,9 +1282,6 @@ impl Ontology {
         &self.denormalized_properties
     }
 
-    /// Returns the sorted, deduplicated list of columns on a node entity that
-    /// carry the `text` storage index, and therefore support the
-    /// `token_match`, `all_tokens`, and `any_tokens` query operators.
     #[must_use]
     pub fn text_indexed_columns(&self, entity_name: &str) -> Vec<&str> {
         let Some(node) = self.nodes.get(entity_name) else {
@@ -1462,10 +1312,6 @@ impl Ontology {
             .unwrap_or(&[])
     }
 
-    /// Look up the dedup key (ORDER BY columns) for a ClickHouse table name.
-    ///
-    /// Returns the node's `sort_key` for node tables, the edge table's
-    /// `sort_key` for edge tables, or `None` if the table is unknown.
     #[must_use]
     pub fn sort_key_for_table(&self, table: &str) -> Option<&[String]> {
         if let Some(copy) = self.reordered_tables.iter().find(|copy| copy.name == table) {
@@ -1489,7 +1335,6 @@ impl Ontology {
         self.edge_descriptions.get(name).map(|s| s.as_str())
     }
 
-    /// Returns `Some` only for edges sourced from standalone pipelines.
     pub fn get_edge_etl(&self, relationship_kind: &str) -> Option<&[Pipeline]> {
         self.edge_pipelines
             .get(relationship_kind)
@@ -1500,21 +1345,6 @@ impl Ontology {
         self.edge_pipelines.contains_key(relationship_kind)
     }
 
-    /// Whether this relationship's edge materializes `column` on its
-    /// `direction` side — i.e. whether a node property in that column can be
-    /// denormalized onto the edge row. The single source of truth for which
-    /// edges carry which denorm tags; both the read path (compiler) and the
-    /// write path (indexer) derive from it.
-    ///
-    /// - A standalone edge projects `column` only when the matching literal
-    ///   endpoint maps an immutable ontology property to an extracted input
-    ///   field. Its rows change only with the link row, so a copy of a
-    ///   mutable property would go stale.
-    /// - An FK edge projects only on the side holding the key.
-    /// - A node-pipeline edge projects only the pipeline's own node, on the
-    ///   side that names it literally; derived-entity edges project nothing.
-    /// - An edge no declared pipeline emits has no writer the ontology can
-    ///   consult, so it is assumed to project on both sides.
     pub fn edge_projects_column(
         &self,
         relationship_kind: &str,
@@ -1607,11 +1437,6 @@ impl Ontology {
             .flat_map(|(k, configs)| configs.iter().map(move |c| (k.as_str(), c)))
     }
 
-    /// Look up a field's [`DataType`] on a node.
-    ///
-    /// Returns `None` if the node or field doesn't exist. Reserved columns
-    /// listed in [`NODE_RESERVED_COLUMNS`] (currently just `id`) are always
-    /// `DataType::Int`.
     #[must_use]
     pub fn get_field_type(&self, node_name: &str, field_name: &str) -> Option<DataType> {
         if NODE_RESERVED_COLUMNS.contains(&field_name) {
@@ -1624,13 +1449,6 @@ impl Ontology {
             .map(|f| f.data_type)
     }
 
-    /// Get the ClickHouse table name for a node label.
-    ///
-    /// Returns the `destination_table` from the node's ontology definition.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the node label is unknown.
     pub fn table_name(&self, node_label: &str) -> Result<&str, OntologyError> {
         let node = self.nodes.get(node_label).ok_or_else(|| {
             OntologyError::Validation(format!("unknown node label \"{node_label}\""))
@@ -1665,11 +1483,6 @@ impl fmt::Display for Ontology {
     }
 }
 
-/// Strip a `v{N}_` schema-version prefix from a physical table name, if
-/// present. `N` must be one or more ASCII digits. Used to normalize table
-/// names when an ontology built with
-/// [`Ontology::with_schema_version_prefix`] is queried with a lookup key
-/// that may or may not carry the prefix (and vice versa).
 pub(crate) fn strip_schema_version_prefix(table: &str) -> &str {
     let Some(rest) = table.strip_prefix('v') else {
         return table;
@@ -1697,7 +1510,6 @@ mod tests {
         for entry in std::fs::read_dir(dir).expect("ontology directory should read") {
             let path = entry.expect("ontology entry should read").path();
             if path.is_dir() {
-                // `sql/` holds refreshable-view select templates, not extract pipelines.
                 if path.file_name().and_then(|name| name.to_str()) != Some("sql") {
                     collect_sql_contents(&path, out);
                 }
@@ -1751,8 +1563,6 @@ mod tests {
         let from_dir = Ontology::load_from_dir(fixtures_dir()).expect("should load from dir");
 
         assert_eq!(embedded, from_dir);
-        // Markers are the indexer's concern now, so authored SQL is carried raw:
-        // at least one authored file's `{{...}}` markers survive load unresolved.
         let markers_preserved = all_pipelines(&embedded).iter().any(|pipeline| {
             let Extract::ClickHouse(extract) = &pipeline.extract;
             matches!(&extract.query, ExtractQuery::Sql(sql)
@@ -1808,9 +1618,6 @@ mod tests {
         }
     }
 
-    /// The ontology is declarative: it carries authored `.sql.j2` verbatim and marks
-    /// everything else `Generated` (no inline SQL). The generated SQL itself is the
-    /// indexer's concern, checked by its golden snapshot — not here.
     #[test]
     fn ontology_carries_authored_sql_and_marks_the_rest_generated() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
@@ -1893,8 +1700,6 @@ mod tests {
     fn code_graph_edges_are_registered() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
 
-        // They must all route to the same edge table so traversals can JOIN
-        // them with edges from other code-graph relationships.
         for kind in ["CALLS", "EXTENDS", "DEFINES", "IMPORTS"] {
             let entries = ontology
                 .get_edge(kind)
@@ -1985,11 +1790,6 @@ mod tests {
         use crate::entities::DenormDirection;
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
 
-        // HAS_DIFF's foreign key (merge_request_id) lives on the diff, so only the
-        // target side projects. Projecting onto the always-empty source side pushes
-        // has(source_tags,'state:merged') and silently drops every merged-MR diff
-        // row (gitlab-org/gitlab#601941). Call edge_projects_column directly so the
-        // guard would fail if that fix were reverted.
         assert!(
             !ontology.edge_projects_column(
                 "HAS_DIFF",
@@ -2019,7 +1819,6 @@ mod tests {
         );
     }
 
-    // Another entity's pipeline writes these edges with empty tags (#1249).
     #[test]
     fn denorm_not_declared_on_sides_no_pipeline_tags() {
         use crate::entities::DenormDirection::{Source, Target};
@@ -2165,10 +1964,8 @@ mod tests {
             strip_schema_version_prefix("v42_gl_vulnerability"),
             "gl_vulnerability"
         );
-        // No digits after `v` — leave untouched.
         assert_eq!(strip_schema_version_prefix("v_gl_user"), "v_gl_user");
         assert_eq!(strip_schema_version_prefix("version_gl_x"), "version_gl_x");
-        // Missing underscore after digits — leave untouched.
         assert_eq!(strip_schema_version_prefix("v1gl_user"), "v1gl_user");
     }
 
@@ -2212,7 +2009,6 @@ mod tests {
             .unwrap()
             .required_role = RequiredRole::SecurityManager;
 
-        // User is global, so the edge is the anchor; an edge table has no redaction floor.
         assert_eq!(
             ontology.traversal_path_columns(&format!("v9_{table}")),
             [
@@ -2296,8 +2092,6 @@ mod tests {
 
     #[test]
     fn min_access_level_for_table_normalizes_schema_version_prefix() {
-        // The ontology carries the unprefixed `destination_table` but the
-        // compiler may look up the prefixed form, or vice-versa.
         let ontology = ontology_with_role("Vulnerability", RequiredRole::SecurityManager);
         assert_eq!(
             ontology.min_access_level_for_table("gl_vulnerability"),
@@ -2312,8 +2106,6 @@ mod tests {
             Some(25)
         );
 
-        // Prefixed ontology, prefixed or unprefixed query — both ends
-        // normalize.
         let prefixed = ontology_with_role("Vulnerability", RequiredRole::SecurityManager)
             .with_schema_version_prefix("v1_");
         assert_eq!(
@@ -2329,11 +2121,8 @@ mod tests {
     #[test]
     fn min_access_level_for_table_is_none_for_unknown_or_unredacted() {
         let ontology = Ontology::new().with_nodes(["Project"]);
-        // Edge tables and CTEs aren't known nodes.
         assert!(ontology.min_access_level_for_table("gl_edge").is_none());
         assert!(ontology.min_access_level_for_table("some_cte").is_none());
-        // Node without a `redaction` block yields None — caller picks the
-        // default role.
         assert!(ontology.min_access_level_for_table("gl_project").is_none());
     }
 
@@ -2937,10 +2726,6 @@ properties:
 
     #[test]
     fn user_node_marks_sensitive_columns_admin_only() {
-        // Pin the real ontology so any future edit that drops admin_only on a
-        // sensitive User column fails CI. Each column listed here is one that
-        // GitLab does not expose to non-admins on its public REST/GraphQL
-        // surfaces; see config/ontology/nodes/core/user.yaml for the rationale.
         let ontology = Ontology::load_embedded().expect("embedded ontology loads");
         for field in [
             "email",
@@ -3009,7 +2794,6 @@ properties:
         assert!(names.contains(&"branch"));
         assert!(names.contains(&"path"));
         assert!(names.contains(&"name"));
-        // traversal_path is included for hydration traversal-path narrowing.
         assert!(names.contains(&"traversal_path"));
         assert!(names.contains(&"commit_sha"));
     }
@@ -3054,7 +2838,6 @@ properties:
 
     #[test]
     fn local_exclude_properties_validated_against_fields() {
-        // Guards against a typo'd exclude_properties entry referencing a missing field.
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
         for entity_name in ontology.local_entity_names() {
             let fields = ontology
@@ -3401,11 +3184,6 @@ properties:
 
     #[test]
     fn user_lifecycle_edges_to_issuables_are_prune_to_target() {
-        // REOPENED is a global User source into a namespaced issuable target,
-        // identical in shape to CLOSED/MERGED. All must carry prune_to_target so
-        // the query-restrict pass scopes them from the resolved target prefix;
-        // a missing scope falls through restrict's `_ => continue` arm and
-        // scopes the edge differently from its siblings.
         let o = Ontology::load_embedded().unwrap();
         for kind in ["REOPENED", "CLOSED", "MERGED"] {
             let variants = o.edges.get(kind).expect(kind);
@@ -3540,8 +3318,6 @@ properties:
         assert!(!got.contains_key("lab"));
     }
 
-    // Diamond: node X reachable via both a scope-preserving and a
-    // cross-namespace path. Taint from pass A must block propagation.
     #[test]
     fn propagate_taints_diamond_reachable_node() {
         let o = Ontology::load_embedded().unwrap();

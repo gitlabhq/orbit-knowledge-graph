@@ -1,5 +1,3 @@
-# config/ontology/nodes/core/project.yaml
-
 node_type: Project
 domain: core
 description: A GitLab project/repository
@@ -16,8 +14,7 @@ redaction:
   id_column: id
   # Temporary: aligned with source-code entities so Project + code traversals
   # don't emit two (resource_type=project, ability=...) redaction entries that
-  # Rails then 400s on as duplicate. Revert to read_project after the
-  # response-side discriminator fix lands. See #570.
+  # Rails then 400s on as duplicate.
   ability: read_code
 
 properties:
@@ -115,9 +112,6 @@ pipelines:
   - name: Project
     extract:
       type: clickhouse
-      # tables[0] is the partition-probe base: it must carry traversal_path + id.
-      # siphon_projects lacks traversal_path (Project derives it via the join), so
-      # project_namespace_traversal_paths leads.
       tables: [project_namespace_traversal_paths, siphon_projects, siphon_routes]
       order_by: [traversal_path, id]
       query: project.sql.j2

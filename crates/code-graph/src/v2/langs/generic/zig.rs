@@ -14,14 +14,11 @@ use crate::v2::types::BindingKind;
 use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage};
 
-// ── DSL parser spec ─────────────────────────────────────────────
-
 #[derive(Default)]
 pub struct ZigDsl;
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-// Only standard builtin types - arbitrary-width types (i.e. `u7`) are excluded
 const ZIG_BUILTIN_TYPES: &[&str] = &[
     "bool",
     "void",
@@ -58,8 +55,6 @@ fn classify_zig_binding(node: &N<'_>) -> &'static str {
     "Const"
 }
 
-// Zig imports are essentially variable declarations, so extra work is needed to identify which
-// declarations are actually imports.
 fn zig_extract_imports(node: &N<'_>, imports: &mut Vec<crate::v2::types::CanonicalImport>) -> bool {
     use crate::v2::types::{CanonicalImport, ImportBindingKind, ImportMode};
 
@@ -108,7 +103,6 @@ fn zig_extract_imports(node: &N<'_>, imports: &mut Vec<crate::v2::types::Canonic
     true
 }
 
-// Helper used to reduce repetition in the ZigDsl::scope() specification.
 fn zig_container(label: &'static str, decl_kinds: &'static [&'static str]) -> ScopeRule {
     scope("variable_declaration", label)
         .def_kind(DefKind::Class)
@@ -116,9 +110,6 @@ fn zig_container(label: &'static str, decl_kinds: &'static [&'static str]) -> Sc
         .name_from(child_of_kind("identifier"))
 }
 
-// Anonymous tests are valid Zig, and sometimes used to ensure tests are *always* run.
-// This generates a name for anonymous tests before adding them to the list of definitions so they
-// can be interacted with normally.
 fn zig_anonymous_test(
     node: &N<'_>,
     defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
@@ -186,7 +177,6 @@ impl DslLanguage for ZigDsl {
                 .def_kind(DefKind::Function)
                 .when(has_child(&["string"]))
                 .name_from(child_of_kind("string").child_of_kind("string_content")),
-            // Anonymous tests are also valid, and caught by the `zig_anonymous_test` hook
         ]
     }
 
@@ -222,7 +212,6 @@ impl DslLanguage for ZigDsl {
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
-        // The file is the namespace in Zig; there is no package clause.
         None
     }
 
@@ -272,8 +261,6 @@ impl DslLanguage for ZigDsl {
         types::SsaConfig::default()
     }
 }
-
-// ── Resolution rules ────────────────────────────────────────────
 
 pub struct ZigRules;
 

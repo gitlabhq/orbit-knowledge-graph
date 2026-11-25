@@ -2,11 +2,6 @@ use crate::v2::types::ImportBindingKind;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-/// Resolution order:
-/// 1. Direct import_map lookup for the full name
-/// 2. Split on separator, resolve first segment via imports, append rest
-/// 3. Prepend module_prefix (same-package/module fallback)
-/// 4. Return bare name unchanged
 pub fn resolve_type_name(
     name: &str,
     import_map: &rustc_hash::FxHashMap<String, String>,

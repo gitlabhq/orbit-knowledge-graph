@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Dump project IDs and full paths from the datalake for code corpus fetching.
-# Output: TSV (project_id \t full_path), written to GCS and stdout.
-# Usage: KCTX=... RUN_ID=bench7 bash bench/scripts/dump-project-list.sh
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -1,7 +1,3 @@
-//! The relation graph, the planner's intermediate form. Each `RelationNode` is one read, filter,
-//! projection, join, union, or latest-row pick. `RelationGraph::current_rows` plans a table read once
-//! and hands out the same `RelationId` for repeats.
-
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 
 use super::predicates::{Column, Predicate, Projection};
@@ -238,7 +234,6 @@ impl RelationGraph {
         RelationUsage::of(root, self)
     }
 
-    /// Replaces `target` with the relation `transform` builds on top of it, in every earlier node and in `root`.
     pub fn transform(
         &mut self,
         root: &mut RelationId,
@@ -280,7 +275,6 @@ impl RelationGraph {
         })
     }
 
-    /// The current row per sort key, planned once per distinct read so repeated reads share one relation.
     pub fn current_rows(
         &mut self,
         table: &str,

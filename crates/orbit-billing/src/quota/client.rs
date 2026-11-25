@@ -172,8 +172,6 @@ impl QuotaClient {
 
         let mut builder = self.http.get(&url).query(&params);
         if self.license_auth {
-            // Without the header CDot can only answer 401, so an unusable claim fails closed
-            // here instead of sending an unauthenticated request.
             let Some(mut token) = request
                 .license_checksum
                 .as_ref()
@@ -864,7 +862,6 @@ mod tests {
 
     #[tokio::test]
     async fn connection_error_fails_closed_as_unreachable() {
-        // Port 1 is reserved and unroutable; the TCP connect fails before any HTTP exchange.
         install_crypto();
         let client = QuotaClient::new(
             "http://127.0.0.1:1".into(),

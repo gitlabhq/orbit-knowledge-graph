@@ -10,30 +10,6 @@ const STATE_CLOSED: u8 = 0;
 const STATE_OPEN: u8 = 1;
 const STATE_HALF_OPEN: u8 = 2;
 
-/// ```text
-///              failure_threshold
-///   ┌────────┐   exceeded    ┌──────┐
-///   │ Closed ├──────────────►│ Open │
-///   └───▲────┘               └──┬───┘
-///       │                       │
-///       │  probe succeeds       │ cooldown elapsed
-///       │                       │
-///   ┌───┴──────┐◄───────────────┘
-///   │ HalfOpen │
-///   └───┬──────┘
-///       │
-///       │ probe fails
-///       │
-///       └──────────────────►Open
-/// ```
-///
-/// | From     | Event                        | To       |
-/// |----------|------------------------------|----------|
-/// | Closed   | failure threshold            | Open     |
-/// | Open     | cooldown elapsed             | HalfOpen |
-/// | HalfOpen | probe succeeds               | Closed   |
-/// | HalfOpen | probe fails                  | Open     |
-/// | HalfOpen | no probe outcome in cooldown | HalfOpen |
 #[derive(Debug)]
 enum CircuitState {
     Closed { failures: VecDeque<Instant> },
@@ -41,7 +17,6 @@ enum CircuitState {
     HalfOpen { probe_deadline: Instant },
 }
 
-/// State label without internal data, for observer callbacks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StateLabel {
     Closed,
@@ -78,13 +53,10 @@ pub struct Transition {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AcquireResult {
     Allowed,
-    /// First request after cooldown — its outcome decides the next state.
     Probe,
     Rejected,
 }
 
-/// Per-service circuit state. Atomic fast-path: the mutex is only
-/// taken on failures and state transitions.
 pub(crate) struct Circuit {
     state: AtomicU8,
     inner: Mutex<CircuitInner>,
@@ -116,7 +88,6 @@ impl Circuit {
         self.state.load(Ordering::Acquire) == STATE_CLOSED
     }
 
-    /// Gate a request. Closed → atomic load only, no lock.
     pub fn try_acquire(&self, now: Instant) -> AcquireResult {
         if self.state.load(Ordering::Acquire) == STATE_CLOSED {
             return AcquireResult::Allowed;
@@ -139,7 +110,6 @@ impl Circuit {
         AcquireResult::Probe
     }
 
-    /// Record success. Closed → atomic load only, no lock.
     pub fn record_success(&self) -> Option<Transition> {
         if self.state.load(Ordering::Acquire) == STATE_CLOSED {
             return None;
@@ -161,8 +131,6 @@ impl Circuit {
         }
     }
 
-    /// Record failure. Always locks — an IO error already happened,
-    /// so the mutex cost is noise.
     pub fn record_failure(&self, now: Instant) -> Option<Transition> {
         let mut inner = self.inner.lock();
         let window = inner.config.window;

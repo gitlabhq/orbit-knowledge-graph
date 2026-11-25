@@ -1,5 +1,3 @@
-# config/ontology/edges/authored.yaml
-
 description: Authorship relationship between users and entities
 
 variants:

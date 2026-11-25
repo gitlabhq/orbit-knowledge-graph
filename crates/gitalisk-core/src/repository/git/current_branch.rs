@@ -57,7 +57,6 @@ mod tests {
     }
 
     fn create_initial_commit(repo: &mut LocalGitRepository) -> std::io::Result<()> {
-        // Create a test file
         repo.fs.create_file("test.txt", Some("initial content"));
         repo.add_all().commit("Initial commit");
         Ok(())
@@ -78,7 +77,6 @@ mod tests {
         let result = get_current_branch(repo.path.to_str().unwrap());
         assert!(result.is_ok());
         let branch = result.unwrap();
-        // Git now defaults to 'main' in newer versions, but some systems still use 'master'
         assert!(branch == "main" || branch == "master");
     }
 
@@ -87,7 +85,6 @@ mod tests {
         let mut repo = init_test_repo();
         create_initial_commit(&mut repo).unwrap();
 
-        // Create and switch to a custom branch
         Command::new("git")
             .args(["checkout", "-b", "feature/test-branch"])
             .current_dir(repo.path.as_path())
@@ -104,7 +101,6 @@ mod tests {
         let mut repo = init_test_repo();
         create_initial_commit(&mut repo).unwrap();
 
-        // Get the commit hash
         let commit_output = Command::new("git")
             .args(["rev-parse", "HEAD"])
             .current_dir(repo.path.as_path())
@@ -114,7 +110,6 @@ mod tests {
             .trim()
             .to_string();
 
-        // Checkout the commit directly (detached HEAD)
         Command::new("git")
             .args(["checkout", &commit_hash])
             .current_dir(repo.path.as_path())
@@ -130,11 +125,8 @@ mod tests {
     #[test]
     fn test_get_current_branch_new_repo_no_commits() {
         let repo = init_test_repo();
-        // Don't create any commits
 
         let result = get_current_branch(repo.path.to_str().unwrap());
-        // Modern git creates an initial branch even without commits
-        // So this should succeed and return the default branch name
         assert!(result.is_ok());
         let branch = result.unwrap();
         assert!(branch == "main" || branch == "master");
@@ -145,7 +137,6 @@ mod tests {
         let mut repo = init_test_repo();
         create_initial_commit(&mut repo).unwrap();
 
-        // Create a branch with special characters (but valid for git)
         let branch_name = "feature/fix-123_test-branch";
         Command::new("git")
             .args(["checkout", "-b", branch_name])

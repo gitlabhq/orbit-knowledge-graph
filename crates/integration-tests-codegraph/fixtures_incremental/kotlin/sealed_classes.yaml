@@ -1,13 +1,5 @@
 name: "Kotlin sealed classes and interfaces — hierarchy members and methods"
 
-# Coverage note: classify_kotlin_class in kotlin.rs has no dedicated branch for
-# the `sealed` modifier, so a sealed class is reported as definition_type "Class"
-# and a sealed interface as "Interface" (the "interface" keyword branch). The
-# `sealed`-ness itself is not captured as metadata. Kotlin already had
-# data_classes.yaml and companion_object.yaml, but no fixture for a sealed
-# hierarchy; this proves the subclasses and their overriding methods are indexed
-# and will not regress.
-
 fixtures:
   - path: com/example/sealed/Expr.kt
     content: |

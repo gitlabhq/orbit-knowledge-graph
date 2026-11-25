@@ -19,7 +19,6 @@ function isExistingFile(path, cwd) {
   }
 }
 
-/** A private per-user directory: the plugin data dir, else `~/.cache/orbit`. Undefined when it is not ours. */
 function stateDirectory(env) {
   const directory = env.CLAUDE_PLUGIN_DATA || join(env.XDG_CACHE_HOME || join(homedir(), ".cache"), "orbit");
   mkdirSync(directory, { recursive: true, mode: 0o700 });

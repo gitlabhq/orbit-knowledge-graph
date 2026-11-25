@@ -1,5 +1,3 @@
-# config/ontology/edges/extends.yaml
-
 description: Supertype relationships in source code (inheritance, interface implementation, struct embedding, mixin composition)
 
 variants:

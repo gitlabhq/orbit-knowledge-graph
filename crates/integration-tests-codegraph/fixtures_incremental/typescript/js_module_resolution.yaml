@@ -690,8 +690,7 @@ tests:
       - { row: { name: "track", alias: "secondTrack" } }
 
   - name: Missing members on local namespace imports do not become external calls
-    # Deferred: suppressing fallback requires proof that the module's exports are complete.
-    skip: true
+    known_gap: "Deferred: suppressing fallback requires proof that the module's exports are complete."
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'namespace_missing/main.ts'

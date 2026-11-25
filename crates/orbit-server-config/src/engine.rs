@@ -11,8 +11,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::resources::{ContainerResources, derive_code_indexing_slots};
 
-// ── Base config types ────────────────────────────────────────────────
-
 /// Sparse per-subscription policy override (retry, concurrency, DLQ).
 ///
 /// The correct default policy for each topic is declared in Rust by the indexer
@@ -162,8 +160,6 @@ impl ScheduleConfiguration {
         }
     }
 }
-
-// ── Handler config types ─────────────────────────────────────────────
 
 /// Tuning for the SDLC datalake extract retry loop.
 ///
@@ -364,8 +360,6 @@ pub struct HandlersConfiguration {
     pub code_indexing_task: CodeIndexingTaskHandlerConfig,
 }
 
-// ── Dispatcher / scheduler config types ──────────────────────────────
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalDispatcherConfig {
     #[serde(flatten)]
@@ -457,8 +451,6 @@ pub struct ScheduledTasksConfiguration {
     pub namespace_freshness: NamespaceFreshnessConfig,
     pub graph_stats: GraphStatsConfig,
 }
-
-// ── Top-level engine config ──────────────────────────────────────────
 
 /// Indexer module selector. Each variant maps to a domain in `crates/indexer/src/modules/`.
 ///
@@ -733,11 +725,6 @@ mod tests {
 
         let hint = sched.interval_hint();
 
-        // interval_hint computes (second_occurrence - first_occurrence).
-        // Even without truncation the chained find_next_occurrence calls
-        // carry the same sub-second fraction, so the difference cancels to
-        // a clean 60s. The truncation is defensive; this test pins the
-        // contract regardless.
         assert_eq!(hint, Duration::from_secs(60));
     }
 
@@ -750,9 +737,6 @@ mod tests {
             run_timeout_secs: 60,
         };
 
-        // 2026-01-15 10:05:00.700 UTC — 700ms into a matching second.
-        // Without truncation croner returns :06:00.700, yielding ~60.0s delay.
-        // With truncation the next occurrence is :06:00.000, yielding exactly 59.3s.
         let now = NaiveDate::from_ymd_opt(2026, 1, 15)
             .unwrap()
             .and_hms_milli_opt(10, 5, 0, 700)
@@ -762,7 +746,6 @@ mod tests {
         let delay = sched.next_delay(now);
         let secs = delay.as_secs_f64();
 
-        // Must be < 60s (snapped to :06:00.000 → 59.3s), not ~60.0s or ~60.7s.
         assert!(
             (59.0..60.0).contains(&secs),
             "expected delay ~59.3s, got {secs:.3}s"

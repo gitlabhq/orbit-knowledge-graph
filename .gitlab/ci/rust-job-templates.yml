@@ -1,4 +1,3 @@
-# Trust model: scripts/ci/cargo-home-cache.sh.
 .cargo-home-cache:
   paths: &cargo-home-paths
     - .cargo-cache/git/db

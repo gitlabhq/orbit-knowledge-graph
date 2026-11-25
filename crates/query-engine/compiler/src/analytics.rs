@@ -5,8 +5,6 @@ use serde::Serialize;
 use crate::input::Input;
 use crate::passes::hydrate::HydrationPlan;
 
-/// `query_executed` accumulates across multiple ClickHouse round-trips; all
-/// other fields are written directly by observers.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ExecMetrics {
     #[serde(skip)]

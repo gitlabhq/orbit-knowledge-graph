@@ -4,10 +4,6 @@ use std::collections::HashSet;
 use query_engine::compiler::input::{Input, QueryType};
 use query_engine::formatters::GraphResponse;
 
-/// Some variants carry data from the AST (field name, edge type) so the
-/// enforcement is granular: a query with two filter fields or two
-/// relationship types produces one requirement per field/type, and the
-/// test must assert each individually.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Requirement {
     OrderBy,
@@ -50,7 +46,6 @@ impl std::fmt::Display for Requirement {
 }
 
 impl Requirement {
-    /// Whether the response holds anything this requirement could check.
     pub fn checkable(&self, input: &Input, response: &GraphResponse) -> bool {
         let rows = response.rows.as_ref().map_or(0, Vec::len);
         match self {
@@ -132,11 +127,6 @@ impl QueryRequirements for Input {
     }
 }
 
-/// Tracks which query-derived requirements have been satisfied by test assertions.
-///
-/// When created via [`super::ResponseView::for_query`], requirements are derived
-/// from the compiled [`Input`]. Each assertion method on `ResponseView` marks the
-/// relevant requirement as satisfied. On drop, panics if any requirement was not met.
 pub(super) struct AssertionTracker {
     required: HashSet<Requirement>,
     satisfied: RefCell<HashSet<Requirement>>,

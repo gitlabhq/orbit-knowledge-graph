@@ -69,8 +69,6 @@ impl ArrowClickHouseClient {
         self.fetch_text(&format!("EXPLAIN PIPELINE {sql}")).await
     }
 
-    /// Flushes the query log first to ensure the entry is available.
-    /// `log_comment_match` must be a unique substring (e.g. a profiling UUID).
     pub async fn fetch_query_log(
         &self,
         log_comment_match: &str,

@@ -1,24 +1,4 @@
 #!/usr/bin/env bash
-# Bump the pinned gitlab devel chart + gitlab-org/gitlab ref + CNG image
-# digests to the latest master build available right now. Run manually when
-# you want to catch up to current devel; the output is committed so every CI
-# run uses the same snapshot (no registry lookups at deploy time).
-#
-# All pins live in e2e/config/versions.yaml under .gitlab.{chart,ref,images}.
-# values/gitlab.yaml.gotmpl renders the digests as "master@<digest>" tags at
-# helmfile sync time.
-#
-# Pins webservice, workhorse, sidekiq, toolbox — the four images that carry
-# either Rails code (schema-version race lives in their dependency init
-# check) or the workhorse sidecar that pairs with webservice. Workhorse is
-# pinned because the Rails<->workhorse orbit-query payload contract changes
-# shape on master; an unpinned :master workhorse against a pinned webservice
-# silently drops the Authorization header and 502s every query.
-#
-# Usage:
-#   e2e/scripts/bump-gitlab-pins.sh
-#   git diff -- e2e/config/versions.yaml
-#   git commit -am 'chore(e2e): bump gitlab pins'
 
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -47,8 +27,6 @@ if [[ -n "$IMAGE_REPOSITORY" ]]; then
   exit 0
 fi
 
-# The devel repo publishes a fresh chart every few hours tagged with the
-# source pipeline ID. We pick the one with the newest `created` timestamp.
 log "Finding latest chart version in $CHART_INDEX"
 CHART_VERSION=$(curl -sSL --fail "$CHART_INDEX" \
   | yq '.entries.gitlab | map(select(.appVersion | test(strenv(CHART_APP_VERSION_RE))))

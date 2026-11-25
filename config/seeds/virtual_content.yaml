@@ -1,7 +1,3 @@
-# Virtual column content for data correctness tests, loaded by
-# integration-testkit's SeededColumnResolver. Entries are keyed by lookup and
-# matched against the hydrated `depends_on` properties; `value: null` and
-# unmatched rows resolve to null.
 blob_content:
   - match: {project_id: 1000, path: src/parser.rs}
     value: |-

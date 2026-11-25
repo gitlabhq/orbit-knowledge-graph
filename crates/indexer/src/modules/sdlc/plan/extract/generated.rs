@@ -1,5 +1,3 @@
-//! Generated-extract SQL rendering; all `DataType` → ClickHouse dialect rendering lives here.
-
 use ontology::sql_template;
 use ontology::{DataType, EtlScope, constants::TRAVERSAL_PATH_COLUMN};
 
@@ -67,7 +65,6 @@ impl SelectColumn {
             DataType::Date => format!(
                 "if({name} >= toDate('1900-01-01') AND {name} <= toDate('2299-12-31'), {name}, NULL) AS {name}"
             ),
-            // Postgres `bytea` can hold non-UTF8 bytes; one bad row poisons the Arrow batch, so hex-encode invalid values.
             _ if column.binary => format!("if(isValidUTF8({name}), {name}, hex({name})) AS {name}"),
             _ => name.clone(),
         };

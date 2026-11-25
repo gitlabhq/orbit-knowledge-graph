@@ -1,13 +1,3 @@
-# Cross-project MENTIONS direction + partition guard. Project A (id=200,
-# traversal_path=1/100/200/) mentions project B (id=400,
-# traversal_path=1/100/400/) via a note "mentioned in my-group/proj-a!42"
-# living on MR 1000 in project B. Rails writes the note on the *mentioned*
-# entity, so noteable_id=1000 (in project B) is the mentioned side and
-# the body ref MR !42 (id=30, in project A) is the mentioner.
-#
-# The MENTIONS edge must point mentioner → mentioned (source=30, target=1000)
-# and land in the mentioned entity's (noteable's) namespace partition
-# (1/100/400/), NOT the mentioner's (1/100/200/).
 description: Cross-project MENTIONS points from mentioner to mentioned in the mentioned entity's partition
 scope: { namespace: 100 }
 

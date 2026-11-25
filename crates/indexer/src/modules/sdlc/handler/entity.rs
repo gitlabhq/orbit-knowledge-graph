@@ -244,7 +244,6 @@ impl EntityHandler {
                             .await
                             .map(|()| stats)
                             .map_err(HandlerError::from),
-                        // A parent still at its first-pass start re-triggers partitioning next dispatch; Ok keeps this expected mid-load state out of pipeline-error metrics.
                         Err(incomplete) => {
                             info!(
                                 expanded(KV_KEY) = checkpoint_key.as_str(),
@@ -393,8 +392,6 @@ impl EntityHandler {
     }
 }
 
-/// Parent watermark for a finished partitioned load, or the partitions still
-/// mid-pull: consolidating past a cursored partition silently drops its id range.
 fn consolidated_watermark(
     partition_checkpoints: &[(String, Checkpoint)],
     fallback: DateTime<Utc>,

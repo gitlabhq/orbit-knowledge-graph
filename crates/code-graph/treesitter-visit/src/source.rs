@@ -117,8 +117,6 @@ pub trait Doc: Clone + 'static {
     fn get_source(&self) -> &Self::Source;
     fn root_node(&self) -> Self::Node<'_>;
     fn get_node_text<'a>(&'a self, node: &Self::Node<'a>) -> Cow<'a, str>;
-    /// Node kind name. Implementations may cache the `kind_id`→name mapping
-    /// to avoid re-validating the grammar's C kind string on every call.
     fn node_kind<'a>(&'a self, node: &Self::Node<'a>) -> Cow<'a, str>;
 }
 
@@ -144,7 +142,6 @@ impl Content for String {
             "byte offset must not precede its line-relative column (positions must be paired from the same node)"
         );
         let line_start = offset - col;
-        // Count UTF-8 codepoint lead bytes (skip continuation bytes) in the line prefix.
         src[line_start..offset]
             .iter()
             .filter(|&&b| b & 0b1100_0000 != 0b1000_0000)

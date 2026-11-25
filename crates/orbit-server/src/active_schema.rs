@@ -210,8 +210,6 @@ struct SnapshotLoader {
 }
 
 impl SnapshotLoader {
-    /// The key is a cache of `gkg_schema_version`; before the first dispatcher
-    /// that writes it runs, ClickHouse is the only place the answer exists.
     async fn active_version(&self) -> anyhow::Result<Option<u32>> {
         match self.catalog.active_version().await? {
             Some(version) => Ok(Some(version)),

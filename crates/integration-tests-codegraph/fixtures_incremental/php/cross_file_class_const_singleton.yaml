@@ -113,7 +113,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # corrected: cross-file Calls rows are unique per caller and target
   - name: "Inherited method dispatch via both static-factory chains: register -> Container.get (2 call sites)"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

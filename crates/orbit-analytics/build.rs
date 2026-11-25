@@ -1,23 +1,3 @@
-//! Proto-style codegen for Iglu schemas.
-//!
-//! For each `<name>` in [`SCHEMAS`], reads the pinned version from
-//! `vendored.iglu.pins.<name>` in `config/versions.yaml` (via
-//! `orbit_versions::VERSIONS`) and the schema JSON from
-//! `SCHEMA_DIR/iglu/<name>/<version>.json`, runs it through
-//! [`typify::TypeSpace`] to produce idiomatic Rust types, and emits one
-//! `pub mod <name> { ... }` block per schema into
-//! `OUT_DIR/iglu_schemas.rs`. Each module exposes:
-//!
-//! - A `<TypeName>` struct (and any supporting enums) generated from the
-//!   schema's `properties` / `enum` constraints. The runtime owns these
-//!   directly — they implement `Serialize` + `Deserialize`.
-//! - `pub const VERSION: &str` — the pinned version from `versions.yaml`.
-//! - `pub const SCHEMA_URI: &str` — the full Iglu URI.
-//! - `pub const SCHEMA_JSON: &str` — the raw JSON body, embedded for
-//!   test-time validator compilation.
-//!
-//! The runtime binary never reads the on-disk schema files.
-
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -26,10 +6,6 @@ use typify::{TypeSpace, TypeSpaceSettings};
 
 const VENDOR: &str = "com.gitlab";
 
-/// `(schema_name, generated_root_type_name)` — the second element is the
-/// Rust identifier we want for the generated struct. Typify uses the
-/// schema's `title` to pick a name; we inject one to keep the surface
-/// stable across schema revisions.
 const SCHEMAS: &[(&str, &str)] = &[
     ("orbit_common", "OrbitCommon"),
     ("orbit_query", "OrbitQuery"),
@@ -92,8 +68,6 @@ fn render_module(iglu_dir: &Path, schema_name: &str, type_name: &str) -> String 
         .unwrap_or_else(|e| panic!("invalid JSON in {}: {e}", schema_path.display()));
     assert_self_matches_path(&parsed, &schema_path, schema_name, &version);
 
-    // Strip Iglu-specific top-level keys typify doesn't understand, and
-    // inject `title` so the generated root struct is named deterministically.
     if let Some(obj) = parsed.as_object_mut() {
         obj.remove("$schema");
         obj.remove("self");
@@ -109,8 +83,6 @@ fn render_module(iglu_dir: &Path, schema_name: &str, type_name: &str) -> String 
             .with_derive("Debug".to_string())
             .with_derive("PartialEq".to_string()),
     );
-    // Type-inference picks up schemars::schema::RootSchema (typify's
-    // public input type) without us naming the crate explicitly.
     type_space
         .add_root_schema(
             serde_json::from_value(parsed.clone())
@@ -146,10 +118,6 @@ fn render_module(iglu_dir: &Path, schema_name: &str, type_name: &str) -> String 
     out
 }
 
-/// Inject property defaults that GKG needs for `derive(Default)` but that
-/// don't belong in the canonical Iglu schema. Runs before
-/// `promote_defaults_on_required` so the injected defaults get the same
-/// treatment as any naturally present ones.
 fn inject_defaults(schema: &mut Value, schema_name: &str) {
     if schema_name == "orbit_query"
         && let Some(source_type) = schema
@@ -162,8 +130,6 @@ fn inject_defaults(schema: &mut Value, schema_name: &str) {
     }
 }
 
-/// Remove required properties that carry a `default` so typify generates
-/// `#[serde(default)]` on those fields, enabling `derive(Default)` on the struct.
 fn promote_defaults_on_required(schema: &mut Value) {
     let Some(obj) = schema.as_object_mut() else {
         return;

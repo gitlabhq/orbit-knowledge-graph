@@ -63,8 +63,6 @@ const toSegment = (x: number, y: number, ax: number, ay: number, bx: number, by:
   return { d: Math.hypot(x - ax - t * dx, y - ay - t * dy), t };
 };
 
-// `tall` and `lift` set the height of the map inside `region` and its gap from the top, so a small region,
-// such as a scroll scene on a phone, fits the whole route.
 export function SearchMap({ search, anchor, region, tall = MAP_TALL, lift = MAP_LIFT }: { search: Search | null; anchor: string; region: string; tall?: number; lift?: number }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const state = useRef<{ search: Search | null; since: number }>({ search, since: 0 });

@@ -125,7 +125,7 @@
 - category: upstream
   reason: "The INNER JOIN form hit a ClickHouse FillingRightJoinSide OOM, so the scan must stay bare."
   preview: "// Bare siphon_notes scan, not the INNER JOIN that caused FillingRightJ…"
-  hash: eda3465ebfbc171e
+  hash: 7f842d23d07d005c
   lines: 1
 "crates/indexer/src/modules/sdlc/plan/extract/generated.rs":
 - category: upstream
@@ -187,8 +187,8 @@
 "crates/indexer/src/nats/versioning.rs":
 - category: invariant
   reason: "The constant has no writer, but GC needs it to delete streams of older schema versions."
-  preview: "// No writer since the KV progress store was removed. Kept so GC delete…"
-  hash: 0a088761a577b036
+  preview: "// Kept so GC deletes the streams of older schema versions."
+  hash: ddd2c4735f7954b4
   lines: 1
 - category: invariant
   reason: "A listing error must abort before deletion; a partial survey could delete a live release stream."
@@ -205,7 +205,7 @@
 - category: invariant
   reason: "A migration-gated sweep stranded projects before; coverage-driven dispatch must not be reverted."
   preview: "//! Coverage-driven code-backfill sweep."
-  hash: 5c0b7ca82b0c9b9c
+  hash: 5f62fce9b515d3e3
   lines: 8
 "crates/indexer/src/testkit/logs.rs":
 - category: upstream

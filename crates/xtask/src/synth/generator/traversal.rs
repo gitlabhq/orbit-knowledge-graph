@@ -1,31 +1,3 @@
-//! Traversal ID generation for hierarchical authorization.
-//!
-//! Traversal IDs are hierarchical paths like `1/2/5/12` where each component
-//! is a globally unique namespace ID. The path represents the ancestry chain
-//! from root to the current namespace. This matches GitLab's namespace traversal
-//! ID system for row-level authorization.
-//!
-//! Example tree:
-//! ```text
-//!   1 (org root)
-//!   ├── 2
-//!   │   ├── 4
-//!   │   │   └── 7
-//!   │   └── 5
-//!   └── 3
-//!       └── 6
-//!           ├── 8
-//!           └── 9
-//! ```
-//!
-//! Produces traversal IDs: `1`, `1/2`, `1/3`, `1/2/4`, `1/2/5`, `1/3/6`, `1/2/4/7`, `1/3/6/8`, `1/3/6/9`
-//!
-//! ## Entity Context and Registry
-//!
-//! During relationship-based generation, entities are tracked with their traversal context:
-//! - `EntityContext`: holds an entity's ID and traversal ID
-//! - `EntityRegistry`: maintains all generated entities by type for parent lookups
-
 use rand::{Rng, RngExt};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -33,8 +5,6 @@ use std::sync::atomic::{AtomicI64, Ordering};
 #[derive(Debug, Clone)]
 pub struct EntityContext {
     pub id: i64,
-    /// For Groups: extends parent's traversal ID with own ID.
-    /// For other entities: inherits from parent container.
     pub traversal_path: String,
 }
 
@@ -67,16 +37,11 @@ impl EntityContext {
 
 #[derive(Debug)]
 pub struct EntityRegistry {
-    /// Full entities by node type (used during relationship generation).
     entities: HashMap<String, Vec<EntityContext>>,
-    /// Compact ID-only storage (used after compaction for associations).
     ids_only: HashMap<String, Vec<i64>>,
-    /// ID → traversal_path lookup, built during compaction.
     id_paths: HashMap<i64, String>,
     compacted: bool,
-    /// For Groups only, monotonically increasing.
     namespace_counter: AtomicI64,
-    /// For non-namespace entities.
     entity_counter: AtomicI64,
     org_id: u32,
 }
@@ -106,15 +71,10 @@ impl EntityRegistry {
         self.entity_counter.fetch_add(1, Ordering::SeqCst)
     }
 
-    /// Call after relationship generation is complete, before associations.
     pub fn compact(&mut self) {
         self.compact_with_aliases(&HashMap::new());
     }
 
-    /// Compact the registry, merging epsilon node entries into their real type names.
-    ///
-    /// For example, with aliases `{"Group@1": "Group", "Group@2": "Group"}`,
-    /// entities stored under "Group@1" and "Group@2" get merged into "Group".
     pub fn compact_with_aliases(&mut self, aliases: &HashMap<String, String>) {
         if self.compacted {
             return;
@@ -153,7 +113,6 @@ impl EntityRegistry {
             .push(context);
     }
 
-    /// The path is preserved in `id_paths` so association edge generation can inherit it.
     pub fn add_id_only(&mut self, node_type: &str, id: i64, traversal_path: &str) {
         debug_assert!(!self.compacted, "Cannot add after compaction");
         self.id_paths.insert(id, traversal_path.to_string());
@@ -168,7 +127,6 @@ impl EntityRegistry {
         self.entities.get(node_type).map(|v| v.as_slice())
     }
 
-    /// Works after compaction, or for leaf types that were added with add_id_only.
     pub fn get_ids_slice(&self, node_type: &str) -> Option<&[i64]> {
         self.ids_only.get(node_type).map(|v| v.as_slice())
     }
@@ -188,7 +146,6 @@ impl EntityRegistry {
         &self.entities
     }
 
-    /// Available after compaction (populated during compact_with_aliases).
     pub fn get_path(&self, id: i64) -> Option<&str> {
         self.id_paths.get(&id).map(|s| s.as_str())
     }
@@ -313,7 +270,6 @@ fn calculate_branching_factor(count: usize, max_depth: usize) -> usize {
         return count;
     }
 
-    // Total nodes in balanced tree = (b^d - 1) / (b - 1) where b = branching factor, d = depth
     let mut low = 2usize;
     let mut high = count;
 
@@ -336,7 +292,6 @@ fn tree_size(branching_factor: usize, depth: usize) -> usize {
         return depth;
     }
 
-    // Geometric series: 1 + b + b^2 + ... + b^(d-1) = (b^d - 1) / (b - 1)
     let mut total = 0usize;
     let mut level_size = 1usize;
 
@@ -354,7 +309,7 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    #[ignore] // Run with: cargo test -p xtask -- --ignored --nocapture
+    #[ignore]
     fn test_print_example_traversal_paths() {
         println!("\n=== Example traversal paths (org_id=1, count=20, max_depth=4) ===");
         let generator = TraversalPathGenerator::new(1, 20, 4);
@@ -615,7 +570,7 @@ mod tests {
         registry.compact_with_aliases(&aliases);
 
         let group_ids = registry.get_ids_slice("Group").unwrap();
-        assert_eq!(group_ids.len(), 5); // 100, 101, 200, 201, 300
+        assert_eq!(group_ids.len(), 5);
         assert!(group_ids.contains(&100));
         assert!(group_ids.contains(&201));
         assert!(group_ids.contains(&300));

@@ -105,8 +105,7 @@ tests:
       - { row_count: 1 }
 
   - name: "the method after a question mark resolves through the inner type"
-    # Known gap: the receiver takes the return type Result<Items, ()>, the wrapper, not its argument, so count has no edge; the same gap as the let row in !2891.
-    skip: true
+    known_gap: "the receiver takes the return type Result<Items, ()>, the wrapper, not its argument, so count has no edge; the same gap as the let row in !2891."
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = "chain_through_try" AND callee.name = "count"

@@ -208,7 +208,6 @@ fixtures:
       }
 
 tests:
-  # ── Trait definitions and their members ───────────────────────────
   - name: "Traits are typed as Trait"
     query: |
       MATCH (d:Definition)
@@ -253,7 +252,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Inheritance via `use Trait;` (Extends edges) ──────────────────
   - name: "Multiple traits in one use: Product uses both Loggable and Cacheable"
     query: |
       MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
@@ -283,7 +281,6 @@ tests:
       - { row_count: 2 }
       - { unique: parent }
 
-  # ── Calls into trait-provided members ─────────────────────────────
   - name: "Trait method via \\$this: Product.persist -> Loggable.log"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

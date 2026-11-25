@@ -1,10 +1,3 @@
-//! Concurrent loading uses per-shard locks for entries and content-addressed blobs.
-//! The byte limit counts offered files before policy runs. The file limit counts kept files
-//! once per path; a listed entry past the same count is dropped and counted. Rejected content
-//! is not materialized.
-//! Files are read, classified, and stored during loading unless metadata explicitly requests KeepLazy.
-//! Finishing sorts and deduplicates entries in place, retaining the latest entry per path.
-
 use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
 use std::io;
@@ -24,7 +17,6 @@ pub type ContentReader = Arc<dyn Fn(u64) -> io::Result<Vec<u8>> + Send + Sync>;
 
 pub enum Put<'a> {
     Bytes(Vec<u8>),
-    /// Called synchronously at most once, only for `Keep` or `Pending`.
     ReadAndStore {
         size: u64,
         read: Box<dyn FnOnce() -> io::Result<Vec<u8>> + 'a>,

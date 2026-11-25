@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Fail when a workspace member declares a dependency without `workspace = true`.
+import argparse
+import re
+import sys
+import tomllib
+from pathlib import Path
+
+USAGE = """Fail when a workspace member declares a dependency without `workspace = true`.
 
 Opt out per dependency in the member's Cargo.toml, with a reason:
 
@@ -10,12 +16,6 @@ Usage: check_workspace_deps.py [--registry-only] [ROOT]
     --registry-only  ignore path dependencies
 Exit 0 = clean, 1 = violations or stale/empty allow entries.
 """
-
-import argparse
-import re
-import sys
-import tomllib
-from pathlib import Path
 
 KINDS = ("dependencies", "dev-dependencies", "build-dependencies")
 
@@ -72,7 +72,7 @@ def check_member(path, registry_only):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=USAGE.splitlines()[0])
     parser.add_argument("root", nargs="?", default=".", type=Path)
     parser.add_argument("--registry-only", action="store_true")
     args = parser.parse_args()

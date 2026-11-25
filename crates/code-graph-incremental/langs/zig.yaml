@@ -1,8 +1,3 @@
-# Zig rewrite rules.
-# Handles: const/var declarations (structs, enums, unions, constants,
-# variables), container fields, functions, tests, member and struct
-# initializer calls, control flow.
-
 config:
   stdlib: [
     { availability: implicit, symbols: ['@as', '@alignCast', '@alignOf', '@bitCast', '@bitOffsetOf',

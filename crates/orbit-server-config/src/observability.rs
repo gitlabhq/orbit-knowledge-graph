@@ -48,7 +48,9 @@ pub enum ObservabilityConfigError {
     MissingProvisionerUrl,
     #[error("observability.provisioner_api_key is not set")]
     MissingProvisionerApiKey,
-    #[error("observability.provisioner_url must be https, or http on loopback")]
+    #[error(
+        "observability.provisioner_url must be a valid https URL without embedded credentials, or http on loopback"
+    )]
     UnprotectedProvisionerUrl,
     #[error("observability.{0} must be greater than zero")]
     NonPositive(&'static str),

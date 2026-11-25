@@ -1,8 +1,3 @@
-//! The canonical tree becomes the ontology's local tables, following
-//! `config/export.yaml`. The YAML names every table, column, node kind and
-//! tag; this module knows none of them. It checks the YAML against the
-//! ontology when loaded, then walks the trees.
-
 use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 
@@ -24,7 +19,6 @@ mod parse;
 use parse::{EntityColumn, EntityPlan, IdPart, On, Position, RowSource, Source, SpanCandidate};
 pub use parse::{ExportConfig, ExportPlan};
 
-/// A value the caller hands in with every export.
 #[derive(Clone, Copy)]
 pub enum Scalar<'a> {
     Int(i64),
@@ -63,9 +57,6 @@ impl Scalar<'_> {
     }
 }
 
-/// Named values every row carries, such as the project and branch being
-/// indexed. `export.yaml` binds them to header columns and picks the ones
-/// that seed row ids, so ids match code-graph's for the same inputs.
 #[derive(Clone)]
 pub struct Envelope<'a> {
     values: Vec<(&'a str, Scalar<'a>)>,
@@ -85,7 +76,6 @@ impl<'a> Envelope<'a> {
             .map(|(_, v)| *v)
     }
 
-    /// Confirms every name the plan refers to was handed in.
     fn check(&self, plan: &ExportPlan) -> Result<(), Error> {
         for name in plan.envelope_names() {
             if self.get(name).is_none() {
@@ -99,9 +89,6 @@ impl<'a> Envelope<'a> {
         Ok(())
     }
 
-    /// `FxHash` over `[prefix values.., seed, parts..]`, sign bit cleared: the
-    /// same computation as code-graph's `compute_id`, so the same inputs give
-    /// the same id in both pipelines.
     fn id(&self, plan: &ExportPlan, seed: &str, parts: &[&str]) -> i64 {
         let prefix: Vec<Cow<str>> = plan
             .id_prefix
@@ -121,13 +108,9 @@ impl<'a> Envelope<'a> {
     }
 }
 
-/// Every tree the exporter walks: the parsed files plus the project tree,
-/// with each file's root standing in for its `__file` node so ancestry
-/// continues from a definition to its file to its directories.
 struct Forest<'a> {
     trees: &'a [Tree],
     project: Tree,
-    /// For each file tree, the project-tree node its root stands in for.
     stand_in: Vec<Option<u32>>,
 }
 
@@ -165,7 +148,6 @@ impl<'a> Forest<'a> {
         self.tree(tree).cursor(node)
     }
 
-    /// Ancestors of `(tree, node)`, crossing from a file root into the project tree.
     fn ancestors(&self, tree: u32, node: u32) -> impl Iterator<Item = (u32, u32)> + '_ {
         let own = self
             .cursor(tree, node)
@@ -192,8 +174,6 @@ impl<'a> Forest<'a> {
     }
 }
 
-/// The node a row describes and, under `expand:`, the child it was expanded
-/// from; without an expansion the node stands in for both.
 struct Row<'a> {
     tree: &'a Tree,
     node: Cursor<'a>,
@@ -247,7 +227,6 @@ fn child(c: Cursor, kind: u16) -> Option<Cursor> {
     c.children().find(|ch| ch.kind() == kind)
 }
 
-/// One `(table, batch)` per local entity, then the edge table.
 #[allow(clippy::too_many_arguments)]
 pub fn export(
     trees: &[Tree],
@@ -272,7 +251,6 @@ pub fn export(
     )
 }
 
-/// The directories that hold `paths`, and the edges between them.
 pub fn export_directories(
     paths: &[&str],
     export_config: &ExportConfig,

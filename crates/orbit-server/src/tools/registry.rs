@@ -55,9 +55,6 @@ pub(super) fn list_commands_description(frontend: Frontend) -> String {
     )
 }
 
-/// Catalog entry shape shared by the TOON `list_commands` response and the
-/// inlined description. The input schema is named `input_schema` so it is not
-/// confused with `invoke_command`'s own `parameters` argument.
 #[derive(Serialize)]
 pub(super) struct CommandCatalogEntry {
     name: String,
@@ -75,9 +72,6 @@ impl From<&ToolDefinition> for CommandCatalogEntry {
     }
 }
 
-/// Description for callers that cannot afford a discovery turn: the full
-/// command catalog is inlined as compact JSON, followed by the graph
-/// relationship patterns when given.
 pub(super) fn inline_list_commands_description(
     frontend: Frontend,
     relationships: Option<&str>,
@@ -182,9 +176,6 @@ impl ToolRegistry {
         Self::tools_with_catalog(frontend, false, None)
     }
 
-    /// When `inline_catalog` is set, `list_commands` carries the full command
-    /// catalog, plus the graph relationship patterns when given, in its
-    /// description so the caller can skip the discovery and schema turns.
     pub fn tools_with_catalog(
         frontend: Frontend,
         inline_catalog: bool,
@@ -485,9 +476,6 @@ mod tests {
             .description
     }
 
-    // Tripping this budget usually means the ontology gained edges. Either
-    // raise the limits after checking the inlined description is still worth
-    // its tokens, or shorten the pattern format in `build_relationship_patterns`.
     #[test]
     fn inlined_description_stays_under_size_budget() {
         for frontend in [Frontend::JsonDsl, Frontend::Gql] {

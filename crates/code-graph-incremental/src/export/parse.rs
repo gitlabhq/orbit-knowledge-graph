@@ -1,7 +1,3 @@
-//! `export.yaml` parsed and checked against the ontology. Every table,
-//! column, node kind, tag and transform is named there; the walker in
-//! `mod.rs` only follows the result.
-
 use ontology::{DataType, Ontology};
 use orbit_arrow::{ColumnSpec, ColumnType};
 
@@ -111,22 +107,18 @@ pub(super) enum Position {
     EndCol,
 }
 
-/// A `span:` candidate: the node itself when it carries the tag, or its
-/// first child of the kind.
 #[derive(Clone, Copy)]
 pub(super) enum SpanCandidate {
     Tagged(u32),
     Child(u16),
 }
 
-/// Where a row column's value comes from.
 pub(super) enum Source {
     Transform(Tf),
     Const(String),
     Position(Position, Vec<SpanCandidate>),
 }
 
-/// Which node a column runs on.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum On {
     Node,
@@ -151,7 +143,6 @@ pub(super) struct Column {
     pub(super) source: RowSource,
 }
 
-/// A part of the row id: a column's value, or the node's byte range.
 pub(super) enum IdPart {
     Column(usize),
     Span,
@@ -184,7 +175,6 @@ pub(super) struct GraphEdge {
     pub(super) fallback: bool,
 }
 
-/// `export.yaml` checked against the ontology and interned for one `Lang`.
 pub struct ExportPlan {
     pub(super) id_prefix: Vec<String>,
     pub(super) entities: Vec<EntityPlan>,
@@ -493,7 +483,6 @@ fn row_source(column: &ColumnYaml) -> Result<RowSource, LoadError> {
 }
 
 impl ExportPlan {
-    /// Every envelope name the header and id prefix refer to.
     pub(super) fn envelope_names(&self) -> impl Iterator<Item = &str> {
         self.entities
             .iter()

@@ -255,10 +255,6 @@ mod tests {
         let template = system_note.extract_template.as_str();
         let normalized_template = template.split_whitespace().collect::<Vec<_>>().join(" ");
 
-        // #830: the metadata join is bounded by the page CTE, not inlined
-        // above the LIMIT. The _batch CTE contains only the base table scan;
-        // siphon_system_note_metadata is read via an enrichment CTE scoped
-        // to `note_id IN (SELECT DISTINCT id FROM _batch)`.
         assert!(
             normalized_template.contains("WITH _batch AS ("),
             "extract must wrap the base scan in a _batch CTE: {template}"

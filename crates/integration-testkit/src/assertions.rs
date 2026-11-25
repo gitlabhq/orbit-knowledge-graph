@@ -119,7 +119,6 @@ pub async fn assert_edges_have_traversal_path(
     }
 }
 
-/// `tag_column` must be `source_tags` or `target_tags`.
 pub async fn assert_edge_tags(
     ctx: &TestContext,
     relationship_kind: &str,
@@ -154,7 +153,6 @@ pub async fn assert_edge_tags(
     }
 }
 
-/// `expected` maps source_id → expected tag set.
 pub async fn assert_edge_tags_by_source(
     ctx: &TestContext,
     relationship_kind: &str,
@@ -196,7 +194,6 @@ pub async fn assert_edge_tags_by_source(
     }
 }
 
-/// `expected` maps target_id → expected tag set.
 pub async fn assert_edge_tags_by_target(
     ctx: &TestContext,
     relationship_kind: &str,

@@ -1,7 +1,3 @@
-//! Parallel requests that share one correlation ID must each get their own
-//! ClickHouse `query_id`, or ClickHouse rejects all but the first with
-//! Code 216 (QUERY_WITH_SAME_ID_IS_ALREADY_RUNNING).
-
 use std::sync::Arc;
 
 use compiler::Frontend;

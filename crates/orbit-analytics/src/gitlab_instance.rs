@@ -140,7 +140,6 @@ mod tests {
     fn send(enabled: Option<bool>, with_gitlab: bool, with_local: bool) -> (usize, usize) {
         let gitlab = Arc::new(Recorder::default());
         let local = Arc::new(Recorder::default());
-        // The default watch has no instance yet, so product usage data reads as off.
         let mut trackers: Vec<Arc<dyn AnalyticsTracker>> = Vec::new();
         if with_gitlab {
             trackers.push(Arc::new(ConsentGate::new(

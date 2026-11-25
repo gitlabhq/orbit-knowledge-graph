@@ -230,8 +230,6 @@ async fn assert_no_delivery(
     }
 }
 
-/// Publishes one message, drives redelivery through every `max_deliver` attempt, and confirms
-/// NATS goes silent afterward without ever ack'ing, nack'ing, or term'ing it.
 async fn publish_and_exhaust_redelivery(
     broker: &NatsBroker,
     subscription: &Subscription,
@@ -536,8 +534,6 @@ async fn skips_creation_when_disabled() {
 
 #[tokio::test]
 async fn updates_stream_config_during_rolling_update() {
-    // Guards against error 10058 during rolling deploys when stream config changes
-    // between versions. See https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/261
     let (_container, url) = start_nats_container().await;
 
     let config_v1 = NatsConfiguration {
@@ -648,16 +644,11 @@ async fn in_progress_prevents_redelivery() {
 
     let progress = message.progress_notifier();
 
-    // Send in-progress after 3s (before the 5s ack_wait expires).
-    // This resets the deadline to ~8s from message delivery.
     tokio::time::sleep(Duration::from_secs(3)).await;
     progress.notify_in_progress().await;
 
-    // Wait another 3s — now at ~6s total, past the original 5s deadline
-    // but safely within the reset window (new deadline ~8s).
     tokio::time::sleep(Duration::from_secs(3)).await;
 
-    // Check for 1s — ends at ~7s, still before the 8s reset deadline.
     let redelivery = tokio::time::timeout(Duration::from_secs(1), messages.next()).await;
     assert!(
         redelivery.is_err(),
@@ -667,7 +658,6 @@ async fn in_progress_prevents_redelivery() {
     message.ack().await.expect("failed to ack");
 }
 
-// Regression: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/753
 #[tokio::test]
 async fn subscribe_with_multi_level_wildcard_does_not_reject_durable_name() {
     let (_container, url) = start_nats_container().await;
@@ -741,8 +731,6 @@ async fn release_gc_and_schema_cleanup_delete_their_own_entities() {
             .unwrap_or_else(|e| panic!("failed to create bucket {name}: {e}"));
     }
 
-    // Zero threshold makes the just-created idle fixtures immediately eligible
-    // (`created > now` can never hold), so the sweep is deterministic.
     gc_idle_release_streams(&client, Duration::ZERO)
         .await
         .expect("gc_idle_release_streams failed");
@@ -837,9 +825,6 @@ async fn cleanup_is_idempotent() {
         .expect("cleanup_schema_version_buckets failed for non-existent schema version");
 }
 
-/// A message that's never ack'd/nack'd/term'd across every `max_deliver` attempt leaves NATS
-/// silent afterward: no error, no dead-letter, nothing. The message stays in its stream slot
-/// forever, blocking all future dispatch to that subject.
 #[tokio::test]
 async fn exhausted_message_blocks_redispatch_until_manually_deleted() {
     let (_container, url) = start_nats_container().await;
@@ -872,8 +857,6 @@ async fn exhausted_message_blocks_redispatch_until_manually_deleted() {
     )
     .await;
 
-    // The workqueue's per-subject slot is still held by the stuck message, so re-dispatch to
-    // the same subject is rejected.
     let redispatch = broker
         .publish(&subscription, &simple_envelope("namespace-100"))
         .await;
@@ -883,7 +866,6 @@ async fn exhausted_message_blocks_redispatch_until_manually_deleted() {
          slot, got {redispatch:?}"
     );
 
-    // Manual recovery: delete the stuck message, then republish and confirm it's picked up.
     let versioned_subject = NATS_VERSIONER.subject(subject);
     let stuck_stream = versioned_stream(&url, stream_name).await;
     let stuck = stuck_stream
@@ -911,8 +893,6 @@ async fn exhausted_message_blocks_redispatch_until_manually_deleted() {
         .expect("failed to ack recovered message");
 }
 
-/// End-to-end version of the mechanism above: `MaxDeliveriesReconciler` runs as a live
-/// `Trigger` and clears the stuck message itself via JetStream's `MAX_DELIVERIES` advisory.
 #[tokio::test]
 async fn max_deliveries_reconciler_deletes_stuck_message_and_unblocks_subject() {
     let (_container, url) = start_nats_container().await;
@@ -943,9 +923,6 @@ async fn max_deliveries_reconciler_deletes_stuck_message_and_unblocks_subject() 
     let reconciler_cancel = cancel.clone();
     let reconciler_handle = tokio::spawn(async move { reconciler.run(reconciler_cancel).await });
 
-    // The reconciler subscribes with no replay, so it must already be listening before
-    // exhaustion fires; the redelivery loop below spans several ack_wait cycles, well past
-    // this subscribe round-trip.
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let _messages = publish_and_exhaust_redelivery(

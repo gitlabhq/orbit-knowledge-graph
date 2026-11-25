@@ -1,7 +1,6 @@
 //! FIPS 140-3 posture of the server binary. Every TLS and JWT primitive runs
 //! inside the AWS-LC FIPS module that the `rustls` `fips` feature links; this
 //! module makes a mislinked binary refuse to start instead of serving traffic.
-
 use anyhow::Context;
 
 /// AWS-LC FIPS module generation the build is declared against. The CMVP

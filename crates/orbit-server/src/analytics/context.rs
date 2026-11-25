@@ -252,8 +252,6 @@ fn apply_metrics(
     q.raw_output_format_version = VERSIONS.raw_output_format.parse().ok();
 }
 
-/// Build a topology fingerprint like `User-[AUTHORED]->MergeRequest`.
-/// Returns `None` for search queries (no relationships).
 fn traversal_shape(input: &query_engine::compiler::Input) -> Option<String> {
     if input.relationships.is_empty() {
         return None;
@@ -279,9 +277,6 @@ fn traversal_shape(input: &query_engine::compiler::Input) -> Option<String> {
     Some(parts.join(", "))
 }
 
-/// Bounds are 255 chars for instance/host fields; exceeding that surfaces a
-/// typed validation error rather than truncating silently.
-/// Same as [`parse_opt`] but for orbit_query newtypes (maxLength 64).
 fn parse_opt_query(
     value: &Option<String>,
     field: &'static str,

@@ -1,5 +1,3 @@
-# config/ontology/nodes/source_code/definition.yaml
-
 node_type: Definition
 domain: source_code
 description: A code definition such as a class, function, method, or module

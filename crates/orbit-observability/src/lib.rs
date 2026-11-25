@@ -1,15 +1,3 @@
-//! Central catalogue of every metric the GKG Rust service emits.
-//!
-//! Each domain submodule declares its metrics as `MetricSpec` constants plus
-//! `build_*` functions that construct the matching OTel instrument. The
-//! [`catalog()`] function returns the union of every module's `CATALOG` slice,
-//! which the `cargo xtask metrics-catalog` command serialises into
-//! `orbit-dashboards/gkg-metrics.json`.
-//!
-//! Consumers elsewhere in the workspace call the `build_*` functions from
-//! their existing `Metrics::with_meter` constructors so that metric names,
-//! descriptions, units, and histogram buckets live in exactly one place.
-
 pub mod billing;
 pub mod buckets;
 pub mod indexer;
@@ -21,18 +9,10 @@ mod types;
 
 pub use types::{MetricKind, MetricSpec, Stability};
 
-/// Returning the same `Meter` instance means every `Metrics::new()` across
-/// the workspace reports under a single instrumentation scope.
 pub fn meter() -> opentelemetry::metrics::Meter {
     opentelemetry::global::meter("gkg")
 }
 
-/// Flat catalog of every `MetricSpec` emitted by the service.
-///
-/// The order is deterministic: modules are concatenated in a fixed order and
-/// each module's own `CATALOG` preserves declaration order. The xtask sorts
-/// by `otel_name` before writing, so this order only matters when the slice
-/// is read directly.
 pub fn catalog() -> Vec<&'static MetricSpec> {
     let mut v: Vec<&'static MetricSpec> = Vec::new();
     v.extend(indexer::etl::CATALOG);

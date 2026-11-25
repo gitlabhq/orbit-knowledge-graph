@@ -131,7 +131,6 @@ impl GitlabClient {
                 expanded(REMOTE_ADDR) = %addr,
                 "overriding DNS for base_url host"
             );
-            // Port 0 tells reqwest to use the port from the request URL.
             builder = builder.resolve(domain, SocketAddr::new(addr.ip(), 0));
         }
 

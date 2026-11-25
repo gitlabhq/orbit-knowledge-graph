@@ -289,7 +289,6 @@ async fn indexes_repository() {
     assert_code_indexed(&clickhouse, project_id).await;
     assert_branch_indexed(&clickhouse, project_id, "main", traversal_path).await;
 
-    // Nested files should not have direct Branch --CONTAINS--> File edges
     assert_edge_count_for_traversal_path(
         &clickhouse,
         "CONTAINS",
@@ -508,8 +507,6 @@ async fn indexes_calls_and_extends_edges() {
     )
     .await;
 
-    // Both edges land in gl_code_edge per ontology routing
-    // (the schema version prefix is added at runtime).
     let ontology = integration_testkit::load_ontology();
     let calls_table = ontology.edge_table_for_relationship("CALLS").unwrap();
     let extends_table = ontology.edge_table_for_relationship("EXTENDS").unwrap();
@@ -534,10 +531,6 @@ async fn indexes_calls_and_extends_edges() {
         "expected at least one EXTENDS edge for Dog extends Animal, got {extends}"
     );
 
-    // Now run a real query through the compiler against the indexed data:
-    // CALLS traversal Definition -> Definition. The compiler resolves the
-    // CALLS edge through the embedded ontology (proves schema.yaml
-    // registration works) and the SQL must hit gl_code_edge.
     let json = format!(
         r#"{{
         "query_type": "traversal",
@@ -1913,12 +1906,6 @@ async fn attempts(
     i64::extract_column(&result, 0).expect("attempts")
 }
 
-/// Verifies that stale edge cleanup is scoped to the specific project+branch
-/// and does not delete edges belonging to other projects in the same namespace.
-///
-/// This is the regression test for the fix in `stale_data_cleaner.rs` that
-/// replaced the namespace-wide `source_kind IN (...)` filter with a
-/// `source_id IN (subquery)` that pins to `project_id` and `branch`.
 #[tokio::test]
 async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
     let project_a: i64 = 20;
@@ -2793,7 +2780,6 @@ async fn timed_out_job_writes_no_data(incremental: bool) {
     );
     let handler = deps.code_indexing_task_handler();
 
-    // First timeout: transient, so NATS redelivers for one retry.
     let mut first = code_indexing_task_envelope(project_id, "abc123", 1, "99/99/");
     first.attempt = 1;
     let result = handler.handle(handler_context(), first).await;
@@ -2802,7 +2788,6 @@ async fn timed_out_job_writes_no_data(incremental: bool) {
         "first timeout must retry (transient), not dead-letter; got {result:?}"
     );
 
-    // Second timeout: structurally stuck, so it dead-letters.
     let mut second = code_indexing_task_envelope(project_id, "abc123", 1, "99/99/");
     second.attempt = 2;
     let result = handler.handle(handler_context(), second).await;
@@ -2882,7 +2867,6 @@ async fn disk_is_clean_after_a_timed_out_job(incremental: bool) {
     let mock = MockGitlabServer::start().await;
     mock.add_project_with_slow_archive(project_id, "main");
 
-    // 1s budget vs a 3s fetch: the job is dropped mid-run, so cleanup runs via the TempDir drop.
     let deps = CodeIndexingDeps::new_with_pipeline_config(
         &mock,
         &clickhouse,

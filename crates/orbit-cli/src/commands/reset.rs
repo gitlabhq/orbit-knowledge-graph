@@ -1,6 +1,3 @@
-//! `orbit workspace reset`: removes the local graph, its manifest, and the index state, after
-//! the running indexes and readers release them. Settings and DuckDB extensions stay.
-
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 

@@ -98,8 +98,6 @@ fixtures:
       }
 
 tests:
-  # ── J1: test_java_reference_resolution_main (14 assertions) ──
-
   - name: "All expected definitions exist"
     query: |
       MATCH (d:Definition)

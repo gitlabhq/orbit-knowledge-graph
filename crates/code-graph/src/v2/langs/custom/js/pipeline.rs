@@ -46,9 +46,6 @@ impl LanguagePipeline for JsPipeline {
         progress.files_advanced(ProgressPhase::Resolve, errors.len());
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
-        // Route per-file outcomes to the typed collections regardless of
-        // whether at least one file analyzed; the orchestrator no longer
-        // double-counts skipped/errored at the language boundary.
         for (path, error) in &errors {
             match error {
                 AnalyzerError::Skip { kind, detail } => {
@@ -99,9 +96,6 @@ impl LanguagePipeline for JsPipeline {
             ));
         }
 
-        // One probe: every manifest/config file JS resolution cares about
-        // is read exactly once here, then shared with the resolver,
-        // evaluator, and tsconfig discovery below.
         let probe = WorkspaceProbe::load(Path::new(root_path), files);
 
         let (mut graph, modules) = builder.into_parts();

@@ -3,11 +3,6 @@ use std::collections::HashMap;
 use arrow::array::{Array, FixedSizeBinaryArray, LargeStringArray, StringArray};
 use arrow::record_batch::RecordBatch;
 
-/// Reads a two-column `(key, value)` result into a map.
-///
-/// ClickHouse does not render every text column as Arrow `Utf8`: a
-/// `FixedString(32)` such as `trace_id` arrives as `FixedSizeBinary`, which a
-/// plain `StringArray` downcast silently misses and turns into an empty result.
 pub fn two_string_columns(batches: &[RecordBatch]) -> HashMap<String, String> {
     let mut rows = HashMap::new();
 

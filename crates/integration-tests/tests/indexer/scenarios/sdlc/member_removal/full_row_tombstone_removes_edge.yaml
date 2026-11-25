@@ -1,6 +1,3 @@
-# The contrast case for pk_only_tombstone_removes_edge: when the tombstone still
-# carries the endpoint columns, the transform's IsNotNull/TypeIn endpoint filters
-# pass and the tombstone reaches gl_edge. Pins the shape the fix must generalize to.
 description: A membership removal replicated with the full row removes the MEMBER_OF edge
 scope: { namespace: 100 }
 
