@@ -101,13 +101,8 @@ mod tests {
                     .iter()
                     .find(|field| field.name == property);
                 let reserved = ontology::constants::NODE_RESERVED_COLUMNS.contains(&property);
-                let visible = declared.filter(|field| {
-                    !field.hidden
-                        && !matches!(
-                            &field.source,
-                            ontology::FieldSource::Virtual(source) if source.disabled
-                        )
-                });
+                let visible =
+                    declared.filter(|field| !field.hidden && !field.is_disabled_virtual());
                 for (selector, expected) in [
                     (
                         serde_json::json!({"columns": [property]}),

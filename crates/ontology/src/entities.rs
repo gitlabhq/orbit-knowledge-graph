@@ -395,9 +395,9 @@ impl NodeEntity {
     /// A disabled virtual column resolves to nothing, so listing it would
     /// advertise a column that never returns a value.
     pub fn listed_fields(&self) -> impl Iterator<Item = &Field> {
-        self.fields.iter().filter(|field| {
-            !field.hidden && !matches!(&field.source, FieldSource::Virtual(v) if v.disabled)
-        })
+        self.fields
+            .iter()
+            .filter(|field| !field.hidden && !field.is_disabled_virtual())
     }
 
     pub fn is_default_column(&self, field: &Field) -> bool {
@@ -658,6 +658,10 @@ impl Field {
         matches!(self.source, FieldSource::Virtual(_))
     }
 
+    pub fn is_disabled_virtual(&self) -> bool {
+        matches!(&self.source, FieldSource::Virtual(v) if v.disabled)
+    }
+
     pub fn is_text_searchable(&self) -> bool {
         self.like_allowed
             && self.filterable
@@ -774,22 +778,8 @@ mod listed_fields_tests {
         Field {
             name: name.to_string(),
             source,
-            data_type: DataType::String,
             nullable: true,
-            enum_values: None,
-            enum_type: EnumType::default(),
-            like_allowed: true,
-            filterable: true,
-            admin_only: false,
-            hidden: false,
-            mutable: true,
-            description: None,
-            selectivity: FieldSelectivity::default(),
-            high_fan_out: false,
-            terminal_values: None,
-            traversal_path_lookup: None,
-            binary: false,
-            unique: false,
+            ..Field::default()
         }
     }
 
