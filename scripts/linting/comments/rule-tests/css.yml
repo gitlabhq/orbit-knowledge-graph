@@ -1,0 +1,5 @@
+id: comments-css
+valid:
+  - 'a { color: red; }'
+invalid:
+  - '/* a comment */'
