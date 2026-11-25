@@ -180,8 +180,6 @@ mod tests {
             Some(Language::Markdown)
         );
         assert_eq!(detect_language_from_path("Makefile"), None);
-        // Pure extension lookup: minified-bundle exclusion is the CodeFilter
-        // denylist's job, not this mapping's.
         assert_eq!(
             detect_language_from_path("vendor/jquery.min.js"),
             Some(Language::JavaScript)

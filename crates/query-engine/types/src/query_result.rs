@@ -15,8 +15,6 @@ use orbit_arrow::{ArrowUtils, ColumnValue};
 pub struct NodeRef {
     pub id: i64,
     pub entity_type: String,
-    /// Hydrated entity properties, populated after redaction.
-    /// Empty until the hydration stage fetches full properties for this node.
     pub properties: HashMap<String, ColumnValue>,
     pub owner_id: Option<i64>,
 }
@@ -43,11 +41,7 @@ impl NodeRef {
 #[derive(Debug, Clone)]
 pub struct QueryResultRow {
     columns: HashMap<String, ColumnValue>,
-    /// Nodes discovered dynamically at query time that need redaction checks (e.g nodes where their entity type is not known ahead of time).
     dynamic_nodes: Vec<NodeRef>,
-    /// Relationship kinds for each hop in a path finding query.
-    /// `edge_kinds[i]` is the relationship that connects `dynamic_nodes[i]` to `dynamic_nodes[i+1]`.
-    /// Empty for non-path-finding queries.
     edge_kinds: Vec<String>,
     authorized: bool,
 }
@@ -100,8 +94,6 @@ impl QueryResultRow {
         &self.dynamic_nodes
     }
 
-    /// For neighbors queries, returns the neighbor node if present.
-    /// Returns None for non-neighbors queries or if neighbor is null.
     pub fn neighbor_node(&self) -> Option<&NodeRef> {
         self.dynamic_nodes.first()
     }
@@ -300,8 +292,6 @@ impl QueryResult {
         &self.rows
     }
 
-    /// Remove authorized rows that do not satisfy `predicate`.
-    /// Used for post-hydration filtering (e.g. virtual column filters).
     pub fn retain_rows(&mut self, mut predicate: impl FnMut(&QueryResultRow) -> bool) {
         self.rows.retain(|row| !row.authorized || predicate(row));
     }
@@ -397,8 +387,6 @@ impl QueryResult {
         }
     }
 
-    /// Apply authorization results to rows. Fails closed: any row containing a node
-    /// that cannot be verified as authorized is marked unauthorized.
     pub fn apply_authorizations(&mut self, authorizations: &[ResourceAuthorization]) -> usize {
         let mut redacted_count = 0;
         let redaction_nodes: Vec<_> = self.ctx.nodes().cloned().collect();
@@ -450,7 +438,6 @@ impl QueryResult {
         self.rows.iter().filter(|r| r.authorized).count()
     }
 
-    /// Drops rows past the page window (the overfetched `has_more` probe).
     pub fn truncate(&mut self, len: usize) {
         self.rows.truncate(len);
     }

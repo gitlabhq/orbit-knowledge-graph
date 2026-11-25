@@ -66,8 +66,6 @@ MILESTONES="$(api --paginate "projects/$PROJECT_ID/milestones?state=active&inclu
 CURRENT="$(jq_rules -n -r --argjson milestones "$MILESTONES" --arg today "$TODAY" \
   'include "milestone-assignee"; current_milestone($milestones; $today) | .title // empty')"
 
-# Without a current milestone the rules still assign and copy issue milestones,
-# but the run fails so a gap in the release milestones gets noticed.
 STATUS=0
 if [ -z "$CURRENT" ]; then
   log "milestone-assignee: no active release milestone covers $TODAY"

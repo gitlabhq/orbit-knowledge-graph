@@ -1,5 +1,3 @@
-# config/ontology/nodes/security/identifier.yaml
-
 node_type: VulnerabilityIdentifier
 domain: security
 description: A vulnerability identifier such as a CVE, CWE, or other external reference

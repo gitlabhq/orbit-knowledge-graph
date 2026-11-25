@@ -1,4 +1,3 @@
-# Pipeline source_tags come from the MemTable enrichment, not a JOIN.
 description: Pipelines index with transformed source/failure_reason plus IN_PROJECT / TRIGGERED edges and source tags
 scope: { namespace: 100 }
 

@@ -4,7 +4,6 @@ use anyhow::{Result, bail};
 use ontology::Ontology;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
-/// Separator between entity type and depth level in epsilon node names.
 const EPSILON_DEPTH_SEPARATOR: char = '@';
 
 #[derive(Debug, Clone)]
@@ -12,8 +11,6 @@ pub struct ParentEdge {
     pub edge_type: String,
     pub parent_kind: String,
     pub ratio: EdgeRatio,
-    /// Parent-to-child: source is parent, target is child (e.g., CONTAINS)
-    /// Child-to-parent: source is child, target is parent (e.g., IN_PROJECT)
     pub parent_to_child: bool,
 }
 
@@ -23,8 +20,6 @@ pub struct DependencyGraph {
     parent_edges: BTreeMap<String, Vec<ParentEdge>>,
     roots: HashSet<String>,
     parent_types: HashSet<String>,
-    /// Maps epsilon depth-level node names to their real entity type.
-    /// e.g., "Group@1" → "Group", "Group@2" → "Group"
     epsilon_to_real: HashMap<String, String>,
 }
 
@@ -34,24 +29,12 @@ impl DependencyGraph {
         let mut roots: HashSet<String> = HashSet::new();
         let mut all_nodes: BTreeSet<String> = BTreeSet::new();
         let mut epsilon_to_real: HashMap<String, String> = HashMap::new();
-        // Reverse index: real type → its epsilon names. Built in pass 1, used in pass 2
-        // to fan out children to all depth levels in O(1) per parent type.
         let mut expanded_types: HashMap<String, Vec<String>> = HashMap::new();
 
         for node_type in config.roots.keys() {
             roots.insert(node_type.clone());
             all_nodes.insert(node_type.clone());
         }
-
-        // Two-pass processing of relationships:
-        //
-        // Pass 1: Detect self-referential edges (source == target) with Recursive ratios
-        //         and expand them into epsilon depth-level nodes.
-        //         e.g., "Group -> Group" { count: 2, max_depth: 3 }
-        //         becomes: Group → Group@1 → Group@2 → Group@3
-        //
-        // Pass 2: Process all other edges normally, fanning out to epsilon levels
-        //         when a parent type was expanded in pass 1.
 
         for (edge_type, variants) in &config.relationships.edges {
             for (variant_key, ratio) in variants {
@@ -156,10 +139,6 @@ impl DependencyGraph {
                 all_nodes.insert(parent_kind.clone());
                 all_nodes.insert(child_kind.clone());
 
-                // If the parent was expanded into epsilon depth-level nodes,
-                // add parent edges from each epsilon level to the child.
-                // This ensures children (e.g., Project) are generated for every
-                // depth level of the hierarchy (Group, Group@1, Group@2, ...).
                 if let Some(epsilon_names) = expanded_types.get(&parent_kind) {
                     parent_edges
                         .entry(child_kind.clone())
@@ -261,15 +240,10 @@ impl DependencyGraph {
         Ok(())
     }
 
-    /// Edge directionality from the ontology naming convention:
-    /// Parent-to-child (source is parent): `CONTAINS`, `HAS_*`.
-    /// Child-to-parent (source is child): `IN_*`.
-    /// All other edges are associations and must not appear in the relationship config.
     fn is_parent_to_child(edge_type: &str) -> bool {
         edge_type == PARENT_TO_CHILD_EDGE || edge_type.starts_with(PARENT_TO_CHILD_PREFIX)
     }
 
-    /// Kahn's algorithm
     fn topological_sort(
         _roots: &HashSet<String>,
         parent_edges: &BTreeMap<String, Vec<ParentEdge>>,
@@ -341,7 +315,6 @@ impl DependencyGraph {
         &self.roots
     }
 
-    /// Returns the input unchanged if it's not an epsilon node.
     pub fn resolve_type<'a>(&'a self, node_type: &'a str) -> &'a str {
         self.epsilon_to_real
             .get(node_type)
@@ -353,7 +326,6 @@ impl DependencyGraph {
         self.epsilon_to_real.contains_key(node_type)
     }
 
-    /// For registry compaction.
     pub fn epsilon_to_real(&self) -> &HashMap<String, String> {
         &self.epsilon_to_real
     }

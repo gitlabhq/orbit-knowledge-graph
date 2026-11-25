@@ -1,7 +1,3 @@
-# TypeScript/JavaScript rewrite rules.
-# Handles: import/export, class/function/interface/enum/type defs,
-# member access, calls, this.x, control flow, bindings.
-
 config:
   stdlib: [
     { availability: implicit, symbols: [AggregateError, Array, ArrayBuffer, BigInt, BigInt64Array,
@@ -91,7 +87,6 @@ config:
 stages:
   - name: normalize
     rules:
-      # `await f()`, `f() as T`, `f()!`, `(f())` and `f() satisfies T` carry the value of the call they wrap
       - match: '(await_expression $V:call_expression)'
         replace: '$V'
       - match: '(as_expression $V:call_expression)'
@@ -102,7 +97,6 @@ stages:
         replace: '$V'
       - match: '(satisfies_expression $V:call_expression)'
         replace: '$V'
-      # <div> is an intrinsic element, not a component call
       - match: '(jsx_self_closing_element name: (identifier "/^[a-z]/") $$$A)'
         replace: '(jsx_intrinsic $$$A)'
       - match: '(jsx_opening_element name: (identifier "/^[a-z]/") $$$A)'
@@ -110,13 +104,11 @@ stages:
       - match: '(program $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
 
-      # Constructor parameter property (only when accessibility_modifier present)
       - match: '(required_parameter **/(accessibility_modifier) pattern: $N type: (type_annotation $T:type_identifier))'
         replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))))'
       - match: '(required_parameter **/(accessibility_modifier) pattern: $N)'
         replace: '(__def (__defname @$N) (__property))'
 
-      # Regular typed parameter → binding with SSA type hint
       - match: '(required_parameter pattern: $N type: (type_annotation $T:type_identifier))'
         replace: '(__binding @$N $N (__declaration) (__ssa_typed @$T))'
       - match: '(required_parameter pattern: $N)'
@@ -125,23 +117,18 @@ stages:
       - match: '(return_statement $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
 
-      # Distinguish import type from import before rewriting
       - match: '(import_statement (type) $$$REST)'
         replace: '(import_type_statement $$$REST)'
 
-      # this.x → __ivar
       - match: '(member_expression object: (this) property: $P)'
         replace: '(__ivar @$P)'
 
-      # Superclass: extends clause → __supertype
       - match: '(extends_clause value: $V)'
         replace: '(__supertype @$V $V)'
 
-      # implements clause → individual __supertype nodes
       - match: '(implements_clause $$$TYPES:type_identifier $$$REST)'
         replace: '(implements_clause $$$REST $$$TYPES=>__supertype)'
 
-      # Import alias: capture real name as sym, alias as child
       - match: '(import_specifier (type) name: $N alias: $A)'
         replace: '(import_specifier @$N (__alias @$A))'
         tag: { type_only: "true" }
@@ -153,7 +140,6 @@ stages:
       - match: '(import_specifier name: $N)'
         replace: '(import_specifier @$N)'
 
-      # Export specifier alias
       - match: '(export_specifier name: $N alias: $A)'
         replace: '(export_specifier @$N (__alias @$A))'
       - match: '(export_specifier name: $N)'
@@ -172,7 +158,6 @@ stages:
 
   - name: retag-calls
     rules:
-      # <Comp … /> and <Comp>…</Comp> call the component
       - match: '(jsx_self_closing_element name: $N:__member $$$A)'
         replace: '(__call (__callee $N) $$$A)'
       - match: '(jsx_self_closing_element name: $N:identifier $$$A)'
@@ -196,7 +181,6 @@ stages:
     rules:
       - match: '(export_statement (default) value: $N:identifier)'
         replace: '(__module_export @$N (__default_export "default"))'
-      # import type { a, b } from './source'
       - match: '(import_type_statement (import_clause (named_imports $$$SPECS:import_specifier)) source: (string $S:string_fragment))'
         replace: '(__import_type (__source @$S) (__source_path @$S) $$$SPECS->__name)'
       - match: '(import_type_statement (import_clause (namespace_import $N:identifier)) source: (string $S:string_fragment))'
@@ -204,33 +188,26 @@ stages:
       - match: '(import_type_statement (import_clause $N:identifier) source: (string $S:string_fragment))'
         replace: '(__import_type (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
 
-      # import defaultExport, { named } from './source' — combined default + named (before individual rules)
       - match: '(import_statement (import_clause $N:identifier $$$REST (named_imports $$$SPECS:import_specifier)) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)) $$$SPECS->__name)'
 
-      # import { a, b } from './source'
       - match: '(import_statement (import_clause (named_imports $$$SPECS:import_specifier)) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) $$$SPECS->__name)'
 
-      # import * as ns from './source'
       - match: '(import_statement (import_clause (namespace_import $N:identifier)) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name "*" (__alias @$N)))'
 
-      # import defaultExport from './source'
       - match: '(import_statement (import_clause $N:identifier) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
 
-      # const { a, b: c } = require('./source') — CJS destructured require; aliases finish in cjs-entries
       - match: '(variable_declarator name: (object_pattern $$$E:shorthand_property_identifier_pattern|pair_pattern) value: (__call (__callee "require") (arguments (string $S:string_fragment))))'
         replace: '(__import (__source @$S) (__source_path @$S) $$$E->cjs_entry)'
 
-      # const x = require('./source') — CJS namespace require
       - match: '(variable_declarator name: $N:identifier value: (__call (__callee "require") (arguments (string $S:string_fragment))))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
         tag: { import_type: CjsRequire }
         tag_on: __name
 
-      # exports.f = function f() {} / module.exports.f = ... → an exported function def
       - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "exports") right: (function_expression name: $N body: $B)))'
         replace: '(__def (__defname @$N) (__function) $B)'
         tag: { exports: '@$P' }
@@ -243,27 +220,22 @@ stages:
       - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "module.exports") right: (function_expression body: $B)))'
         replace: '(__def (__defname @$P) (__function) $B)'
         tag: { exports: '@$P' }
-      # exports.X = <value> → an exported variable
       - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "exports") right: $V))'
         replace: '(__def (__defname @$P $P) (__variable) $V)'
         tag: { exports: '@$P' }
-      # module.exports = function main() {} → the default export
       - match: '(expression_statement (assignment_expression left: (__member "exports" (__object "module")) right: (function_expression name: $N body: $B)))'
         replace: '(__def (__defname @$N) (__default_export "default") (__function) $B)'
       - match: '(expression_statement (assignment_expression left: (__member "exports" (__object "module")) right: $N:identifier))'
         replace: '(__module_export @$N (__default_export "default"))'
 
-      # export { A, B } from './source' — named re-export with source (before star)
       - match: '(export_statement (export_clause $$$SPECS:export_specifier) source: (string $S:string_fragment))'
         replace: '(__module_export (__import (__source @$S) (__source_path @$S) $$$SPECS->__name))'
 
-      # export * from './source' — star re-export (no export_clause)
       - match: '(export_statement (namespace_export $N:identifier) source: (string $S:string_fragment))'
         replace: '(__module_export (__import (__source @$S) (__source_path @$S) (__name "*" (__alias @$N))))'
       - match: '(export_statement source: (string $S:string_fragment))'
         replace: '(__module_export (__import (__source @$S) (__source_path @$S) (__name "*")))'
 
-      # export { A, B } — local re-export (no source)
       - match: '(export_statement (export_clause $$$SPECS:export_specifier))'
         replace: '(__module_export $$$SPECS->__name)'
 
@@ -278,7 +250,6 @@ stages:
 
   - name: classify
     rules:
-      # Bindings
       - match: '(variable_declarator name: $N value: $V:arrow_function)'
         replace: '(__def (__defname @$N) (__declaration @$ROOT|ancestor_sym("variable_owner")) (__function) $V)'
       - match: '(variable_declarator name: $N value: $V:identifier)'
@@ -301,7 +272,6 @@ stages:
       - match: '(public_field_definition name: $N)'
         replace: '(__def (__defname @$N $N) (__property))'
 
-      # Control flow
       - match: '(if_statement condition: $COND consequence: $C alternative:? $A)'
         replace: '(__ssa_branch $COND (__ssa_arm $C) (__ssa_arm? $A))'
       - match: '(switch_statement value: $V body: $B)'
@@ -311,7 +281,6 @@ stages:
       - match: '(try_statement body: $B $$$ALTS:catch_clause|finally_clause)'
         replace: '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm)'
 
-      # Loops
       - match: '(for_in_statement (let) left: $N:identifier right: $V body: $B)'
         replace: '(__scope "block" (__ssa_loop $V (__binding @$N (__declaration "block")) $B))'
       - match: '(for_in_statement (const) left: $N:identifier right: $V body: $B)'
@@ -327,17 +296,13 @@ stages:
       - match: '(do_statement body: $B)'
         replace: '(__ssa_loop $B)'
 
-      # Abstract method signatures (no body)
       - match: '(abstract_method_signature name: $N)'
         replace: '(__def (__defname @$N) (__method))'
         tag: { flavor: abstract }
-      # Functions
       - match: '(function_declaration name: $N parameters: (formal_parameters $$$P:__binding) body: $B)'
         replace: '(__def (__defname @$N) (__function) $$$P $B)'
       - match: '(function_declaration name: $N body: $B)'
         replace: '(__def (__defname @$N) (__function) $B)'
-      # Methods — static before generic; parameters: captures ctor param properties.
-      # A computed key ([expr]) is not a named member; `#name` drops the hash.
       - match: '(method_definition name: (computed_property_name) body: $B)'
         replace: '(__ssa_hint $B)'
       - match: '(method_definition **/(static) name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
@@ -363,7 +328,6 @@ stages:
       - match: '(enum_declaration name: $N body: $B)'
         replace: '(__def (__defname @$N) (__enum) $B)'
 
-      # Classes (last — body contains already-canonical methods)
       - match: '(class_declaration name: $N body: $B $$$ANN:__supertype)'
         replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
       - match: '(abstract_class_declaration name: $N body: $B $$$ANN:__supertype)'
@@ -387,11 +351,9 @@ stages:
 
   - name: exports
     rules:
-      # export default function/class → mark the def as default export
       - match: '(export_statement **/(default) (__def $$$CHILDREN))'
         replace: '(export_statement (__def (__default_export "default") $$$CHILDREN))'
 
-      # export const X = ... → promote binding to Variable def
       - match: '(export_statement (variable_owner $B:__binding))'
         replace: '(export_statement (__def (__defname @$B $B) (__variable)))'
 
@@ -458,13 +420,10 @@ resolve:
   stages:
     - name: config
       rules:
-        # tsconfig paths: each entry becomes an alias, first target wins
         - match: '(__field "paths" (__obj $$$E:__field))'
           replace: '(__field "paths" (__obj $$$E->path_alias))'
-        # webpack resolve.alias pairs extracted from the config
         - match: '(__file "webpack.config.js" $$$F:__field)'
           replace: '(__file "webpack.config.js" $$$F->__alias)'
-        # tsconfig baseUrl → source root
         - match: '(__file "/^(ts|js)config\.json$/" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" $V:__str) $$$REST))) $$$OUTER)'
           replace: '(__file @$ROOT (__source_root @$V|strip_prefix("./") $V (__scope "bare_import")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
 

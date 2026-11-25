@@ -1,5 +1,3 @@
-# config/ontology/nodes/core/group.yaml
-
 node_type: Group
 domain: core
 description: A GitLab group (top-level group or subgroup)
@@ -97,9 +95,6 @@ pipelines:
   - name: Group
     extract:
       type: clickhouse
-      # tables[0] is the partition-probe base: it must carry traversal_path + id.
-      # siphon_namespaces lacks traversal_path (Group derives it via the join), so
-      # namespace_traversal_paths leads.
       tables: [namespace_traversal_paths, siphon_namespaces, siphon_namespace_details, siphon_routes]
       order_by: [traversal_path, id]
       query: group.sql.j2

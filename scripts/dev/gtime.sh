@@ -1,28 +1,23 @@
 #!/bin/bash
 
-# Check if gtime is available
 if ! command -v gtime &> /dev/null; then
   echo '{"error": "gtime command not found in PATH"}'
   exit 1
 fi
 
-# Check if a path argument was provided
 if [ -z "$1" ]; then
   echo '{"error": "No path argument provided"}'
   exit 1
 fi
 
-# Run gtime and capture output
 GTIME_OUTPUT=$(gtime --verbose cargo run --release --bin orbit workspace index "$1" 2>&1 > /dev/null)
 
-# Parse the gtime output
 COMMAND=$(echo "$GTIME_OUTPUT" | grep "Command being timed:" | sed 's/.*Command being timed: "\(.*\)"/\1/')
 USER_TIME=$(echo "$GTIME_OUTPUT" | grep "User time" | grep -o '[0-9.]*')
 SYSTEM_TIME=$(echo "$GTIME_OUTPUT" | grep "System time" | grep -o '[0-9.]*')
 CPU_PERCENT=$(echo "$GTIME_OUTPUT" | grep "Percent of CPU" | grep -o '[0-9]*%' | tr -d '%')
 ELAPSED_TIME=$(echo "$GTIME_OUTPUT" | grep "Elapsed (wall clock) time" | grep -o '[0-9:]*' | tail -1)
 
-# Memory metrics
 AVG_SHARED_TEXT=$(echo "$GTIME_OUTPUT" | grep "Average shared text size" | grep -o '[0-9]*')
 AVG_UNSHARED_DATA=$(echo "$GTIME_OUTPUT" | grep "Average unshared data size" | grep -o '[0-9]*')
 AVG_STACK=$(echo "$GTIME_OUTPUT" | grep "Average stack size" | grep -o '[0-9]*')
@@ -30,15 +25,12 @@ AVG_TOTAL=$(echo "$GTIME_OUTPUT" | grep "Average total size" | grep -o '[0-9]*')
 MAX_RSS_KB=$(echo "$GTIME_OUTPUT" | grep "Maximum resident set size" | grep -o '[0-9]*')
 AVG_RSS_KB=$(echo "$GTIME_OUTPUT" | grep "Average resident set size" | grep -o '[0-9]*')
 
-# Page faults
 MAJOR_FAULTS=$(echo "$GTIME_OUTPUT" | grep "Major (requiring I/O) page faults:" | grep -o '[0-9]*')
 MINOR_FAULTS=$(echo "$GTIME_OUTPUT" | grep "Minor (reclaiming a frame) page faults:" | grep -o '[0-9]*')
 
-# Context switches
 VOLUNTARY_CTX=$(echo "$GTIME_OUTPUT" | grep "Voluntary context switches:" | grep -o '[0-9]*')
 INVOLUNTARY_CTX=$(echo "$GTIME_OUTPUT" | grep "Involuntary context switches:" | grep -o '[0-9]*')
 
-# I/O and system metrics
 SWAPS=$(echo "$GTIME_OUTPUT" | grep "Swaps:" | grep -o '[0-9]*')
 FS_INPUTS=$(echo "$GTIME_OUTPUT" | grep "File system inputs:" | grep -o '[0-9]*')
 FS_OUTPUTS=$(echo "$GTIME_OUTPUT" | grep "File system outputs:" | grep -o '[0-9]*')
@@ -47,14 +39,11 @@ SOCKET_MSG_RECV=$(echo "$GTIME_OUTPUT" | grep "Socket messages received:" | grep
 SIGNALS=$(echo "$GTIME_OUTPUT" | grep "Signals delivered:" | grep -o '[0-9]*')
 PAGE_SIZE=$(echo "$GTIME_OUTPUT" | grep "Page size" | grep -o '[0-9]*')
 
-# Exit status
 EXIT_STATUS=$(echo "$GTIME_OUTPUT" | grep "Exit status:" | grep -o '[0-9]*')
 
-# Convert RSS to MB and GB
 MAX_RSS_MB=$(echo "scale=2; $MAX_RSS_KB / 1024" | bc)
 MAX_RSS_GB=$(echo "scale=2; $MAX_RSS_KB / 1024 / 1024" | bc)
 
-# Output structured JSON
 echo "{
   \"path\": \"$1\",
   \"command\": \"$COMMAND\",

@@ -89,10 +89,8 @@ impl ClickHouseConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientConfig {
-    /// Send timeout in seconds.
     #[serde(default = "default_timeout")]
     pub send_timeout: u32,
-    /// Receive timeout in seconds.
     #[serde(default = "default_timeout")]
     pub receive_timeout: u32,
     #[serde(default = "default_insert_block_size")]
@@ -122,18 +120,12 @@ impl Default for ClientConfig {
 pub struct SchemaConfig {
     #[serde(default = "default_engine_type")]
     pub engine: String,
-    /// When true, each node table gets its own ORDER BY from the ontology
-    /// (e.g. gl_user uses [id], code tables use [traversal_path, project_id, branch, id]).
-    /// When false (default), all node tables share node_order_by.
     #[serde(default)]
     pub use_ontology_sort_keys: bool,
-    /// If empty, defaults to ORDER BY columns. Ignored when use_ontology_sort_keys is true.
     #[serde(default)]
     pub node_primary_key: Vec<String>,
-    /// Ignored when use_ontology_sort_keys is true.
     #[serde(default = "default_node_order_by")]
     pub node_order_by: Vec<String>,
-    /// If empty, defaults to ORDER BY columns.
     #[serde(default)]
     pub edge_primary_key: Vec<String>,
     #[serde(default = "default_edge_order_by")]
@@ -144,13 +136,6 @@ pub struct SchemaConfig {
     pub indexes: Vec<IndexConfig>,
     #[serde(default)]
     pub projections: Vec<ProjectionConfig>,
-    /// Appended to the CREATE TABLE SETTINGS clause. Common options:
-    /// - `min_bytes_for_wide_part`: Threshold for wide vs compact parts (default: 10MB)
-    /// - `merge_with_ttl_timeout`: TTL merge interval in seconds
-    /// - `storage_policy`: Named storage policy for tiered storage
-    /// - `ttl_only_drop_parts`: Only drop whole parts on TTL expiry (0 or 1)
-    ///
-    /// See: https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/mergetree#settings
     #[serde(default)]
     pub settings: HashMap<String, String>,
 }
@@ -169,12 +154,11 @@ fn default_node_order_by() -> Vec<String> {
 
 fn default_edge_order_by() -> Vec<String> {
     use ontology::constants::{EDGE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN};
-    // Subset of EDGE_RESERVED_COLUMNS in query-optimal order; validated against EDGE_RESERVED_COLUMNS at startup.
     vec![
         TRAVERSAL_PATH_COLUMN.to_string(),
-        EDGE_RESERVED_COLUMNS[2].to_string(), // source_id
-        EDGE_RESERVED_COLUMNS[3].to_string(), // source_kind
-        EDGE_RESERVED_COLUMNS[1].to_string(), // relationship_kind
+        EDGE_RESERVED_COLUMNS[2].to_string(),
+        EDGE_RESERVED_COLUMNS[3].to_string(),
+        EDGE_RESERVED_COLUMNS[1].to_string(),
     ]
 }
 
@@ -203,7 +187,6 @@ impl Default for SchemaConfig {
 #[serde(deny_unknown_fields)]
 pub struct IndexConfig {
     pub name: String,
-    /// Target table ("*" for all node tables, "edges" for edge table).
     pub table: String,
     pub expression: String,
     #[serde(rename = "type")]
@@ -237,16 +220,12 @@ pub struct GenerationConfig {
     #[serde(default = "default_organizations")]
     pub organizations: u32,
 
-    /// Root entities (no parent, generated first) with absolute counts per organization.
     #[serde(default)]
     pub roots: BTreeMap<String, usize>,
 
     #[serde(default)]
     pub relationships: RelationshipConfig,
 
-    /// Entity type that defines the namespace hierarchy: it gets namespace IDs
-    /// (extending traversal paths) instead of regular entity IDs. In GitLab's
-    /// data model this is "Group".
     #[serde(default = "default_namespace_entity")]
     pub namespace_entity: String,
 
@@ -258,7 +237,6 @@ pub struct GenerationConfig {
     #[serde(default)]
     pub parallel: bool,
 
-    /// Same seed gives byte-identical output; if unset, output is random.
     #[serde(default)]
     pub seed: Option<u64>,
 
@@ -309,33 +287,12 @@ impl Default for GenerationConfig {
     }
 }
 
-/// Edge ratio for relationship-based generation.
-///
-/// Can be either:
-/// - An integer count (e.g., 5 children per parent)
-/// - A fractional probability (e.g., 0.3 = 30% chance of creating edge)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum EdgeRatio {
     Count(usize),
-    /// Probability of creating the relationship (0.0-1.0).
     Probability(f64),
-    /// Recursive hierarchy: fixed count per parent, expanded to `max_depth` levels.
-    ///
-    /// Only valid for self-referential edges (source == target).
-    /// The dependency graph expands `A → A` into epsilon depth-level nodes:
-    /// `A → A@1 → A@2 → ... → A@max_depth`, each with `count` children per parent.
-    ///
-    /// ```yaml
-    /// CONTAINS:
-    ///   "Group -> Group":
-    ///     count: 2
-    ///     max_depth: 3
-    /// ```
-    Recursive {
-        count: usize,
-        max_depth: usize,
-    },
+    Recursive { count: usize, max_depth: usize },
 }
 
 impl EdgeRatio {
@@ -352,7 +309,6 @@ impl EdgeRatio {
         }
     }
 
-    /// For counts, returns a value in range [count/2, count*1.5].
     pub fn sample_with_variance(&self, rng: &mut impl Rng) -> usize {
         match self {
             EdgeRatio::Count(n) | EdgeRatio::Recursive { count: n, .. } => {
@@ -377,7 +333,6 @@ impl Default for EdgeRatio {
     }
 }
 
-/// Format in YAML: `"SourceKind -> TargetKind": ratio`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EdgeVariantConfig {
     pub source: String,
@@ -385,18 +340,6 @@ pub struct EdgeVariantConfig {
     pub ratio: EdgeRatio,
 }
 
-/// Relationship-based generation configuration.
-///
-/// Maps ontology edge types to their generation ratios.
-/// Example:
-/// ```yaml
-/// relationships:
-///   CONTAINS:
-///     "Group -> Group": 3        # 3 subgroups per group
-///     "Group -> Project": 5      # 5 projects per group
-///   IN_PROJECT:
-///     "MergeRequest -> Project": 30
-/// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RelationshipConfig {
     #[serde(flatten)]
@@ -404,7 +347,6 @@ pub struct RelationshipConfig {
 }
 
 impl RelationshipConfig {
-    /// Parse a variant key like "Group -> Project" into (source, target).
     pub fn parse_variant_key(key: &str) -> Option<(String, String)> {
         let parts: Vec<&str> = key.split("->").map(|s| s.trim()).collect();
         if parts.len() == 2 {
@@ -430,10 +372,8 @@ impl RelationshipConfig {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum IterationDirection {
-    /// For each target, sample source entities to link.
     #[default]
     Target,
-    /// For each source, sample target entities to link.
     Source,
 }
 
@@ -467,31 +407,6 @@ impl AssociationEdgeValue {
     }
 }
 
-/// Association edge configuration.
-///
-/// Creates edges between existing entities (does not generate new entities).
-/// Used for relationships like AUTHORED, MEMBER_OF, ASSIGNED, etc.
-///
-/// # Simple Format
-/// `"Source -> Target": ratio`
-/// Iterates over targets, sampling sources to link.
-///
-/// # Extended Format
-/// `"Source -> Target": { ratio: 0.3, per: "source" }`
-/// Iterates over the specified side (source or target).
-///
-/// # Example YAML
-/// ```yaml
-/// associations:
-///   AUTHORED:
-///     "User -> MergeRequest": 1           # Each MR has 1 author
-///   MERGED:
-///     "User -> MergeRequest":             # 30% of MRs have a merger
-///       ratio: 0.3
-///       per: target                       # Iterate over MRs, not Users
-///   ASSIGNED:
-///     "User -> WorkItem": 0.7             # 70% of work items have an assignee
-/// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AssociationConfig {
     #[serde(flatten)]
@@ -499,7 +414,6 @@ pub struct AssociationConfig {
 }
 
 impl AssociationConfig {
-    /// Returns (edge_type, source_kind, target_kind, ratio, iteration_direction).
     pub fn all_associations(&self) -> Vec<(String, String, String, EdgeRatio, IterationDirection)> {
         let mut result = Vec::new();
         for (edge_type, variants) in &self.edges {
@@ -523,12 +437,10 @@ impl AssociationConfig {
 #[serde(deny_unknown_fields)]
 pub struct EvaluationConfig {
     pub queries_path: String,
-    /// Number of IDs to sample per entity type.
     #[serde(default = "default_sample_size")]
     pub sample_size: usize,
     #[serde(default = "default_iterations")]
     pub iterations: usize,
-    /// 1 = serial (default), >1 = concurrent load testing.
     #[serde(default = "default_concurrency")]
     pub concurrency: usize,
     #[serde(default)]
@@ -537,11 +449,8 @@ pub struct EvaluationConfig {
     pub filter: Option<String>,
     #[serde(default)]
     pub output: OutputConfig,
-    /// Directory to save run metadata (query plans, params, sample data).
     #[serde(default)]
     pub metadata_dir: Option<String>,
-    /// ClickHouse query-level SETTINGS appended to every evaluated query;
-    /// these override the built-in safe defaults (e.g. `join_algorithm`).
     #[serde(default)]
     pub settings: std::collections::HashMap<String, String>,
 }
@@ -575,8 +484,6 @@ impl Default for EvaluationConfig {
 }
 
 impl EvaluationConfig {
-    /// `queries_path` has no serde default so YAML deserialization enforces it,
-    /// but `Default` leaves it empty for convenience. Call this before evaluation.
     pub fn validate(&self) -> Result<()> {
         ensure!(
             !self.queries_path.is_empty(),
@@ -590,10 +497,8 @@ impl EvaluationConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OutputConfig {
-    /// Output format: text, json, markdown.
     #[serde(default = "default_format")]
     pub format: String,
-    /// Output file path (stdout if not specified).
     #[serde(default)]
     pub path: Option<String>,
 }
@@ -611,7 +516,6 @@ impl Default for OutputConfig {
     }
 }
 
-/// All fields are mandatory in YAML — no serde defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FakeDataConfig {
@@ -621,7 +525,6 @@ pub struct FakeDataConfig {
 }
 
 impl FakeDataConfig {
-    /// Validates all values after deserialization.
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(path)
@@ -713,7 +616,6 @@ fn validate_int_range(range: [u32; 2], field: &str) -> Result<()> {
 #[serde(deny_unknown_fields)]
 pub struct FakeDataStrings {
     pub pools: FakeDataStringPools,
-    /// Classification rules for string fields (first match wins).
     pub classify: Vec<StringClassifyRule>,
 }
 
@@ -728,7 +630,6 @@ pub struct FakeDataStringPools {
     pub branch_prefixes: Vec<String>,
 }
 
-/// If the lowercased field name contains any `contains` pattern, use this `kind`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StringClassifyRule {
@@ -750,20 +651,16 @@ pub enum StringKind {
     RefOrBranch,
 }
 
-/// Keyed by lowercased field name.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FakeDataBools {
-    /// Fallback probability for fields not in `fields`.
     pub default: f64,
     pub fields: HashMap<String, f64>,
 }
 
-/// Keyed by lowercased field name.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FakeDataInts {
-    /// Fallback range [min, max] (inclusive) for fields not in `fields`.
     pub default: [u32; 2],
     pub fields: HashMap<String, [u32; 2]>,
 }

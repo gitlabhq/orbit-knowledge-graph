@@ -264,7 +264,6 @@ pub fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
     }
 }
 
-/// Returns `None` for unsupported filter ops.
 pub fn denorm_tag_expr(
     edge_alias: &str,
     tag_col: &str,
@@ -291,10 +290,6 @@ pub(crate) fn tag_membership(alias: &str, column: &str, values: &[String]) -> Ex
     }
 }
 
-/// When multiple tables are involved, each UNION arm projects only the
-/// columns common to all edge tables (the 6 reserved edge columns) so
-/// that tables with extra columns (e.g. gl_code_edge's project_id/branch)
-/// don't cause a ClickHouse "UNION different number of columns" error.
 pub fn final_edge_table_scan(tables: &[String], alias: &str) -> TableRef {
     if tables.len() == 1 {
         return TableRef::scan_final(&tables[0], alias);
@@ -316,7 +311,6 @@ pub fn final_edge_table_scan(tables: &[String], alias: &str) -> TableRef {
     TableRef::union_all(queries, alias)
 }
 
-/// Like `edge_table_scan` but pushes per-arm predicates into each UNION arm; returns predicates the caller must apply on the enclosing query (single-table case).
 pub fn edge_table_scan_filtered(
     tables: &[String],
     alias: &str,
@@ -344,9 +338,6 @@ pub fn edge_table_scan_filtered(
     }
 }
 
-/// `FINAL` applies the table engine's merge semantics at read time, so filters
-/// are evaluated against the latest row rather than historical matching
-/// versions.
 pub fn dedup_query(
     alias: &str,
     table: &str,
@@ -361,7 +352,6 @@ pub fn dedup_query(
     }
 }
 
-/// Latest-row scan wrapped as a subquery TableRef + outer `_deleted=false` filter.
 pub fn dedup_subquery(
     alias: &str,
     table: &str,

@@ -66,14 +66,10 @@ impl DslLanguage for GoDsl {
                         ),
                     ),
                 ),
-            // Interface method specs — nested inside the interface scope,
-            // so they get FQNs like Repository.Get.
             scope("method_elem", "Method")
                 .def_kind(DefKind::Method)
                 .no_scope()
                 .metadata(metadata().return_type(field("result"))),
-            // Unconditional fallback first — reverse iteration means conditional
-            // rules (Struct, Interface) are checked before the fallback.
             scope("type_spec", "Type").def_kind(DefKind::Other),
             scope("type_spec", "Struct")
                 .def_kind(DefKind::Class)
@@ -108,7 +104,6 @@ impl DslLanguage for GoDsl {
                 .when(field_kind("function", &["selector_expression"]))
                 .receiver_chain(&["function", "operand"]),
             reference("call_expression").name_from(field("function")),
-            // Skip inside composite_literal (already tracked via chain_config.constructor).
             reference("type_identifier")
                 .name_from(text())
                 .when(!parent_is("composite_literal")),
@@ -199,8 +194,6 @@ impl DslLanguage for GoDsl {
     }
 }
 
-/// Extract embedded (promoted) types from a Go struct's field_declaration_list.
-/// Embedded fields have a `type` but no `name`, e.g. `type Foo struct { Bar }`.
 fn go_embedded_types(node: &N<'_>) -> Vec<String> {
     let Some(struct_type) = node.field("type") else {
         return vec![];

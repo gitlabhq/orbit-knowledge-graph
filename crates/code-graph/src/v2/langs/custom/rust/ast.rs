@@ -63,10 +63,6 @@ struct RustStructureExtractor {
     definitions: Vec<CanonicalDefinition>,
     imports: Vec<CanonicalImport>,
     trait_impl_scopes: Vec<TraitImplScope>,
-    /// Pending supertype edges to be applied after all definitions are
-    /// collected. Each entry is (target definition FQN, supertype FQN).
-    /// Populated from `trait Foo: Bar + Baz` (target=Foo) and
-    /// `impl Trait for Type` (target=Type, supertype=Trait).
     pending_supertypes: Vec<(String, String)>,
 }
 
@@ -106,12 +102,6 @@ impl RustStructureExtractor {
         if self.pending_supertypes.is_empty() {
             return;
         }
-        // Index local definitions by FQN. Multiple definitions can share an
-        // FQN before `disambiguate_trait_impl_collisions` runs (and after,
-        // for non-impl items); push the supertype onto each match so that
-        // every alias of the target definition is annotated. The linker
-        // resolves super_types against in-graph FQNs, so external traits
-        // (std, deps) silently produce no edge.
         let mut by_fqn: HashMap<String, Vec<usize>> = HashMap::new();
         for (idx, def) in self.definitions.iter().enumerate() {
             by_fqn
@@ -452,23 +442,11 @@ impl RustStructureExtractor {
             }
         };
 
-        // Capture supertrait declarations (`trait Foo: Bar + Baz`) as pending
-        // EXTENDS edges from the local trait FQN to each supertrait FQN. We
-        // route through rust-analyzer HIR (`Trait::direct_supertraits`) so the
-        // emitted FQNs are the canonical module paths the trait actually
-        // resolves to — this picks up cross-module references and re-exports
-        // that AST-level path normalisation would have to re-implement by
-        // hand. External supertraits (std, deps) silently drop in the linker
-        // because no in-graph definition matches their FQN.
         if let (Some(sema), Some(workspace)) = (sema, workspace)
             && !trait_parts.is_empty()
             && let Some(trait_def) = sema.to_trait_def(&trait_item)
         {
             let target_fqn = canonical_fqn_parts(&trait_parts).as_str().to_string();
-            // Direct supertraits only — transitive ancestry is reconstructed
-            // by the linker when consumers walk the EXTENDS edge. Mirrors how
-            // other languages populate `super_types` (one entry per declared
-            // parent, not the closure).
             for super_trait in trait_def.direct_supertraits(sema.db) {
                 if super_trait == trait_def {
                     continue;
@@ -513,11 +491,6 @@ impl RustStructureExtractor {
             .and_then(|segment| segment.name_ref())
             .map(|name_ref| name_ref.text().to_string());
 
-        // Capture `impl Trait for Type` as a pending EXTENDS edge from the
-        // self-type definition to the implemented trait. We route through
-        // HIR (`Impl::trait_`) so the emitted FQN is the canonical module
-        // path of the resolved trait, regardless of how the trait was
-        // referenced at the impl site (bare name, re-export, alias, prelude).
         if let (Some(sema), Some(workspace)) = (sema, workspace)
             && let Some(impl_def) = sema.to_impl_def(&impl_item)
             && let Some(impl_trait) = impl_def.trait_(sema.db)
@@ -743,8 +716,6 @@ impl RustStructureExtractor {
         let Some(use_tree) = use_item.use_tree() else {
             return;
         };
-        // Only unqualified `pub` re-exports; `pub(crate)`, `pub(super)`, `pub(in path)`
-        // are restricted and stay private from the importing module's perspective.
         let visibility = match use_item.visibility().map(|v| v.kind()) {
             Some(VisibilityKind::Pub) => ImportVisibility::Public,
             _ => ImportVisibility::Private,
@@ -1071,10 +1042,6 @@ fn canonical_fqn_parts(parts: &[String]) -> Fqn {
     Fqn::from_parts(&refs, "::")
 }
 
-/// Build the canonical FQN string for a HIR `Trait` using the same module
-/// path scheme local trait definitions use, so a supertrait reference
-/// resolved by HIR matches the FQN of the in-graph trait definition the
-/// linker is searching for.
 fn hir_trait_fqn(
     trait_def: ra_ap_hir::Trait,
     sema: &Semantics<'_, RootDatabase>,

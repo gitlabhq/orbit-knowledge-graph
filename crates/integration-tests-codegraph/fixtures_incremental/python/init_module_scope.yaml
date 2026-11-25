@@ -1,9 +1,5 @@
 name: "Python: module scope derived from file path (__init__.py handling)"
 
-# Exercises python_module_from_path for several representative layouts.
-# The function converts a file path to a dotted module scope; the scope
-# then appears as a prefix in every definition's FQN.
-
 fixtures:
   - path: services/user_service.py
     content: |
@@ -25,10 +21,6 @@ fixtures:
       def main_fn():
           pass
 
-  # A bare __init__.py at the repository root has no enclosing package.
-  # The pipeline must NOT assign the module scope "__init__"; instead it
-  # should treat this file as module-scope-less, so the FQN is just the
-  # function name with no prefix.
   - path: __init__.py
     content: |
       def root_init_fn():

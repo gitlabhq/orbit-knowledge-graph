@@ -25,12 +25,10 @@ pub(crate) async fn fetch(client: OrbitClient, tokens: &[String]) -> Result<Vec<
     Ok(out)
 }
 
-/// Pipelines, branches, and commits (`path@ref`) have no graph expansion, so they are not asked for one.
 fn expandable(token: &str) -> bool {
     !token.starts_with("Pipeline[") && !token.contains('@')
 }
 
-/// The first entity of a token's raw context, without expansion.
 pub(crate) async fn fetch_entity(
     client: &OrbitClient,
     token: &str,
@@ -67,9 +65,6 @@ async fn request(
         })
 }
 
-/// Drops HTML comments outside code fences, as rendered Markdown does, so PR templates and
-/// bot markers in descriptions and notes cost nothing. A line left empty by a removed comment
-/// goes, and so does a blank line after another blank line.
 fn strip_html_comments(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let (mut in_comment, mut fenced, mut blank) = (false, false, false);

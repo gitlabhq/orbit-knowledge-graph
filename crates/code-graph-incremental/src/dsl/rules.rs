@@ -1,24 +1,3 @@
-//! YAML rule loader. Compiles declarative rewrite rules into `Rewrite` structs.
-//!
-//! Format:
-//! ```yaml
-//! stages:
-//!   - name: normalize
-//!     rules:
-//!       - match: '(aliased_import name: $N)'
-//!         set_text: '$N'
-//!       - match: '(aliased_import alias: $A)'
-//!         append: '(__alias @$A)'
-//!       - match: '(attribute object: (identifier "self") attribute: $A)'
-//!         replace: '(__ivar @$A)'
-//!   - name: retag
-//!     rules:
-//!       - match: '(attribute object: $O attribute: $M)'
-//!         retag:
-//!           kind: __member
-//!           fields: { O: object, M: member }
-//! ```
-
 use std::collections::HashMap;
 
 use crate::error::LoadError;
@@ -46,8 +25,6 @@ pub enum ParseFormat {
     Raw(regex::Regex),
 }
 
-/// Whole-language settings from the YAML `config:` section, grouped by the
-/// phase that reads them. Settings read by more than one phase go in `global`.
 #[derive(Default)]
 pub struct Config {
     pub link: LinkConfig,
@@ -55,15 +32,9 @@ pub struct Config {
 }
 
 pub struct LinkConfig {
-    /// Names the language defines everywhere without an import. An unresolved
-    /// call to one does not fall back to wildcard imports.
     pub builtins: rustc_hash::FxHashSet<u32>,
     pub providers: Vec<(u32, rustc_hash::FxHashSet<u32>)>,
-    /// Whether an import may rebind a name already defined in the same scope.
-    /// Ruby autoloads must not; a local class always wins.
     pub imports_shadow_locals: bool,
-    /// Whether an import path may name a def in the current file, as
-    /// `use crate::dep::Service` does for an inline `mod dep {}`.
     pub inline_modules: bool,
 }
 
@@ -80,18 +51,13 @@ impl Default for LinkConfig {
 
 #[derive(Default)]
 pub struct ResolveConfig {
-    /// Module roots that take precedence over repository lookup.
     pub external: Vec<String>,
     pub stdlib: Vec<String>,
-    /// Directory-tree marker kinds that import paths are looked up from.
     pub lookup_from: Vec<u16>,
-    /// Manifest files parsed into the directory tree before resolve stages run.
     pub parse_files: Vec<ParseFileSpec>,
-    /// Same-named class defs in one package are parts of one type, keyed by
-    /// generic arity. True for C#, where a non-partial duplicate cannot compile.
     pub merge_same_named_types: bool,
-    /// An imported name can be a module file under the imported module (Rust).
     pub submodule_imports: bool,
+    pub root_include_fallback: bool,
 }
 
 impl ResolveConfig {
@@ -118,6 +84,7 @@ impl ResolveConfig {
         }
         self.merge_same_named_types |= other.merge_same_named_types;
         self.submodule_imports |= other.submodule_imports;
+        self.root_include_fallback |= other.root_include_fallback;
     }
 }
 
@@ -154,6 +121,8 @@ struct ResolveSettingsSection {
     merge_same_named_types: bool,
     #[serde(default)]
     submodule_imports: bool,
+    #[serde(default)]
+    root_include_fallback: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -300,6 +269,7 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
             .collect::<Result<_, _>>()?,
         merge_same_named_types: r.merge_same_named_types,
         submodule_imports: r.submodule_imports,
+        root_include_fallback: r.root_include_fallback,
     };
     Ok(Config { link, resolve })
 }
@@ -348,14 +318,11 @@ struct ClimbSpec {
 struct Stage {
     #[allow(dead_code)]
     name: Option<String>,
-    /// Re-run the stage until a pass replaces nothing, for rewrites that
-    /// expose a new match each time they fire.
     #[serde(default)]
     repeat: bool,
     rules: Vec<Rule>,
 }
 
-/// One compiled rewrite stage.
 pub struct RewriteStage {
     pub rules: Vec<Rewrite>,
     pub repeat: bool,
@@ -399,12 +366,10 @@ fn compile_stages(stages: &[Stage], lang: &Lang) -> Result<Vec<RewriteStage>, Lo
         .collect()
 }
 
-/// Compile a YAML rule file into stages of rewrites.
 pub fn load_rules(yaml: &str, lang: &Lang) -> Result<Vec<RewriteStage>, LoadError> {
     compile_stages(&read(yaml)?.stages, lang)
 }
 
-/// Everything a language YAML compiles to.
 #[derive(Default)]
 pub struct LangConfig {
     pub rewrite_stages: Vec<RewriteStage>,
@@ -459,8 +424,6 @@ fn compile_resolve(section: &ResolveSection, lang: &Lang) -> Result<Vec<ResolveS
 }
 
 fn compile_stage(stage: &Stage, lang: &Lang) -> Result<RewriteStage, LoadError> {
-    // An append never removes its target, so a repeat stage would stop after
-    // one pass however much the append changed.
     if stage.repeat && stage.rules.iter().any(|rule| rule.append.is_some()) {
         return Err(LoadError(format!(
             "repeat stage {:?} cannot contain append rules",
@@ -659,8 +622,6 @@ mod load_tests {
     use super::*;
     use crate::treesitter::SupportLang;
 
-    /// Every compiled-in rule file goes through the same path a user file
-    /// would, so a broken one fails here rather than at index time.
     #[test]
     fn every_embedded_rule_file_compiles() {
         for (lang_id, _) in crate::treesitter::all_languages() {

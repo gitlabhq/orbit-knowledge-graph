@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Proves a gkg-server binary is linked against the AWS-LC FIPS module and
-# carries no other TLS crypto backend, then boots it once so the module's
-# power-on self-tests run in the build environment.
 set -euo pipefail
 
 binary="${1:?usage: $0 <path-to-gkg-server>}"

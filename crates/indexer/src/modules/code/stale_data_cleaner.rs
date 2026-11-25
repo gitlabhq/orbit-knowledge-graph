@@ -100,8 +100,6 @@ impl ClickHouseStaleDataCleaner {
     }
 
     fn build_edge_delete_query(edge_table: &str, node_tables: &[&str]) -> String {
-        // gl_code_edge has project_id + branch columns, so we can
-        // filter directly without a subquery join.
         if edge_table.contains("code_edge") {
             return format!(
                 r#"

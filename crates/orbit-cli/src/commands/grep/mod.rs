@@ -20,8 +20,6 @@ use orbit_search::{RecallFilter, query_alternatives};
 use crate::remote::grep::{Outcome, graph_kind, searched_kind};
 use local::LocalBackend;
 
-/// What a search prints, following rg: matching lines, `-l` file names, `-c` counts, or
-/// the matches are with their definitions.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Output {
     #[default]
@@ -33,7 +31,6 @@ pub(crate) enum Output {
     Directories,
 }
 
-/// The rg and grep flags a search honors.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct Options {
     pub(crate) fixed: bool,
@@ -42,17 +39,14 @@ pub(crate) struct Options {
     pub(crate) before: usize,
     pub(crate) after: usize,
     pub(crate) max_count: Option<u64>,
-    /// rg `-g` globs: a leading `!` excludes.
     pub(crate) globs: Vec<String>,
     pub(crate) types: Vec<String>,
     pub(crate) types_not: Vec<String>,
     pub(crate) max_columns: Option<usize>,
     pub(crate) output: Output,
-    /// Read the existing index as is: never build or refresh it.
     pub(crate) no_index: bool,
 }
 
-/// A search that found nothing; exits 1 without a message, as rg does.
 #[derive(Debug)]
 pub(crate) struct NoMatches;
 
@@ -418,8 +412,6 @@ const NOTE: &str = "» ";
 const FALLBACK_LINES: usize = 4;
 const FALLBACK_FILES: usize = 5;
 
-/// The files whose lines carry the most query words, best first, each cut to its
-/// `FALLBACK_LINES` best lines, and how many files matched before the cut.
 fn most_words(hits: Vec<scan::Hit>, words: &[term::Term]) -> (Vec<scan::Hit>, usize) {
     let mut by_file: std::collections::BTreeMap<String, Vec<(usize, scan::Hit)>> =
         Default::default();
@@ -505,22 +497,13 @@ fn resolve_missing(root: &Path, scope: Vec<String>, notes: &mut Vec<String>) -> 
     if !scope.iter().any(missing) {
         return scope;
     }
-    let tracked: Vec<String> = std::process::Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["ls-files", "-z"])
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .split('\0')
-                .filter(|file| !file.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
+    let tracked: Vec<String> = crate::workspace::repository_at(root)
+        .index_files()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|file| file.tracked)
+        .map(|file| file.path.to_string_lossy().into_owned())
+        .collect();
     let mut resolved = Vec::new();
     for path in scope {
         if !missing(&path) {

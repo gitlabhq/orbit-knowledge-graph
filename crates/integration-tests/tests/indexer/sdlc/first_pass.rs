@@ -16,7 +16,6 @@ async fn checkpoint_column<T: FromArrowColumn>(
     key: &str,
     column: &str,
 ) -> Vec<T> {
-    // Incremental runs save checkpoints as unawaited async inserts; read only after they land.
     ctx.execute("SYSTEM FLUSH ASYNC INSERT QUEUE").await;
     let result = ctx
         .query(&format!(

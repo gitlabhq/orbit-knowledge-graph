@@ -1,22 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build the `orbit` local CLI binary and package it as
-# orbit-cli-<platform>-<arch>.(tar.gz|zip) in the repository root.
-# The binary inside the archive is `orbit` (or `orbit.exe` on Windows); the
-# `orbit-cli-` prefix on the archive disambiguates from the gkg-server image
-# release. PLATFORM/ARCH default to the host (linux/macOS amd64 or arm64).
-#
-# Supported triples:
-#   {x86_64,aarch64}-unknown-linux-{gnu,musl}
-#   {x86_64,aarch64}-apple-darwin
-#   x86_64-pc-windows-gnullvm        (cross-compiled with llvm-mingw on Linux)
-#
-# Linux builds use cargo-zigbuild. The default glibc build links against glibc
-# 2.28 so it runs on EL8 and later. Set LIBC=musl for the fully static variant.
-# Set PRINT_TARGET=1 to print the resolved Rust target and archive name without
-# building; this is useful for validating PLATFORM/ARCH/LIBC combinations.
-
 PLATFORM="${PLATFORM:-$(uname -s)}"
 PLATFORM=$(echo "$PLATFORM" | tr '[:upper:]' '[:lower:]')
 
@@ -72,12 +56,10 @@ if [ "${PRINT_TARGET:-0}" = "1" ]; then
     exit 0
 fi
 
-# Idempotent; no-op if the target is already installed.
 TOOLCHAIN=$(rustc -vV | awk '/^release:/ { print $2 }')
 rustup target add --toolchain "$TOOLCHAIN" "$TARGET"
 
 echo "Building orbit for $PLATFORM/$ARCH ($TARGET)"
-# Bundle libduckdb (compile from C++) so the released binary is self-contained.
 if [ "$PLATFORM" = "linux" ]; then
     command -v cargo-zigbuild >/dev/null || {
         echo "cargo-zigbuild is required for Linux local CLI builds" >&2

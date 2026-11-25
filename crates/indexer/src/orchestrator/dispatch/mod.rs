@@ -1,6 +1,3 @@
-//! Code in here knows nothing about cron, CDC, or migrations; it only knows how
-//! to enumerate namespaces/projects and publish indexing work to NATS.
-
 pub mod code_backfill;
 pub mod enabled_namespaces;
 pub mod namespace_indexing;

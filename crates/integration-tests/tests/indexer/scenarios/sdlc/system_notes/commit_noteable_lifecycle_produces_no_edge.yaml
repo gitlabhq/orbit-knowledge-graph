@@ -1,6 +1,3 @@
-# There is no Commit node and the CLOSED edge variant for Commit is
-# undeclared, so the Commit-noteable lifecycle note must drop. totals
-# gl_edge: 1 proves no Commit-targeted edge of any kind was written.
 description: A lifecycle action on a Commit noteable produces no edge
 scope: { namespace: 100 }
 

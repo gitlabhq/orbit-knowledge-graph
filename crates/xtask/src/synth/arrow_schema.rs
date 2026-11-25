@@ -3,7 +3,6 @@ use ontology::constants::TRAVERSAL_PATH_COLUMN;
 use ontology::{DataType, Field, NodeEntity};
 
 pub trait ToArrowSchema {
-    /// Prepends traversal_path as the first field.
     fn to_arrow_schema(&self) -> Schema;
 }
 
@@ -16,7 +15,6 @@ impl ToArrowSchema for NodeEntity {
         )];
 
         for field in &self.fields {
-            // traversal_path is prepended unconditionally above; drop any ontology copy.
             if field.name == TRAVERSAL_PATH_COLUMN {
                 continue;
             }
@@ -50,7 +48,7 @@ impl ToArrowType for DataType {
             DataType::Float => ArrowDataType::Float64,
             DataType::Bool => ArrowDataType::Boolean,
             DataType::Date => ArrowDataType::Date32,
-            DataType::DateTime => ArrowDataType::Int64, // Unix timestamp in millis
+            DataType::DateTime => ArrowDataType::Int64,
         }
     }
 }
@@ -88,8 +86,6 @@ pub fn to_clickhouse_ddl(table_name: &str, schema: &Schema, order_by: &[&str]) -
     )
 }
 
-/// Single source of truth for Arrow→ClickHouse type mapping.
-/// Used by both `to_clickhouse_ddl()` and `clickhouse::schema::SchemaGenerator`.
 pub(crate) fn arrow_to_clickhouse_type(arrow_type: &ArrowDataType, nullable: bool) -> String {
     let base_type = match arrow_type {
         ArrowDataType::Boolean => "Bool",

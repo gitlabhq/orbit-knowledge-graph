@@ -1,4 +1,3 @@
-# Also the legacy `{ field = value }` block that tracing accepts after `target:`.
 id: log-args
 language: rust
 rule:

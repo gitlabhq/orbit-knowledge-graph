@@ -1,7 +1,3 @@
-//! The MATCH pattern of a traversal or aggregation: planned nodes, planned relations, and the
-//! denormalized-column facts. `Pattern::new` runs the planning steps in order (nodes, relations,
-//! condition placement, node access, relation order); `Pattern::execution` assembles the relation graph.
-
 mod conditions;
 mod coverage;
 mod nodes;
@@ -55,7 +51,6 @@ pub struct EdgeRelation {
     pub fk: Option<Fk>,
 }
 
-/// A relationship stored as a column on one of its endpoint nodes instead of an edge row.
 #[derive(Clone)]
 pub struct Fk {
     pub node: String,
@@ -130,7 +125,6 @@ impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
         Ok(pattern)
     }
 
-    /// The relation graph for the pattern, with the conditions that span nodes applied at its root.
     pub(super) fn execution(&self) -> Result<ExecutionPlan> {
         let mut execution = steps::RelationBuilder::new(self).build()?;
         let conditions = self

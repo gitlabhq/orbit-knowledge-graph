@@ -1,10 +1,3 @@
-//! The single filtering policy for code indexing, shared by every file source
-//! as a [`FileStreamHooks`] implementation. Per file it produces the full
-//! [`Decision`]: `Parse` (source), `Load` (resolver inputs: on disk, not
-//! parsed), `ListOnly` (excluded/oversize/binary/minified/LFS pointer: a node,
-//! no bytes), or `Drop`. Resolver inputs are never in the denylist, so they
-//! survive. A total-bytes [`Counter`] aborts an oversized repo.
-
 use std::path::Path;
 use std::sync::LazyLock;
 
@@ -18,15 +11,12 @@ use rustc_hash::FxHashMap;
 
 use super::Language;
 
-/// git's binary heuristic looks at the first 8 KiB; matching it keeps a NUL deep
-/// inside a large text file from being misread as binary.
 const BINARY_SNIFF_BYTES: usize = 8000;
 
 const MAX_LINE_LENGTH: usize = 64 * 1024;
 const MAX_AVG_LINE_LENGTH: usize = 16 * 1024;
 const MINIFIED_SIZE_THRESHOLD: usize = 5_000;
 
-/// The LFS spec caps a pointer at 1024 bytes, including extension lines.
 const LFS_POINTER_MAX_BYTES: usize = 1024;
 const LFS_POINTER_VERSION_PREFIX: &[u8] = b"version https://git-lfs.github.com/spec";
 
@@ -36,9 +26,6 @@ pub struct SkipTally {
     pub bytes: u64,
 }
 
-/// The code-indexing filter. Construct one per repository stream. Classifies
-/// each file fully (load+parse / load-only / node / drop): the language detector
-/// is injected so the filter never hard-wires the registry.
 pub struct CodeFilter {
     max_file_size: Option<u64>,
     total_bytes: Counter,
@@ -47,8 +34,6 @@ pub struct CodeFilter {
 }
 
 impl CodeFilter {
-    /// `max_file_size` and `max_total_bytes` are byte caps (`None` = unlimited).
-    /// `detect_language` decides parse candidacy (e.g. `detect_language_from_path`).
     pub fn new(
         max_file_size: Option<u64>,
         max_total_bytes: Option<u64>,
@@ -62,7 +47,6 @@ impl CodeFilter {
         }
     }
 
-    /// Per-reason `(count, bytes)` of files recorded as nodes but not loaded.
     pub fn skips(&self) -> impl Iterator<Item = (SkipReason, SkipTally)> + '_ {
         self.skips.iter().map(|(reason, tally)| (*reason, *tally))
     }
@@ -121,15 +105,12 @@ impl FileStreamHooks for CodeFilter {
         if looks_binary(sniff) {
             return self.record(file, SkipReason::Binary, ContentClass::Binary);
         }
-        // Parsers all need `&str`; validate once here so they can assume UTF-8.
         if std::str::from_utf8(content).is_err() {
             return self.record(file, SkipReason::NotUtf8, ContentClass::Binary);
         }
         if let Some(reason) = minified_skip(content) {
             return self.record(file, reason, ContentClass::MinifiedCode);
         }
-        // A parse candidate is parsed; a non-parsable file (resolver input) is
-        // loaded for resolvers but not parsed.
         let ext = Self::extract_extension(&file.path);
         let is_code = (self.detect_language)(&file.path).is_some();
         let label = FileLabel {
@@ -155,9 +136,6 @@ impl FileStreamHooks for CodeFilter {
     }
 }
 
-/// Detect machine-generated bundles by line shape: a single line over
-/// [`MAX_LINE_LENGTH`], or a high average line length over a non-trivial file.
-/// Split on `\n` and `\r` so classic-Mac line endings can't hide as one line.
 fn minified_skip(content: &[u8]) -> Option<SkipReason> {
     let mut line_count = 0usize;
     let mut current_line_len = 0usize;
@@ -182,8 +160,6 @@ fn minified_skip(content: &[u8]) -> Option<SkipReason> {
     None
 }
 
-/// LFS pointers are filtered out until we decide to do something else with
-/// LFS content.
 fn is_lfs_pointer(content: &[u8]) -> bool {
     if content.len() > LFS_POINTER_MAX_BYTES || !content.starts_with(LFS_POINTER_VERSION_PREFIX) {
         return false;
@@ -203,27 +179,14 @@ fn is_lfs_pointer(content: &[u8]) -> bool {
     has_oid && has_size
 }
 
-/// The single denylist of files recorded as a bare node but never loaded or
-/// parsed: globs matched case-insensitively on the basename, grouped by line.
-/// Source (including tests), manifests, lockfiles, and dotfiles are absent so
-/// resolver inputs survive — file-name exclusions go here, directory-subtree
-/// exclusions in [`orbit_utils::vfs_policies::EXCLUDED_INDEXING_DIRS`].
 pub const EXCLUDED_INDEXING_GLOBS: &[&str] = &[
-    // Raster + vector images.
     "*.{png,jpg,jpeg,gif,bmp,ico,webp,avif,tiff,tif,svg}",
-    // Fonts.
     "*.{ttf,otf,woff,woff2,eot}",
-    // Audio / video.
     "*.{mp3,mp4,mov,webm,ogg,wav,flac,m4a,m4v,avi,mkv,opus}",
-    // Archives.
     "*.{zip,tar,gz,tgz,bz2,xz,7z,rar,lz4,zst}",
-    // Not archives: native binaries and bytecode.
     "*.{exe,dll,so,dylib,class,jar,war,pyc,pyo,o,a,lib}",
-    // Documents.
     "*.{pdf,doc,docx,xls,xlsx,ppt,pptx,odt,ods,odp}",
-    // Datastores / disk images.
     "*.{db,sqlite,sqlite3,iso,dmg,bin,dat}",
-    // Minified JS/TS bundles (the content heuristic catches unnamed ones).
     "*.min.{js,mjs,cjs}",
 ];
 
@@ -235,9 +198,6 @@ static EXCLUDED_INDEXING_GLOBSET: LazyLock<GlobSet> = LazyLock::new(|| {
     builder.build().expect("static excluded-indexing globset")
 });
 
-/// `true` when `rel_path` is on the [`EXCLUDED_INDEXING_GLOBS`] denylist. Match
-/// is case-insensitive, on the basename only. `false` means "load it"; resolver
-/// inputs fall there because they are not in the denylist.
 fn is_excluded_from_indexing(rel_path: &Path) -> bool {
     let Some(name) = rel_path.file_name() else {
         return false;
@@ -246,18 +206,14 @@ fn is_excluded_from_indexing(rel_path: &Path) -> bool {
     EXCLUDED_INDEXING_GLOBSET.is_match(&lowered)
 }
 
-/// BOMs that keep a NUL-bearing buffer as text: UTF-16/32 text is full of NULs,
-/// so the BOM is what distinguishes it from a binary blob.
 const TEXT_BOMS: &[&[u8]] = &[
-    &[0x00, 0x00, 0xFE, 0xFF], // UTF-32 BE
-    &[0xFF, 0xFE, 0x00, 0x00], // UTF-32 LE
-    &[0xEF, 0xBB, 0xBF],       // UTF-8
-    &[0xFF, 0xFE],             // UTF-16 LE
-    &[0xFE, 0xFF],             // UTF-16 BE
+    &[0x00, 0x00, 0xFE, 0xFF],
+    &[0xFF, 0xFE, 0x00, 0x00],
+    &[0xEF, 0xBB, 0xBF],
+    &[0xFF, 0xFE],
+    &[0xFE, 0xFF],
 ];
 
-/// Binary when a NUL byte appears in `prefix`, like git's `buffer_is_binary`,
-/// plus a BOM rescue for UTF-16/32 text (git has none, so BOM-less is dropped).
 fn looks_binary(prefix: &[u8]) -> bool {
     if prefix.is_empty() {
         return false;
@@ -419,7 +375,6 @@ mod tests {
                 "{path}"
             );
         }
-        // The leading dot must be literal — these are real source, not bundles.
         for path in ["src/admin.js", "src/examine.js"] {
             assert_eq!(hd(f.on_header(&entry(path, 200))), None, "{path}");
         }
@@ -427,8 +382,6 @@ mod tests {
 
     #[test]
     fn identical_parse_candidates_are_each_parsed() {
-        // Byte-identical files at different paths are distinct graph entities
-        // (different module/FQN), so both parse; content is never deduped.
         let mut f = filter();
         let src = b"export const x = 1;\n";
         assert_eq!(d(f.on_content(&entry("a/x.js", 19), src)), Decision::Parse);
@@ -488,7 +441,6 @@ mod tests {
             "README.md",
             "Makefile",
             "src/admin.js",
-            // Test files are real source and are indexed like any other.
             "pkg/server_test.go",
         ] {
             assert!(
@@ -528,7 +480,6 @@ mod tests {
         assert!(!looks_binary(b"fn main() {}\n"));
         assert!(looks_binary(b"abc\x00def"));
         assert!(looks_binary(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"));
-        // UTF-16/32 BOMs rescue NUL-bearing text; BOM-less NULs stay binary.
         assert!(!looks_binary(&[0xEF, 0xBB, 0xBF, b'h', b'i']));
         assert!(!looks_binary(&[0xFF, 0xFE, b'h', 0x00, b'i', 0x00]));
         assert!(looks_binary(&[0x68, 0x00, 0x69, 0x00]));

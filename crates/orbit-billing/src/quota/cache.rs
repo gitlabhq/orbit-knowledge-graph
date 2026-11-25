@@ -7,9 +7,6 @@ use opentelemetry::metrics::ObservableGauge;
 use super::client::{FailureReason, QuotaClient, QuotaDecision, QuotaOutcome};
 use super::key::{CacheKey, CdotRequest};
 
-// Cached decision plus the instant at which it should be treated as expired.
-// moka's `expire_after` policy queries `CachedDecision::expires_at` so each
-// entry carries its own TTL (jittered at insert time).
 #[derive(Clone)]
 struct CachedDecision {
     decision: QuotaDecision,
@@ -25,9 +22,6 @@ fn jittered(ttl: Duration) -> Duration {
     Duration::from_nanos((nanos * factor).max(0.0) as u64)
 }
 
-/// Decision surfaced to `QuotaService`. Distinct from the internal
-/// `QuotaDecision` so that a failed check is visible as its own label value in
-/// the metrics rather than being collapsed into `Deny`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum QuotaGateDecision {
     Allow,
@@ -56,9 +50,6 @@ impl QuotaCache {
             .expire_after(ExpireByInstant)
             .build();
 
-        // The OTel SDK owns the callback and invokes it independently of `QuotaCache`.
-        // Cloning is cheap (moka Cache is Arc-backed) and gives the closure its own
-        // owned handle so the SDK can hold it as 'static without borrowing from self.
         let cache_for_gauge = inner.clone();
         let meter = orbit_observability::meter();
         let entries_gauge = orbit_observability::billing::quota::QUOTA_CACHE_ENTRIES
@@ -82,8 +73,6 @@ impl QuotaCache {
     pub(crate) async fn check(&self, request: CdotRequest) -> (QuotaGateDecision, CacheOutcome) {
         let key = request.key.clone();
 
-        // Fast path: cache hit. Done as a separate `get` so we can label the
-        // metric on the service side; `try_get_with` below masks hit-vs-miss.
         if let Some(cached) = self.inner.get(&key).await {
             return (gate_from_decision(cached.decision), CacheOutcome::Hit);
         }
@@ -289,8 +278,6 @@ mod tests {
 
     #[tokio::test]
     async fn caches_deny_decisions() {
-        // A Deny outcome carries a TTL just like Allow and must be cached so
-        // we don't re-hit CDot for every denied request.
         let (url, counter) = counting_status_server(AxumStatus::PAYMENT_REQUIRED).await;
         let client = Arc::new(
             QuotaClient::new(
@@ -392,7 +379,6 @@ mod tests {
             assert_eq!(h.await.unwrap().0, QuotaGateDecision::Allow);
         }
 
-        // Single upstream request despite 20 concurrent callers, due to get_with coalescing.
         assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
 

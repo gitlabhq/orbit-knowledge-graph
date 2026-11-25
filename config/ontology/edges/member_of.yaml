@@ -1,5 +1,3 @@
-# config/ontology/edges/member_of.yaml
-
 description: A user is a member of a group or project
 
 variants:

@@ -27,13 +27,9 @@
   variables:
     GIT_STRATEGY: none
     DOCS_GITLAB_REPO_SUFFIX: orbit
-    # By default, deploy the Review App using the `main` branch of the `gitlab-org/gitlab-docs` project
     DOCS_BRANCH: main
   when: manual
 
-# Trigger a docs build in docs-gitlab-com project
-# Useful to preview the docs changes live
-# https://docs.gitlab.com/development/documentation/review_apps/
 review-docs-deploy:
   extends:
   - .review-docs
@@ -45,7 +41,6 @@ review-docs-deploy:
   script:
   - ./trigger-build.rb docs deploy
 
-# Cleanup remote environment of docs-gitlab-com
 review-docs-cleanup:
   extends:
   - .review-docs

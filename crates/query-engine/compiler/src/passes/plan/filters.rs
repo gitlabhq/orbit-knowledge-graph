@@ -1,6 +1,3 @@
-//! Binds an input filter to the backend facts about its property (sort key, text index, selectivity,
-//! uniqueness, mutability). Those facts decide where the planner may apply the filter.
-
 use std::collections::HashMap;
 
 use query_data_model::{OrbitQueryModel, RelationalMapping};
@@ -11,7 +8,6 @@ use crate::input::{FilterOp, Input, InputFilter, PredicateTarget};
 
 pub type NullAsEpochColumns = HashMap<String, ontology::DataType>;
 
-/// The type of each compared column that stores null as the epoch, so the epoch literal matches it.
 #[derive(Clone, Copy, PartialEq)]
 pub struct NullAsEpoch {
     pub column: Option<ontology::DataType>,

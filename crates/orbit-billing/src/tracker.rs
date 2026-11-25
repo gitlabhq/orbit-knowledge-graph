@@ -16,8 +16,6 @@ use crate::metrics::{
 };
 
 pub trait BillingTracker: Send + Sync {
-    /// Returns the Snowplow event ID assigned to the enqueued event, so callers
-    /// can correlate it with delivery-outcome callbacks / logs.
     fn track(&self, event: BillingEvent) -> Result<Uuid, labkit_events::Error>;
 }
 

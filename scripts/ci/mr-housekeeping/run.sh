@@ -14,10 +14,6 @@ BOT_USER_ID="$(printf '%s' "$BOT_USER" | jq -r '.id')"
 export BOT_USERNAME BOT_USER_ID
 log "mr-housekeeping: bot=$BOT_USERNAME tasks=\"$TASKS\" dry_run=$DRY_RUN"
 
-# Fail before any task if the token cannot write here: every task needs
-# Developer, and with less the run dies on its first write with every MR behind
-# it never evaluated. members/all resolves direct, inherited and invited-group
-# membership alike; a token minted in another project resolves 404.
 ACCESS_LEVEL="$(api "projects/$PROJECT_ID/members/all/$BOT_USER_ID" 2>/dev/null | jq -r '.access_level // 0' || true)"
 ACCESS_LEVEL="${ACCESS_LEVEL:-0}"
 if [ "$ACCESS_LEVEL" -lt 30 ]; then

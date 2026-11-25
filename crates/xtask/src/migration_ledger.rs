@@ -1,6 +1,3 @@
-//! `cargo xtask migration-ledger {bump,check}`: maintain and verify the schema
-//! migration ledger and its fingerprint snapshot.
-
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
@@ -56,15 +53,28 @@ fn read_ledger() -> Result<MigrationLedger> {
 fn write_schema_version(version: u32) -> Result<()> {
     let path = env!("VERSIONS_FILE");
     let content = fs::read_to_string(path)?;
-    let current = format!("\nschema: {}\n", orbit_versions::VERSIONS.schema);
-    if !content.contains(&current) {
+    let Some(updated) = replace_schema_line(&content, orbit_versions::VERSIONS.schema, version)
+    else {
         bail!("{path} has no `schema:` line matching the compiled-in version");
-    }
-    fs::write(
-        path,
-        content.replace(&current, &format!("\nschema: {version}\n")),
-    )
-    .with_context(|| format!("writing {path}"))
+    };
+    fs::write(path, updated).with_context(|| format!("writing {path}"))
+}
+
+fn replace_schema_line(content: &str, from: u32, to: u32) -> Option<String> {
+    let current = format!("schema: {from}");
+    let mut found = false;
+    let updated = content
+        .split_inclusive('\n')
+        .map(|line| {
+            if !found && line.trim_end() == current {
+                found = true;
+                line.replacen(&current, &format!("schema: {to}"), 1)
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+    found.then_some(updated)
 }
 
 #[derive(serde::Deserialize)]
@@ -146,7 +156,6 @@ fn widen_amended_entry_scope(
     Ok(existing.widened_with(declared))
 }
 
-/// Lowers a [`MigrationScope`] into the wire `scope:`, `entities:` and `edge_rows:` fields of a ledger entry.
 fn split_scope_into_ledger_fields(
     scope: MigrationScope,
     edge_rows: EdgeRows,
@@ -177,8 +186,6 @@ pub fn check(base: Option<String>) -> Result<()> {
     Ok(())
 }
 
-/// Enforce that a fingerprint change in this MR carries a `base + 1` bump and a
-/// ledger entry covering the derived drift.
 fn check_under_declaration(
     ontology: &Ontology,
     committed: &Fingerprints,
@@ -196,8 +203,6 @@ fn check_under_declaration(
 
     let base_version: u32 = schema_version_at(base)
         .ok_or_else(|| anyhow!("could not read {base}:{VERSIONS_REPO_PATH}"))?;
-    // A gap would leave an entry-less version, which the migration path treats
-    // as a full rebuild; one MR bumps exactly one version.
     if schema_version != base_version + 1 {
         bail!(
             "fingerprint snapshot changed, so SCHEMA_VERSION must be exactly base + 1 \
@@ -214,7 +219,6 @@ fn check_under_declaration(
             anyhow!("no ledger entry for the bumped version {schema_version}. {REMEDIATION}")
         })?;
 
-    // A `none` entry may under-declare drift; its gate is the note check in `MigrationLedger::validate`.
     if entry.scope == LedgerScope::None {
         return Ok(());
     }
@@ -440,7 +444,6 @@ fn format_set(values: &BTreeSet<String>) -> String {
     }
 }
 
-/// First-time snapshot: write the fingerprint file without bumping.
 fn write_initial_snapshot(ontology: &Ontology, current: &Fingerprints) -> Result<()> {
     let version = orbit_versions::VERSIONS.schema;
     let ledger = read_ledger()?;
@@ -455,6 +458,20 @@ fn write_initial_snapshot(ontology: &Ontology, current: &Fingerprints) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replace_schema_line_matches_the_first_line_of_the_file() {
+        let content = "schema: 126\n\nquery_dsl: 13.7.0\n";
+        assert_eq!(
+            replace_schema_line(content, 126, 127).as_deref(),
+            Some("schema: 127\n\nquery_dsl: 13.7.0\n")
+        );
+        assert_eq!(
+            replace_schema_line("vendored:\n  schema: 126\n", 126, 127),
+            None
+        );
+        assert_eq!(replace_schema_line("schema: 125\n", 126, 127), None);
+    }
 
     #[test]
     fn schema_version_ignores_unrelated_pins() {

@@ -145,8 +145,6 @@ pub trait OrbitQueryModel {
             .is_some()
     }
 
-    /// A disabled virtual property gets no hydration plan, so accepting it as
-    /// a requested column would return nothing.
     fn property_is_unresolvable(&self, property: PropertyId) -> bool {
         matches!(
             self.property_realization(property),

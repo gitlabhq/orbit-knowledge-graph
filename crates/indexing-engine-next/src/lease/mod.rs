@@ -5,7 +5,7 @@ use std::time::SystemTime;
 
 pub use rules::{Claim, Hold, LeaseRules, Renewal};
 
-pub(crate) use store::{LeaseStore, LeaseWrite, Leases};
+pub(crate) use store::{Acquisition, LeaseStore, LeaseWrite, Leases};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Lease {

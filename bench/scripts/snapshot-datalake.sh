@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Snapshot a loaded CH PVC for fast cloning on future runs.
-# Usage: KCTX=... RUN_ID=bench5 bash bench/scripts/snapshot-datalake.sh
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

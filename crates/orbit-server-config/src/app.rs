@@ -193,7 +193,6 @@ fn parse_yaml(data: &[u8], path: &Path) -> Result<serde_json::Value, ConfigError
         path: path.to_path_buf(),
         source: Box::new(source),
     })?;
-    // An empty or comment-only file parses to null, which would replace every layer beneath it.
     Ok(match document {
         serde_json::Value::Null => serde_json::Value::Object(serde_json::Map::new()),
         document => document,

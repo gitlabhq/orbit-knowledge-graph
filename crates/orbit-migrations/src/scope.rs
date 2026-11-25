@@ -63,9 +63,9 @@ impl MigrationScope {
     #[must_use]
     pub fn merged_with(&self, other: &Self) -> Self {
         match (self, other) {
-            (Self::Full, _) | (_, Self::Full) => Self::Full, // full absorbs all
-            (Self::None, kept) | (kept, Self::None) => kept.clone(), // none is identity
-            (Self::Code, Self::Code) => Self::Code,          // same domain
+            (Self::Full, _) | (_, Self::Full) => Self::Full,
+            (Self::None, kept) | (kept, Self::None) => kept.clone(),
+            (Self::Code, Self::Code) => Self::Code,
             (
                 Self::Sdlc {
                     entities: left,
@@ -77,16 +77,16 @@ impl MigrationScope {
                 },
             ) => {
                 let entities = if left.is_empty() || right.is_empty() {
-                    BTreeSet::new() // "all sdlc" absorbs subsets
+                    BTreeSet::new()
                 } else {
-                    left.union(right).cloned().collect() // union subsets
+                    left.union(right).cloned().collect()
                 };
                 Self::Sdlc {
                     entities,
                     edge_rows: left_edge_rows.widened_with(*right_edge_rows),
                 }
             }
-            _ => Self::Full, // mixed domains escalate
+            _ => Self::Full,
         }
     }
 }

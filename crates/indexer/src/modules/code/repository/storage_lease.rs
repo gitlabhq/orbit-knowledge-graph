@@ -1,8 +1,3 @@
-//! Cross-pod cap on concurrent archive downloads per Gitaly storage.
-//!
-//! Losing a lease drops the work future, which only stops the download if the work stops on
-//! drop; the legacy extractor carries its own cancel flag (`cache.rs`).
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -187,8 +182,6 @@ impl ArchiveLeases {
 struct HeldSlot(Option<LockGuard>);
 
 impl HeldSlot {
-    /// Takes the guard unless its stored expiry has passed, in which case the key may be another
-    /// pod's by now and is abandoned instead.
     fn take_unless_expired(&mut self) -> Option<LockGuard> {
         let guard = self.0.take()?;
         if guard.time_left().is_zero() {

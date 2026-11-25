@@ -42,8 +42,6 @@ impl From<ClickHouseError> for DatalakeError {
 
 pub(crate) type RecordBatchStream<'a> = BoxStream<'a, Result<RecordBatch, DatalakeError>>;
 
-/// Storage-scan figures from the `X-ClickHouse-Summary` header. Greater than or
-/// equal to the rows the page actually returned.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ScanStats {
     pub scanned_rows: u64,
@@ -73,9 +71,6 @@ pub(crate) trait DatalakeQuery: Send + Sync {
         max_block_size: Option<u64>,
     ) -> Result<Vec<RecordBatch>, DatalakeError>;
 
-    /// Buffers a whole page and reports ClickHouse's scan cost from the query
-    /// summary. The default reports zero scan stats; only [`Datalake`] surfaces
-    /// the real summary.
     async fn query_batches_with_summary(
         &self,
         sql: &str,
@@ -90,8 +85,6 @@ pub(crate) trait DatalakeQuery: Send + Sync {
     }
 }
 
-/// Byte cap for retry blocks, keeping a block's String column under the 2GB
-/// Arrow offset limit even for MB-wide rows. ClickHouse's own default.
 const RETRY_PREFERRED_BLOCK_SIZE_BYTES: &str = "1000000";
 
 pub(crate) type DatalakeClient = Arc<ArrowClickHouseClient>;
@@ -219,9 +212,6 @@ fn scan_stats_from_summary(summary: QuerySummary) -> ScanStats {
     }
 }
 
-/// True when a datalake read failed because an Arrow column hit the 2 GiB i32
-/// offset cap. The pipeline's extract retry uses this to drop straight to the
-/// floor block size rather than gradually halving.
 pub(in crate::modules::sdlc) fn is_arrow_string_overflow(err: &DatalakeError) -> bool {
     let DatalakeError::Query(message) = err else {
         return false;

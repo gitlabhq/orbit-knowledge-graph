@@ -12,8 +12,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
-/// Safe defaults; user-provided settings from the YAML config are merged on
-/// top, overriding any key that appears in both.
 const BASE_QUERY_SETTINGS: &[(&str, &str)] = &[
     ("max_memory_usage", "1000000000"),
     ("max_execution_time", "30"),
@@ -22,8 +20,7 @@ const BASE_QUERY_SETTINGS: &[(&str, &str)] = &[
     ("join_algorithm", "'partial_merge'"),
 ];
 
-/// Prevents memory exhaustion when queries return rows with large column values.
-const METADATA_SAMPLE_MAX_BYTES: usize = 1024 * 1024; // 1 MB
+const METADATA_SAMPLE_MAX_BYTES: usize = 1024 * 1024;
 
 pub type SampleRow = Vec<String>;
 
@@ -184,9 +181,6 @@ impl QueryExecutor {
         }
     }
 
-    /// Values are classified as numeric (emitted bare), boolean (emitted bare),
-    /// already-quoted (emitted as-is), or string (wrapped in single quotes).
-    /// Output is sorted by key for deterministic ordering across runs.
     fn build_settings(user: &std::collections::HashMap<String, String>) -> String {
         let mut merged: std::collections::BTreeMap<&str, String> = BASE_QUERY_SETTINGS
             .iter()
@@ -210,8 +204,6 @@ impl QueryExecutor {
         format!("SETTINGS {}", pairs.join(", "))
     }
 
-    /// `namespace_entity` specifies which entity type defines the namespace
-    /// hierarchy (typically "Group") — used to sample traversal paths.
     pub async fn warm_cache(&mut self, namespace_entity: &str) -> Result<()> {
         self.sampler.warm_cache(&self.ontology).await?;
         self.security_contexts = self
@@ -250,7 +242,6 @@ impl QueryExecutor {
             global_fallback_count: 0,
         };
 
-        // Track sampled IDs to ensure path-finding queries get distinct start/end
         let mut sampled_by_entity: std::collections::HashMap<String, Vec<i64>> =
             std::collections::HashMap::new();
 
@@ -319,8 +310,6 @@ impl QueryExecutor {
                 .await?
         };
 
-        // For path-finding queries, ensure we don't reuse IDs for the same entity type.
-        // This prevents start/end being the same node.
         if let Some(already_sampled) = sampled_by_entity.get(entity) {
             sampled_ids.retain(|id| !already_sampled.contains(id));
             if sampled_ids.is_empty() {
@@ -351,10 +340,6 @@ impl QueryExecutor {
         Ok(sampled_ids)
     }
 
-    /// Safety settings applied via `query_settings`:
-    /// - max_memory_usage: Limits RAM per query (fails instead of crashing server)
-    /// - max_bytes_before_external_*: Spills to disk instead of using RAM
-    /// - join_algorithm: Uses disk-based joins for large tables
     async fn execute_sql_with_sample(
         &self,
         sql: &str,
@@ -581,7 +566,6 @@ impl QueryExecutor {
         }
     }
 
-    /// Includes a small delay after memory/network errors to let ClickHouse recover.
     pub async fn execute_all(
         &self,
         queries: &std::collections::HashMap<String, QueryEntry>,
@@ -604,9 +588,6 @@ impl QueryExecutor {
         results
     }
 
-    /// Unlike `execute_all`, this does NOT back off on memory errors — the
-    /// purpose is load testing under realistic conditions where multiple
-    /// queries hit ClickHouse simultaneously.
     pub async fn execute_all_concurrent(
         &self,
         queries: &std::collections::HashMap<String, QueryEntry>,
@@ -672,7 +653,6 @@ impl QueryExecutor {
         String::from_utf8_lossy(&buffer).to_string()
     }
 
-    /// Caps response size to 1MB to handle queries with large column values.
     async fn fetch_sample_for_metadata(&self, sql: &str) -> Option<SampleData> {
         let settings = &self.query_settings;
         let sample_sql = format!(

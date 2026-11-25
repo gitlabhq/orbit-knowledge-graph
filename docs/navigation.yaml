@@ -1,8 +1,3 @@
-# The GitLab Orbit section of the docs.gitlab.com global navigation.
-# Source of truth until it merges in docs-gitlab-com data/en-us/navigation.yaml.
-# scripts/docs/site.sh replaces the GitLab Orbit section of the docs-gitlab-com
-# checkout with this file, so `mise docs:serve` and `mise docs:build` show these pages.
-
 - title: GitLab Orbit
   url: 'orbit/'
   submenu:

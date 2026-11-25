@@ -63,10 +63,6 @@ fixtures:
       }
 
 tests:
-  # ══════════════════════════════════════════════════════════════
-  # KOTLIN CALLING JAVA (cross-language)
-  # ══════════════════════════════════════════════════════════════
-
   - name: "Kotlin UserService calls Java User.create (static method via import)"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -78,10 +74,6 @@ tests:
       - { row_count: 1 }
       - { row: { src: "com/example/service/UserService.kt", tgt: "com/example/model/User.java" } }
 
-  # ══════════════════════════════════════════════════════════════
-  # KOTLIN CALLING KOTLIN (within family)
-  # ══════════════════════════════════════════════════════════════
-
   - name: "Kotlin UserService calls Kotlin capitalize"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -92,10 +84,6 @@ tests:
       - { row_count: 1 }
       - { row: { src: "com/example/service/UserService.kt", tgt: "com/example/util/Strings.kt" } }
 
-  # ══════════════════════════════════════════════════════════════
-  # JAVA CALLING JAVA (within family)
-  # ══════════════════════════════════════════════════════════════
-
   - name: "Java User.create calls Java User (same file)"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -105,10 +93,6 @@ tests:
     assert:
       - { row_count: 2 }
       - { row: { callee: "com.example.model.User.User" } }
-
-  # ══════════════════════════════════════════════════════════════
-  # ALL FILES AND DEFINITIONS DISCOVERED
-  # ══════════════════════════════════════════════════════════════
 
   - name: "All 5 files discovered"
     query: |

@@ -9,8 +9,6 @@ const EXCLUDED_EXTENSIONS: &[&str] = &[
     "bin", "dat",
 ];
 const EXCLUDED_SUFFIXES: &[&str] = &[".min.js", ".min.mjs", ".min.cjs"];
-/// GitLab's machine-translated documentation trees, skipped at any depth
-/// (case-insensitive path-segment match).
 pub const EXCLUDED_INDEXING_DIRS: &[&str] = &["doc-locale", "docs-locale"];
 const BINARY_SNIFF_BYTES: usize = 8000;
 const MAX_LINE_LENGTH: usize = 64 * 1024;
@@ -62,8 +60,6 @@ impl Pass for CodePolicy {
     }
 }
 
-/// `true` when a directory segment of the `/`-separated `path` is in
-/// [`EXCLUDED_INDEXING_DIRS`]; the basename itself never matches.
 pub fn in_excluded_directory(path: &str) -> bool {
     let Some((directories, _)) = path.rsplit_once('/') else {
         return false;

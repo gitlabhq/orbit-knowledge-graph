@@ -46,8 +46,8 @@
 - category: contract
   reason: "Temporary: Rails returns 400 on duplicate redaction entries until the discriminator fix lands; do not revert early."
   preview: "# Temporary: aligned with source-code entities so Project + code traver…"
-  hash: 7a141bf858682697
-  lines: 4
+  hash: 2be2160773ee9abc
+  lines: 3
 "config/ontology/nodes/security/vulnerability.yaml":
 - category: security
   reason: "Security Manager (25) is the minimum role for security resources, so the security pass drops Reporter-only paths."

@@ -1,8 +1,3 @@
-# Swift rewrite rules.
-# Handles: import as a wildcard import, classes, structs, enums, extensions
-# (as __impl wrappers), protocols, properties with self.x typing, functions,
-# init, self./super. calls, control flow.
-
 config:
   stdlib: [
       { module: Swift, availability: implicit, precedence: runtime, symbols: [abs, assert, assertionFailure, debugPrint, dump, fatalError,

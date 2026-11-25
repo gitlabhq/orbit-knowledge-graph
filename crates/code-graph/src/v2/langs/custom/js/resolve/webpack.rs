@@ -1,8 +1,3 @@
-//! Config discovery is driven entirely off the indexed file list held
-//! by [`super::super::WorkspaceProbe`]: any file whose basename matches
-//! `webpack.config.{js,cjs,mjs,ts}` in any folder is eligible. No
-//! filesystem walking happens here.
-
 use oxc_resolver::AliasValue;
 use std::path::Path;
 
@@ -10,8 +5,6 @@ use super::evaluator::{
     EvaluatedValue, ModuleEvalCache, contained_repo_path, evaluate_module_exports,
 };
 
-/// Stops at the first config that yields a non-empty alias table — a
-/// deliberate "first win" behaviour matching the pre-split evaluator.
 pub(super) fn load_project_aliases(
     probe: &super::super::WorkspaceProbe,
 ) -> Vec<(String, Vec<AliasValue>)> {
@@ -43,8 +36,6 @@ fn load_webpack_aliases(
     aliases
 }
 
-/// Arrays of configs (function-factory or multi-config exports) are
-/// flattened — every entry contributes.
 fn collect_aliases_from_value(
     value: &EvaluatedValue,
     root_dir: &Path,
@@ -99,18 +90,12 @@ fn alias_values_from_evaluated(
     match value {
         EvaluatedValue::String(path) => {
             if Path::new(path).is_absolute() || path.starts_with('.') {
-                // Dropped silently unless it resolves inside the repo, so a
-                // hostile `webpack.config.js` cannot redirect an alias at
-                // `/etc/...`, a parent-of-repo path, or a Windows absolute.
                 contained_repo_path(root_dir, config_dir, path)
                     .map(|resolved| vec![AliasValue::Path(resolved.to_string_lossy().to_string())])
                     .unwrap_or_default()
             } else if is_safe_package_specifier(path) {
                 vec![AliasValue::Path(path.clone())]
             } else {
-                // Anything else — `node:child_process`, URLs, paths that
-                // fell through the absolute/`.` filter because of platform
-                // differences — is refused.
                 vec![]
             }
         }
@@ -123,9 +108,6 @@ fn alias_values_from_evaluated(
     }
 }
 
-/// ASCII-only, no path separators, no protocol prefix: matches `lodash`,
-/// `@scope/pkg/sub` and rejects anything that could smuggle in a node
-/// built-in (`node:fs`) or filesystem escape.
 fn is_safe_package_specifier(value: &str) -> bool {
     if value.is_empty() || value.contains(':') || value.contains('\\') {
         return false;

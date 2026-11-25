@@ -1,13 +1,3 @@
-//! Materialises Orbit Grafana dashboards from jsonnet sources.
-//!
-//! Walks `dashboards/orbit/*.dashboard.jsonnet` and runs each through
-//! `jsonnet` (provided by the `aqua:google/go-jsonnet` mise tool) twice,
-//! once per flavor: `com` (for dashboards.gitlab.net) lands next to the
-//! source, `dedicated` (for GitLab Dedicated tenant Grafanas) lands in the
-//! sibling `dashboards/dedicated/` directory. With `--check`, compares each
-//! regenerated file against its committed copy and fails on drift, mirroring
-//! the `metrics-catalog` CI gate.
-
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,9 +6,7 @@ use std::process::Command;
 use anyhow::{Context, Result, anyhow, bail};
 
 const DEFAULT_DIR: &str = "dashboards/orbit";
-/// Sibling directory (of the source dir) receiving the `dedicated` flavor.
 const DEDICATED_DIR_NAME: &str = "dedicated";
-/// Glob suffix that identifies dashboard sources (rather than helpers).
 const SOURCE_SUFFIX: &str = ".dashboard.jsonnet";
 
 pub fn run(dir: Option<PathBuf>, check: bool) -> Result<()> {
@@ -106,9 +94,6 @@ fn collect_sources(dir: &Path) -> Result<Vec<PathBuf>> {
 
 fn run_jsonnet(src: &Path, flavor: &str) -> Result<String> {
     let flavor_arg = format!("flavor={flavor}");
-    // Prefer `jsonnet` already on PATH (e.g. when mise is activated). Fall
-    // back to `mise exec -- jsonnet ...` so a user with mise installed but
-    // not yet activated still gets a working build.
     let direct = Command::new("jsonnet")
         .args(["--ext-str", &flavor_arg])
         .arg(src)

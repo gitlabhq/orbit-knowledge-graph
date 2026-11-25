@@ -1,10 +1,3 @@
-//! [`SnowplowIndexingObserver`] accumulates per-dispatch stats and, on
-//! `finish`, emits one `gkg_indexing_completed` event with the run's resource
-//! cost: an `orbit_sdlc_indexing` or `orbit_code_indexing` context alongside
-//! `orbit_common`. Errored runs are skipped so partial costs don't pollute
-//! the cost-attribution dataset, and no-op runs (idle incremental polls that
-//! read and wrote nothing) are skipped so they don't flood the collector.
-
 use std::sync::Arc;
 
 use labkit_events::StructuredEvent;
@@ -97,9 +90,6 @@ impl SnowplowIndexingObserver {
         }
     }
 
-    /// Resolve `(namespace_id, root_namespace_id)`. A traversal path yields
-    /// both (leaf + top-level); otherwise we fall back to a directly-set
-    /// namespace with no root (globally-scoped SDLC runs have neither).
     fn namespace_ids(&self) -> (Option<i64>, Option<i64>) {
         match &self.traversal_path {
             Some(path) => (path.leaf_id(), path.top_level_namespace_id()),
@@ -115,9 +105,6 @@ impl SnowplowIndexingObserver {
         }
     }
 
-    /// A run that read and wrote nothing is an idle incremental poll: the SDLC
-    /// scheduler re-dispatches every namespace every minute, so emitting these
-    /// would flood the analytics collector with no-op events that carry no cost.
     fn did_work(&self) -> bool {
         match self.pipeline_type {
             Some(PipelineType::Sdlc) => self.read_rows > 0 || self.written_rows > 0,

@@ -1,6 +1,3 @@
-//! Step for a variable-length relation: expand hop by hop from the pinned end and union the requested
-//! depths, carrying the path so far.
-
 use ontology::constants::*;
 use query_data_model::OrbitQueryModel;
 
@@ -15,7 +12,6 @@ use crate::passes::plan::graph::{RelationGraph, RelationId};
 use crate::passes::plan::predicates::*;
 
 impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
-    /// Walks a variable-length relation from its pinned end, so the walk reverses when only the target is pinned.
     pub(super) fn multi_hop_source(&mut self, relation: &EdgeRelation) -> Result<RelationId> {
         let pattern = self.pattern;
         let mut expansion = relation.clone();

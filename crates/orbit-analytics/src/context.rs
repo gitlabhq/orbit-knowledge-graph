@@ -1,15 +1,3 @@
-//! Consumer-owned Snowplow context types for Orbit analytics.
-//!
-//! Data types are codegen'd from `config/schemas/iglu/<name>/<version>.json`
-//! by `build.rs` via [`typify`] and included here at compile time. Each
-//! generated module ([`orbit_common`], [`orbit_query`]) exposes the
-//! typed struct (e.g. `OrbitCommon`) plus three `&'static str` consts:
-//! `VERSION`, `SCHEMA_URI`, `SCHEMA_JSON`.
-//!
-//! Wrap a generated type with [`OrbitCommonContext`] or
-//! [`OrbitQueryContext`] to attach it to a `StructuredEvent` — these
-//! wrappers `impl labkit_events::SnowplowContext`.
-
 use labkit_events::SnowplowContext;
 use orbit_server_config::DeploymentKind;
 
@@ -241,8 +229,6 @@ impl SnowplowContext for OrbitNamespaceGraphStatsContext {
     }
 }
 
-// Re-exported for callers that need the bare URI string, e.g. assertions in
-// observer and integration tests.
 pub const ORBIT_COMMON_SCHEMA: &str = orbit_common::SCHEMA_URI;
 pub const ORBIT_QUERY_SCHEMA: &str = orbit_query::SCHEMA_URI;
 pub const ORBIT_SDLC_INDEXING_SCHEMA: &str = orbit_sdlc_indexing::SCHEMA_URI;
@@ -256,10 +242,6 @@ pub const ORBIT_NAMESPACE_GRAPH_STATS_SCHEMA: &str = orbit_namespace_graph_stats
 #[cfg(any(test, feature = "testkit"))]
 const IGLU_SELF_DESCRIBING_BASE_DIALECT: &str = "http://json-schema.org/draft-04/schema#";
 
-/// Return the inlined schema JSON for `name` at its pinned version.
-///
-/// Used by tests in this crate's consumers to compile an Iglu validator
-/// against the same JSON the runtime emits contexts for.
 #[cfg(any(test, feature = "testkit"))]
 pub fn load_schema_json(name: &str) -> serde_json::Value {
     let raw = match name {
