@@ -1,17 +1,5 @@
 name: "C# structs — struct definitions, properties, fields, methods, readonly struct"
 
-# Coverage note: csharp.rs maps struct_declaration to definition_type "Struct"
-# (scope("struct_declaration", "Struct")), property_declaration to "Property",
-# constructor_declaration to "Constructor", and method_declaration to "Method".
-# Existing C# fixtures cover classes and resolution but not struct extraction or
-# struct members; this proves they are indexed and will not regress.
-#
-# Known gap: a bare struct field written without an initializer (e.g.
-# `public int X;`) is not emitted as a Field definition — the field_declaration
-# scope's name_from(field("declaration").field("name")) does not resolve the
-# declarator name for that form, so X/Y do not appear in the graph. Auto-property
-# members (Width/Height) are extracted normally, and are asserted below.
-
 fixtures:
   - path: Geometry/Point.cs
     content: |

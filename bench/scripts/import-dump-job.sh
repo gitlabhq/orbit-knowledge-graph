@@ -11,7 +11,6 @@ source "${BENCH_DIR}/scripts/lib.sh"
 GCP_SA=$(cd "${TF_DIR}" && "$TF" output -raw node_sa_email 2>/dev/null)
 : "${CH_NS:=ra-ch-${RUN_ID}}"
 
-# Read credentials from the secret created by provision.sh.
 CH_PASSWORD=$($KC get secret ra-ch-credentials -n "${CH_NS}" \
   -o jsonpath='{.data.default-password}' 2>/dev/null | base64 -d) || true
 if [[ -z "${CH_PASSWORD}" ]]; then
@@ -24,13 +23,11 @@ $KC create secret generic ra-import-ch-auth \
   --from-literal=password="${CH_PASSWORD}" \
   --dry-run=client -o yaml | $KC apply -f -
 
-# Ensure the GCS-access KSA exists.
 $KC create sa ra-import-sa -n "${CH_NS}" 2>/dev/null || true
 $KC annotate sa ra-import-sa -n "${CH_NS}" \
   "iam.gke.io/gcp-service-account=${GCP_SA}" \
   --overwrite 2>/dev/null
 
-# Delete any previous Job.
 $KC delete job ra-import-dump -n "${CH_NS}" --ignore-not-found=true 2>/dev/null
 
 DUMPS_BUCKET=$(cd "${TF_DIR}" && "$TF" output -raw datalake_dumps_bucket 2>/dev/null || bench '.buckets.datalake_dumps')
@@ -59,7 +56,6 @@ fi
 
 kill "${LOG_PID}" 2>/dev/null || true
 
-# Clean up auth secret.
 $KC delete secret ra-import-ch-auth -n "${CH_NS}" --ignore-not-found=true
 
 log "Import done"

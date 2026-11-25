@@ -1,6 +1,3 @@
-//! Each backend lives in its own submodule and exposes a single `codegen()`
-//! entry point with the same signature.
-
 pub mod clickhouse;
 pub mod ddl;
 pub mod duckdb;
@@ -41,9 +38,6 @@ pub struct ParameterizedQuery {
     pub sql: String,
     pub params: HashMap<String, ParamValue>,
     pub result_context: ResultContext,
-    /// Resolved query settings. Baked into the SQL SETTINGS clause by codegen
-    /// and also applied as HTTP-level ClickHouse settings by the execution
-    /// stage (defense-in-depth).
     pub query_config: QueryConfig,
     pub dialect: SqlDialect,
 }
@@ -59,8 +53,6 @@ pub struct CompiledQueryContext {
 }
 
 impl ParameterizedQuery {
-    /// **Not for execution** — inlines params into SQL; use parameterized
-    /// queries to prevent injection.
     pub fn render(&self) -> String {
         match self.dialect {
             SqlDialect::ClickHouse => {

@@ -11,8 +11,6 @@ use crate::commands::setup::spec::Agent;
 const BLOCK_BEGIN: &str = "<!-- orbit:setup:begin -->";
 const BLOCK_END: &str = "<!-- orbit:setup:end -->";
 
-/// Each agent loads the Orbit instructions from its plugin or hook, so setup writes no
-/// instruction-file block. Install and uninstall remove the block earlier releases wrote.
 pub(super) struct Instructions;
 
 impl Installer for Instructions {

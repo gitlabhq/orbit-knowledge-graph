@@ -48,7 +48,7 @@ fixtures:
 
 tests:
   - name: "Module-qualified call resolves across files: Foo.greet -> Baz.hello"
-    skip: true
+    known_gap: "reason not recorded"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Foo.greet'
@@ -85,7 +85,7 @@ tests:
       - { row_count: 1 }
 
   - name: "Exactly 4 Calls edges total — no spurious edges"
-    skip: true
+    known_gap: "reason not recorded"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(:Definition)
       RETURN count(caller) AS n

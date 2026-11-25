@@ -1,5 +1,3 @@
-# config/ontology/edges/has_note.yaml
-
 description: Entity has a note/comment attached
 
 variants:

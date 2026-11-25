@@ -1,5 +1,3 @@
-# config/ontology/nodes/packages/package_file.yaml
-
 node_type: PackageFile
 domain: packages
 description: A file belonging to a package in the GitLab package registry (the stored artifact, for example a .whl, .jar, or .tgz)

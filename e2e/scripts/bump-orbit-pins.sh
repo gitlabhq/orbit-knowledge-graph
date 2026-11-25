@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Bump the pinned gkg image tag in e2e/config/versions.yaml to the latest
-# release. The chart pin stays manual: chart-line moves can change the values
-# schema and need a reviewed values update (see !2062).
 
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"

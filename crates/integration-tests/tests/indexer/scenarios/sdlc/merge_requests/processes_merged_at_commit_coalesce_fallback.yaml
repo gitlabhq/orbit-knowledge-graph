@@ -1,4 +1,3 @@
-# KG #924: every COALESCE leg must decode bytea SHAs in both `\x`-text and post-siphon!475 raw-binary form; a raw-binary leg left un-hex-encoded breaks the Arrow UTF-8 decode.
 description: MERGED_AT_COMMIT decodes bytea SHAs, walks the COALESCE fallback, and gates on merged state
 scope: { namespace: 100 }
 
@@ -8,17 +7,11 @@ seed:
   merge_requests:
     - { id: 1, iid: 101, title: Merge commit MR, source_branch: a, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: cleanmergeAAA, merged_commit_sha: "\\x31626362616230646333356438623563383233663932626334626364623934313433383430303865", squash_commit_sha: null, author_id: 1, merge_user_id: 1, traversal_path: "1/100/1000/" }
     - { id: 2, iid: 102, title: Legacy merge MR, source_branch: b, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: mergeBBB1234567890abcdef1234567890abcdef12, merged_commit_sha: null, squash_commit_sha: null, author_id: 1, merge_user_id: 1, traversal_path: "1/100/1000/" }
-    # Squash MR must point at the landed squash commit, not the pre-squash head
-    # found in auto-merge notes.
     - { id: 3, iid: 103, title: Squash MR, source_branch: c, target_branch: main, state_id: 3, merge_status: merged, draft: true, squash: true, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: null, merged_commit_sha: null, squash_commit_sha: "\\xfeedface0000000000000000000000000000beef", author_id: 1, merge_user_id: 1, traversal_path: "1/100/1000/" }
-    # Post-siphon!475 squash: raw binary bytes (no \x prefix). The { sql: ... }
-    # escape injects unhex() to seed the 20-byte digest directly into the String
-    # column, matching how ClickHouse stores decoded bytea after the fix.
     - { id: 6, iid: 106, title: Squash MR post-fix, source_branch: f, target_branch: main, state_id: 3, merge_status: merged, draft: true, squash: true, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: null, merged_commit_sha: null, squash_commit_sha: { sql: "unhex('aabbccdd11223344556677889900aabbccddeeff')" }, author_id: 1, merge_user_id: 1, traversal_path: "1/100/1000/" }
     - { id: 7, iid: 107, title: SHA-256 merge commit MR, source_branch: g, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: null, merged_commit_sha: "\\x30313233343536373839616263646566303132333435363738396162636465663031323334353637383961626364656630313233343536373839616263646566", squash_commit_sha: null, author_id: 1, merge_user_id: 1, traversal_path: "1/100/1000/" }
     - { id: 8, iid: 108, title: Merge MR post-fix, source_branch: h, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: null, merged_commit_sha: { sql: "unhex('deadbeefcafebabe00000000000000000000abcd')" }, squash_commit_sha: null, author_id: 1, merge_user_id: 1, traversal_path: "1/100/1000/" }
     - { id: 4, iid: 104, title: FF merge MR, source_branch: d, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: null, merged_commit_sha: null, squash_commit_sha: null, author_id: 1, merge_user_id: 1, traversal_path: "1/100/1000/" }
-    # A SHA alone is insufficient; closed MRs must not emit merged-at edges.
     - { id: 5, iid: 105, title: Closed-with-SHA MR, source_branch: e, target_branch: main, state_id: 2, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: closedEEE1234567890abcdef1234567890abcdef, merged_commit_sha: null, squash_commit_sha: null, author_id: 1, merge_user_id: null, traversal_path: "1/100/1000/" }
 
 expect:

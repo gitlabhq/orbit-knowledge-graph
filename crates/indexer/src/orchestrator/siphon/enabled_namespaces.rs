@@ -1,5 +1,3 @@
-//! CDC route: newly-enabled namespaces trigger SDLC indexing and code backfill.
-
 use std::sync::Arc;
 
 use async_trait::async_trait;

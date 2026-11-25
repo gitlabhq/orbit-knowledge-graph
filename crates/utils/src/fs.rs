@@ -37,15 +37,11 @@ pub fn contained_canonical_path(root: &Path, path: &Path) -> Option<PathBuf> {
     canonical.starts_with(root).then_some(canonical)
 }
 
-/// `true` when `path` has only normal components — safe to join under a root,
-/// with no `..`/`.`/root/prefix that could climb out.
 pub fn is_safe_relative_path(path: &Path) -> bool {
     path.components()
         .all(|c| matches!(c, std::path::Component::Normal(_)))
 }
 
-/// Resolve `dest` to its canonical form within `root`, creating parents if
-/// needed. `PermissionDenied` if the real target escapes `root`.
 pub fn resolve_dest_within(root: &Path, dest: &Path) -> io::Result<PathBuf> {
     if dest.exists() {
         contained_canonical_path(root, dest).ok_or_else(|| {
@@ -87,10 +83,6 @@ pub fn safe_create_dir_all(path: &Path, root: &Path) -> io::Result<PathBuf> {
         .join(path.file_name().unwrap_or_default()))
 }
 
-/// Walk up from `path` to find the deepest ancestor that exists on disk.
-///
-/// Used to validate a path before `create_dir_all` so that we can detect
-/// symlinks in existing components before creating new directories.
 pub fn longest_existing_ancestor(path: &Path) -> &Path {
     let mut current = path;
     while !current.exists() {
@@ -117,13 +109,10 @@ pub fn validate_symlinks(root: &Path) -> io::Result<Vec<RemovedSymlink>> {
     while let Some(dir) = stack.pop() {
         let entries = match std::fs::read_dir(&dir) {
             Ok(e) => e,
-            // Cleanup elsewhere can race us and remove it after listing.
             Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
             Err(e) => return Err(e),
         };
         for entry in entries {
-            // OS-level iteration errors are recorded but don't stop the scan,
-            // so remaining symlinks are still checked and cleaned up.
             let entry = match entry {
                 Ok(e) => e,
                 Err(e) => {

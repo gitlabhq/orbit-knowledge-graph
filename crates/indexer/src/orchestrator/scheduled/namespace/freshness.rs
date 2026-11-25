@@ -26,7 +26,6 @@ use crate::orchestrator::dispatch::enabled_namespaces::{
 };
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 
-// The last sweep syncs idle entities; the margin keeps a late or slow sweep inside the scan.
 const SWEEP_MARGIN: TimeDelta = TimeDelta::minutes(15);
 
 const FRESHNESS_QUERY_SQL: &str = r#"SELECT root_path, target, max(watermark) AS latest
@@ -52,7 +51,6 @@ pub struct NamespaceFreshness {
     scan_window: TimeDelta,
     lag: Histogram<f64>,
     oldest_sync: Arc<Mutex<Vec<(String, i64)>>>,
-    // Dropping the handle deregisters the gauge callback.
     _oldest_sync_gauge: ObservableGauge<i64>,
     metrics: ScheduledTaskMetrics,
     config: NamespaceFreshnessConfig,
@@ -86,7 +84,6 @@ impl NamespaceFreshness {
         let meter = orbit_observability::meter();
         let oldest_sync: Arc<Mutex<Vec<(String, i64)>>> = Arc::default();
         let reported = Arc::clone(&oldest_sync);
-        // Observing only the last run's plans drops a plan the served ontology no longer has.
         let oldest_sync_gauge =
             sdlc::FRESHNESS_OLDEST_SYNC.build_observable_gauge_i64(&meter, move |observer| {
                 for (plan, timestamp) in reported.lock().iter() {
@@ -232,8 +229,6 @@ impl NamespaceFreshness {
         Ok(())
     }
 
-    /// Records one lag sample per enabled root and returns the time up to which every root is in sync.
-    /// Without enabled roots there is no data to measure, so the plan reports nothing.
     fn record_plan_lag(
         &self,
         plan: &PipelineDescriptor,
@@ -276,8 +271,6 @@ async fn load_checkpoints(
     store.load_by_prefix(prefix).await.map_err(TaskError::new)
 }
 
-/// The global dispatcher targets the current time every minute, so a global checkpoint is its own sync point.
-/// A plan that never synced reports nothing; promotion requires every global plan, so only a fresh install has one.
 fn global_synced_until(plan: &PipelineDescriptor, state: &SyncState) -> Option<DateTime<Utc>> {
     let key = format!("{GLOBAL_SCOPE_KEY}.{}", plan.name);
     state
@@ -286,8 +279,6 @@ fn global_synced_until(plan: &PipelineDescriptor, state: &SyncState) -> Option<D
         .and_then(Checkpoint::synced_until)
 }
 
-/// An upper bound on how far indexed data trails the datalake: merges keep only the newest version
-/// of a row, so the first unindexed change is lost and a pending entity counts from its last sync.
 fn lag(
     now: DateTime<Utc>,
     scanned_from: DateTime<Utc>,

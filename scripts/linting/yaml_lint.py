@@ -3,19 +3,6 @@
 # requires-python = ">=3.10"
 # dependencies = ["pyyaml>=6.0"]
 # ///
-"""
-Layout lint for the YAML test suites.
-
-Prettier sets indentation, quotes, and spacing inside a line. This script adds
-one rule that Prettier does not have: a blank line separates two sibling
-entries when one of them spans more than one line. Siblings are the top-level
-keys and the items of each top-level list, for example the cases of a suite.
-
-Usage:
-  yaml_lint.py [--fix] [FILE...]   # no FILE checks every suite file
-
-Exit codes: 0 clean, 1 findings.
-"""
 from __future__ import annotations
 
 import argparse

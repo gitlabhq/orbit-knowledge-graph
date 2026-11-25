@@ -1,5 +1,5 @@
-# config/ontology/nodes/source_code/commit.yaml
-
+# DRIFT WARNING: keep decoded_sha and the masked hash in sync with
+# merge_request.yaml, or MERGED_AT_COMMIT points at a non-existent node.
 node_type: Commit
 domain: source_code
 description: A Git commit, shared target for commit-related edges
@@ -51,16 +51,6 @@ properties:
     nullable: false
     description: "Namespace path for authz."
 
-# Emitted from merge_requests (Siphon has no commit table). Duplicate
-# (project_id, sha) rows collapse in gl_commit via ReplacingMergeTree.
-# Commit.id is sign-bit-masked so the Int64 keyset cursor stays positive.
-# Bytea decode details: see siphon#248.
-#
-# DRIFT WARNING: keep decoded_sha and the masked hash in sync with
-# merge_request.yaml, or MERGED_AT_COMMIT points at a non-existent node.
-#
-# Shared-commit transient: deleting one MR can tombstone a Commit still
-# referenced by another MR. The next re-index re-inserts it.
 indexer:
   reindex: [merge_requests]
 pipelines:

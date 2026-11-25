@@ -8,9 +8,6 @@ use percent_encoding::percent_decode_str;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde_saphyr::granit_parser::{Event, Parser, ScalarStyle};
 
-/// Separator between FQN segments. A `#` or `\` inside heading text or the
-/// file stem is escaped with `\` in the segment, so the FQN splits
-/// unambiguously.
 pub const FQN_SEPARATOR: &str = "#";
 
 pub const MAX_SECTIONS_PER_FILE: usize = 10_000;
@@ -70,23 +67,15 @@ pub struct FrontMatter {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Section {
-    /// Plain heading text: inline markup and closing `#`s removed.
     pub name: String,
-    /// The section's FQN segment: the escaped name, suffixed `-N` when a
-    /// sibling already uses it.
     pub segment: String,
-    /// GitLab's rendered fragment, whose duplicate suffixes also count
-    /// headings in block quotes and list items.
     pub anchor: String,
     pub parent: Option<usize>,
     pub start: usize,
-    /// Byte offset of the line after the heading (setext underline included).
     pub heading_end: usize,
     pub end: usize,
 }
 
-/// Only headings at the top level of the document count as sections: a heading
-/// inside a block quote or list item is quoted content, not document structure.
 pub fn parse(source: &str) -> Document {
     let arena = Arena::new();
     let mut options = Options::default();
@@ -153,9 +142,6 @@ pub fn parse(source: &str) -> Document {
     }
 }
 
-/// `block` is comrak's front matter slice of `source`: it starts after any
-/// byte order mark and runs to the end of the blank line after the closing
-/// delimiter, when there is one.
 fn parse_front_matter(source: &str, block: &str) -> FrontMatter {
     let start = source.len() - source.strip_prefix('\u{feff}').unwrap_or(source).len();
     let through_delimiter = block.trim_end_matches(['\r', '\n']);
@@ -352,8 +338,6 @@ fn anchors_and_links<'a>(
     (top_level_anchors, links)
 }
 
-/// Same anchors as comrak's `Anchorizer`, in linear time: each base resumes
-/// after its last suffix instead of probing from zero.
 #[derive(Default)]
 struct UniqueAnchors {
     taken: FxHashSet<String>,
@@ -383,8 +367,6 @@ impl UniqueAnchors {
 pub struct Link {
     pub url: String,
     pub image: bool,
-    /// Index of the innermost section containing the link; `None` before the
-    /// first heading.
     pub section: Option<usize>,
 }
 
@@ -426,7 +408,6 @@ impl Link {
     }
 }
 
-/// RFC 3986: a scheme is a letter, then letters, digits, `+`, `-` or `.`, then `:`.
 fn has_scheme(url: &str) -> bool {
     let Some((scheme, _)) = url.split_once(':') else {
         return false;
@@ -525,8 +506,6 @@ fn inline_text<'a>(node: &'a AstNode<'a>) -> String {
     text.trim().to_string()
 }
 
-/// Zero-based (line, byte column) positions. A lone `\r` ends a line, as in
-/// CommonMark, so line numbers agree with comrak's.
 pub struct LineIndex {
     starts: Vec<usize>,
     len: usize,
@@ -566,8 +545,6 @@ impl LineIndex {
         (line, offset - self.starts[line])
     }
 
-    /// The position just past the last character of `source[..end]`, before
-    /// its trailing line ending, so a range ends on its own last line.
     pub fn end_position(&self, source: &str, end: usize) -> (usize, usize) {
         let content = source.get(..end).unwrap_or(source);
         let content = content

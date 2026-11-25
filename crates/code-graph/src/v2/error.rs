@@ -1,8 +1,6 @@
 use std::fmt;
 use strum::{AsRefStr, Display};
 
-/// Task-level failures from the v2 code-graph pipeline. Per-file
-/// failures route through [`FileFault`] instead.
 #[derive(Debug)]
 pub enum CodeGraphError {
     ThreadPoolCreation {
@@ -65,7 +63,6 @@ impl std::error::Error for CodeGraphError {
 }
 
 impl CodeGraphError {
-    /// Returns a stable stage label for metrics recording.
     pub fn stage(&self) -> &'static str {
         match self {
             Self::ThreadPoolCreation { .. } => "thread_pool",
@@ -77,8 +74,6 @@ impl CodeGraphError {
         }
     }
 
-    /// Pseudo-path used as the `file_path` field on `PipelineError` so
-    /// task-level errors are distinguishable from per-file ones in logs.
     pub fn scope(&self) -> &'static str {
         match self {
             Self::ThreadPoolCreation { .. } => "<thread-pool>",
@@ -91,7 +86,6 @@ impl CodeGraphError {
     }
 }
 
-/// Which bounded phase tripped a per-file timeout: the parse/walk/ssa budget or the Phase 2/3 watchdog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AsRefStr, Display)]
 #[strum(serialize_all = "snake_case")]
 pub enum AbortPhase {
@@ -101,7 +95,6 @@ pub enum AbortPhase {
     Sentinel,
 }
 
-/// Per-file benign skip. `as_metric_label` returns the wire-stable label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileSkip {
     Oversize,
@@ -150,8 +143,6 @@ impl fmt::Display for FileSkip {
     }
 }
 
-/// Per-file genuine failure. The task itself completes; the file is
-/// excluded from the graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileFault {
     FileRead,
@@ -189,14 +180,6 @@ impl fmt::Display for FileFault {
     }
 }
 
-/// Why a file did not index cleanly: a benign skip, a genuine fault, or
-/// nothing. Carried on the File node and written to `gl_file.reason` via its
-/// `Display`, which is the only way to produce the string — so the column is
-/// strictly enum-bounded. The category prefix (`skip_` / `fault_`) composes
-/// with the inner enum's `Display` via strum, so a new variant is labelled
-/// automatically (`skip_oversize`, `fault_invalid_utf8`, …; empty for `None`).
-/// `Skip`/`Fault` come from the parse phase; `Filter` from the pre-parse file
-/// stream ([`SkipReason`](orbit_utils::fs_walk::SkipReason)), both labelled `skip_`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Display)]
 pub enum FileReason {
     #[default]
@@ -210,8 +193,6 @@ pub enum FileReason {
     Filter(orbit_utils::fs_walk::SkipReason),
 }
 
-/// Per-file outcome from a language analyzer. Encodes skip-vs-fault
-/// at the type level so callers route by variant, not by string match.
 #[derive(Debug)]
 pub enum AnalyzerError {
     Skip { kind: FileSkip, detail: String },

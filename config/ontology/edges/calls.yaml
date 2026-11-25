@@ -1,5 +1,3 @@
-# config/ontology/edges/calls.yaml
-
 description: Call relationships in source code representing function/method invocations
 
 variants:

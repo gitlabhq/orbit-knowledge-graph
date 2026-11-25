@@ -32,11 +32,6 @@ fn derive_seed(base: u64, org_id: u32, stream: &str) -> u64 {
     h ^ (h >> 31)
 }
 
-/// In production, edges are scoped to the namespace where the resource lives.
-/// For association edges between a global entity (e.g. User at `1/`) and a
-/// scoped entity (e.g. MergeRequest at `1/7/30/81/`), the scoped entity's
-/// path wins. We use path length as a proxy for specificity since deeper
-/// namespaces always produce longer path strings.
 fn most_specific_path(registry: &EntityRegistry, source_id: i64, target_id: i64) -> String {
     let src = registry
         .get_path(source_id)
@@ -47,7 +42,6 @@ fn most_specific_path(registry: &EntityRegistry, source_id: i64, target_id: i64)
     if tgt.len() >= src.len() { tgt } else { src }.to_string()
 }
 
-/// Interned string type for edge records to avoid millions of small allocations.
 pub type IStr = Arc<str>;
 
 #[derive(Debug, Clone)]
@@ -140,7 +134,6 @@ impl Generator {
         Xoshiro256PlusPlus::seed_from_u64(self.stream_seed(org_id, stream))
     }
 
-    /// Unseeded runs keep random fake values and wall-clock timestamps.
     fn fake_seed(&self, org_id: u32, stream: &str) -> Option<u64> {
         self.config
             .generation
@@ -1196,8 +1189,6 @@ mod tests {
             .collect();
         assert!(!authored.is_empty());
         for edge in &authored {
-            // Association edges should inherit the source node's traversal_path,
-            // not the sentinel "0/". Source nodes always have a path starting with "1/".
             assert!(
                 edge.traversal_path.as_ref().starts_with("1/"),
                 "AUTHORED edge should have source node's traversal_path, got '{}'",

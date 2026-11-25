@@ -258,9 +258,6 @@ mod tests {
         assert!(config.url.contains("8123"));
     }
 
-    // Without the rustls-tls-* features on the `clickhouse` crate, any HTTPS
-    // URL is rejected immediately with "scheme is not http". This test guards
-    // against accidental removal of those features (e.g. by Renovate Bot).
     #[tokio::test]
     async fn test_https_url_does_not_fail_with_missing_tls() {
         let config = ClickHouseConfiguration {

@@ -97,7 +97,6 @@ fixtures:
       end
 
 tests:
-  # ── Definition types ──────────────────────────────────────────
   - name: "Module definitions exist (reopened across files)"
     query: |
       MATCH (d:Definition)
@@ -118,7 +117,6 @@ tests:
     assert:
       - { row_count: 5 }
 
-  # ── FQN separator: all scopes use :: ────────────────────────────
   - name: "Instance method FQN uses :: separator"
     query: |
       MATCH (d:Definition)
@@ -128,7 +126,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # corrected: instance and singleton run share the canonical Method FQN
   - name: "Instance method run uses :: separator"
     query: |
       MATCH (d:Definition)
@@ -138,7 +135,6 @@ tests:
     assert:
       - { row_count: 2 }
 
-  # corrected: instance and singleton run share the canonical Method FQN
   - name: "Singleton method uses :: separator"
     query: |
       MATCH (d:Definition)
@@ -148,7 +144,6 @@ tests:
     assert:
       - { row_count: 2 }
 
-  # ── Containment edges ─────────────────────────────────────────
   - name: "Module defines Class"
     query: |
       MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
@@ -185,7 +180,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── attr_reader generates Attribute definitions ────────────────
   - name: "attr_reader generates Attribute definitions"
     query: |
       MATCH (d:Definition)

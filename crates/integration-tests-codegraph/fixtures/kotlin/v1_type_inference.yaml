@@ -29,7 +29,7 @@ tests:
   # ── K6: test_kotlin_type_inference_from_try_catch ──
 
   - name: "tryTypeInference -> Person.getName (try-catch expression)"
-    skip: true
+    known_gap: "reason not recorded"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'tryTypeInference'

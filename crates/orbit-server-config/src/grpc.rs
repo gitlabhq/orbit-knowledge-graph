@@ -48,8 +48,6 @@ mod tests {
     use super::*;
     use crate::AppConfig;
 
-    // Regression guard for hyperium/tonic#2522: a zero grace with a non-zero
-    // max age reproduces the "async fn resumed after completion" panic.
     #[test]
     fn default_pairs_max_connection_age_with_nonzero_grace() {
         let cfg = AppConfig::embedded_defaults().grpc;

@@ -12,15 +12,10 @@ use crate::handler::HandlerError;
 use super::datalake::DatalakeQuery;
 use orbit_utils::traversal_path::TraversalPath;
 
-/// The probe derives its bucket width from the id span to land near this count;
-/// a fixed width would collapse a narrow id range into a single bucket.
 const TARGET_BUCKET_COUNT: i64 = 10_000;
 
-/// Skip partitioning a scope smaller than this; the probe isn't worth it.
 pub const PARTITION_MIN_ROWS: u64 = 50_000_000;
 
-/// Half-open `[lower, upper)` slice of the leading sort-key prefix; `None` is an
-/// open end (first/last partition).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::modules::sdlc) struct PartitionAssignment {
     pub index: u32,
@@ -74,8 +69,6 @@ pub(in crate::modules::sdlc) fn build_strategies(
         .collect()
 }
 
-/// The `(…, id)` prefix to partition on; `None` when the trailing key isn't a
-/// numeric column we can bucket (e.g. `traversal_path` alone).
 fn partition_key_columns(order_by: &[String]) -> Option<Vec<String>> {
     let key: Vec<String> = order_by.iter().take(2).cloned().collect();
     match key.last().map(String::as_str) {
@@ -107,7 +100,6 @@ impl PartitionStrategy {
         if cuts.len() < self.count as usize {
             let probe_rows: usize = batches.iter().map(RecordBatch::num_rows).sum();
             if probe_rows > 0 && self.min_rows > 0 {
-                // Returned rows cleared the probe's `total_rows >= min_rows` gate, so too-few-cuts on a real scope is the silent single-threaded fallback (#869).
                 warn!(
                     safe(BATCH_COUNT) = batches.len(),
                     safe(ROW_COUNT) = probe_rows,
@@ -128,7 +120,6 @@ impl PartitionStrategy {
         Ok(self.assignments_between(&cuts))
     }
 
-    // cuts[0] is the scope start; cuts[1..count] are the internal partition edges.
     fn assignments_between(&self, cuts: &[Vec<String>]) -> Vec<PartitionAssignment> {
         let edges = &cuts[1..self.count as usize];
         (0..self.count)
@@ -142,10 +133,6 @@ impl PartitionStrategy {
             .collect()
     }
 
-    /// Buckets the trailing id key, accumulates row counts in sort-key order,
-    /// and takes the first key tuple of each row-balanced quantile. Carrying the
-    /// leading keys lets a cut split *inside* a dominant path by id — a
-    /// path-only cut cannot.
     fn probe_sql(&self, traversal_path: Option<&TraversalPath>) -> String {
         let table = &self.datalake_table;
         let count = self.count;

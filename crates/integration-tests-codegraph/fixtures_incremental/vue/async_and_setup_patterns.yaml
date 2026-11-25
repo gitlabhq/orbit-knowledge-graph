@@ -38,8 +38,7 @@ fixtures:
 
 tests:
   - name: defineAsyncComponent options objects still synthesize Vue component definitions
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+    known_gap: "The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not."
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'components/async_panel.vue'
@@ -52,8 +51,7 @@ tests:
       - { row: { name: "setup", type: "Method" } }
 
   - name: defineAsyncComponent setup methods resolve imported helper calls
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'AsyncPanel::setup'
@@ -63,8 +61,7 @@ tests:
       - { row: { caller: "AsyncPanel::setup", callee: "markReady" } }
 
   - name: script setup imports resolve to concrete helper definitions
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'components/setup_panel.vue'
@@ -74,8 +71,7 @@ tests:
       - { row: { name: "normalizeValue", target: "normalizeValue" } }
 
   - name: script setup function bodies resolve imported helper calls
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'runSetup'

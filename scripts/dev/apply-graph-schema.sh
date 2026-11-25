@@ -1,23 +1,4 @@
 #!/usr/bin/env bash
-# Apply the Orbit graph schema (config/graph.sql) to a ClickHouse database over HTTP.
-#
-# Usage:
-#   scripts/dev/apply-graph-schema.sh [OPTIONS]
-#
-# Options:
-#   --url URL         ClickHouse HTTP URL (default: http://127.0.0.1:8123)
-#   --database DB     Target database (default: gkg)
-#   --user USER       ClickHouse user (default: gitlab-dev-stack)
-#   --schema FILE     Path to SQL file (default: config/graph.sql)
-#   --dry-run         Print statements without executing
-#   -h, --help        Show this help
-#
-# Environment variables (override defaults):
-#   CLICKHOUSE_URL, CLICKHOUSE_DATABASE, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD
-#
-# The script applies each SQL statement individually because ClickHouse
-# does not support multi-statement DDL in one request. HTTP is used because
-# `mise run dev:connect` forwards only the HTTP port from the Caproni cluster.
 
 set -euo pipefail
 
@@ -32,7 +13,27 @@ SCHEMA="${REPO_ROOT}/config/graph.sql"
 DRY_RUN=false
 
 usage() {
-    sed -n '2,/^$/s/^# \{0,1\}//p' "$0"
+    cat <<'EOF'
+Apply the Orbit graph schema (config/graph.sql) to a ClickHouse database over HTTP.
+
+Usage:
+  scripts/dev/apply-graph-schema.sh [OPTIONS]
+
+Options:
+  --url URL         ClickHouse HTTP URL (default: http://127.0.0.1:8123)
+  --database DB     Target database (default: gkg)
+  --user USER       ClickHouse user (default: gitlab-dev-stack)
+  --schema FILE     Path to SQL file (default: config/graph.sql)
+  --dry-run         Print statements without executing
+  -h, --help        Show this help
+
+Environment variables (override defaults):
+  CLICKHOUSE_URL, CLICKHOUSE_DATABASE, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD
+
+The script applies each SQL statement individually because ClickHouse
+does not support multi-statement DDL in one request. HTTP is used because
+`mise run dev:connect` forwards only the HTTP port from the Caproni cluster.
+EOF
     exit 0
 }
 

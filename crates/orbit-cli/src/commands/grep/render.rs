@@ -12,7 +12,6 @@ use super::scan::Hit;
 use super::term::{Term, matcher};
 
 const NOTE: &str = "» ";
-/// A query that names a definition gets that definition's source first, so `head` keeps it.
 const LOOKUP_MAX_DEFINITIONS: usize = 3;
 const LOOKUP_LINES: usize = 80;
 const EDITED_MARK: &str = " (edited since index)";
@@ -269,10 +268,6 @@ fn index_lines(dirs: &[(&str, Vec<(&str, usize)>)]) -> Vec<(String, usize)> {
     lines
 }
 
-/// The source of the one definition a single plain query term names, as rg context lines
-/// under its `»` line. None for patterns, OR queries, or names with many definitions.
-/// The source of a definition a plain query term names (at most a few such definitions), printed
-/// before the rows so `head` keeps it. None with `-A`/`-B`/`-C`, `-v`, or `-l`/`-c`/`-q`.
 pub(super) fn lookup(
     repo: &Path,
     hits: &[Hit],

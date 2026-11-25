@@ -331,8 +331,7 @@ tests:
       - { row: { path: "ee/security_inventory/utils", name: "buildSeverityPath", target: "buildSeverityPath" } }
 
   - name: direct ee Vue imports target the component definition
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/spec/frontend/oncall_schedule/direct_form_spec.ts'
@@ -342,8 +341,7 @@ tests:
       - { row: { path: "ee/oncall_schedules/components/add_edit_schedule_form.vue", name: "default", target: "AddEditScheduleForm" } }
 
   - name: Vue SFC extraction emits component and method definitions for monolith files
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue'
@@ -364,8 +362,7 @@ tests:
       - { empty: true }
 
   - name: ee Vue barrels preserve explicit default reexports
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/spec/frontend/oncall_schedule/index_spec.ts'

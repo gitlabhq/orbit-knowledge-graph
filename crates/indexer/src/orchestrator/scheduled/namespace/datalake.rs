@@ -249,7 +249,6 @@ impl NamespaceChangeQuery {
     }
 }
 
-/// Renders `select` over the changed rows of every source, as `changed`, and the enabled roots, as `enabled`.
 pub(super) fn render_change_query(
     select: &str,
     reindex_sources: &BTreeSet<ReindexSource>,

@@ -8,7 +8,6 @@ pub use treesitter_visit::extract::{
     no_extract, text,
 };
 
-/// Single-value fields use `Extract`. Multi-value fields use `fn(&Node) -> Vec<String>`.
 pub struct MetadataRule {
     pub super_types: Option<fn(&N<'_>) -> Vec<String>>,
     pub return_type: Option<Extract>,
@@ -61,7 +60,6 @@ impl MetadataRule {
         self
     }
 
-    /// The `resolve` closure transforms bare type names into FQNs using tree context + import map.
     pub fn extract_metadata(
         &self,
         node: &N<'_>,
@@ -79,9 +77,6 @@ impl MetadataRule {
             .type_annotation
             .as_ref()
             .and_then(|e| e.apply_with(node, &resolve));
-        // receiver_type uses bare apply (no import resolution) so it
-        // stores the source-level type name. The lookup_by_receiver_type
-        // matches against bare_type extracted from the chain's FQN.
         let receiver_type = self.receiver_type.as_ref().and_then(|e| e.apply(node));
         let decorators = self.decorators.map(|f| f(node)).unwrap_or_default();
         let companion_of = self.companion_of.as_ref().and_then(|e| e.apply(node));

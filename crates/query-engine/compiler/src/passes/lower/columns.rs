@@ -1,6 +1,3 @@
-//! Columns a materialized relation must select: ClickHouse stores every column an `AS MATERIALIZED`
-//! body selects, so the body keeps only what the relation's consumers reference.
-
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::graph::exposed_alias;
@@ -14,7 +11,6 @@ use crate::passes::plan::reuse::RelationUsage;
 
 type Consumer = (Option<RelationId>, Option<String>);
 
-/// An empty set means the relation must keep every column.
 pub(super) fn required_columns(
     plan: &ExecutionPlan,
     usage: &RelationUsage,

@@ -1,5 +1,3 @@
-# config/ontology/edges/owner.yaml
-
 description: Ownership relationship between users and groups/projects
 
 variants:

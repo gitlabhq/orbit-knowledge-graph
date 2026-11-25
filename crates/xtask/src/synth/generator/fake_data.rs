@@ -39,15 +39,11 @@ fn push_hex_u16(buf: &mut String, val: u16) {
     push_hex_u64(buf, val as u64);
 }
 
-/// Bool and Int carry pre-resolved parameters so generation is a single
-/// comparison / modulo with no HashMap lookup on the hot path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldKind {
     String(StringKind),
     GenericString,
-    /// Pre-computed byte threshold (random_byte < threshold → true).
     Bool(u8),
-    /// Pre-computed (min, range_size) for `min + (random % range_size)`.
     Int(u32, u32),
     Float,
     Date,
@@ -80,9 +76,6 @@ pub struct StaticStringRule {
     pub kind: StringKind,
 }
 
-/// String pools are `Box::leak`ed to get `&'static str` slices — the data lives
-/// for the entire program lifetime (trivial size, few hundred bytes) and avoids
-/// per-row allocation overhead, allowing `Cow::Borrowed` returns.
 pub struct FakeDataPools {
     pub name_prefixes: &'static [&'static str],
     pub email_domains: &'static [&'static str],
@@ -91,7 +84,6 @@ pub struct FakeDataPools {
     pub states: &'static [&'static str],
     pub branch_prefixes: &'static [&'static str],
 
-    // order matters — first match wins
     pub string_rules: &'static [StaticStringRule],
 
     pub bool_thresholds: HashMap<&'static str, u8>,
@@ -109,12 +101,10 @@ fn leak_string_pool(strings: Vec<String>) -> &'static [&'static str] {
     Box::leak(leaked.into_boxed_slice())
 }
 
-/// Convert a probability (0.0–1.0) to a byte threshold for `(random_byte < threshold)`.
 fn prob_to_threshold(p: f64) -> u8 {
     (p * 256.0).ceil().min(255.0) as u8
 }
 
-/// Convert [min, max] inclusive range to (min, range_size) for `min + (random % range_size)`.
 fn range_to_params(range: [u32; 2]) -> (u32, u32) {
     let min = range[0];
     let max = range[1];
@@ -377,7 +367,6 @@ impl FakeValueGenerator {
     ) -> FakeValue {
         let bits = self.next_random();
 
-        // Use lowest bits for nullable check (10% ≈ 26/256)
         if nullable && (bits & 0xff) < 26 {
             return FakeValue::Null;
         }

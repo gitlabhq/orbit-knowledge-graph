@@ -1,11 +1,5 @@
 name: "C# enums — members, explicit values, typed base, [Flags] enum"
 
-# Coverage note: csharp.rs maps enum_declaration to definition_type "Enum"
-# (scope("enum_declaration", "Enum")) and enum_member_declaration to "EnumVariant"
-# (scope("enum_member_declaration", "EnumVariant").no_scope()). csharp/edge_cases.yaml
-# touches a single EnumMember; there was no focused fixture for enum extraction,
-# enum members under a namespace, a byte-typed enum, or a [Flags] enum.
-
 fixtures:
   - path: Models/Status.cs
     content: |

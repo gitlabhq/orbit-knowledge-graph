@@ -2,10 +2,6 @@ name: "Ruby v1 parity — full resolution suite"
 fixture_tree: ruby_v1
 
 tests:
-  # All tests skip: v2 Ruby pipeline produces defs but no Calls edges yet.
-  # FQNs use :: separator (v2 format), not # (v1 format).
-
-  # ── R1: test_notification_service_call_resolution ──
   - name: "UsersController::destroy -> NotificationService::notify"
     skip: false
     query: |
@@ -16,7 +12,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── R2: test_send_welcome_email_resolution ──
   - name: "UsersController::create -> User::send_welcome_email"
     skip: false
     query: |
@@ -37,7 +32,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── R3: test_static_method_call_resolution ──
   - name: "Application::test_user_creation_flow -> User::create_with_profile"
     skip: false
     query: |
@@ -78,7 +72,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── R5: test_chained_method_call_resolution ──
   - name: "UsersController::show -> User::get_profile"
     skip: false
     query: |
@@ -109,7 +102,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── R8: test_service_method_call_patterns ──
   - name: "NotificationService::notify -> NotificationService::build_notification"
     skip: false
     query: |
@@ -150,7 +142,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── R11: test_ruby_instance_variable_resolution ──
   - name: "UsersController::show -> User::get_profile (through @user)"
     skip: false
     query: |
@@ -161,7 +152,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── R14: test_ruby_cross_service_calls ──
   - name: "User::send_welcome_email -> EmailService::send_welcome (cross-service)"
     skip: false
     query: |
@@ -172,7 +162,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── R15: test_ruby_private_method_calls ──
   - name: "User::send_notification -> NotificationService::notify"
     skip: false
     query: |
@@ -183,7 +172,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── R16: test_ruby_variable_assignment_tracking ──
   - name: "UsersController::create -> User::send_welcome_email (through user = User.new)"
     skip: false
     query: |
@@ -194,7 +182,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── R17: test_ruby_block_and_iterator_calls ──
   - name: "NotificationService::send_batch_notifications -> NotificationService::notify (in block)"
     skip: false
     query: |

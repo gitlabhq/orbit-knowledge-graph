@@ -1,5 +1,3 @@
-# "#9" carries no project prefix; the note's project_id must supply the
-# default project so the work item resolves.
 description: Same-project shorthand references resolve via the note's owning project
 scope: { namespace: 100 }
 

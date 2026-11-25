@@ -1,5 +1,3 @@
-//! Pipeline identity derived from ETL declarations.
-
 use std::collections::BTreeSet;
 
 use crate::Ontology;

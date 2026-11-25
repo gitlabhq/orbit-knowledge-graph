@@ -21,12 +21,9 @@ pub struct AnalyzedJsFile {
     pub relative_path: String,
     pub analysis: JsFileAnalysis,
     pub phase1: JsPhase1File,
-    /// Wall-clock time for OXC parse + semantic + extraction.
     pub parse_ms: f64,
 }
 
-/// What resolution needs from a parsed file. The module graph builder is the last
-/// reader of the rest of [`JsFileAnalysis`], so it is dropped instead of carried.
 #[derive(Debug, Clone)]
 pub struct ResolvedJsFile {
     pub relative_path: String,
@@ -64,8 +61,6 @@ pub fn analyze_files(
     progress: &dyn crate::v2::pipeline::ProgressObserver,
 ) -> (Vec<AnalyzedJsFile>, Vec<FailedJsFile>) {
     let root_gone = std::sync::atomic::AtomicBool::new(false);
-    // `catch_unwind` isolates per-file panics: a malformed input that trips
-    // an OXC invariant takes down that file's analysis, not the pipeline.
     let results: Vec<_> = files
         .par_iter()
         .filter_map(|relative_path| {
@@ -86,8 +81,6 @@ pub fn analyze_files(
             });
             let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
             progress.files_advanced(crate::v2::pipeline::ProgressPhase::Parse, 1);
-            // If the sentinel killed this file while OXC was running,
-            // convert whatever result we got into a timeout skip.
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
                 return Some((
                     relative_path.clone(),
@@ -150,10 +143,6 @@ fn safe_repo_join(root_path: &str, relative_path: &str) -> Result<PathBuf, Analy
         ));
     }
     let input = Path::new(relative_path);
-    // Callers sometimes hand us absolute paths that already live under
-    // `root_path` (the v2 pipeline walker and the integration-test
-    // harness both do). Strip the root so the rest of the check sees a
-    // clean relative form; anything else is refused.
     let rel = if input.is_absolute() {
         input.strip_prefix(root_path).map_err(|_| {
             AnalyzerError::skip(
@@ -190,10 +179,6 @@ fn safe_repo_join(root_path: &str, relative_path: &str) -> Result<PathBuf, Analy
     Ok(joined)
 }
 
-/// Per-file ceiling on star-reexport specifiers. Star re-export chains
-/// drive repeated resolver work inside `resolve_star_reexport_target`,
-/// so an attacker-crafted module with 100 k `export * from '...'`
-/// statements would amplify the cost of every import that touches it.
 const MAX_STAR_REEXPORTS: usize = 64;
 
 fn dedup_and_cap_star_reexports(specifiers: &[String]) -> Vec<JsStarReexport> {
@@ -270,10 +255,6 @@ fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, 
     }
     let (virtual_path, source_text) = prepared_source(&relative_path, &extension, &source)?;
 
-    // One analyzer call per file. SFCs with multiple `<script>` blocks
-    // go through `frameworks::combine_scripts` first, so the analyzer
-    // never sees the N-blocks-to-merge shape that silently dropped
-    // colliding bindings in the old multi-pass path.
     let mut analysis = JsAnalyzer::analyze_file(&source_text, &virtual_path, &relative_path)?;
     analysis.relative_path = relative_path.clone();
 
@@ -337,8 +318,6 @@ fn file_backed_module(
     })
 }
 
-/// For SFCs, every `<script>` block is concatenated into one buffer so
-/// the analyzer, OXC parser, and SSA pass each run once per file.
 fn prepared_source(
     relative_path: &str,
     extension: &str,
@@ -349,8 +328,6 @@ fn prepared_source(
     }
     let combined = super::frameworks::combine_scripts(source, extension)?;
     if combined.block_count == 0 {
-        // No `<script>` block found — treat the raw SFC as empty source
-        // so the analyzer emits no defs rather than tripping on markup.
         return Ok((format!("{relative_path}.js"), String::new()));
     }
     let virtual_ext = if combined.is_typescript { "ts" } else { "js" };
@@ -426,11 +403,6 @@ fn canonical_definition(definition: &JsDef, extends: Option<&String>) -> Canonic
     }
 }
 
-/// JS identifiers are attacker-controlled and carry into the graph as
-/// hash keys and display strings. A source with 100 MB of contiguous
-/// identifier text can hold the whole thing in memory for the life of
-/// the pipeline. Cap at 1 KiB, which is still two orders of magnitude
-/// past any realistic human-written name.
 fn truncate_identifier(value: &str) -> String {
     const MAX: usize = 1024;
     if value.len() <= MAX {
@@ -445,9 +417,6 @@ fn truncate_identifier(value: &str) -> String {
 }
 
 fn canonical_def_kind(kind: &JsDefKind) -> DefKind {
-    // Arms are explicit (no catch-all) so adding a new `JsDefKind`
-    // variant triggers an exhaustiveness error instead of silently
-    // collapsing to a wrong graph `DefKind`.
     match kind {
         JsDefKind::Class => DefKind::Class,
         JsDefKind::Interface => DefKind::Interface,

@@ -1,6 +1,3 @@
-//! Dispatcher coverage lives in the YAML scenarios under
-//! `tests/indexer/scenarios/dispatch/`, executed by `dispatch_scenarios`.
-
 use std::sync::Arc;
 
 use super::common;

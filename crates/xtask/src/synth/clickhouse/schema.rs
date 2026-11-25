@@ -24,7 +24,6 @@ impl<'a> SchemaGenerator<'a> {
 
             let (primary_key, order_by): (Vec<&str>, Vec<&str>) =
                 if self.config.use_ontology_sort_keys && !node.sort_key.is_empty() {
-                    // Matches graph.sql where each table has its own ORDER BY/PK.
                     let sort_key: Vec<&str> = node.sort_key.iter().map(|s| s.as_str()).collect();
                     (sort_key.clone(), sort_key)
                 } else {
@@ -148,7 +147,6 @@ impl<'a> SchemaGenerator<'a> {
         statements
     }
 
-    /// Resolve table pattern ("*" = all node tables, "edges" = edge table).
     fn resolve_table_pattern(&self, pattern: &str) -> Vec<String> {
         match pattern {
             TABLE_PATTERN_ALL_NODES => self

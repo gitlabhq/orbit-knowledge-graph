@@ -1,5 +1,3 @@
-# config/ontology/edges/assigned.yaml
-
 description: Assignment relationship between users and entities
 
 variants:

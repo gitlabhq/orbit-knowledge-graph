@@ -1,14 +1,3 @@
-//! `Pipeline<T>` carries one artifact; `then` swaps it for the next by
-//! running a `Phase`. The artifact's type decides which phases apply:
-//!
-//! ```text
-//! () ─Prepare─> Workset<SourcePaths>
-//!   ─Each(Parse+Rewrite+Canonicalize+Link)─> Workset<Vec<LinkedFile>>
-//!   ─Insert─> DirtyGraph ─Resolve─> Resolved ─Display─> Displayed
-//!   ─Export─> Exported ─Emit─> Exported
-//! ReindexInput ─Remap─> Workset<SourcePaths> ─(as above)
-//! ```
-
 mod artifacts;
 mod phases;
 mod state;
@@ -60,7 +49,6 @@ impl<'e, T> Pipeline<'e, T> {
     }
 }
 
-/// One step of a pipeline: consumes the current artifact, produces the next.
 pub trait Phase<I> {
     type Output;
 
@@ -69,7 +57,6 @@ pub trait Phase<I> {
     fn run(self, context: &mut Context, input: I) -> Result<Self::Output, Error>;
 }
 
-/// A step over one item with no shared state, so items run in parallel.
 pub trait ItemPhase<I> {
     type Output;
 
@@ -99,7 +86,6 @@ impl<I, A: ItemPhase<I>, B: ItemPhase<A::Output>> ItemPhase<I> for Chain<A, B> {
     }
 }
 
-/// What one run shares across its phases; `run` is the run's total deadline.
 pub struct Context<'e> {
     pub env: &'e Env,
     pub repository: Sources,
@@ -179,7 +165,6 @@ pub struct FileStats {
     pub resolve: Duration,
 }
 
-/// The file an item of a per-file phase belongs to.
 pub trait Labelled {
     fn label(&self) -> &str;
     fn bytes(&self) -> u64 {
@@ -187,7 +172,6 @@ pub trait Labelled {
     }
 }
 
-/// Sees the run as it happens; implement only the methods you need.
 pub trait Observer: Send {
     fn started(&mut self, _phase: &str) {}
     fn finished(&mut self, _phase: &str, _elapsed: Duration) {}

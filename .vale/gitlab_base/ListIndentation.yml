@@ -14,18 +14,3 @@ tokens:
   - '^1\. [^\n]*\n\n?( |  |    )[`\w-]'
   - '^- [^\n]*\n\n?( |   |    )[`\w-]'
 
-# Regex guide:
-#
-# "^1. [^\n]*" - Lines that start with an ordered list.
-# "^- [^\n]*" - Lines that start with an unordered list.
-#
-# "\n\n?" - Then one or two newlines
-#
-# Ordered lists: "( |  |    )" - One, two, or four spaces (three = OK)
-# Unordered lists: "( |   |    )" - One, three, or four spaces (two = OK)
-#
-# "[`\w-]" - Any one of:
-#
-# - A backtick - For code blocks (after a list item).
-# - A letter/number - For alert boxes, sentences, and nested ordered lists (after a list item).
-# - A hyphen - For nested unordered lists (after a list item).

@@ -1,16 +1,3 @@
-//! # Why two semaphores?
-//!
-//! The global semaphore caps total concurrency across the entire engine, protecting
-//! shared resources like CPU, memory, and database connections.
-//!
-//! Per-group semaphores let you run multiple handler types in a single pod without
-//! one starving the others. For example, running both SDLC and Code handlers, you
-//! can give each group a limit of 4 while keeping the global limit at 6, so neither
-//! group can monopolize all workers.
-//!
-//! If you only need a global limit, don't configure any concurrency groups and
-//! the engine will skip the group semaphore entirely.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -22,10 +9,6 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use super::metrics::EngineMetrics;
 use orbit_server_config::EngineConfiguration;
 
-/// A permit that reserves capacity for one handler execution; releases on drop.
-///
-/// Includes a global permit (always) and a group-specific permit (when the handler
-/// belongs to a configured concurrency group).
 pub struct HandlerSlot {
     _global_permit: OwnedSemaphorePermit,
     _group_permit: Option<OwnedSemaphorePermit>,

@@ -1,7 +1,3 @@
-//! Per-store limits. File size over the cap becomes `List("oversize")`.
-//! Resident overflow spills; kept file count, total bytes and scratch overflow fail loading.
-//! Failed reservations leave counters unchanged, and arithmetic never wraps.
-
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
@@ -26,12 +22,10 @@ pub struct Limits {
     pub file_bytes: Option<u64>,
     pub total_bytes: Option<u64>,
     pub files: Option<usize>,
-    /// `Some(0)` spills all content; this budget excludes metadata and temporary read buffers.
     pub resident_bytes: Option<u64>,
     pub spilled_bytes: Option<u64>,
 }
 
-/// Returns the previous total for positional scratch writes.
 pub(super) fn add_capped(
     total: &AtomicU64,
     metric: LimitKind,

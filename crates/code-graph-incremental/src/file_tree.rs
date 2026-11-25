@@ -12,11 +12,7 @@ use crate::tree::{Cursor, Node, Step, Tag, Tree};
 pub struct WalkResult {
     pub entrypoints: Vec<(String, String)>,
     pub lookup: LookupConfig,
-    /// Per file: the tags rules put on it and on its ancestor directories,
-    /// nearest first, plus `source_root_rel`, its path below the nearest source root.
     pub file_tags: Vec<(String, Vec<Tag>)>,
-    /// Every key a file tag can carry, so a reused tree can drop the ones
-    /// that no longer apply before this run's are set.
     pub tag_keys: Vec<u32>,
 }
 
@@ -46,8 +42,6 @@ pub struct ProjectTree<'a> {
 }
 
 impl<'a> ProjectTree<'a> {
-    /// Just the directory tree: `__root` over `__dir` and `__file` nodes whose
-    /// `sym` is the path segment. The resolver and the exporter both walk it.
     pub fn directory_tree(lang: &'a Lang, paths: &'a [&'a str]) -> Tree {
         static NO_CONFIG: std::sync::LazyLock<ResolveConfig> =
             std::sync::LazyLock::new(ResolveConfig::default);
@@ -266,8 +260,6 @@ impl<'a> ProjectTree<'a> {
         }
     }
 
-    /// Import-path aliases a rule file declared as `(__alias key (__str value))`
-    /// on the project tree, longest key first so `@/lib/*` wins over `@/*`.
     fn collect_aliases(&mut self) {
         let mut aliases = self
             .tree

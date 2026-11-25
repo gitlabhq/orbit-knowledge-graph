@@ -9,5 +9,4 @@ pub use clients::ClickHouseClients;
 pub(crate) use writer::insert_overrides;
 pub use writer::{ClickHouseWriter, WriteError, WriteReport};
 
-/// ClickHouse microsecond timestamp format used across watermark stores and data cleaners.
 pub const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.6f";

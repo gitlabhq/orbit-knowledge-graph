@@ -1,8 +1,5 @@
-// Re-export so existing `crate::constants::` paths keep working.
 pub use ontology::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 
-// Per-node columns embed a user alias and end in one of these suffixes. No other
-// internal name may, or an alias could reproduce it; the const asserts enforce that.
 const PER_NODE_SUFFIXES: [&str; 4] = ["pk", "id", "type", "tp"];
 
 const fn takes_per_node_suffix(name: &str) -> bool {
@@ -34,9 +31,6 @@ const fn ends_with_word(name: &[u8], word: &[u8]) -> bool {
     true
 }
 
-/// Loaded once at startup from the embedded ontology YAML.
-/// Every name the compiler invents (column, table alias, CTE) starts with this prefix,
-/// and validation rejects user identifiers that use it, so the two never collide.
 pub fn internal_column_prefix() -> &'static str {
     use std::sync::OnceLock;
     static PREFIX: OnceLock<String> = OnceLock::new();
@@ -89,7 +83,6 @@ internal_name!(pub(crate) center_rows_cte, "center_rows");
 internal_name!(pub(crate) scope_lookup_alias, "scope");
 internal_name!(pub(crate) id_source_alias, "id_source");
 
-// _orbit_{alias}_pk  — always the entity's primary key (for hydration lookups)
 pub fn primary_key_column(alias: &str) -> String {
     format!("{}{alias}_pk", internal_column_prefix())
 }
@@ -102,9 +95,6 @@ pub(crate) fn redaction_type_column(alias: &str) -> String {
     format!("{}{alias}_type", internal_column_prefix())
 }
 
-/// Hidden column carrying the entity's `traversal_path` value from the base
-/// query into the hydration pipeline. Used to narrow hydration scans via
-/// `startsWith(traversal_path, tp)`, pruning granules through the primary key.
 pub fn traversal_path_column(alias: &str) -> String {
     format!("{}{alias}_tp", internal_column_prefix())
 }
@@ -118,7 +108,6 @@ pub(crate) fn edge_column_prefix(index: usize, variable_length: bool) -> String 
     format!("{}{hop}e{index}_", internal_column_prefix())
 }
 
-/// Table alias of one hop in a multi-hop expansion; the first hop is depth 1.
 pub(crate) fn hop_alias(depth: u32) -> String {
     format!("{}e{depth}", internal_column_prefix())
 }
@@ -131,13 +120,10 @@ pub(crate) fn node_filter_cte(alias: &str) -> String {
     format!("{}nf_{alias}", internal_column_prefix())
 }
 
-/// Table alias of one arm in a UNION over several edge tables.
-/// Stays reserved because `alias` is.
 pub(crate) fn union_arm_alias(alias: &str) -> String {
     format!("{alias}_arm")
 }
 
-/// Upper bound on rows fetched per entity type during dynamic hydration.
 pub const MAX_DYNAMIC_HYDRATION_RESULTS: usize = 1000;
 
 pub const EDGE_KIND_SUFFIX: &str = "kind";
