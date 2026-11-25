@@ -1,6 +1,6 @@
 mod ledger;
 mod runtime;
-pub mod simulator;
+pub mod simulation;
 mod timeline;
 
 use std::sync::{Arc, OnceLock};

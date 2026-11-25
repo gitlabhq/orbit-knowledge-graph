@@ -1,13 +1,13 @@
 mod support;
 
 use indexing_engine_next::testkit::Testkit;
-use indexing_engine_next::{ClusterPoolConfig, EngineConfig, LaneConfig, PoolConfig};
+use indexing_engine_next::{ClusterPoolConfig, EngineConfig, Lane, LaneConfig, LaneId, PoolConfig};
 use support::{MINUTE, Run, SECOND, TestPlanner, TestWorker, events, nonzero};
 
 fn two_slots_and_a_parse_pool(pool: PoolConfig) -> EngineConfig {
     EngineConfig::default()
         .with_lane(
-            "test.worker/default",
+            LaneId::new("test.worker", Lane::DEFAULT),
             LaneConfig::new(nonzero(2), 10 * MINUTE),
         )
         .with_pool("parse", pool)

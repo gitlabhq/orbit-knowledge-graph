@@ -1,0 +1,62 @@
+"crates/orbit-billing/src/enforcement.rs":
+- category: compliance
+  reason: "SOX control: billing enforcement is a build-time cfg so deployed config cannot disable it."
+  preview: "//! Startup validation for builds compiled with `ORBIT_BILLING_ENFORCED…"
+  hash: 632005c9536fa1af
+  lines: 3
+"crates/orbit-billing/src/inputs.rs":
+- category: contract
+  reason: "SOX boundary: only these fields cross from auth to billing, through the single adapter."
+  preview: "//! Input shape for `BillingObserver`."
+  hash: b0dc8b73d4a70dbe
+  lines: 6
+"crates/orbit-billing/src/metrics.rs":
+- category: upstream
+  reason: "OTel hides never-observed series, so rate()==0 alerts need series registered at zero at startup."
+  preview: "/// Register every series at 0 at startup so `rate(...) == 0` alerts co…"
+  hash: 73deb730386df04c
+  lines: 3
+"crates/orbit-billing/src/quota/cache.rs":
+- category: magic-value
+  reason: "Tradeoff: without jitter, the fleet misses the cache in lockstep when CustomersDot sends equal max-age values."
+  preview: "// ±10% jitter staggers expiry across instances that all populate their…"
+  hash: d068d7ea80dc62df
+  lines: 3
+- category: upstream
+  reason: "Dropping the gauge handle deregisters the OTel callback, so the field must stay."
+  preview: "// Kept alive for the lifetime of the cache so the OTel SDK keeps invok…"
+  hash: ec9e4b7c8bb2a3e0
+  lines: 2
+- category: compliance
+  reason: "SOX billing scope: a failed CustomersDot call must not be cached, so the next request retries."
+  preview: "/// Returns the gate decision and whether it was served from cache."
+  hash: 7857c758ba562159
+  lines: 6
+"crates/orbit-billing/src/quota/key.rs":
+- category: security
+  reason: "Cache key fields are logged, so adding license_checksum would leak a credential into logs."
+  preview: "// `license_checksum` stays out of `CacheKey`: key fields are logged, a…"
+  hash: 2048fa94f3b846c2
+  lines: 3
+- category: contract
+  reason: "CustomersDot expects the realm exactly as Rails signs it, so it must not become REALM_SM."
+  preview: "// The quota check sends the realm claim exactly as Rails signed it (`s…"
+  hash: 1defe74d6d85b39d
+  lines: 3
+"crates/orbit-billing/src/quota/metrics.rs":
+- category: upstream
+  reason: "OTel exposes a series only after first observation; histogram record(0) would be a real sample."
+  preview: "/// Pre-seed every labelled counter series at 0 so Prometheus never see…"
+  hash: c7cace8bcea8462e
+  lines: 8
+"crates/orbit-billing/src/quota/mod.rs":
+- category: invariant
+  reason: "Self-managed operators control CustomersDot egress, so failing open there would bypass quota; only GitLab.com fails open."
+  preview: "// Self-managed operators control egress to CustomersDot, so only GitLa…"
+  hash: 266eeb0e284c6954
+  lines: 1
+- category: contract
+  reason: "Transient behavior: SaaS requests without a governing namespace skip check and billing until Rails rejects them."
+  preview: "// Temporary until Rails rejects SaaS requests without a governing name…"
+  hash: c54652911782e639
+  lines: 2

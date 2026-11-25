@@ -1,0 +1,6 @@
+id: comments-ruby
+valid:
+  - 'x = "# not a comment"'
+invalid:
+  - '# a comment'
+  - 'x = 1 # trailing comment'

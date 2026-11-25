@@ -1,0 +1,6 @@
+id: comments-ruby
+language: ruby
+severity: error
+message: Remove this comment and fix the root cause in the code. Run `mise run lint:comments` for the steps.
+rule:
+  kind: comment

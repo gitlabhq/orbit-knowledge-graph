@@ -1,0 +1,12 @@
+"crates/orbit-observability/src/buckets.rs":
+- category: invariant
+  reason: "The buckets must stay a superset of the old layout so mixed pods still sum per le during rollouts."
+  preview: "/// Query latency buckets (10 ms to 60 s). A superset of the previous l…"
+  hash: 662ccccde03e2fdd
+  lines: 2
+"crates/orbit-observability/src/indexer/etl.rs":
+- category: upstream
+  reason: "The By unit already adds _bytes; a .bytes token renames the series and breaks dashboards."
+  preview: "// Drop the `.bytes` token from the OTel name: the `By` unit already ma…"
+  hash: 07b2a6cbfd063724
+  lines: 3

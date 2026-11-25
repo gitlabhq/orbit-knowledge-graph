@@ -1,0 +1,118 @@
+"crates/orbit-server/build.rs":
+- category: upstream
+  reason: "Libduckdb-sys adds no rpath for a downloaded libduckdb, so debug runs need this."
+  preview: "/// libduckdb-sys 2.0 adds no rpath for a downloaded libduckdb, so a de…"
+  hash: e48eaa2a2bcff8a8
+  lines: 2
+"crates/orbit-server/src/auth/claims.rs":
+- category: security
+  reason: "Anyone holding the checksum can query CustomersDot quota verdicts, so it must never be serialized or logged."
+  preview: "/// SHA-256 of the instance's online cloud license, sent by Rails on se…"
+  hash: 7d71f5aeb71f9aab
+  lines: 4
+- category: contract
+  reason: "The Rails ops flag orbit_gitlab_com_access_override sets this claim; no other file names the flag."
+  preview: "/// Set by Rails on GitLab.com when the user's Orbit billing namespace …"
+  hash: 48150e93cc6ba52f
+  lines: 3
+- category: security
+  reason: "access_levels are raw Gitlab::Access integers that the security pass compares directly with required_role."
+  preview: "/// One traversal path the user holds in their scope, paired with the e…"
+  hash: 4cd2b1e05e6134b1
+  lines: 9
+"crates/orbit-server/src/auth/validator.rs":
+- category: security
+  reason: "RSA algorithms hit RUSTSEC-2023-0071 until jsonwebtoken moves to rsa 0.10+; only HS256 is allowed."
+  preview: "// SECURITY: Only HS256 (HMAC-SHA256) is supported. Do NOT add RSA algo…"
+  hash: 0a6739661bf2be35
+  lines: 3
+- category: contract
+  reason: "Rails base64-decodes the secret file before signing JWTs, so the validator must decode to match."
+  preview: "// Rails base64-decodes the secret file before signing JWTs"
+  hash: ea6d4ed05479b8d8
+  lines: 2
+"crates/orbit-server/src/billing_adapter.rs":
+- category: compliance
+  reason: "SOX: this file is part of the billing control surface defined in the billing ADR."
+  preview: "//! The single claims-conversion seam between orbit-server and orbit-bi…"
+  hash: 445f70caff169f14
+  lines: 9
+"crates/orbit-server/src/clickhouse_setup.rs":
+- category: upstream
+  reason: "No ON CLUSTER: users reach replicas only through replicated user storage, so ON CLUSTER would break the contract."
+  preview: "// The contract has no ON CLUSTER: users reach every replica only throu…"
+  hash: 080548de368c0547
+  lines: 2
+"crates/orbit-server/src/content/gitaly/file_content.rs":
+- category: upstream
+  reason: "Gitaly lists a shared blob once per request, so misses go to the next batch."
+  preview: "/// Gitaly lists a shared blob once per request, so the files a batch m…"
+  hash: 172eb3c57ce05d84
+  lines: 1
+"crates/orbit-server/src/expanded_logs.rs":
+- category: security
+  reason: "Rust-analyzer logs names from parsed repositories, so configured ra_ap directives must be dropped to avoid leaks."
+  preview: "/// rust-analyzer writes names from the parsed repository into its mess…"
+  hash: 5a9277d664a13d50
+  lines: 2
+- category: security
+  reason: "The default panic hook prints panic text, which can hold parsed customer source, to stderr."
+  preview: "/// The default hook prints the panic text, which can hold parsed sourc…"
+  hash: 6d7f0de92193dcb5
+  lines: 1
+- category: security
+  reason: "A customer path in an internal span must not get expanded logs, or customer data leaks."
+  preview: "/// A customer path inside an internal span must not be expanded."
+  hash: 9fed48c6b9773edc
+  lines: 1
+"crates/orbit-server/src/fips.rs":
+- category: compliance
+  reason: "FIPS 140-3 control: a mislinked binary must refuse to start instead of serving traffic."
+  preview: "//! FIPS 140-3 posture of the server binary. Every TLS and JWT primitiv…"
+  hash: 8924a0a560bf2e8d
+  lines: 3
+- category: compliance
+  reason: "Moving to another AWS-LC FIPS module generation is a compliance event, not a routine bump."
+  preview: "/// AWS-LC FIPS module generation the build is declared against. The CM…"
+  hash: 9acdd495daea743d
+  lines: 4
+- category: invariant
+  reason: "FIPS control: the provider must install before any TLS or JWT use, or consumers pick a non-FIPS provider."
+  preview: "/// Installs the FIPS-restricted rustls provider as the process default…"
+  hash: 1b86776098103e88
+  lines: 3
+"crates/orbit-server/src/grpc/legacy.rs":
+- category: contract
+  reason: "Transient: published clients still call the old gRPC path; delete only after zero traffic for a milestone."
+  preview: "//! Serves the pre-rename wire surface. Published clients built from th…"
+  hash: 05bedccccd3a8479
+  lines: 6
+"crates/orbit-server/src/grpc/server.rs":
+- category: upstream
+  reason: "Tonic ignores builder TCP settings for a pre-bound listener, so they are set here."
+  preview: "// Tonic ignores the builder's TCP settings for a pre-bound listener."
+  hash: da9bd9e9ebad00db
+  lines: 1
+"crates/orbit-server/src/indexing_status/checkpoints.rs":
+- category: invariant
+  reason: "Not FINAL on purpose: before a merge a completed row must still count after a late overlapping write."
+  preview: "// Not `FINAL`: until a merge, a completed row still counts after an ov…"
+  hash: 5a73f0e744c52648
+  lines: 1
+"crates/orbit-server/src/pipeline/helpers.rs":
+- category: security
+  reason: "Non-validation errors can leak ClickHouse table, column, and SQL details, so only validation errors pass verbatim."
+  preview: "/// Sanitize error messages before sending to clients."
+  hash: c4046da89b1267d8
+  lines: 11
+- category: upstream
+  reason: "Tracing-core caches callsite interest from a thread without a subscriber, so the second dispatcher must stay."
+  preview: "// A second dispatcher stops tracing-core from caching callsite interest"
+  hash: 5edb40e6ad81da7f
+  lines: 2
+"crates/orbit-server/src/pipeline/service.rs":
+- category: invariant
+  reason: "Dropping the future from outside tore down the observer and hid timed-out queries from metrics."
+  preview: "// The timeout lives inside run_query so the observer is still alive"
+  hash: 372ddddaecb139dc
+  lines: 4
