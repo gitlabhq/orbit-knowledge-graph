@@ -53,44 +53,20 @@ DIRECTIVES = [
 ]
 
 GUIDE = """\
-Code comments are not allowed in this repository.
+Code comments are not allowed. Delete each comment and fix the cause:
+- It says what the code does: rename, or extract a named function.
+- It justifies a workaround: fix the design, or open an issue and link it in the MR.
+- It states an invariant, a limit, or a unit: use a type, a named const, an assert, or a test.
+- It is a TODO or a FIXME: open an issue.
+- It explains a decision: write it in the MR description or the commit message.
 
-A comment is not checked by any tool. It goes stale, and the next agent copies
-it as a pattern. A comment that justifies a workaround keeps the workaround in
-the code. Remove each comment above and fix the root cause in the code:
-
-  The comment says what the code does.
-    Rename the item, or extract a function whose name says it.
-  The comment justifies a workaround (a sleep, a retry, a clone, a magic value).
-    Fix the design that needs the workaround. If you cannot fix it in this MR,
-    open an issue and link it in the MR description.
-  The comment states an invariant, a limit, or a unit.
-    Put it in a type, a named const, an assert, or a test.
-  The comment is a TODO or a FIXME.
-    Open an issue.
-  The comment explains a decision.
-    Put it in the MR description or the commit message.
-
-Exception process: if no step applies and a reviewer agrees, add an entry to the
-area file under scripts/linting/comments/ledger/. Code owners approve each change.
-Print a ready entry for the comment block at a line, then fill in the reason:
-
-  mise run lint:comments -- --entry crates/example/src/lib.rs:42
-
-  crates/example/src/lib.rs:
-  - category: invariant
-    reason: why no change to the code can replace this comment
-    preview: "// the first line of the comment"
-    hash: 3f2a9c1e5b7d4a60
-    lines: 2
-
-The hash covers every line of the block, so an edit to a kept comment fails
-until you print the entry again and update it in the same MR. An entry without
-a hash exempts every comment in the files that its path glob matches. "rules"
-limits an entry to some comments-* rules. An entry that exempts no comment fails.
+Exception, only when a reviewer agrees: print the entry, add it to the area file that it names, and write the reason.
+  mise run lint:comments -- --entry PATH:LINE
+The hash covers the full block. After you edit a kept comment, print the entry again.
+An entry without a hash exempts all comments in the files that its glob matches. "rules" limits an entry to these rule ids.
+An entry that exempts no comment fails.
 Categories: {categories}.
-
-Inline suppression (ast-grep-ignore) of the comment rules is not allowed."""
+Do not use ast-grep-ignore for comments-* rules."""
 GUIDE = GUIDE.replace("{categories}", ", ".join(sorted(CATEGORIES)))
 
 HINTS = [
