@@ -1,5 +1,8 @@
 # yaml-language-server: $schema=schemas/schema-migrations.schema.json
 migrations:
+- version: 129
+  scope: none
+  note: Ontology YAML comments removed; DDL and reindex output byte-identical.
 - version: 128
   scope: sdlc
   entities:
