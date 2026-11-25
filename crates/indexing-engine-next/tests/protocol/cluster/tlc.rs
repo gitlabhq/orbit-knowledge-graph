@@ -31,10 +31,80 @@ pub fn state_id(canonical: &str) -> StateId {
 pub fn canonical(lines: impl IntoIterator<Item = String>) -> String {
     let mut lines: Vec<String> = lines
         .into_iter()
-        .map(|line| line.chars().filter(|c| !c.is_whitespace()).collect())
+        .map(|line| {
+            let compact: String = line.chars().filter(|c| !c.is_whitespace()).collect();
+            sort_record_fields(&compact)
+        })
         .collect();
     lines.sort();
     lines.join("\n")
+}
+
+fn sort_record_fields(value: &str) -> String {
+    let mut sorted = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(open) = rest.find('[') {
+        sorted.push_str(&rest[..open]);
+        let close = open + find_closing_bracket(&rest[open..]);
+        let mut fields: Vec<String> = split_top_level(&rest[open + 1..close])
+            .into_iter()
+            .map(sort_record_fields)
+            .collect();
+        fields.sort();
+        sorted.push('[');
+        sorted.push_str(&fields.join(","));
+        sorted.push(']');
+        rest = &rest[close + 1..];
+    }
+    sorted.push_str(rest);
+    sorted
+}
+
+fn find_closing_bracket(value: &str) -> usize {
+    let mut depth = 0usize;
+    for (index, character) in value.char_indices() {
+        match character {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return index;
+                }
+            }
+            _ => {}
+        }
+    }
+    value.len() - 1
+}
+
+fn split_top_level(content: &str) -> Vec<&str> {
+    let bytes = content.as_bytes();
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        match (bytes[index], bytes.get(index + 1)) {
+            (b'<', Some(b'<')) | (b'>', Some(b'>')) => {
+                depth = if bytes[index] == b'<' {
+                    depth + 1
+                } else {
+                    depth - 1
+                };
+                index += 1;
+            }
+            (b'[' | b'(' | b'{', _) => depth += 1,
+            (b']' | b')' | b'}', _) => depth -= 1,
+            (b',', _) if depth == 0 => {
+                parts.push(&content[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    parts.push(&content[start..]);
+    parts
 }
 
 pub(super) fn state_lines(cluster: &Cluster) -> Vec<String> {
@@ -100,7 +170,7 @@ pub(super) fn state_lines(cluster: &Cluster) -> Vec<String> {
             ),
         ),
         (
-            "marker",
+            "pending",
             cluster
                 .pending
                 .get()

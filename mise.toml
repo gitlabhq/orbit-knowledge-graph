@@ -453,42 +453,76 @@ echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  $jar.tmp
 mv "$jar.tmp" "$jar"
 """
 
+[tasks."spec:engine:compile"]
+description = "Compile the Quint spec of the indexing engine to TLA+, with the root modules that TLC runs"
+tools = { java = "temurin-21.0.13+9.0.LTS", bun = "1.4.4", node = "24.22.2" }
+depends = ["spec:engine:tools"]
+shell = "bash -c"
+run = '''
+set -euo pipefail
+quint="$PWD/specs/indexing-engine-next/quint"
+build=target/indexing-engine-spec
+rm -rf "$build" && mkdir -p "$build"
+for module in leaseDedupeProtocol leaseDedupeLiveness; do
+  (cd "$build" && bunx @informalsystems/quint@0.34.0 compile --target tlaplus --main="$module" "$quint/$module.qnt" > "$module.tla")
+done
+rm -rf "$build/_apalache-out"
+apalache=$(ls ~/.quint/apalache-dist-*/apalache/lib/apalache.jar | sort -V | tail -1)
+(cd "$build" && jar xf "$apalache" tla2sany/StandardModules/Apalache.tla tla2sany/StandardModules/Variants.tla)
+mv "$build"/tla2sany/StandardModules/*.tla "$build/" && rm -rf "$build/tla2sany"
+cat > "$build/ModelCheck.tla" <<'TLA'
+---- MODULE ModelCheck ----
+EXTENDS leaseDedupeProtocol, TLC
+
+PodSymmetry == Permutations(Pods)
+====
+TLA
+cat > "$build/LivenessCheck.tla" <<'TLA'
+---- MODULE LivenessCheck ----
+EXTENDS leaseDedupeLiveness, TLC
+
+LiveSpec == q_init /\ [][q_step]_allVars /\ Fairness
+====
+TLA
+'''
+
 [tasks."spec:engine"]
 description = "Model-check the indexing engine lease and dedupe spec with TLC"
 tools = { java = "temurin-21.0.13+9.0.LTS" }
-depends = ["spec:engine:tools"]
+depends = ["spec:engine:compile"]
 shell = "bash -c"
 run = """
 set -euo pipefail
 for config in specs/indexing-engine-next/*.cfg; do
-  java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states -config "$config" specs/indexing-engine-next/LeaseDedupe.tla
+  java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states -config "$config" target/indexing-engine-spec/ModelCheck.tla
 done
 """
 
 [tasks."spec:engine:liveness"]
 description = "Check with TLC that every acked submit of the indexing engine spec ends done once faults stop"
 tools = { java = "temurin-21.0.13+9.0.LTS" }
-depends = ["spec:engine:tools"]
+depends = ["spec:engine:compile"]
 shell = "bash -c"
 run = """
 set -euo pipefail
 for config in specs/indexing-engine-next/liveness/*.cfg; do
-  java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-liveness -config "$config" specs/indexing-engine-next/LeaseDedupeLiveness.tla
+  java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-liveness -config "$config" target/indexing-engine-spec/LivenessCheck.tla
 done
 """
 
 [tasks."spec:engine:counterexample"]
 description = "Check that TLC still finds each counterexample, and that it breaks the rule that its config names"
 tools = { java = "temurin-21.0.13+9.0.LTS" }
-depends = ["spec:engine:tools"]
+depends = ["spec:engine:compile"]
 shell = "bash -c"
 run = """
 set -uo pipefail
 spec=specs/indexing-engine-next
+build=target/indexing-engine-spec
 tlc() { java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states "$@" 2>&1; }
 for config in "$spec"/counterexamples/*.cfg; do
   rule=$(awk '/^INVARIANTS/ { print $NF }' "$config")
-  out=$(tlc -config "$config" "$spec/LeaseDedupe.tla"); status=$?
+  out=$(tlc -config "$config" "$build/ModelCheck.tla"); status=$?
   if [ "$status" -ne 12 ] || ! grep -q "Invariant $rule is violated" <<< "$out"; then
     tail -40 <<< "$out"; echo "$config: expected $rule to be violated, TLC exit $status"; exit 1
   fi
@@ -496,7 +530,7 @@ for config in "$spec"/counterexamples/*.cfg; do
 done
 for config in "$spec"/liveness/counterexamples/*.cfg; do
   rule=$(awk '/^PROPERTIES/ { print $NF }' "$config")
-  out=$(tlc -config "$config" "$spec/LeaseDedupeLiveness.tla"); status=$?
+  out=$(tlc -config "$config" "$build/LivenessCheck.tla"); status=$?
   if [ "$status" -ne 13 ] || ! grep -q "Temporal properties were violated" <<< "$out"; then
     tail -40 <<< "$out"; echo "$config: expected $rule to be violated, TLC exit $status"; exit 1
   fi
@@ -507,7 +541,7 @@ done
 [tasks."spec:engine:code"]
 description = "Check that the Rust protocol code has the same state graph as the spec in small clusters (ENGINE_SPEC_CLUSTER picks one)"
 tools = { java = "temurin-21.0.13+9.0.LTS" }
-depends = ["spec:engine:tools"]
+depends = ["spec:engine:compile"]
 shell = "bash -c"
 run = """
 set -euo pipefail
@@ -517,13 +551,61 @@ for config in specs/indexing-engine-next/code-check/*.cfg; do
   name=$(basename "$config" .cfg)
   [ -z "${ENGINE_SPEC_CLUSTER:-}" ] || [ "$ENGINE_SPEC_CLUSTER" = "$name" ] || continue
   java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir "target/tlc-graph-$name" \
-    -dump dot,actionlabels "$graphs/$name" -config "$config" specs/indexing-engine-next/LeaseDedupe.tla > "$graphs/$name.log" 2>&1 \
+    -dump dot,actionlabels "$graphs/$name" -config "$config" target/indexing-engine-spec/ModelCheck.tla > "$graphs/$name.log" 2>&1 \
     || { tail -40 "$graphs/$name.log"; exit 1; }
   echo "$name: $(grep -oE "[0-9]+ distinct states found, 0 states left" "$graphs/$name.log" | grep -oE "^[0-9]+") states in the spec"
 done
 ENGINE_SPEC_TLC_GRAPHS="$graphs" cargo test -q --release -p indexing-engine-next --test protocol \
   every_state_and_step_of_the_small_clusters_matches_the_spec -- --include-ignored --nocapture
 rm -f "$graphs"/*.dot
+"""
+
+[tasks."spec:engine:nats-trace"]
+description = "Run real pods on NATS through a crash and a wipe, then check with TLC that a behavior of the spec explains the steps of each key (ENGINE_TEST_NATS_URL reuses a running server)"
+tools = { java = "temurin-21.0.13+9.0.LTS" }
+depends = ["spec:engine:compile"]
+shell = "bash -c"
+run = '''
+set -uo pipefail
+root=$PWD
+build="$root/target/indexing-engine-spec"
+check="$root/specs/indexing-engine-next/nats-trace"
+traces="$root/${CARGO_TARGET_DIR:-target}/tmp/indexing-engine-next-spec/nats-traces"
+rm -rf "$traces"
+ENGINE_SPEC_NATS_TRACES="$traces" cargo test -q -p indexing-engine-next --test nats scenario -- --ignored || exit 1
+for folder in "$traces"/key*; do
+  name=$(basename "$folder")
+  cp "$build"/leaseDedupeProtocol.tla "$build"/Apalache.tla "$build"/Variants.tla "$check"/NatsTraceCheck.tla "$check"/NatsTraceCheck.cfg "$folder"
+  out=$(cd "$folder" && java -XX:+UseParallelGC -cp "$root/target/tla2tools-1.7.4.jar" tlc2.TLC -workers auto -cleanup -metadir "$folder/states" -config NatsTraceCheck.cfg NatsTraceCheck.tla 2>&1); status=$?
+  if [ "$status" -ne 12 ] || ! grep -q "Invariant NotEverySeen is violated" <<< "$out"; then
+    tail -40 <<< "$out"; echo "$name: no behavior of the spec explains these steps, TLC exit $status"; exit 1
+  fi
+  echo "$name: a behavior of the spec explains every step"
+done
+'''
+
+[tasks."spec:engine:trace"]
+description = "Check with Quint that every step of the simulated runner is a step of the spec"
+tools = { bun = "1.4.4", node = "24.22.2" }
+shell = "bash -c"
+run = """
+set -euo pipefail
+traces="$PWD/${CARGO_TARGET_DIR:-target}/tmp/indexing-engine-next-spec/traces"
+rm -rf "$traces" && mkdir -p "$traces"
+ENGINE_SPEC_TRACES="$traces" cargo test -q -p indexing-engine-next --test simulation \\
+  every_step_of_the_simulated_lane_loop_is_a_step_of_the_spec -- --include-ignored
+check_trace() {
+  folder="$1"
+  name=$(basename "$folder")
+  cp specs/indexing-engine-next/quint/leaseDedupeProtocol.qnt "$folder"
+  if (cd "$folder" && bunx @informalsystems/quint@0.34.0 test traces.qnt --main=traces --backend=typescript --max-samples=1 > quint.log 2>&1); then
+    echo "$name: $(grep -oE "[0-9]+ passing" "$folder/quint.log") runs follow the spec step by step"
+  else
+    tail -60 "$folder/quint.log"; echo "$name: a step of the runner is not a step of the spec"; return 1
+  fi
+}
+export -f check_trace
+printf '%s\\0' "$traces"/*/ | xargs -0 -n 1 -P "$(getconf _NPROCESSORS_ONLN)" bash -c 'check_trace "$1"' _
 """
 
 [tasks."schema:bump"]

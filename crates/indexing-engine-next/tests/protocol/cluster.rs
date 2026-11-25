@@ -18,6 +18,7 @@ const OFFSETS: [u64; 2] = [0, 1];
 const TTL: u32 = 3;
 const SKEW_MARGIN: u32 = 1;
 const ACK_WAIT: u64 = 2;
+const GIVE_BACK_DELAY: u64 = 1;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Bounds {
@@ -91,6 +92,7 @@ pub enum Action {
     LoseMessage(usize),
     Deliver(usize, usize),
     AcquireLease(usize),
+    GiveBack(usize),
     StartTask(usize),
     Renew(usize),
     RenewFails(usize),
@@ -327,12 +329,14 @@ impl Cluster {
                     actions.extend(self.broker.ready_messages().map(|c| Action::Deliver(h, c)))
                 }
                 Step::Leasing(claim) => {
-                    if claim
+                    let free = claim
                         .lease_if_free(&self.rules, &self.lease_entry(), self.local_now(h))
-                        .is_some()
-                    {
-                        actions.push(Action::AcquireLease(h));
-                    }
+                        .is_some();
+                    actions.push(if free {
+                        Action::AcquireLease(h)
+                    } else {
+                        Action::GiveBack(h)
+                    });
                 }
                 Step::Leased(_) => actions.push(Action::StartTask(h)),
                 Step::Running(_) => actions.push(Action::Work(h)),
@@ -377,6 +381,7 @@ impl Cluster {
             }
             Action::Deliver(h, c) => self.deliver(h, c),
             Action::AcquireLease(h) => self.acquire_lease(h),
+            Action::GiveBack(h) => self.give_back(h),
             Action::StartTask(h) => self.start_task(h),
             Action::Renew(h) => self.renew(h),
             Action::RenewFails(h) => {
@@ -441,6 +446,13 @@ impl Cluster {
         };
         self.holders[h].step =
             Step::Leased(claim.into_hold(&self.rules, &lease, written, local_now));
+    }
+
+    fn give_back(&mut self, h: usize) {
+        if let Some(c) = self.holders[h].held {
+            self.broker.nack(c, self.clock.ticks() + GIVE_BACK_DELAY);
+        }
+        self.drop_run(h);
     }
 
     fn start_task(&mut self, h: usize) {

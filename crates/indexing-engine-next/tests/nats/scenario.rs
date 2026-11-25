@@ -1,18 +1,18 @@
-use std::collections::BTreeSet;
 use std::num::NonZeroU32;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 
 use crate::server::{connect_to_empty_nats, delete_every_stream};
+use crate::spec_trace::{ActorObserver, Journal};
 use indexing_engine_next::lease::{HolderId, LeaseRules};
 use indexing_engine_next::nats::{NatsSettings, NatsTransport};
 use indexing_engine_next::{Engine, Outcome, TaskContext, TaskError, Worker};
-use indexing_engine_next::{EngineConfig, EngineEvent, LaneConfig, Observer, TaskStep};
+use indexing_engine_next::{EngineConfig, LaneConfig};
 use indexing_engine_next::{Key, Tenant};
 use indexing_engine_next::{Lane, LaneId};
 
@@ -24,7 +24,7 @@ const RULES: LeaseRules = LeaseRules {
 };
 const SETTINGS: NatsSettings = NatsSettings {
     replicas: 1,
-    ack_wait: Duration::from_millis(1500),
+    ack_wait: Duration::from_secs(1),
     idle_poll: Duration::from_millis(50),
     stream_check: Duration::from_millis(200),
 };
@@ -35,9 +35,6 @@ struct WriteInput {
 }
 
 struct SlowWrite;
-
-#[derive(Clone, Default)]
-struct FinishedKeys(Arc<Mutex<BTreeSet<String>>>);
 
 struct Pod {
     serving: JoinHandle<anyhow::Result<()>>,
@@ -60,44 +57,18 @@ impl Worker for SlowWrite {
     }
 }
 
-impl Observer for FinishedKeys {
-    fn observe(&self, event: &EngineEvent) {
-        if let EngineEvent::Task(event) = event
-            && matches!(event.step, TaskStep::Finished { .. })
-        {
-            self.0.lock().insert(event.task.key.to_string());
-        }
-    }
-}
-
-impl FinishedKeys {
-    async fn wait_for_every_key(&self) {
-        for _ in 0..300 {
-            if self.0.lock().len() == usize::try_from(KEYS).unwrap_or(usize::MAX) {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        panic!("only the keys {:?} finished", self.0.lock());
-    }
-
-    fn clear(&self) {
-        self.0.lock().clear();
-    }
-}
-
 impl Pod {
     async fn start(
         client: &async_nats::Client,
-        name: &str,
-        finished: &FinishedKeys,
+        name: &'static str,
+        journal: &Journal,
     ) -> (Self, Arc<NatsTransport>) {
         let transport = Arc::new(
             NatsTransport::open(client.clone(), SETTINGS)
                 .await
                 .expect("the pod creates or joins the NATS resources"),
         );
-        let engine = build_engine(finished);
+        let engine = build_engine(journal.observer_for(name));
         let ports = transport.ports().clone();
         let holder = HolderId::new(name);
         let serving = tokio::spawn(async move { engine.serve(ports, holder, RULES).await });
@@ -120,32 +91,41 @@ impl Pod {
 #[ignore = "starts a NATS container; mise run test:engine:nats runs it"]
 async fn every_task_finishes_after_a_pod_crash_and_after_a_nats_wipe() {
     let (client, _container) = connect_to_empty_nats().await;
-    let finished = FinishedKeys::default();
-    let planner = build_engine(&finished);
+    let journal = Journal::default();
+    let planner = build_engine(journal.observer_for("planner"));
+    let keys = usize::try_from(KEYS).unwrap_or(usize::MAX);
 
-    let (first, transport) = Pod::start(&client, "p1", &finished).await;
-    let (second, _) = Pod::start(&client, "p2", &finished).await;
+    let (first, transport) = Pod::start(&client, "p1", &journal).await;
+    let (second, _) = Pod::start(&client, "p2", &journal).await;
     submit_every_key(&planner, &transport).await;
     tokio::time::sleep(Duration::from_millis(100)).await;
     first.crash();
-    finished.wait_for_every_key().await;
+    journal.record_crash("p1");
+    journal.wait_until_keys_finish(keys, 0).await;
 
+    journal.record_wipe();
     delete_every_stream(&client).await;
     let stopped = second.wait_until_it_stops().await;
     assert!(stopped.is_err(), "a pod stops once its task stream is gone");
+    journal.record_crash("p2");
 
-    finished.clear();
-    let (_third, transport) = Pod::start(&client, "p3", &finished).await;
+    let after_wipe = journal.mark();
+    let (_third, transport) = Pod::start(&client, "p3", &journal).await;
     submit_every_key(&planner, &transport).await;
-    finished.wait_for_every_key().await;
+    journal.wait_until_keys_finish(keys, after_wipe).await;
+
+    if let Ok(folder) = std::env::var("ENGINE_SPEC_NATS_TRACES") {
+        journal
+            .write_tla_traces(&PathBuf::from(folder))
+            .expect("the traces of each key are written");
+    }
 }
 
-fn build_engine(finished: &FinishedKeys) -> Engine {
+fn build_engine(observer: ActorObserver) -> Engine {
     let lane = LaneId::new(SlowWrite::NAME, Lane::DEFAULT);
     let slots = NonZeroU32::new(4).unwrap_or(NonZeroU32::MIN);
     let config =
         EngineConfig::default().with_lane(lane, LaneConfig::new(slots, Duration::from_secs(60)));
-    let observer = finished.clone();
     Engine::builder()
         .config(config)
         .module(|module| {

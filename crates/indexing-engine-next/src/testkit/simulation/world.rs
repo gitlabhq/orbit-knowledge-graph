@@ -8,9 +8,10 @@ use rand::{RngExt, SeedableRng};
 use tokio::sync::Notify;
 use tokio::time::Instant;
 
+use super::trace::{TraceStep, format_quint_action};
 use super::{FaultBudget, SimulatedBroker, SimulatedKeyValue};
 use crate::event::{TaskEvent, TaskStep};
-use crate::lease::Lease;
+use crate::lease::{HolderId, Lease};
 use crate::task::{TaskId, TaskMessage};
 use crate::versioned::Revision;
 
@@ -48,6 +49,7 @@ pub(super) struct World {
     pub(super) broker: SimulatedBroker,
     payloads: HashMap<TaskId, TaskMessage>,
     pub(super) processes: Vec<ProcessState>,
+    holders: HashMap<HolderId, usize>,
     pub(super) publishing: Option<TaskId>,
     pub(super) ids: Vec<TaskId>,
     pub(super) covers: Vec<TaskId>,
@@ -56,6 +58,7 @@ pub(super) struct World {
     pub(super) faults_left: FaultBudget,
     pub(super) planner_crash_armed: bool,
     pub(super) submits: usize,
+    pub(super) trace: Vec<TraceStep>,
     timeline: Vec<String>,
     broken: Option<String>,
     counts: BTreeMap<String, usize>,
@@ -98,6 +101,7 @@ pub(super) struct WorldOutcome {
     pub(super) seed: u64,
     pub(super) broken: Option<String>,
     pub(super) timeline: Vec<String>,
+    pub(super) trace: Vec<TraceStep>,
     pub(super) counts: BTreeMap<String, usize>,
 }
 
@@ -125,6 +129,7 @@ impl SharedWorld {
             broker: SimulatedBroker::new(ACK_WAIT_TICKS),
             payloads: HashMap::new(),
             processes,
+            holders: HashMap::new(),
             publishing: None,
             ids: Vec::new(),
             covers: Vec::new(),
@@ -133,6 +138,7 @@ impl SharedWorld {
             faults_left: faults,
             planner_crash_armed: false,
             submits,
+            trace: Vec::new(),
             timeline: Vec::new(),
             broken: None,
             counts: BTreeMap::new(),
@@ -202,6 +208,7 @@ impl SharedWorld {
             seed: world.seed,
             broken: world.broken.take(),
             timeline: std::mem::take(&mut world.timeline),
+            trace: std::mem::take(&mut world.trace),
             counts: std::mem::take(&mut world.counts),
         }
     }
@@ -231,6 +238,10 @@ impl World {
         u64::try_from(elapsed.as_millis() / TICK.as_millis()).unwrap_or(u64::MAX)
     }
 
+    pub(super) fn seen_tick(&self) -> u64 {
+        self.seen_tick
+    }
+
     pub(super) fn local_time(&self, actor: Actor) -> SystemTime {
         UNIX_EPOCH + Instant::now().duration_since(self.started_at) + TICK * self.offset_of(actor)
     }
@@ -243,7 +254,8 @@ impl World {
         self.broken.is_some()
     }
 
-    pub(super) fn start_process(&self, index: usize) -> Actor {
+    pub(super) fn start_process(&mut self, holder: HolderId, index: usize) -> Actor {
+        self.holders.insert(holder, index);
         Actor::Process {
             index,
             incarnation: self.processes[index].incarnation,
@@ -328,6 +340,12 @@ impl World {
                 let process = &mut self.processes[index];
                 process.seen = hold.seen_revision();
                 process.renew_at = ticks_at(hold.renew_at());
+                if !self.holds_current_lease(index) {
+                    self.break_rule(format!(
+                        "p{} reported a renewal of a lease that it does not hold",
+                        index + 1
+                    ));
+                }
                 self.record_step("Renew", format!("(p{})", index + 1));
             }
             (Actor::Process { index, .. }, TaskStep::RenewalLost) => {
@@ -385,6 +403,17 @@ impl World {
             .map_or(0, |index| index + 1)
     }
 
+    pub(super) fn find_lease_holder(&self) -> Option<usize> {
+        self.lease
+            .get()
+            .and_then(|lease| self.holders.get(&lease.holder).copied())
+    }
+
+    fn holds_current_lease(&self, process: usize) -> bool {
+        self.find_lease_holder() == Some(process)
+            && self.lease.revision() == self.processes[process].seen
+    }
+
     pub(super) fn drop_run(&mut self, process: usize) {
         self.processes[process].phase = Phase::Idle;
         self.processes[process].held = None;
@@ -395,6 +424,9 @@ impl World {
         if name != "Tick" {
             self.timeline
                 .push(format!("t{} {name}{detail}", self.seen_tick));
+        }
+        if self.step_order == StepOrder::Atomic {
+            self.record_trace_step(format_quint_action(name, &detail));
         }
         if let Some(rule) = self.find_broken_rule() {
             self.break_rule(rule.to_owned());
@@ -427,6 +459,9 @@ impl World {
 
     fn record_initial_state(&mut self) {
         self.timeline.push("t0 Init".to_owned());
+        if self.step_order == StepOrder::Atomic {
+            self.record_trace_step(self.format_initial_action());
+        }
     }
 
     fn record_passed_ticks(&mut self) {
@@ -487,6 +522,16 @@ impl Phase {
         match self {
             Phase::Leased | Phase::Running | Phase::Done => true,
             Phase::Idle | Phase::Leasing => false,
+        }
+    }
+
+    pub(super) fn spec_name(self) -> &'static str {
+        match self {
+            Phase::Idle => "idle",
+            Phase::Leasing => "leasing",
+            Phase::Leased => "leased",
+            Phase::Running => "running",
+            Phase::Done => "done",
         }
     }
 }

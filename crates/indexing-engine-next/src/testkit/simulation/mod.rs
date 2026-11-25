@@ -4,6 +4,7 @@ mod key_value;
 mod ports;
 mod simulated_nats;
 mod tick_clock;
+mod trace;
 mod worker;
 mod world;
 
@@ -30,6 +31,7 @@ pub use simulated_nats::SimulatedNats;
 pub use tick_clock::TickClock;
 
 use ports::{build_ports, build_world_observer};
+use trace::TraceStep;
 use worker::{SimulatedWrite, WriteInput};
 use world::{Actor, SharedWorld, StepOrder, TICK};
 
@@ -56,6 +58,7 @@ pub struct SimulationReport {
     seed: u64,
     broken: Option<String>,
     timeline: Vec<String>,
+    trace: Vec<TraceStep>,
     counts: BTreeMap<String, usize>,
 }
 
@@ -136,6 +139,10 @@ impl Simulation {
             }
         }
         cluster.stop_and_report()
+    }
+
+    pub(super) fn count_ticks(&self) -> u32 {
+        FAULT_TICKS + HEAL_TICKS
     }
 }
 
@@ -240,6 +247,7 @@ impl Cluster {
             seed: outcome.seed,
             broken: outcome.broken,
             timeline: outcome.timeline,
+            trace: outcome.trace,
             counts: outcome.counts,
         }
     }
@@ -252,7 +260,7 @@ impl Cluster {
 
     fn spawn_process(&self, process: usize) -> JoinHandle<()> {
         let holder = HolderId::new(format!("p{}-{}", process + 1, self.restarts[process]));
-        let actor = self.world.lock().start_process(process);
+        let actor = self.world.lock().start_process(holder.clone(), process);
         let lane = LaneId::new(SimulatedWrite::NAME, Lane::DEFAULT);
         let config =
             EngineConfig::default().with_lane(lane, LaneConfig::new(NonZeroU32::MIN, LANE_TIMEOUT));
