@@ -8,11 +8,6 @@ use crate::error::CircuitBreakerError;
 use crate::observer::CircuitBreakerObserver;
 use crate::state::{AcquireResult, Circuit};
 
-/// Circuit breaker for a single service. Clones share one circuit (`Arc`).
-///
-/// ```text
-/// self.db.call(|| async { client.execute(query).await }).await?;
-/// ```
 #[derive(Clone)]
 pub struct CircuitBreaker {
     name: &'static str,
@@ -33,8 +28,6 @@ impl CircuitBreaker {
         }
     }
 
-    /// Run `f` if the circuit is closed. Returns [`CircuitBreakerError::Open`]
-    /// without calling `f` if open.
     pub async fn call<F, Fut, T, E>(&self, f: F) -> Result<T, CircuitBreakerError<E>>
     where
         F: FnOnce() -> Fut,
@@ -43,10 +36,6 @@ impl CircuitBreaker {
         self.call_with_filter(f, |_| true).await
     }
 
-    /// Like [`call`](Self::call), but `classifier` decides which errors
-    /// count as failures. Returns `false` → error passes through without
-    /// counting toward the threshold, and closes a half-open circuit
-    /// because the service answered.
     pub async fn call_with_filter<F, Fut, T, E, C>(
         &self,
         f: F,

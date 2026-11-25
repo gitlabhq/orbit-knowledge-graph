@@ -1,13 +1,3 @@
-//! Hydration emit: fetch node properties for a set of IDs.
-//!
-//! Produces a UNION ALL of per-entity latest-row scans. Each arm dedups with
-//! `LIMIT 1 BY <sort_key>` over a plain scan (not `FINAL`), keeping column
-//! pruning and projections, then filters `_deleted = false`.
-//!
-//! When the base query provided traversal paths, each arm injects a
-//! `startsWith(traversal_path, tp)` predicate so ClickHouse can prune
-//! granules via the primary key (sort key starts with `traversal_path`).
-
 use ontology::constants::*;
 
 use crate::ast::*;

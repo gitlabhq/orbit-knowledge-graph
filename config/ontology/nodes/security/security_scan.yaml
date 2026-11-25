@@ -1,5 +1,3 @@
-# config/ontology/nodes/security/security_scan.yaml
-
 node_type: SecurityScan
 domain: security
 description: A security scan execution that produces findings within a CI/CD pipeline

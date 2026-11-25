@@ -1,5 +1,3 @@
-# Docker Compose files: services, volumes, and networks are named
-# children of their top-level sections.
 name: docker_compose
 match:
   filename_suffixes: [docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml]

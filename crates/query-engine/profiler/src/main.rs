@@ -28,80 +28,110 @@ use service::ProfilerPipelineService;
     about = "Profile GKG queries against ClickHouse"
 )]
 struct Cli {
-    /// Query string or @filepath. Named JSON objects map names to JSON queries,
-    /// or to GQL strings when used with --gql.
+    #[arg(
+        help = "Query string or @filepath. Named JSON objects map names to JSON queries, or to GQL strings when used with --gql"
+    )]
     query: String,
 
-    /// Read the query as one GQL statement instead of Orbit query JSON
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Read the query as one GQL statement instead of Orbit query JSON"
+    )]
     gql: bool,
 
-    /// ClickHouse HTTP URL
-    #[arg(long, default_value = "http://127.0.0.1:8123", env = "CLICKHOUSE_URL")]
+    #[arg(
+        long,
+        default_value = "http://127.0.0.1:8123",
+        env = "CLICKHOUSE_URL",
+        help = "ClickHouse HTTP URL"
+    )]
     ch_url: String,
 
-    /// ClickHouse database
-    #[arg(long, default_value = "gkg_graph", env = "CLICKHOUSE_DATABASE")]
+    #[arg(
+        long,
+        default_value = "gkg_graph",
+        env = "CLICKHOUSE_DATABASE",
+        help = "ClickHouse database"
+    )]
     ch_database: String,
 
-    /// ClickHouse user
-    #[arg(long, default_value = "default", env = "CLICKHOUSE_USER")]
+    #[arg(
+        long,
+        default_value = "default",
+        env = "CLICKHOUSE_USER",
+        help = "ClickHouse user"
+    )]
     ch_user: String,
 
-    /// ClickHouse password
-    #[arg(long, env = "CLICKHOUSE_PASSWORD")]
+    #[arg(long, env = "CLICKHOUSE_PASSWORD", help = "ClickHouse password")]
     ch_password: Option<String>,
 
-    /// Authorized paths for the security context (repeatable), as `path` or `path@access_level`;
-    /// a bare path gets the default Reporter level
-    #[arg(short = 't', long, required = true)]
+    #[arg(
+        short = 't',
+        long,
+        required = true,
+        help = "Authorized paths for the security context (repeatable), as `path` or `path@access_level`; a bare path gets the default Reporter level"
+    )]
     traversal_paths: Vec<String>,
 
-    /// Ontology config directory
-    #[arg(long, default_value = "config/ontology")]
+    #[arg(
+        long,
+        default_value = "config/ontology",
+        help = "Ontology config directory"
+    )]
     ontology: PathBuf,
 
-    /// Schema version prefix for table names (e.g. 24 → v24_gl_project).
-    /// Defaults to the embedded SCHEMA_VERSION from config/SCHEMA_VERSION.
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Schema version prefix for table names (e.g. 24 → v24_gl_project). Defaults to the embedded SCHEMA_VERSION from config/SCHEMA_VERSION"
+    )]
     schema_version: Option<u32>,
 
-    /// Include EXPLAIN PLAN and EXPLAIN PIPELINE for each query
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Include EXPLAIN PLAN and EXPLAIN PIPELINE for each query"
+    )]
     explain: bool,
 
-    /// Show ClickHouse instance health snapshot
-    #[arg(long)]
+    #[arg(long, help = "Show ClickHouse instance health snapshot")]
     health: bool,
 
-    /// Output format
-    #[arg(long, default_value = "json")]
+    #[arg(long, default_value = "json", help = "Output format")]
     format: OutputFormat,
 
-    /// Extra ClickHouse settings (repeatable, e.g. max_threads=4)
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Extra ClickHouse settings (repeatable, e.g. max_threads=4)"
+    )]
     settings: Vec<String>,
 
-    /// Filter multi-query files by regex pattern (e.g. --filter "Q14|E2|D2")
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Filter multi-query files by regex pattern (e.g. --filter \"Q14|E2|D2\")"
+    )]
     filter: Option<String>,
 
-    /// Write output to a file instead of stdout
-    #[arg(short = 'o', long)]
+    #[arg(short = 'o', long, help = "Write output to a file instead of stdout")]
     output: Option<PathBuf>,
 
-    /// Send raw SQL directly to ClickHouse (skip DSL compilation).
-    /// Supports @filepath for SQL files.
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Send raw SQL directly to ClickHouse (skip DSL compilation). Supports @filepath for SQL files"
+    )]
     raw_sql: bool,
 
-    /// Compile only: print rendered SQL without executing.
-    #[arg(long, value_enum)]
+    #[arg(
+        long,
+        value_enum,
+        help = "Compile only: print rendered SQL without executing"
+    )]
     compile_only: Option<CompileShow>,
 
-    /// Include the formatted response agents receive (`toon` = llm format,
-    /// `json` = raw graph) as a `response` field in the profiler output.
-    #[arg(long, value_enum)]
+    #[arg(
+        long,
+        value_enum,
+        help = "Include the formatted response agents receive (`toon` = llm format, `json` = raw graph) as a `response` field in the profiler output"
+    )]
     emit_response: Option<ResponseFormat>,
 }
 

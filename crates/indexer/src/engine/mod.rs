@@ -1,34 +1,3 @@
-//! The engine subscribes to topics, dispatches messages to handlers, and acks/nacks.
-//!
-//! # Example
-//!
-//! ```no_run
-//! use std::sync::Arc;
-//!
-//! use indexer::engine::EngineBuilder;
-//! use indexer::handler::{Handler, HandlerRegistry};
-//! use indexer::nats::{NatsBroker, NatsServicesImpl};
-//! use indexer::IndexerConfig;
-//!
-//! # async fn run(config: IndexerConfig, my_handler: Box<dyn Handler>) -> Result<(), Box<dyn std::error::Error>> {
-//! let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
-//! let nats_services = Arc::new(NatsServicesImpl::new(broker.clone()));
-//!
-//! let registry = Arc::new(HandlerRegistry::default());
-//! registry.register_handler(my_handler);
-//!
-//! let engine = EngineBuilder::new(broker, registry)
-//!     .nats_services(nats_services)
-//!     .build();
-//!
-//! engine.run(&config.engine).await?;
-//!
-//! // From another task:
-//! engine.stop();
-//! # Ok(())
-//! # }
-//! ```
-
 pub mod dead_letter;
 pub mod durability;
 pub mod handler;
@@ -68,25 +37,6 @@ pub enum EngineError {
     InvalidConfig(String),
 }
 
-/// Builder for constructing an [`Engine`].
-///
-/// Required components are passed to `new()`. Optional components can be set
-/// via builder methods before calling `build()`.
-///
-/// # Example
-///
-/// ```
-/// use std::sync::Arc;
-///
-/// use indexer::engine::EngineBuilder;
-/// use indexer::handler::HandlerRegistry;
-/// use indexer::nats::NatsBroker;
-///
-/// # fn build(broker: Arc<NatsBroker>) {
-/// let registry = Arc::new(HandlerRegistry::default());
-/// let engine = EngineBuilder::new(broker, registry).build();
-/// # }
-/// ```
 pub struct EngineBuilder {
     broker: Arc<NatsBroker>,
     registry: Arc<HandlerRegistry>,
@@ -137,31 +87,6 @@ impl EngineBuilder {
     }
 }
 
-/// The ETL engine that processes messages through registered handlers.
-///
-/// The engine subscribes to topics based on registered handlers, processes
-/// incoming messages, and manages acknowledgments. It uses a worker pool
-/// to control concurrency.
-///
-/// # Creating an engine
-///
-/// Use [`EngineBuilder`]:
-///
-/// ```
-/// # use std::sync::Arc;
-/// # use indexer::engine::EngineBuilder;
-/// # use indexer::handler::HandlerRegistry;
-/// # use indexer::nats::NatsBroker;
-/// # fn build(broker: Arc<NatsBroker>, registry: Arc<HandlerRegistry>) {
-/// let engine = EngineBuilder::new(broker, registry).build();
-/// # }
-/// ```
-///
-/// # Lifecycle
-///
-/// 1. Create with [`EngineBuilder`]
-/// 2. Start with [`Engine::run`]
-/// 3. Stop with [`Engine::stop`]
 pub struct Engine {
     broker: Arc<NatsBroker>,
     registry: Arc<HandlerRegistry>,
@@ -172,7 +97,6 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Returns when stopped via [`Engine::stop`] or when all subscriptions end.
     pub async fn run(&self, configuration: &EngineConfiguration) -> Result<(), EngineError> {
         let subscriptions = self.registry.subscriptions();
         if subscriptions.is_empty() {
@@ -300,7 +224,6 @@ impl Engine {
         Ok(())
     }
 
-    /// In-flight messages will complete before shutdown.
     pub fn stop(&self) {
         self.cancel.cancel();
     }
@@ -445,9 +368,6 @@ async fn process_message(
     );
 }
 
-/// Precedence: Exhausted > Dropped > RetryRequested > Backpressure > TransientError > Success.
-/// Retry policy (max_attempts, retry_interval) is read from the subscription,
-/// not from individual handlers.
 async fn run_handlers(
     handlers: &[Arc<dyn Handler>],
     context: &HandlerContext,
@@ -597,7 +517,6 @@ async fn run_handlers(
     if has_retry_requested {
         return HandlersOutcome::Failed { retry_delay: None };
     }
-    // Skips the `should_redeliver` check below: contention must not spend an attempt.
     if has_backpressure {
         return HandlersOutcome::Failed {
             retry_delay: backpressure_delay,
@@ -625,7 +544,6 @@ async fn run_handlers(
     HandlersOutcome::Success
 }
 
-/// A task can end in a panic or, when its set is aborted, a cancellation.
 pub(crate) fn join_error_type(error: &tokio::task::JoinError) -> &'static str {
     if error.is_panic() {
         "panic"
@@ -1041,8 +959,6 @@ mod tests {
         );
     }
 
-    /// `MockHandler` rewrites deserialization errors as processing errors, so this
-    /// handler returns the real variant.
     struct DeserializationFailingHandler(std::sync::Mutex<Option<serde_json::Error>>);
 
     #[async_trait::async_trait]
@@ -1182,11 +1098,6 @@ mod tests {
         );
     }
 
-    /// Validates the backpressure mechanism in the listen loop.
-    ///
-    /// The select loop pulls a message only while it holds a `max_inflight` work permit.
-    /// Without this gate, all messages are pulled immediately and queued on the
-    /// worker pool semaphore — causing NATS ack_wait timeouts and infinite redelivery.
     #[tokio::test]
     async fn listen_loop_caps_inflight_to_max() {
         use tokio_stream::wrappers::ReceiverStream;
@@ -1261,8 +1172,6 @@ mod tests {
         );
     }
 
-    /// A handler that returns `requires_worker_pool() = false` must run even
-    /// when every worker pool permit is already held by other work.
     #[tokio::test]
     async fn handler_bypassing_worker_pool_runs_when_pool_exhausted() {
         let runtime = test_runtime(&EngineConfiguration {

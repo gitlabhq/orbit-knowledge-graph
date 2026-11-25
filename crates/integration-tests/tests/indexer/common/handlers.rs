@@ -115,7 +115,6 @@ pub async fn entity_handler_with_partitions(
     entity_handler_for_config(ctx, config, entity_name, partitions).await
 }
 
-/// Pages the entity extract at `batch_size` rows so small fixtures exercise keyset paging.
 pub async fn entity_handler_with_batch_size(
     ctx: &TestContext,
     entity_name: &str,

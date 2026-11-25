@@ -1,9 +1,3 @@
-# With datalake_batch_size=1 (the test default) the handler pages one note at a
-# time, so three cross_reference notes span three pages plus a final empty one.
-# A full drain materializes all three MENTIONS edges (no row skipped or
-# double-counted by the keyset cursor) and advances the ns.100.SystemNote
-# checkpoint to the run watermark. Note rows carry _siphon_replicated_at ==
-# created_at so the watermark window selects them.
 description: Draining a keyset-paged window materializes every edge and advances the SystemNote checkpoint
 scope: { namespace: 100 }
 

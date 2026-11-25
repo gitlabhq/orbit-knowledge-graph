@@ -201,7 +201,6 @@ impl ArrowClickHouseClient {
         self.quorum_writes
     }
 
-    /// The connection points at a self-managed cluster with more than one replica.
     pub fn is_replicated(&self) -> bool {
         self.replicated
     }
@@ -214,8 +213,6 @@ impl ArrowClickHouseClient {
         }
     }
 
-    /// Use this for `INSERT` queries so they inherit async-insert and
-    /// other write-specific settings. Use `query()` for read operations.
     pub fn insert_query(&self, sql: &str) -> ArrowQuery {
         self.query(sql).with_settings(
             self.insert_settings
@@ -224,7 +221,6 @@ impl ArrowClickHouseClient {
         )
     }
 
-    /// Sorted so the emitted `SETTINGS` clause is deterministic.
     fn insert_settings_clause(&self, overrides: &[(&str, &str)]) -> String {
         let mut merged: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
         for (k, v) in &self.insert_settings {
@@ -394,8 +390,6 @@ impl ArrowClickHouseClient {
         &self.client
     }
 
-    /// Bind a named parameter to a query.
-    ///
     pub fn bind_param(
         query: ArrowQuery,
         key: &str,
@@ -465,12 +459,6 @@ fn parameter_text(text: &str, temporal: bool) -> &str {
     }
 }
 
-/// Log a warning when array binding silently drops elements that don't
-/// match the expected scalar type (e.g. a string in an Int64 array).
-///
-/// In practice this should never fire: the query engine's `check_filter_types`
-/// validates values against the ontology column type, and the lowerer builds
-/// homogeneous arrays. This is purely defensive for `bind_param`'s public API.
 fn warn_on_dropped_elements(key: &str, scalar: &str, input: usize, bound: usize) {
     if bound != input {
         warn!(
@@ -537,7 +525,6 @@ impl ArrowQuery {
             .fold(self, |query, (name, value)| query.with_setting(name, value))
     }
 
-    /// For statements that are not idempotent, such as `ATTACH PARTITION ... FROM`.
     pub fn without_quorum_retry(mut self) -> Self {
         self.retry_quorum_conflicts = false;
         self

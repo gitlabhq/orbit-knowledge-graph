@@ -87,7 +87,6 @@ enum BindingKey {
     Field(u32, u32),
 }
 
-/// Which wildcard imports an unresolved bare name may fall back to.
 #[derive(Clone, Copy)]
 enum Wildcards {
     All,
@@ -102,7 +101,6 @@ struct Fold<'t> {
     registered: FxHashSet<u32>,
     defs: Vec<u32>,
     defs_by_name: FxHashMap<u32, Vec<u32>>,
-    /// Per class: member name to its defs, and ivar name to its typed binding.
     members: RefCell<FxHashMap<u32, FxHashMap<u32, Vec<u32>>>>,
     ivars: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
     supertypes: FxHashMap<u32, Vec<u32>>,
@@ -188,7 +186,6 @@ impl<'t> Fold<'t> {
         self.def_stack.last().copied().unwrap_or(0)
     }
 
-    /// Stops at the first failed check; `link` reports it after the walk.
     fn run(&mut self, mut stack: Vec<WorkItem>) {
         while let Some(item) = stack.pop() {
             if self.killed.is_some() {
@@ -279,9 +276,6 @@ impl<'t> Fold<'t> {
         stack.extend(c.children_rev().map(|ch| WorkItem::Visit(ch.index())));
     }
 
-    /// Imports spelled inline in a call or a supertype path (`crate::a::f()`,
-    /// `impl zoo::T for X`) bind in the enclosing scope before the node itself;
-    /// the walk into the node then skips them.
     fn handle_inline_imports(&mut self, c: Cursor<'t>) {
         for import in c.children().filter(|i| i.is(C::Import)) {
             self.handle_import(import);
@@ -499,9 +493,6 @@ impl<'t> Fold<'t> {
         }
     }
 
-    /// The def an import path names when every segment is a def in this file
-    /// (`use crate::dep::Service` with `mod dep {}` above it); the file root
-    /// for an empty path (`use crate::dep as dep_mod`).
     fn inline_module(&mut self, import: Cursor<'t>) -> Option<Cursor<'t>> {
         if !self.config.inline_modules {
             return None;
@@ -524,8 +515,6 @@ impl<'t> Fold<'t> {
         Some(module)
     }
 
-    /// Binds an imported name to the def of that name inside `module`, or
-    /// every def in it for a wildcard. False when there is no such def.
     fn bind_from_def(&mut self, module: Cursor<'t>, name: Cursor<'t>, local: u32) -> bool {
         let targets: Vec<(u32, u32)> = match name.sym() == self.wildcard {
             true => module
@@ -1374,7 +1363,6 @@ impl<'t> Fold<'t> {
     }
 
     fn resolve_obj(&mut self, obj: Cursor, method: u32, from: u32, role: Role) {
-        // step = step() types the binding by a call whose receiver is the binding.
         if !self.obj_seen.insert(obj.index()) {
             return;
         }
@@ -1581,7 +1569,6 @@ impl<'t> Fold<'t> {
         self.any_class(&targets)
     }
 
-    // x = x.foo() roots x's type in itself: in-progress nodes yield nothing.
     fn lookup_chain(&mut self, c: Cursor) -> Vec<Value> {
         if let Some(done) = self.chain_memo.get(&c.index()) {
             return done.clone();

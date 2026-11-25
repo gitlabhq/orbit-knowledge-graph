@@ -1,20 +1,3 @@
-//! ClickHouse batch resolvers for system-note edge materialization.
-//!
-//! The reference-resolution pipeline runs in two stages per indexer batch:
-//!
-//! 1. **Path → (source_type, source_id, traversal_path)** against
-//!    `siphon_routes`. Maps the GFM project path (e.g. `gitlab-org/gitlab`)
-//!    that appears inside a note body to the routed entity that owns it.
-//!
-//! 2. **(project_id, iid) → entity id** against `merge_requests` and
-//!    `work_items` (and downstream `issues` once the work-item migration is
-//!    complete). Maps the resolved project + the IID inside the GFM ref
-//!    (`#123` or `!456`) to the durable entity primary key the edge writer
-//!    needs.
-//!
-//! Both queries are parameterized with named placeholders (`{name:Type}`) so
-//! they can be bound via [`ArrowQuery::param`] without string interpolation.
-
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
@@ -35,14 +18,6 @@ pub(super) fn lookup_chunks<T>(items: &[T], batch_size: usize) -> impl Iterator<
     items.chunks(batch_size.max(1))
 }
 
-/// Batch path -> route lookup. Params: `{paths:Array(String)}`. Returns
-/// `(source_id, path, traversal_path)`; `source_type = 'Project'` because an
-/// owning route is always a project.
-///
-/// `startsWith(traversal_path, {root_prefix})` bounds the scan to the source's
-/// top-level namespace (the leading sort-key column) so it's a range scan, not
-/// a full datalake scan. v1 therefore resolves only same-top-level references;
-/// cross-top-level is deferred to the dictionary lever (ADR 013).
 pub static ROUTES_SQL: LazyLock<String> = LazyLock::new(|| {
     let (version, del) = (version(), del());
     format!(
@@ -59,11 +34,6 @@ pub static ROUTES_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// Reverse routes lookup (project `source_id` -> path), to give each note a
-/// default project path for its unqualified refs. Keyed on `source_id` so it
-/// complements [`ROUTES_SQL`]; same `argMax` dedup and `root_prefix` bounding.
-/// Params: `{root_prefix:String}`, `{source_ids:Array(Int64)}`. Returns
-/// `(source_id, path)`.
 pub static PROJECT_PATHS_SQL: LazyLock<String> = LazyLock::new(|| {
     let (version, del) = (version(), del());
     format!(
@@ -100,8 +70,6 @@ pub static MERGE_REQUESTS_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// Like [`MERGE_REQUESTS_SQL`] but keyed on `project_id`. Returns
-/// `(id, project_id, iid)`.
 pub static WORK_ITEMS_SQL: LazyLock<String> = LazyLock::new(|| {
     let (version, del) = (version(), del());
     format!(
@@ -116,8 +84,6 @@ pub static WORK_ITEMS_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// `ROUTES_SQL` filters `source_type = 'Project'`, so every row here is a
-/// project route.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteRow {
     pub source_id: i64,
@@ -132,20 +98,12 @@ pub struct EntityRow {
     pub iid: i64,
 }
 
-/// The traversal_path here is the *resolved ref's* route namespace, which the
-/// emitter does **not** use as the edge partition for MENTIONS — the MENTIONS
-/// edge lands in the noteable's (target's) namespace via `NoteRow.traversal_path`
-/// so that inbound-degree queries hit the right `gl_edge` partition. This field
-/// is still carried for potential future use by other edge kinds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTarget {
     pub id: i64,
     pub traversal_path: TraversalPath,
 }
 
-/// Plan summary: the distinct work the resolver needs to issue against
-/// ClickHouse for a given batch. Used both for the actual runtime resolver
-/// and for the per-batch metric output.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolutionPlan {
     pub paths: HashSet<String>,
@@ -154,8 +112,6 @@ pub struct ResolutionPlan {
 }
 
 impl ResolutionPlan {
-    /// The default project path is substituted when a `Reference` carries no
-    /// explicit project prefix (same-project shorthand: `#123`, `!456`).
     #[cfg(test)]
     pub fn from_refs<'a, I>(refs: I) -> Self
     where
@@ -168,8 +124,6 @@ impl ResolutionPlan {
         plan
     }
 
-    /// Skips empty default projects (the path-IN-list can't tolerate an empty
-    /// string against `siphon_routes.path`).
     pub fn add_ref(&mut self, r: &Reference, default_project: &str) {
         let project = r
             .project_path
@@ -194,7 +148,6 @@ impl ResolutionPlan {
                     }
                 }
             }
-            // No `Commit` node yet (ADR 013), so commit refs add no lookup work.
             RefKind::Commit => {
                 let _ = project_is_empty;
             }
@@ -202,17 +155,12 @@ impl ResolutionPlan {
     }
 }
 
-/// Keyed on `(project_path, kind, iid)` so the [`build_edges`] closure can
-/// resolve a parsed [`Reference`] — substituting the note's default project
-/// path for same-project shorthand — without re-querying ClickHouse per
-/// reference.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ResolvedIndex {
     by_key: HashMap<(RefKind, i64), HashMap<String, ResolvedTarget>>,
 }
 
 impl ResolvedIndex {
-    /// Commit references are not indexed here (no `Commit` node yet).
     pub fn build(
         routes: &[RouteRow],
         mr_entities: &[EntityRow],
@@ -246,9 +194,6 @@ impl ResolvedIndex {
         Self { by_key }
     }
 
-    /// Resolve a single parsed reference, substituting `default_project` for
-    /// same-project shorthand (`#123` / `!456`). Commit references and
-    /// references with no `iid` (or an unknown project/pair) return `None`.
     pub fn resolve(&self, r: &Reference, default_project: &str) -> Option<ResolvedTarget> {
         if r.kind == RefKind::Commit {
             return None;
@@ -316,7 +261,6 @@ mod tests {
 
     #[test]
     fn resolver_sql_dedups_replacing_merge_tree_by_pg_pkey() {
-        // Regression guard for the cross-project `0/` bug (see ROUTES_SQL docs).
         for sql in [
             &*ROUTES_SQL,
             &*PROJECT_PATHS_SQL,
@@ -456,8 +400,6 @@ mod tests {
 
     #[test]
     fn resolved_index_separates_mr_and_work_item_iid_namespaces() {
-        // An MR and a work item can share the same (project, iid); the index
-        // must key on kind so `!7` and `#7` don't collide.
         let index = ResolvedIndex::build(
             &[gitlab_route()],
             &[EntityRow {

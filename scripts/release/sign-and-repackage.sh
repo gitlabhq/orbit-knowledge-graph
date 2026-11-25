@@ -1,15 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Re-emit an archive with its inner binary signed via the code-signer image.
-# Must run inside the gitlab-com/gl-infra/common-ci-tasks-images/code-signer
-# image, with .google-oidc:auth already attached. For .zip archives the
-# environment must also provide `unzip` and `zip`.
-#
-# Usage: scripts/release/sign-and-repackage.sh <archive> <platform> <binary>
-# Platforms: macos, windows
-# Archives:  .tar.gz/.tgz, .zip
-
 if [ $# -ne 3 ]; then
     echo "Usage: $0 <archive> <platform> <binary>" >&2
     exit 1

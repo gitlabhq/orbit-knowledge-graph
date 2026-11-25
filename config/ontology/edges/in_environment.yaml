@@ -1,5 +1,3 @@
-# config/ontology/edges/in_environment.yaml
-
 description: Deployment targets an environment
 table: gl_ci_edge
 

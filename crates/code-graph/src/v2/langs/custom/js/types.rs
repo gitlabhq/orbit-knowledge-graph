@@ -108,7 +108,6 @@ impl ExportedBinding {
         }
     }
 
-    /// Local FQN defaults to `"default"` if the caller has no better candidate.
     pub fn primary(local_fqn: Option<String>, range: Range) -> Self {
         Self {
             local_fqn: local_fqn.unwrap_or_else(|| "default".to_string()),
@@ -202,8 +201,6 @@ pub struct JsFileAnalysis {
     pub module_info: JsModuleInfo,
 }
 
-/// The only fields of a definition resolution reads, so the rest of the analysis
-/// need not survive into the resolution phase, where the JS and TS peaks sit.
 #[derive(Debug, Clone)]
 pub struct JsDefSupport {
     pub fqn: String,
@@ -284,11 +281,6 @@ impl JsDefKind {
     }
 }
 
-/// Class definition metadata consumed by the cross-file resolver.
-///
-/// Only `fqn` and `extends` are read downstream; we intentionally do not
-/// retain per-class `range` or member lists here since those come in via
-/// the `JsDef` stream and the graph-wide member binding index.
 #[derive(Debug, Clone)]
 pub struct JsClassInfo {
     pub fqn: String,

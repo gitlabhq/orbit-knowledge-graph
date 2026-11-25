@@ -72,9 +72,6 @@ fn imported_target_path(
         .or_else(|| default_imported_target_path(imp, sep))
 }
 
-/// A ref collected during the full AST walk, with SSA reaching values
-/// already resolved to owned `ParseValue`s. Ready for cross-file
-/// resolution without re-parsing the source.
 pub struct CollectedRef {
     pub name: smol_str::SmolStr,
     pub chain: Option<Vec<ExpressionStep>>,
@@ -82,23 +79,16 @@ pub struct CollectedRef {
     pub enclosing_def: Option<u32>,
 }
 
-/// Result of a full parse (defs + imports + refs). The refs have SSA
-/// reaching values resolved but NOT cross-file resolved.
 pub struct ParseFullResult {
     pub definitions: Vec<CanonicalDefinition>,
     pub imports: Vec<CanonicalImport>,
     pub refs: Vec<CollectedRef>,
     pub inferred_returns: Vec<(u32, String)>,
-    /// Refs whose SSA alias chain couldn't be resolved without the
-    /// cross-file graph. Each entry is (ref_index, alias_target_name).
-    /// After graph finalize, the pipeline resolves these targets and
-    /// patches the reaching values.
     pub unresolved_aliases: Vec<(usize, String)>,
     pub links: crate::v2::types::FileLinks,
     pub phase_cpu: PhaseCpu,
 }
 
-/// Per-thread CPU time spent in each bounded parse sub-phase of one file.
 #[derive(Clone, Copy, Default)]
 pub struct PhaseCpu {
     pub parse: std::time::Duration,
@@ -106,7 +96,6 @@ pub struct PhaseCpu {
     pub ssa: std::time::Duration,
 }
 
-/// Independent per-file CPU-time budgets for the parse/walk/ssa sub-phases (`None` = unbounded).
 #[derive(Clone, Copy, Default)]
 pub struct PhaseTimeouts {
     pub parse: Option<std::time::Duration>,
@@ -114,13 +103,9 @@ pub struct PhaseTimeouts {
     pub ssa: Option<std::time::Duration>,
 }
 
-/// Typed errors from `parse_full_collect`. Adding a producer means
-/// adding a variant — the consumer's `match` becomes a compile error
-/// until the new arm is handled.
 #[derive(Debug)]
 pub enum ParseFullError {
     InvalidUtf8(std::str::Utf8Error),
-    /// A phase exceeded its per-file CPU budget (or the parser stalled); `phase` names which.
     Aborted {
         phase: crate::v2::error::AbortPhase,
         detail: String,
@@ -213,10 +198,6 @@ impl LanguageSpec {
         Some((name, node_to_range(node), expression))
     }
 
-    /// Iteratively walk a receiver expression, building the chain
-    /// from innermost (base) to outermost (final call).
-    /// All node kind recognition is driven by `ChainConfig`.
-    /// Type names in `New` steps are resolved via `import_map`.
     #[expect(
         clippy::too_many_arguments,
         reason = "iterative tree walk threading node, chain, config, imports, prefix, separator, and tracer; a context struct would duplicate the caller's scope"
@@ -231,8 +212,6 @@ impl LanguageSpec {
         sep: &str,
         tracer: &Tracer,
     ) {
-        // Collect deferred steps (outermost first) while walking inward to
-        // the base. Then push the base, then the deferred steps in reverse.
         let mut deferred: Vec<ExpressionStep> = Vec::new();
         let mut current = node.clone();
 
@@ -419,7 +398,6 @@ impl LanguageSpec {
             break;
         }
 
-        // Append deferred steps in reverse (innermost was deferred last)
         chain.extend(deferred.into_iter().rev());
     }
 
@@ -522,11 +500,6 @@ impl LanguageSpec {
         } else if let Some(raw_path) = rule.extract().apply(node) {
             let full_path = raw_path;
             let alias = rule.extract_alias(node);
-            // Check for wildcard: either a wildcard child node (e.g. `asterisk`
-            // in `import com.example.*`) or the always_wildcard flag (e.g. C#
-            // `using MyApp.Models;` imports all types in the namespace).
-            // Rules that extract aliases are named imports even if the language
-            // also marks regular imports from the same AST node as wildcards.
             let has_wildcard_child = rule
                 .wildcard_child_kind
                 .is_some_and(|wk| node.has(Axis::Child, Match::Kind(wk)));
@@ -571,10 +544,6 @@ impl LanguageSpec {
         }
     }
 
-    /// Parse the full AST: defs, imports, SSA, refs. Returns collected
-    /// refs with reaching values resolved from SSA, but NOT cross-file
-    /// resolved. Source bytes can be dropped after this returns.
-    /// Each [`PhaseTimeouts`] budget bounds its sub-phase; an exceeded phase returns [`ParseFullError::Aborted`].
     pub fn parse_full_collect(
         &self,
         source: &[u8],
@@ -657,7 +626,6 @@ impl LanguageSpec {
                 }
             );
         } else if self.file_scope {
-            // Use filename without extension as root scope (C, C++).
             let stem = std::path::Path::new(file_path)
                 .file_stem()
                 .and_then(|s| s.to_str())
@@ -666,8 +634,6 @@ impl LanguageSpec {
         }
         state.top_level_depth = state.scope_stack.len();
 
-        // `scope_stack[..top_level_depth]` is invariant for the whole walk, so
-        // compute the prefix once rather than rebuilding it on every node.
         let module_prefix: Option<String> = (state.top_level_depth > 0).then(|| {
             state.scope_stack[..state.top_level_depth]
                 .iter()
@@ -748,9 +714,6 @@ impl LanguageSpec {
             }
         }
 
-        // Unresolved alias targets have no SSA value — they need the cross-file
-        // graph to resolve (e.g. `service = AuthService` where
-        // `AuthService` is defined in another file).
         let mut needed: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
         for pending in &pending_refs {
             let reaching = state
@@ -773,9 +736,6 @@ impl LanguageSpec {
             }
         }
 
-        // Build the list of (ref_index, alias_target) for post-graph patching.
-        // Also map alias targets to the import-resolved name so the pipeline
-        // can look them up in the graph.
         let mut unresolved_aliases: Vec<(usize, String)> = Vec::new();
         if !needed.is_empty() {
             for (ref_idx, pending) in pending_refs.iter().enumerate() {
@@ -841,7 +801,6 @@ impl LanguageSpec {
         sep: &'static str,
         module_prefix: Option<&str>,
     ) {
-        // CPU budget tripped: bail so the walk unwinds; parse_full_collect then skips the file.
         if state.timed_out {
             return;
         }
@@ -890,7 +849,6 @@ impl LanguageSpec {
                 state.scope_stack.push(Arc::from(m.name.as_str()));
                 pushed_scope = true;
 
-                // Create new SSA block for this scope (isolates bindings)
                 let new_block = state.ssa.add_block();
                 state.ssa.add_predecessor(new_block, state.current_block);
                 state.ssa.seal_block(new_block);
@@ -945,7 +903,6 @@ impl LanguageSpec {
                 }
             );
 
-            // Write def name to SSA in the parent block so sibling scopes can see it.
             let parent_block = if pushed_scope {
                 *state.saved_blocks.last().unwrap_or(&state.current_block)
             } else {
@@ -990,9 +947,6 @@ impl LanguageSpec {
             if m.creates_scope {
                 state.enclosing_def_stack.push(def_index);
 
-                // Adopt sibling references: when decorators/annotations are
-                // CST siblings of the scope node, emit refs attributed to
-                // this def rather than the parent scope.
                 if !self.hooks.adopt_sibling_refs.is_empty()
                     && let Some(parent) = node.parent()
                 {
@@ -1037,14 +991,11 @@ impl LanguageSpec {
             (None, None) => false,
         };
 
-        // Expression-bodied functions: when a node like `function_body`
-        // contains `=`, treat all refs within as implicit returns.
         let is_expression_body = !self.hooks.expression_body_kinds.is_empty()
             && self.hooks.expression_body_kinds.contains(&nk)
             && node.children().any(|c| c.kind().as_ref() == "=");
 
         if !custom_handled {
-            // Branch matching → SSA fork/join (handles own children)
             if let Some(&rule_idx) = self.branch_dispatch.get(nk).and_then(|v| v.first()) {
                 self.walk_full_branch(node, rule_idx, state, sep, module_prefix);
                 if pushed_scope {
@@ -1057,7 +1008,6 @@ impl LanguageSpec {
                 return;
             }
 
-            // Loop matching → SSA header/body/exit (handles own children)
             if let Some(&rule_idx) = self.loop_dispatch.get(nk).and_then(|v| v.first()) {
                 self.walk_full_loop(node, rule_idx, state, sep, module_prefix);
                 if pushed_scope {
@@ -1112,7 +1062,6 @@ impl LanguageSpec {
                     if let Some(target_path) = imported_target_path(&self.hooks, imp, sep) {
                         state.import_map.insert(effective_name.clone(), target_path);
                     }
-                    // Write import to SSA so alias chasing finds it
                     let ssa_name = state.arena.alloc_str(&effective_name);
                     state.ssa.write_variable(
                         ssa_name,
@@ -1150,12 +1099,8 @@ impl LanguageSpec {
                         .iter()
                         .any(|p| name.starts_with(p));
                     let target_block = if is_instance_attr {
-                        // Write to parent class block so sibling methods can read it
                         *state.saved_blocks.last().unwrap_or(&state.current_block)
                     } else {
-                        // If this variable already has a value in the current
-                        // block, split: create a new block so the previous
-                        // value is preserved for refs queued before this write.
                         if state
                             .ssa
                             .has_variable_in_block(ssa_name, state.current_block)
@@ -1179,10 +1124,6 @@ impl LanguageSpec {
                         .ssa
                         .write_variable(ssa_name, target_block, val.clone());
 
-                    // Class field bindings: also write compound key (e.g. "this.myParameter")
-                    // so that chains like this.myParameter.bar() can resolve via instance
-                    // attr rewrite. Only fires when the binding is directly inside a type
-                    // container scope (not nested inside a method).
                     if !is_instance_attr
                         && !self.ssa_config.self_names.is_empty()
                         && let Some(&enclosing_idx) = state.enclosing_def_stack.last()
@@ -1206,10 +1147,6 @@ impl LanguageSpec {
             if !self.hooks.return_kinds.is_empty() && self.hooks.return_kinds.contains(&nk) {
                 state.in_return = true;
 
-                // For `return x` where x is a bare identifier, read its SSA
-                // value. Only fires when the return expression's first named
-                // child is itself an identifier kind — chains like `return
-                // foo.bar()` are left to the resolver via PendingRef.is_return.
                 if let Some(enclosing_idx) = state.enclosing_def_stack.last().copied()
                     && state.defs[enclosing_idx as usize]
                         .metadata
@@ -1272,8 +1209,6 @@ impl LanguageSpec {
                 {
                     name = new_name;
                 }
-                // For chains, read SSA for the base identifier (not the terminal).
-                // For bare refs, read SSA for the name itself.
                 let ssa_key = if let Some(chain) = &expression {
                     match chain.first() {
                         Some(ExpressionStep::Ident(base) | ExpressionStep::Call(base)) => {
@@ -1378,7 +1313,6 @@ impl LanguageSpec {
             .catch_all_kind
             .is_some_and(|ck| node.has(Axis::Child, Match::Kind(ck)));
 
-        // Identify condition byte range to skip (already walked above)
         let cond_range = rule
             .condition_field
             .and_then(|f| node.field(f))
@@ -1408,7 +1342,6 @@ impl LanguageSpec {
 
                 end_blocks.push(state.current_block);
             } else {
-                // Non-branch child: walk in pre-block (skip condition, already walked)
                 let cs = child.range().start;
                 let ce = child.range().end;
                 let is_condition = cond_range.is_some_and(|(s, e)| cs >= s && ce <= e);
@@ -1454,7 +1387,6 @@ impl LanguageSpec {
             self.walk_full(&iter_node, state, sep, module_prefix);
         }
 
-        // Header block (NOT sealed yet — back edge comes after body)
         let header = state.ssa.add_block();
         state.ssa.add_predecessor(header, pre_block);
         state.current_block = header;
@@ -1493,8 +1425,6 @@ impl LanguageSpec {
     }
 }
 
-/// A reference whose SSA reaching defs haven't been resolved yet.
-/// Stored during the walk, resolved after seal_remaining().
 struct PendingRef<'a> {
     name: String,
     chain: Option<Vec<ExpressionStep>>,
@@ -1557,7 +1487,6 @@ impl<'a> WalkFullState<'a> {
         }
     }
 
-    /// Handles compound key rewrite for instance attribute chains (self.x, @x).
     fn collect_refs(&mut self, pending_refs: &[PendingRef<'a>]) -> Vec<CollectedRef> {
         let mut collected = Vec::with_capacity(pending_refs.len());
         for pending in pending_refs {

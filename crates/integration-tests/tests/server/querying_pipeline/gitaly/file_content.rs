@@ -137,7 +137,6 @@ fn multi_blob_response(blobs: &[(String, Vec<u8>)]) -> Vec<u8> {
     buf
 }
 
-/// Like Gitaly, lists a blob shared by several paths only once.
 fn gitaly_like_response(revisions: &[String], content_of: impl Fn(&str) -> Vec<u8>) -> Vec<u8> {
     let mut seen = std::collections::HashSet::new();
     let mut buf = Vec::new();

@@ -10,7 +10,7 @@ config:
         enabled: true
         size: 5Gi
   merge:
-    max_payload: 67108864  # 64MB, matches staging
+    max_payload: 67108864
 
 container:
   merge:

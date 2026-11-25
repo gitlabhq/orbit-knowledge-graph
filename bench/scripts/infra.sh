@@ -1,16 +1,4 @@
 #!/usr/bin/env bash
-# Lifecycle wrapper for bench Terraform. Reads all config from bench.yaml.
-#
-# Reads tier, state bucket, and all config from bench.yaml.
-# Override tier with TIER env var or -var tier=... passthrough.
-#
-# Usage:
-#   bench/scripts/infra.sh init
-#   bench/scripts/infra.sh apply                          # tier from bench.yaml
-#   bench/scripts/infra.sh apply -var cluster_name=custom
-#   bench/scripts/infra.sh destroy
-#   bench/scripts/infra.sh output cluster_name
-#   bench/scripts/infra.sh plan
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -102,9 +90,7 @@ case "${1:-}" in
     "$TF" -chdir="${TF_DIR}" apply -var "tier=${TIER}" \
       -target=google_container_node_pool.workload "$@"
     fetch_credentials
-    # Phase 2 applies everything including bootstrap helm releases.
     "$TF" -chdir="${TF_DIR}" apply -var "tier=${TIER}" "$@"
-    # Phase 3: cert-manager CRs (need CRDs from phase 2).
     ensure_root_ca
     ;;
   plan)
@@ -120,10 +106,6 @@ case "${1:-}" in
     "$TF" -chdir="${TF_DIR}" output "$@"
     ;;
   reload)
-    # Wipe the graph DB (keep datalake) and restart GKG. Dropping and
-    # recreating `gkg` also drops the checkpoint tables (they live in the
-    # graph DB), so on boot the indexer re-creates schema and re-indexes
-    # from the untouched datalake. Grants persist across DROP DATABASE.
     shift
     : "${RUN_ID:?RUN_ID is required for reload}"
     CH_NS="ra-ch-${RUN_ID}"

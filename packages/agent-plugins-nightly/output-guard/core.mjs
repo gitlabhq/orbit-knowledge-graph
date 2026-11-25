@@ -20,10 +20,6 @@ export function parseOutputLimit(value, warn = console.warn) {
 const MAX_FRAMING_BYTES = 300;
 const GUARD_MARKER = /\n\[\.\.\. (\d+) of (\d+) bytes omitted\. Full output: [^\n]*\]\n/g;
 
-/**
- * Quoting a marker is not enough: the kept head and tail and the omitted count must add up to the full size,
- * give or take the framing a Pi guard adds around them.
- */
 export function alreadyGuarded(text) {
   const markers = [...text.matchAll(GUARD_MARKER)];
   if (markers.length !== 1) return false;

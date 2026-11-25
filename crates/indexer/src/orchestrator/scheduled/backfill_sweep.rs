@@ -3,10 +3,9 @@
 //! On each tick, dispatches code indexing for every enabled namespace whose
 //! projects aren't yet checkpointed for the current schema version. This is
 //! deliberately coverage-driven rather than gated on a `migrating` version
-//! (commit 0d0a33c9a): a migration-gated sweep stranded projects that weren't
+//! because a migration-gated sweep stranded projects that weren't
 //! indexed during the brief migration window. The scheduler's cadence lock
 //! keeps a single replica running the enumeration per interval.
-
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -51,8 +50,6 @@ impl ScheduledTask for CodeBackfillSweep {
 
     async fn run(&self) -> Result<(), TaskError> {
         let start = Instant::now();
-        // Datalake unreachable is transient: record the failure and retry next
-        // tick rather than treating it as a task error.
         let result = self.code_backfill.dispatch_enabled(Uuid::new_v4()).await;
         let duration = start.elapsed().as_secs_f64();
         let outcome = if result.is_ok() { "success" } else { "error" };

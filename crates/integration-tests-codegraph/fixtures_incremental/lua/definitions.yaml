@@ -68,7 +68,6 @@ tests:
     assert:
       - { row: { name: "outer" } }
 
-  # corrected: impl wrappers are containers; the nested local inner is a definition
   - name: "Total definitions from defs.lua"
     query: |
       MATCH (d:Definition)

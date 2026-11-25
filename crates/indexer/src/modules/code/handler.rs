@@ -23,14 +23,8 @@ use crate::retry::GlobalRetry;
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
 
-/// Sentinel branch value written to the checkpoint when the project is
-/// resolved as deleted from Rails (404) and we cannot determine its default
-/// branch. The dispatcher's `fetch_checkpointed_project_ids` filter keys on
-/// `(traversal_path, project_id)` and ignores branch, so any non-empty value
-/// satisfies the schema and dedupes future dispatch cycles.
 const DELETED_PROJECT_BRANCH_SENTINEL: &str = "HEAD";
 
-/// A timed-out job is likely transiently slow: retry once, then dead-letter (engine reads this policy).
 const JOB_TIMEOUT_RETRY: GlobalRetry = GlobalRetry {
     max_attempts: 2,
     dead_letter: true,
@@ -42,7 +36,6 @@ pub fn project_lock_key(project_id: i64, branch: &str) -> String {
     format!("project.{project_id}.{encoded_branch}")
 }
 
-/// Heartbeat lives in this future (not a spawned task), so it can't leak; it ticks whenever `work` is pending, through the blocking parse and the wait for the rows to land.
 async fn run_with_heartbeat<T>(
     work: impl std::future::Future<Output = T>,
     progress: &ProgressNotifier,
@@ -172,11 +165,6 @@ impl Handler for CodeIndexingTaskHandler {
 }
 
 impl CodeIndexingTaskHandler {
-    /// Returns `Ok(Some((branch, project_info)))` when the branch is known,
-    /// `Ok(None)` when the project is gone from Rails (terminal: the dispatcher
-    /// has a stale view; acking avoids DLQ churn), and `Err` for transient
-    /// failures. `project_info` is `Some` when the lookup ran, so the caller
-    /// reuses it instead of asking again.
     async fn resolve_branch(
         &self,
         request: &CodeIndexingTaskRequest,
@@ -210,10 +198,6 @@ impl CodeIndexingTaskHandler {
 
         let Some((branch, project_info)) = self.resolve_branch(request).await? else {
             warn!("project not found resolving default branch; acknowledging as deleted");
-            // Mirror the empty-repository path: write a checkpoint so the
-            // dispatcher's `fetch_checkpointed_project_ids` filter excludes
-            // this project on subsequent backfill cycles instead of
-            // republishing the same task forever.
             let sentinel_branch = request
                 .branch
                 .as_deref()
@@ -465,7 +449,6 @@ impl CodeIndexingTaskHandler {
         }
         let redelivered = match &result {
             Err(HandlerError::Backpressure(_)) => true,
-            // Redeliveries share one dispatch; counting each would exhaust MAX_CODE_ATTEMPTS.
             Err(HandlerError::Processing(_)) if overloaded => attempt > 1,
             Err(HandlerError::Processing(_)) => context.redelivered_on_failure,
             _ => false,

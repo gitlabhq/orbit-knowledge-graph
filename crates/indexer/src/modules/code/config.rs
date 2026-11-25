@@ -67,7 +67,6 @@ impl CodeTableNames {
         })
     }
 
-    /// Unchanging non-key columns a tombstone for `table` must carry.
     pub fn immutable_columns(&self, table: &str) -> &[String] {
         self.node_columns.get(table).map_or(&[], Vec::as_slice)
     }
@@ -95,7 +94,6 @@ impl CodeTableNames {
             })
     }
 
-    /// For stale data cleanup.
     pub fn edge_table_names(&self) -> Vec<&str> {
         let mut tables: Vec<&str> = self
             .edge_tables
@@ -117,7 +115,6 @@ impl CodeTableNames {
         ]
     }
 
-    /// Code-origin source kinds used to clean shared edge tables.
     pub const NODE_KINDS: [&'static str; 5] = [
         "Branch",
         "Directory",
@@ -126,7 +123,6 @@ impl CodeTableNames {
         "ImportedSymbol",
     ];
 
-    /// `NODE_KINDS` as a quoted SQL list for a `source_kind IN (...)` predicate.
     pub fn node_kinds_sql_list() -> String {
         Self::NODE_KINDS.map(|kind| format!("'{kind}'")).join(", ")
     }

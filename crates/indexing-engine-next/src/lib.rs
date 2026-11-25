@@ -23,6 +23,9 @@ mod worker;
 
 pub use builder::{BuildError, Engine, EngineBuilder};
 pub use config::{ClusterPoolConfig, EngineConfig, LaneConfig, PoolConfig};
+pub use event::{
+    EngineEvent, Failure, LaneEvent, LaneStep, Observer, TaskEvent, TaskIdentity, TaskStep,
+};
 pub use lane::{InvalidLaneId, Lane, LaneId};
 pub use ledger::JobSummary;
 pub use payload::{Key, Payload, Tenant};

@@ -105,7 +105,6 @@ fixtures:
       }
 
 tests:
-  # ── Definitions ────────────────────────────────────────────────
   - name: "Trait, abstract class, class, and enum keep distinct definition types"
     query: |
       MATCH (d:Definition)
@@ -154,7 +153,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Inheritance (extends + implements + trait use) ─────────────
   - name: "Product extends Entity"
     query: |
       MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
@@ -179,7 +177,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # ── Calls ──────────────────────────────────────────────────────
   - name: "Inherited method call: Entity.refresh -> Entity.touch via \\$this"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

@@ -1,6 +1,3 @@
-//! Skills stay outside the agent command registry because they are passive artifacts.
-//! Version is not a content hash: concurrent bumps or an explicit skip can reuse it.
-
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 

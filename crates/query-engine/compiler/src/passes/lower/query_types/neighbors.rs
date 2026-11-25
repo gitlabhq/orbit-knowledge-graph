@@ -1,7 +1,3 @@
-//! Neighbors emits its own redaction columns directly (rather than relying on
-//! the result-contract pass's _orbit_* injection) since the center edge column differs
-//! per direction arm.
-
 use ontology::constants::*;
 
 use std::collections::HashMap;
@@ -195,7 +191,6 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         };
 
         let mut where_parts: Vec<Expr> = Vec::new();
-        // Denorm tags aren't in the per-arm projection, so they filter the union output alias.
         for (_, filter) in &center_filters {
             let Some(property) = filter.property else {
                 continue;
@@ -504,7 +499,6 @@ fn build_fused_both_arm(
         query_data_model::DenormalizedDirection::Target,
     );
 
-    // (matched, is_outgoing, neighbor_id, neighbor_kind, center_id)
     let out_tuple = Expr::func(
         Function::Tuple,
         vec![

@@ -168,8 +168,6 @@ tests:
     assert:
       - { column_values: { field: callee, values: ["first"] } }
 
-  # `returns_inside` returns unit, so `r.run()` is ill-typed on purpose: the engine
-  # must not take the closure's `return` as the function's return value.
   - name: a return inside a closure is not the function's return value
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

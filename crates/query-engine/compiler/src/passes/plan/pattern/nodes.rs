@@ -1,6 +1,3 @@
-//! Node planning: a `NodePlan` per input node, and the decision whether each node joins the result
-//! as a table read or only narrows an edge scan.
-
 use std::collections::{HashMap, HashSet};
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
@@ -78,7 +75,6 @@ impl NodePlan {
         })
     }
 
-    /// A node outside a pattern keeps its virtual filters; the lowerer for its query type handles them.
     pub(crate) fn resolve<M>(node: &InputNode, model: &M) -> Result<Self>
     where
         M: OrbitQueryModel + ?Sized,
@@ -118,7 +114,6 @@ impl NodePlan {
         predicates
     }
 
-    /// Every predicate the node's table read applies: filters, bound conditions, ids, and liveness.
     pub fn conditions(&self) -> Vec<Predicate> {
         let mut predicates: Vec<_> = self
             .filters
@@ -166,7 +161,6 @@ where
         .collect()
 }
 
-/// Decides which nodes join the result as rows and which join only to carry their authorization columns.
 pub(super) fn assign_node_access<M>(pattern: &mut Pattern<'_, M>, condition_nodes: &HashSet<String>)
 where
     M: OrbitQueryModel + ?Sized,

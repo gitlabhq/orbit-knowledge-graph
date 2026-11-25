@@ -1,6 +1,3 @@
-//! SDLC indexing pipeline: extract a whole page, transform it, and bulk-write
-//! each destination table, overlapping the next page's read with the writes.
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -30,7 +27,6 @@ use orbit_server_config::DatalakeRetryConfig;
 
 const MAX_RETRIES: u32 = 3;
 
-/// Retry a datalake page read, shrinking the block size each time so an oversized page self-corrects.
 const DATALAKE_EXTRACT_RETRY: LocalRetry = LocalRetry {
     backoff: Backoff::Fixed(&[
         Duration::from_millis(100),
@@ -74,9 +70,6 @@ impl From<PipelineError> for HandlerError {
     }
 }
 
-/// `read_*` count the rows/bytes actually returned from the datalake; `scanned_*`
-/// ClickHouse's storage-scan cost from the summary; `written_*` the transformed
-/// rows/bytes inserted.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(in crate::modules::sdlc) struct PipelineStats {
     pub read_rows: u64,
@@ -86,7 +79,6 @@ pub(in crate::modules::sdlc) struct PipelineStats {
     pub written_rows: u64,
     pub written_bytes: u64,
     pub duration_ms: u64,
-    // Per-phase time can exceed duration_ms: extract and write overlap via tokio::join!.
     pub extract_ms: u64,
     pub transform_ms: u64,
     pub write_ms: u64,
@@ -107,8 +99,6 @@ impl PipelineStats {
     }
 }
 
-/// One extracted page and the cost of fetching it. Carried across loop
-/// iterations because the next page is read while the current one is written.
 struct Page {
     batches: Vec<RecordBatch>,
     scan_stats: ScanStats,
@@ -286,7 +276,6 @@ impl Pipeline {
                 Ok::<_, HandlerError>(write_start.elapsed())
             };
 
-            // Overlap the next page's read with this page's writes; peak memory is roughly two pages.
             let (write_elapsed, next_page) = if has_more {
                 let next_sql = self.page_sql(&base_query, &plan.sort_key, &cursor)?;
                 let (write_result, extract_result) = tokio::join!(
@@ -397,8 +386,6 @@ impl Pipeline {
             .to_sql()
     }
 
-    /// Reads a page, retrying with a smaller block size so a datalake failure
-    /// self-corrects instead of bouncing the message to the dead letter stream.
     async fn extract_batch(
         &self,
         transform_name: &str,
@@ -471,9 +458,6 @@ impl Pipeline {
         .await
     }
 
-    /// Groups output rows by destination table so each table is written as one bulk insert.
-    ///
-    /// Consumes the page so none of it survives into the write and read-ahead window.
     async fn transform_page(
         &self,
         transform: &dyn BlockTransform,
@@ -653,8 +637,6 @@ mod tests {
                 self.batch_size / 2
             };
 
-            // Two blocks per page so the cursor must come from the last block's
-            // last row, not from row order.
             let first = rows / 2;
             let second = rows - first;
             Ok(vec![
@@ -837,8 +819,6 @@ mod tests {
         assert!(completed.indexed_at.is_some());
     }
 
-    // Comparing `has_more` against the plan's budget rather than the query's share ends
-    // a partition after one page and marks it complete with rows unread.
     #[tokio::test]
     async fn partitioned_share_pages_against_the_query_budget() {
         let store = Arc::new(RecordingCheckpointStore::new());
@@ -1302,8 +1282,6 @@ mod tests {
     async fn run_plan_reports_resource_stats() {
         let datalake = Arc::new(StatsDatalake {
             rows: 5,
-            // ClickHouse scanned far more rows than the page returns; read_rows
-            // must track the 5 returned while scanned_rows carries the cost.
             scan_stats: ScanStats {
                 scanned_rows: 1000,
                 scanned_bytes: 64_000,

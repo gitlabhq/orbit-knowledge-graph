@@ -4,12 +4,8 @@ import { cn, Icon, pageLink, SiteLink, ThemeToggle } from "@gitlab-org/orbit-sit
 import { Link, useRouterState } from "@tanstack/react-router";
 import { TABS, USER_DOCS } from "../sections";
 
-// The search dialog lives in the top bar and opens from its button, which phones keep hidden behind the menu.
 const openSearch = () => document.querySelector<HTMLButtonElement>(".site-shell > header .search-button")?.click();
 
-// On phones, the top bar has only the logo and this button. It opens a full-screen sheet under the top bar:
-// search first, then the site's pages as large rows, and the theme at the bottom. A page with a menu, such as
-// Developers, opens its pages as a second level, with a row back.
 export function MobileMenu({ className, sheetClassName }: { className?: string; sheetClassName?: string }) {
   const path = useRouterState({ select: (state) => state.location.pathname });
   const [open, setOpen] = useState(false);

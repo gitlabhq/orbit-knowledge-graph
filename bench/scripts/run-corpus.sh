@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-# Run the query corpus against the bench ClickHouse via query-profiler.
-# Requires a port-forward to the bench CH on localhost:18123.
-#
-# Usage:
-#   KCTX=... RUN_ID=bench12 bash bench/scripts/run-corpus.sh
-#   KCTX=... RUN_ID=bench12 bash bench/scripts/run-corpus.sh sdlc
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,11 +11,9 @@ CH_PASS=$(kubectl --context="${KCTX}" get secret ra-ch-credentials -n "${CH_NS}"
 GRAPH_PASS=$(kubectl --context="${KCTX}" -n "e2e-${RUN_ID}-gkg" get secret gkg-secrets \
   -o jsonpath='{.data.graph-password}' | base64 -d)
 
-# Resolve a traversal path and the schema version from the live data.
 SCHEMA_VER=$(kubectl --context="${KCTX}" exec -n "${CH_NS}" clickhouse-0 -- \
   clickhouse-client --password "${CH_PASS}" -q \
   "SELECT max(version) FROM gkg.gkg_schema_version FORMAT TSV" 2>/dev/null)
-# Use a top-level group path so queries see the full namespace, not a single leaf project.
 TPATH=$(kubectl --context="${KCTX}" exec -n "${CH_NS}" clickhouse-0 -- \
   clickhouse-client --password "${CH_PASS}" -q \
   "SELECT DISTINCT arrayStringConcat(arraySlice(splitByChar('/', traversal_path), 1, 2), '/') || '/'
@@ -35,7 +27,6 @@ export CLICKHOUSE_PASSWORD="${GRAPH_PASS}"
 
 log "Schema version: v${SCHEMA_VER}, traversal path: ${TPATH}"
 
-# Build the profiler once.
 log "Building query-profiler..."
 cargo build -p query-profiler --quiet 2>/dev/null
 PROFILER="${REPO_ROOT}/target/debug/query-profiler"
@@ -55,7 +46,6 @@ CORPUS_DIR="${REPO_ROOT}/fixtures/queries/corpus"
 RESULTS_DIR="${BENCH_DIR}/results/${RUN_ID}/corpus"
 mkdir -p "${RESULTS_DIR}"
 
-# Resolve sample IDs once, cache to disk.
 SAMPLE_CACHE="${RESULTS_DIR}/.sample_ids.json"
 if [[ -f "${SAMPLE_CACHE}" ]]; then
   SAMPLE_JSON=$(cat "${SAMPLE_CACHE}")

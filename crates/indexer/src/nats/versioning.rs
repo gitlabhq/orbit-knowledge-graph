@@ -15,7 +15,7 @@ use orbit_migrations::version::SCHEMA_VERSION;
 
 pub const MANAGED_STREAMS: &[&str] = &[INDEXER_STREAM, DEAD_LETTER_STREAM];
 
-// No writer since the KV progress store was removed. Kept so GC deletes the streams of older schema versions.
+// Kept so GC deletes the streams of older schema versions.
 const RETIRED_INDEXING_PROGRESS_BUCKET: &str = "orbit_indexing_progress";
 
 pub const MANAGED_BUCKETS: &[&str] = &[INDEXING_LOCKS_BUCKET, RETIRED_INDEXING_PROGRESS_BUCKET];

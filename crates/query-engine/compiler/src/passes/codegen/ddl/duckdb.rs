@@ -1,6 +1,5 @@
 use crate::ast::ddl::{ColumnType, CreateTable};
 
-/// Unwraps `LowCardinality(Nullable(_))` so the wrapper alone never reads as non-null.
 fn is_nullable(ct: &ColumnType) -> bool {
     match ct {
         ColumnType::Nullable(_) => true,
@@ -41,7 +40,6 @@ pub fn generate_local_ddl(ontology: &ontology::Ontology, external_ddl: &str) -> 
     ddl
 }
 
-/// Defaults are preserved only when they are plain literals, not ClickHouse function calls.
 pub fn emit_create_table(table: &CreateTable) -> String {
     let mut col_defs: Vec<String> = Vec::new();
 
@@ -70,7 +68,6 @@ pub fn emit_create_table(table: &CreateTable) -> String {
     )
 }
 
-/// True for string/numeric literals and `false`/`true`; false for ClickHouse calls like `now64(6)`.
 fn is_duckdb_compatible_default(default: &str) -> bool {
     let d = default.trim();
     if d.eq_ignore_ascii_case("false") || d.eq_ignore_ascii_case("true") {

@@ -1,10 +1,5 @@
 name: "Python: relative re-exports through a package __init__.py"
 
-# A package __init__.py *is* its package, so a one-dot relative import there
-# resolves against the package itself (no module leaf to drop). Re-exports
-# written this way (`from .base import X`, `from .helpers import *`) must bind
-# callers to the underlying definition rather than an unresolved ImportedSymbol.
-
 fixtures:
   - path: app/registry/base.py
     content: |
@@ -31,7 +26,6 @@ fixtures:
           r.register()
           return make_widget()
 
-  # Two-dot relative import in a nested __init__.py climbs to the parent package.
   - path: proj/core.py
     content: |
       class Engine:
@@ -48,8 +42,6 @@ fixtures:
       def make_engine():
           return Engine()
 
-  # Regression guard: a one-dot relative import in a REGULAR module still drops
-  # the module leaf (this is the case package-init resolution must not break).
   - path: reg/pkg/thing.py
     content: |
       class Thing:
@@ -62,8 +54,6 @@ fixtures:
       def use_thing():
           return Thing()
 
-  # Over-resolution guard: an external import with no local definition must stay
-  # an ImportedSymbol even though the importing file is a package __init__.py.
   - path: ext/__init__.py
     content: |
       from thirdparty import Widget

@@ -1,6 +1,3 @@
-//! Every [`QueryError`] increments [`spec::COMPILER_REJECTED`] with a
-//! closed-enum `failure_reason` label.
-
 use std::sync::LazyLock;
 
 use opentelemetry::KeyValue;
@@ -10,9 +7,6 @@ use orbit_observability::query::engine as spec;
 
 use crate::error::QueryError;
 
-/// Test-only side-channel that lets unit tests verify `count_err` was
-/// actually invoked. The OpenTelemetry counter has no readable handle, so
-/// this is the cheapest way to keep the regression tests honest.
 #[cfg(test)]
 pub(crate) static COUNT_ERR_HITS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);

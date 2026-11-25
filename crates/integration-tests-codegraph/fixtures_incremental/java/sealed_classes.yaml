@@ -1,15 +1,3 @@
-# Java 17 sealed types (JEP 409): sealed interface with a permits clause and its
-# permitted classes (final, non-sealed).
-#
-# How `permits` is represented (#847): the clause is not extracted into
-# metadata and produces no semantic Extends edge — in valid Java every
-# permitted subtype carries its own extends/implements clause (JLS 8.1.1.2),
-# which is where the Extends edges asserted below come from. The permitted
-# type names in the clause (a `permits` field on class/interface_declaration
-# holding a `type_list`) are picked up by the bare `reference("type_identifier")`
-# rule and attributed to the sealed parent, so the parent->child relationship
-# stays reachable as a Calls edge even when the child file is missing or
-# malformed. The Quad/Square fixtures below pin that fallback.
 name: "Java 17: sealed interfaces and permitted classes"
 
 fixtures:
@@ -52,9 +40,6 @@ fixtures:
           public double area() { return 0; }
       }
 
-  # Malformed pair: Square does not declare `implements Quad` (illegal Java,
-  # but indexable), so the parent-side `permits` clause is the only place the
-  # relationship is stated.
   - path: com/example/shapes/Quad.java
     content: |
       package com.example.shapes;

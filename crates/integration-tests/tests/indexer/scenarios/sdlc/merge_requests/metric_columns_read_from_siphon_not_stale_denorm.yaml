@@ -1,6 +1,3 @@
-# The metrics row replicated after the MR row without a parent re-emit;
-# destination metric columns must come from siphon_merge_request_metrics,
-# not the stale NULL denormalized columns on merge_requests.
 description: Metric columns read from the metrics table, not stale denormalized columns
 scope: { namespace: 100 }
 

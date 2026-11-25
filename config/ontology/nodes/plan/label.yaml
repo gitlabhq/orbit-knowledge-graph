@@ -1,5 +1,3 @@
-# config/ontology/nodes/plan/label.yaml
-
 node_type: Label
 domain: plan
 description: A label for categorizing and filtering work items

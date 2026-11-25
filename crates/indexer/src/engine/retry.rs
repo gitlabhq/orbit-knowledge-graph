@@ -1,14 +1,9 @@
-//! Two retry shapes for the indexer. [`LocalRetry`] drives in-process backoff through [`drive`]
-//! and friends; [`GlobalRetry`] decides NATS redelivery-then-dead-letter for `run_handlers`.
-
 use std::future::Future;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Backoff {
-    /// Attempt `i` waits `ladder[min(i, len-1)]`; empty = no wait.
     Fixed(&'static [Duration]),
-    /// `base * 2^attempt`, clamped to `cap`.
     Exponential { base: Duration, cap: Duration },
 }
 
@@ -26,8 +21,6 @@ impl Backoff {
     }
 }
 
-/// In-process retry: [`drive`] and friends run the closure up to `max_attempts`, waiting `backoff`
-/// between tries. Under [`drive_until`] `max_attempts` is a safety bound and the deadline is the real exit.
 #[derive(Debug, Clone, Copy)]
 pub struct LocalRetry {
     pub backoff: Backoff,
@@ -39,7 +32,6 @@ impl LocalRetry {
         self.backoff.delay(attempt)
     }
 
-    /// [`Step::Retry`] with `next` while attempts remain, else [`Step::GiveUp`] with `give_up`.
     pub fn retry_or_give_up<T, E, S>(&self, attempt: u32, next: S, give_up: E) -> Step<T, E, S> {
         if attempt + 1 < self.max_attempts.max(1) {
             Step::Retry(next)
@@ -49,8 +41,6 @@ impl LocalRetry {
     }
 }
 
-/// NATS-redelivery retry: [`GlobalRetry::should_redeliver`] gates redelivery on the delivery
-/// `attempt`, and on exhaustion the failure either dead-letters or drops.
 #[derive(Debug, Clone, Copy)]
 pub struct GlobalRetry {
     pub max_attempts: u32,
@@ -62,7 +52,6 @@ impl GlobalRetry {
         attempt < self.max_attempts.max(1)
     }
 
-    /// The single source of the global retry decision: map a failure to `Processing` (redeliver) or `Permanent`.
     pub fn global_failure(
         &self,
         attempt: u32,
@@ -84,14 +73,12 @@ impl GlobalRetry {
     }
 }
 
-/// The outcome of one attempt; `Retry` carries the next attempt's state by value (keeps the future `Send`).
 pub enum Step<T, E, S = ()> {
     Done(T),
     Retry(S),
     GiveUp(E),
 }
 
-/// Bounded retry that threads state by value through [`Step::Retry`].
 pub async fn drive_with<T, E, S, F, Fut>(policy: &LocalRetry, init: S, attempt: F) -> Result<T, E>
 where
     F: FnMut(S, u32) -> Fut,
@@ -105,7 +92,6 @@ where
     .await
 }
 
-/// Bounded retry with no carried state.
 pub async fn drive<T, E, F, Fut>(policy: &LocalRetry, mut attempt: F) -> Result<T, E>
 where
     F: FnMut(u32) -> Fut,
@@ -115,7 +101,6 @@ where
     drive_with(policy, (), move |(), i| attempt(i)).await
 }
 
-/// Bounded by `deadline` and the attempt cap; `on_deadline` builds the terminal error from the last state.
 pub async fn drive_until<T, E, S, F, Fut, D>(
     policy: &LocalRetry,
     deadline: tokio::time::Instant,
@@ -151,7 +136,6 @@ where
             Step::GiveUp(error) => return Err(error),
             Step::Retry(next) => {
                 state = next;
-                // No sleep after the final attempt: it would be pure latency before exhaustion.
                 if i + 1 < cap {
                     let mut delay = policy.backoff_for(i);
                     if let Some(deadline) = deadline {
@@ -170,17 +154,12 @@ where
     Err(on_bound(&state))
 }
 
-/// One iteration of an unbounded supervisor loop.
 pub enum Loop {
-    /// Succeeded; reset the failure counter and run again immediately.
     Continue,
-    /// Failed; back off then run again (no cap).
     Backoff,
-    /// Terminal; leave the loop.
     Stop,
 }
 
-/// Unbounded supervisor loop until `step` returns [`Loop::Stop`]; `step` gets the consecutive-failure count.
 pub async fn drive_forever<F, Fut>(policy: &LocalRetry, mut step: F)
 where
     F: FnMut(u32) -> Fut,
@@ -199,7 +178,6 @@ where
     }
 }
 
-/// The safety-bound error when a callback only ever returns `Retry` until the cap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RetryExhausted {
     pub attempts: u32,
@@ -235,7 +213,6 @@ mod tests {
         max_attempts: 3,
     };
 
-    /// `drive` with a callback returning `Done` at `done_at` (None = never), else `terminal`; counts calls.
     async fn run(
         done_at: Option<u32>,
         terminal: fn() -> Step<u32, TestError>,
@@ -280,7 +257,6 @@ mod tests {
 
     #[tokio::test]
     async fn exhaustion_does_not_sleep_after_the_final_attempt() {
-        // Real time (no start_paused): a final-attempt Retry must exhaust without sleeping the 10s backoff.
         const LONG: &[Duration] = &[Duration::from_secs(10)];
         let policy = LocalRetry {
             backoff: Backoff::Fixed(LONG),
@@ -339,7 +315,6 @@ mod tests {
 
     #[test]
     fn retry_or_give_up_respects_the_cap() {
-        // POLICY.max_attempts == 3: attempts 0 and 1 retry, attempt 2 gives up.
         assert!(matches!(
             POLICY.retry_or_give_up::<(), _, ()>(0, (), TestError::GaveUp),
             Step::Retry(())

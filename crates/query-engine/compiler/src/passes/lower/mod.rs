@@ -1,5 +1,3 @@
-//! Query lowerer: edge-chain-first, nodes are lazy.
-
 mod columns;
 mod graph;
 mod predicates;

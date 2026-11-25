@@ -169,7 +169,7 @@ tests:
           - { empty: true }
 
   - name: "chained return types: engine.session().cursor().fetch_all() via annotations"
-    skip: true
+    known_gap: "reason not recorded"
     queries:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)

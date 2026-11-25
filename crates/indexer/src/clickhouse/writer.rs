@@ -33,9 +33,6 @@ pub struct WriteReport {
     pub bytes: u64,
 }
 
-/// No internal throttling. Backpressure comes from the message source (NATS ack window,
-/// channel capacity). Handlers control batch sizes per entity; self-managed deployments
-/// with limited memory should watch ClickHouse's query queue.
 #[derive(Clone)]
 pub struct ClickHouseWriter {
     client: ArrowClickHouseClient,
@@ -52,7 +49,6 @@ impl ClickHouseWriter {
         }
     }
 
-    /// A writer that accepts all writes without connecting. For unit tests only.
     #[cfg(any(test, feature = "testkit"))]
     pub fn noop() -> Self {
         use clickhouse_client::ClickHouseConfigurationExt;
@@ -67,7 +63,6 @@ impl ClickHouseWriter {
     }
 }
 
-/// Both variants pin `async_insert` so the many small per-page inserts coalesce into fewer parts.
 pub(crate) fn insert_overrides(
     durability: WriteDurability,
 ) -> &'static [(&'static str, &'static str)] {
@@ -171,7 +166,6 @@ impl ClickHouseWriter {
         .await
     }
 
-    /// Issues a `DELETE FROM` statement for rows that should be lightweight-deleted.
     pub async fn lightweight_delete(&self, sql: &str) -> Result<(), WriteError> {
         if self.noop {
             return Ok(());

@@ -10,14 +10,11 @@ use crate::fingerprint::current_fingerprints;
 
 const REMEDIATION: &str = "Run `mise schema:bump` to record the change and re-snapshot.";
 
-/// Committed state that passed [`verify_committed_snapshot`].
 pub struct VerifiedSnapshot {
     pub committed: Fingerprints,
     pub ledger: MigrationLedger,
 }
 
-/// Verifies the committed fingerprint snapshot, migration ledger and current
-/// ontology archive in `config_dir` against the embedded ontology.
 pub fn verify_committed_snapshot(
     ontology: &Ontology,
     config_dir: &Path,

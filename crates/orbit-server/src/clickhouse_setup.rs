@@ -1,6 +1,3 @@
-//! `--mode clickhouse-setup`: applies `config/clickhouse-setup.sql` to the graph
-//! ClickHouse as an administrator.
-
 use anyhow::{Context, anyhow};
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use orbit_log_fields::info;
@@ -16,7 +13,6 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<()> {
     let reader_password = required(&setup.reader_password, "reader_password")?;
     let siphon_reader_password = required(&setup.siphon_reader_password, "siphon_reader_password")?;
 
-    // The graph database does not exist until the contract creates it.
     let admin = ClickHouseConfiguration {
         database: "default".to_string(),
         username: setup.admin_username.clone(),

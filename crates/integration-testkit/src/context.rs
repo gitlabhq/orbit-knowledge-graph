@@ -86,9 +86,6 @@ impl TestContext {
             .expect("parameterized query failed")
     }
 
-    /// Like [`query_parameterized`] but returns the ClickHouse error instead of
-    /// panicking, so callers (e.g. the corpus smoke test) can collect per-query
-    /// failures rather than aborting on the first one.
     pub async fn try_query_parameterized(
         &self,
         pq: &ParameterizedQuery,
@@ -120,8 +117,6 @@ impl TestContext {
         serde_json::from_str(&text).expect("explain output is JSON")
     }
 
-    /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see
-    /// every inserted row.
     pub async fn optimize_all(&self) {
         self.optimize(false).await;
     }
@@ -403,7 +398,6 @@ fn test_settings() -> HashMap<String, String> {
     settings
 }
 
-// More concurrent clones per fork fail with TOO_MANY_SIMULTANEOUS_QUERIES on a 4-CPU runner.
 const CLONE_CONCURRENCY: usize = 8;
 
 static CLIENTS: LazyLock<Mutex<HashMap<String, ArrowClickHouseClient>>> =

@@ -1,5 +1,3 @@
-# config/ontology/nodes/ci/stage.yaml
-
 node_type: Stage
 domain: ci
 description: A stage within a CI/CD pipeline that groups related jobs (e.g., build, test, deploy)

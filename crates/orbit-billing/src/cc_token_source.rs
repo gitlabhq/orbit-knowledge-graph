@@ -7,9 +7,6 @@ use labkit_events::TokenSource;
 use labkit_events::oidc::SourceError;
 use reqwest::header::{AUTHORIZATION, HeaderMap};
 
-/// labkit `TokenSource` for Cloud Connector billing auth on Self-Managed /
-/// Dedicated. Only reads [`CloudConnectorTokenCache`] and injects the
-/// `Authorization` header — fetching and caching happen elsewhere.
 pub struct CloudConnectorTokenSource {
     cache: Arc<CloudConnectorTokenCache>,
 }
@@ -32,9 +29,6 @@ impl TokenSource for CloudConnectorTokenSource {
                 .token()
                 .await
                 .map_err(|e| SourceError::RequestingOidcToken(e.to_string()))?;
-            // No SourceError variant means "header encoding failed"; TokenCache
-            // means "failed to parse a fetched JWT" (oidc/source.rs), which this
-            // isn't, so RequestingOidcToken is the closer fit.
             let value = format!("Bearer {token}").parse().map_err(
                 |e: reqwest::header::InvalidHeaderValue| {
                     SourceError::RequestingOidcToken(e.to_string())

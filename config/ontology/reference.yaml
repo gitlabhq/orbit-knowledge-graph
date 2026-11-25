@@ -1,13 +1,7 @@
-# config/ontology/nodes/core/user.yaml
-
 node_type: User
 domain: core
 description: A GitLab user account
 destination_table: users
-
-# Output destination
-# destination:
-#   table: users
 
 properties:
   id:
@@ -27,7 +21,7 @@ properties:
 
   is_admin:
     type: boolean
-    source: admin  # rename: admin → is_admin
+    source: admin
     nullable: false
 
   user_type:
@@ -49,14 +43,7 @@ edges:
     source: parent_id
     target_kind: Group
 
-# using this overrides automatic query gen via the properties fields above
 etl:
-  # codepath: siphon
-  # codepath: internal_code_indexing
   query: |
     SELECT * FROM notes where noteable_type = 'MergeRequest'
 
-# below scenario is where you want to split 1 siphon table into multiple tables 
-# etl:
-#   query: |
-#     SELECT * FROM notes where noteable_type = 'Issue'

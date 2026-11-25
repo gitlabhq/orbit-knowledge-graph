@@ -85,7 +85,7 @@
 - category: contract
   reason: "Transient: published clients still call the old gRPC path; delete only after zero traffic for a milestone."
   preview: "//! Serves the pre-rename wire surface. Published clients built from th…"
-  hash: 05bedccccd3a8479
+  hash: 9100e7aa04b54703
   lines: 6
 "crates/orbit-server/src/grpc/server.rs":
 - category: upstream
@@ -114,5 +114,5 @@
 - category: invariant
   reason: "Dropping the future from outside tore down the observer and hid timed-out queries from metrics."
   preview: "// The timeout lives inside run_query so the observer is still alive"
-  hash: 372ddddaecb139dc
+  hash: 2aa6f34ca931fd45
   lines: 4

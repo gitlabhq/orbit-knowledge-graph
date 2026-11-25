@@ -25,7 +25,6 @@ ch_query() {
     sh -c 'clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD"'
 }
 
-# 600s: this may launch before the ClickHouse pod even exists.
 log "Waiting for traversal-path dictionaries to exist"
 for _ in $(seq 1 120); do
   if ch_query "EXISTS DICTIONARY datalake.namespace_traversal_paths_dict" 2>/dev/null | grep -q '^1$'; then

@@ -1,5 +1,3 @@
-//! The phases, in the order they run.
-
 use std::borrow::Cow;
 use std::time::{Duration, Instant};
 
@@ -89,9 +87,6 @@ fn workset(
     })
 }
 
-/// Incremental index: removed and modified files leave the graph, edges and
-/// resolver locations follow the compacted file indices, and every retained
-/// file that pointed at a removed one is marked dirty.
 pub struct Remap;
 
 impl Phase<ReindexInput> for Remap {
@@ -117,9 +112,6 @@ impl Phase<ReindexInput> for Remap {
     }
 }
 
-/// `Parse` entries this crate has a grammar for become the lazy workset,
-/// Drops the dirty trees, renumbers what remains, and returns the retained
-/// files whose resolution depended on a dropped one.
 fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> FxHashSet<u32> {
     state.trees.retain(|t| !dirty.contains(t.label.as_str()));
 
@@ -182,8 +174,6 @@ fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> F
     dependents
 }
 
-/// Runs an `ItemPhase` over every item of a workset in parallel. An item that
-/// overruns its budget is skipped and reported; the rest continue.
 pub struct Each<P>(pub P);
 
 impl<C, P> Phase<Workset<C>> for Each<P>
@@ -240,7 +230,6 @@ where
                     items.push(v);
                 }
                 Err(k) => {
-                    // Guard: a killed file must not keep an entry from an earlier phase.
                     context.report.files.remove(&path);
                     context.skip(k);
                 }
@@ -256,8 +245,6 @@ where
     }
 }
 
-/// What `Each` fans out over: items already in memory, or a lazy source
-/// pulled one item at a time as workers free up.
 pub trait IntoParallel {
     type Item: Send;
     fn into_parallel(
@@ -291,7 +278,6 @@ impl IntoParallel for SourcePaths {
     }
 }
 
-/// tree-sitter, with the grammar of the file's own language.
 pub struct Parse;
 
 impl ItemPhase<SourceFile> for Parse {
@@ -318,7 +304,6 @@ impl ItemPhase<SourceFile> for Parse {
     }
 }
 
-/// The language's rewrite stages, under the per-file rewrite budget.
 pub struct Rewrite;
 
 impl ItemPhase<Parsed> for Rewrite {
@@ -350,8 +335,6 @@ impl ItemPhase<Parsed> for Rewrite {
     }
 }
 
-/// Drops every non-canonical node and the source text; what is left is what
-/// the linker reads and the snapshot stores.
 pub struct Canonicalize;
 
 impl ItemPhase<Rewritten> for Canonicalize {
@@ -415,9 +398,6 @@ impl ItemPhase<Canonical> for Link {
     }
 }
 
-/// Puts the linked files on the graph, plus everything the inventory listed:
-/// manifests for the resolver, and a `File` row for every unparsed file with
-/// the reason, including candidates that were killed or could not be read.
 pub struct Insert;
 
 impl Phase<Workset<Vec<LinkedFile>>> for Insert {
@@ -497,12 +477,6 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
     }
 }
 
-/// Cross-file resolution over the dirty files. A file that overruns its
-/// resolve budget keeps its intra-file edges and is reported. A family that
-/// overruns keeps the edges resolved so far, is reported, and resolves in
-/// full on the next run. Manifest files join the project tree so the
-/// resolver can read module roots from them. An edge a file kept from an
-/// earlier run is not added again when that file resolves again.
 pub struct Resolve;
 
 impl Phase<DirtyGraph> for Resolve {
@@ -607,7 +581,6 @@ impl Phase<DirtyGraph> for Resolve {
         debug_assert!(old_links.is_empty(), "stale Links edges: {old_links:?}");
         state.edges.extend(new_links);
         context.run.check()?;
-        // Only files parsed in this run have an entry.
         let mut resolved = Vec::with_capacity(result.file_timings.len());
         for (fi, elapsed) in result.file_timings {
             resolved.push(fi);
@@ -631,9 +604,6 @@ impl Phase<DirtyGraph> for Resolve {
     }
 }
 
-/// The language's display rules: the tags export reads (`fqn`, `def_type`, ...).
-/// Only the touched trees are displayed again; the others keep the tags
-/// their snapshot saved.
 pub struct Display;
 
 impl Phase<Resolved> for Display {
@@ -679,7 +649,6 @@ impl Phase<Resolved> for Display {
     }
 }
 
-/// The graph as the ontology's local tables, following `config/export.yaml`.
 pub struct Export<'a> {
     pub ontology: &'a Ontology,
     pub envelope: Envelope<'a>,
@@ -711,8 +680,6 @@ impl Phase<Displayed> for Export<'_> {
     }
 }
 
-/// Hands each exported table to `sink` as the graph leaves the pipeline:
-/// DuckDB, ClickHouse, a channel. The graph stays for the next step.
 pub struct Emit<F>(pub F);
 
 impl<F, E> Phase<Exported> for Emit<F>

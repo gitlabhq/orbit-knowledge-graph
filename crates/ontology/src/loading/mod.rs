@@ -72,7 +72,6 @@ impl ReadOntologyFile for EmbeddedReader {
     }
 }
 
-/// Every embedded ontology source file as `(relative_path, contents)`, sorted by path.
 pub(crate) fn embedded_files() -> Vec<(String, String)> {
     let mut files: Vec<(String, String)> = EmbeddedOntology::iter()
         .filter_map(|path| {
@@ -103,8 +102,6 @@ pub(super) fn load_embedded() -> Result<Ontology, OntologyError> {
     load_with(&EmbeddedReader)
 }
 
-/// Embedded ontology with a directory mirroring `config/ontology/` deep-merged over it.
-/// A file present in both is merged (maps merge, lists append); a file only in the overlay is added.
 pub(super) struct DirOverlay<'a>(pub &'a Path);
 
 impl ReadOntologyFile for DirOverlay<'_> {
@@ -424,9 +421,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     entry.property, entry.node
                 ))
             })?;
-        // A string-typed enum column already holds the value, so the integer ordinals
-        // are not a usable mapping for it. Matches the node projection and the query
-        // normalizer, which both gate enum coercion on EnumType::Int.
         let enum_values = match field.enum_type {
             EnumType::Int => field.enum_values.clone(),
             _ => None,
@@ -452,9 +446,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     directions.push(crate::entities::DenormDirection::Target);
                 }
                 for direction in directions {
-                    // Declare the denorm only on edges whose ETL materializes
-                    // the column, so the compiler never pushes a tag onto an
-                    // edge with empty tags.
                     if !ontology.edge_projects_column(
                         edge_name,
                         &entry.node,
@@ -920,7 +911,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         }
         ontology.reordered_tables.push(copy);
     }
-    // A denormalized table is bucketed whenever its anchor table is.
     if let Some(partition) = ontology.partition.as_mut() {
         let bucketed: Vec<String> = ontology
             .denormalized_joins
@@ -1347,8 +1337,6 @@ fn validate_auxiliary_dictionaries(ontology: &crate::Ontology) -> Result<(), Ont
     Ok(())
 }
 
-/// Every node's storage columns must correspond 1:1 with its non-virtual
-/// properties, catching drift between the logical and physical schema.
 fn validate_storage_columns(ontology: &crate::Ontology) -> Result<(), OntologyError> {
     for node in ontology.nodes() {
         if node.storage.columns.is_empty() {
@@ -1398,7 +1386,6 @@ pub(crate) struct DeclaredHop<'a> {
     pub via_fk: bool,
 }
 
-/// Resolve a `denormalized_joins` entry into its table chain; at least one table must be scoped.
 pub(crate) fn resolve_denormalized_join(
     ontology: &crate::Ontology,
     name: &str,
@@ -1542,9 +1529,6 @@ fn validate_unique_denormalized_joins(ontology: &crate::Ontology) -> Result<(), 
     Ok(())
 }
 
-/// `namespace_anchor` variants must have an FK column and must target a
-/// namespace anchor (an entity with a `traversal_path_lookup`). Also enforces
-/// that the same FK column name always maps to the same anchor entity.
 fn validate_edge_scope_annotations(ontology: &crate::Ontology) -> Result<(), OntologyError> {
     use crate::entities::EdgeVariantScope;
     use std::collections::HashMap;
@@ -1928,7 +1912,6 @@ mod tests {
         );
         assert!(err(&[hop("REVIEWER", "User", "Project", false)]).contains("no REVIEWER variant"));
         assert!(err(&[hop("REVIEWER", "User", "MergeRequest", true)]).contains("no fk_column"));
-        // Cross-namespace hops are fine: each table keeps its own path in the row.
         for (name, hop_) in [
             ("closes", hop("CLOSES", "MergeRequest", "WorkItem", false)),
             ("contains", hop("CONTAINS", "Group", "Project", false)),

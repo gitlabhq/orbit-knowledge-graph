@@ -4,6 +4,7 @@ mod validate;
 use std::sync::Arc;
 
 use crate::config::EngineConfig;
+use crate::event::Observer;
 use crate::planner::Planner;
 use crate::reconciler::Reconciler;
 use crate::worker::Worker;
@@ -17,6 +18,7 @@ use registry::{PlannerEntry, ReconcilerEntry, WorkerEntry};
 pub struct Engine {
     pub(crate) registry: Arc<Registry>,
     pub(crate) config: EngineConfig,
+    pub(crate) observers: Vec<Arc<dyn Observer>>,
 }
 
 #[derive(Clone, Default)]
@@ -26,6 +28,7 @@ pub struct EngineBuilder {
     planners: Vec<PlannerEntry>,
     reconcilers: Vec<ReconcilerEntry>,
     pools: Vec<&'static str>,
+    observers: Vec<Arc<dyn Observer>>,
 }
 
 impl Engine {
@@ -65,6 +68,11 @@ impl EngineBuilder {
         self
     }
 
+    pub fn observer<O: Observer>(&mut self, observer: O) -> &mut Self {
+        self.observers.push(Arc::new(observer));
+        self
+    }
+
     pub fn build(self) -> Result<Engine, BuildError> {
         validate::reject_invalid_or_duplicate_names(&self)?;
         validate::reject_unknown_lanes(&self)?;
@@ -76,6 +84,7 @@ impl EngineBuilder {
         Ok(Engine {
             registry: Arc::new(registry),
             config: self.config,
+            observers: self.observers,
         })
     }
 }

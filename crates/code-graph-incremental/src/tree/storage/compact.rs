@@ -9,7 +9,6 @@ pub struct Compact<N = Node>(pub(crate) Vec<Entry<N>>);
 #[derive(Clone)]
 pub(crate) struct Entry<N> {
     pub(crate) node: N,
-    // A self-parent marks a removed slot without changing other node IDs.
     parent: u32,
     first_child: u32,
     last_child: u32,

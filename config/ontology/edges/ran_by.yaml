@@ -1,5 +1,3 @@
-# config/ontology/edges/ran_by.yaml
-
 description: Security scan was executed by a CI job
 table: gl_ci_edge
 

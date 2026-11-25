@@ -1,5 +1,3 @@
-# config/ontology/nodes/core/note.yaml
-
 node_type: Note
 domain: core
 description: A comment or annotation on a GitLab object (issue, merge request, commit, etc.)

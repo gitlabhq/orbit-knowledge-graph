@@ -1,8 +1,5 @@
 use std::net::{IpAddr, Ipv4Addr};
 
-/// A self-signed certificate for `localhost` and `127.0.0.1`, as
-/// `(certificate PEM, key PEM)`. A client trusts it by using the certificate
-/// itself as the CA.
 pub fn generate_test_certs() -> (String, String) {
     let signing_key = rcgen::KeyPair::generate().expect("failed to generate key pair");
     let mut params = rcgen::CertificateParams::new(vec!["localhost".to_string()])

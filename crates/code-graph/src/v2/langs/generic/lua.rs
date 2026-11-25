@@ -26,8 +26,6 @@ impl DslLanguage for LuaDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        // Evaluated last-to-first: [2] checked before [1] before [0].
-        // [0] is the unconditional fallback for plain `function foo()`.
         vec![
             scope("function_declaration", "Function").def_kind(DefKind::Function),
             scope("function_declaration", "Function")
@@ -56,7 +54,6 @@ impl DslLanguage for LuaDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        // require("module") is handled entirely via the on_import hook below.
         vec![]
     }
 
@@ -94,7 +91,6 @@ impl DslLanguage for LuaDsl {
         None
     }
 
-    // Lua files have no module declaration; the file path forms the FQN root.
     fn file_scope() -> bool {
         true
     }
@@ -131,8 +127,6 @@ impl DslLanguage for LuaDsl {
     }
 }
 
-/// Returns `true` for a `require` `function_call` node to prevent the default
-/// import extractor from also running on it.
 fn lua_extract_require(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
     if node.kind().as_ref() != "function_call" {
         return false;
@@ -146,14 +140,10 @@ fn lua_extract_require(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool
     let Some(args) = node.field("arguments") else {
         return true;
     };
-    // `arguments` is either a `string` node directly (require "mod") or
-    // a parenthesized `arguments` node containing a string (require("mod")).
     let string_node = if args.kind().as_ref() == "string" {
         args
     } else {
         let Some(s) = args.child_of_kind("string") else {
-            // Dynamic argument (e.g. require(var)) — mark as consumed so no
-            // double-processing, but we can't resolve the path statically.
             return true;
         };
         s

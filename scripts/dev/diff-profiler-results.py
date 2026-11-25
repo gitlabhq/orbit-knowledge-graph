@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-"""Compare two or more query-profiler result files side by side.
-
-Usage:
-    python3 scripts/dev/diff-profiler-results.py baseline.json dedup.json
-    python3 scripts/dev/diff-profiler-results.py a.json b.json c.json --labels main,dedup,v2
-    python3 scripts/dev/diff-profiler-results.py a.json b.json --metric elapsed_ms
-"""
 
 import argparse
 import json
@@ -13,9 +6,6 @@ import sys
 from pathlib import Path
 
 
-# Peak memory and ProfileEvents are not in profiler output (they need
-# cross-replica system.query_log); fetch those out-of-band by correlation_id.
-# Here we diff the scan + time metrics the response header gives accurately.
 METRICS = {
     "read_rows": ("total_read_rows", "rows"),
     "read_bytes": ("total_read_bytes", "bytes"),
@@ -135,7 +125,6 @@ def main():
 
 
 def print_wide(queries, datasets, labels, fmt):
-    """Unified table: rows + bytes side by side for 2-way comparison."""
     a_data, b_data = datasets
     a_label, b_label = labels
     rows_key, rows_unit = METRICS["read_rows"]

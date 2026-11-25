@@ -79,7 +79,6 @@ tests:
       - { row: { caller: Go, callee: Stop, file: App/End.cs } }
 
   - name: "a class name that two using directives import links to both candidates"
-    # C# rejects the ambiguous name (CS0104); the engine keeps both candidates.
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'Use' AND callee.name = 'Hit'

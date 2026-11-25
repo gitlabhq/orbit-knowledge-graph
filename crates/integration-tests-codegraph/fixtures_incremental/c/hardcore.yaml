@@ -140,10 +140,6 @@ fixtures:
       }
 
 tests:
-  # ══════════════════════════════════════════════════════════════
-  # EXACT TOTAL COUNTS
-  # ══════════════════════════════════════════════════════════════
-
   - name: "Exact function count"
     query: |
       MATCH (d:Definition)
@@ -190,10 +186,6 @@ tests:
       - { row_count: 13 }
       - { unique: path }
 
-  # ══════════════════════════════════════════════════════════════
-  # STATIC FUNCTION VISIBILITY
-  # ══════════════════════════════════════════════════════════════
-
   - name: "Static functions exist as definitions"
     query: |
       MATCH (d:Definition)
@@ -213,10 +205,6 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "reader::internal_seek", callee: "reader::internal_flush" } }
-
-  # ══════════════════════════════════════════════════════════════
-  # NEGATIVE ASSERTIONS — must NOT exist
-  # ══════════════════════════════════════════════════════════════
 
   - name: "NO edge from app to static internal_flush (file-local)"
     query: |
@@ -244,10 +232,6 @@ tests:
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 0 }
-
-  # ══════════════════════════════════════════════════════════════
-  # INCLUDE CHAIN RESOLUTION
-  # ══════════════════════════════════════════════════════════════
 
   - name: "copy_file calls reader_open (via io/reader.h → reader.c)"
     query: |
@@ -289,10 +273,6 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "app::main", callee: "error::panic" } }
 
-  # ══════════════════════════════════════════════════════════════
-  # DUPLICATE EDGE CHECK
-  # ══════════════════════════════════════════════════════════════
-
   - name: "copy_file CALLS edges have no duplicates"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -300,10 +280,6 @@ tests:
       RETURN callee.fqn AS callee
     assert:
       - { unique: callee }
-
-  # ══════════════════════════════════════════════════════════════
-  # NESTED STRUCT
-  # ══════════════════════════════════════════════════════════════
 
   - name: "Nested struct with scoped FQN"
     query: |
@@ -324,10 +300,6 @@ tests:
       - { row_count: 1 }
       - { row: { parent: "nested::Outer", child: "nested::Outer::Inner" } }
 
-  # ══════════════════════════════════════════════════════════════
-  # TYPEDEF FUNCTION POINTER
-  # ══════════════════════════════════════════════════════════════
-
   - name: "Function pointer typedef"
     query: |
       MATCH (d:Definition)
@@ -346,10 +318,6 @@ tests:
       - { row_count: 1 }
       - { row: { fqn: "nested::Task", type: TypeAlias } }
 
-  # ══════════════════════════════════════════════════════════════
-  # ENUM SCOPING
-  # ══════════════════════════════════════════════════════════════
-
   - name: "ErrorCode enum constants with full scope"
     query: |
       MATCH (d:Definition)
@@ -361,10 +329,6 @@ tests:
       - { row: { fqn: "error::ErrorCode::ERR_NONE" } }
       - { row: { fqn: "error::ErrorCode::ERR_IO" } }
       - { row: { fqn: "error::ErrorCode::ERR_MEM" } }
-
-  # ══════════════════════════════════════════════════════════════
-  # FILE CONTAINMENT — exact per-file function counts
-  # ══════════════════════════════════════════════════════════════
 
   - name: "reader.c defines exactly 5 functions (3 public + 2 static)"
     query: |
@@ -405,10 +369,6 @@ tests:
       - { row: { fqn: "app::copy_file" } }
       - { row: { fqn: "app::main" } }
 
-  # ══════════════════════════════════════════════════════════════
-  # INTRA-FILE CALLS
-  # ══════════════════════════════════════════════════════════════
-
   - name: "Intra-file: internal_seek calls internal_flush (both in reader.c)"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -439,10 +399,6 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "unrelated::unrelated_func", callee: "unrelated::helper" } }
 
-  # ══════════════════════════════════════════════════════════════
-  # CROSS-FILE CALLS
-  # ══════════════════════════════════════════════════════════════
-
   - name: "Cross-file: copy_file calls all 6 IO functions via include"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -467,10 +423,6 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "app::main", callee: "error::panic" } }
-
-  # ══════════════════════════════════════════════════════════════
-  # GENERIC (void*) DATA STRUCTURES
-  # ══════════════════════════════════════════════════════════════
 
   - name: "Generic list API functions exist"
     query: |
