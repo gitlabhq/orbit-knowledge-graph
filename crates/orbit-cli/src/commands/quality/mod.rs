@@ -32,6 +32,7 @@ pub(crate) enum Rule {
     Layers,
     Hotspots,
     Dead,
+    Shallow,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, clap::ValueEnum)]
@@ -59,7 +60,14 @@ pub(crate) fn run(options: Options) -> Result<()> {
         spec::launcher()
     );
     let rules: BTreeSet<Rule> = if options.rules.is_empty() {
-        [Rule::Cycles, Rule::Layers, Rule::Hotspots, Rule::Dead].into()
+        [
+            Rule::Cycles,
+            Rule::Layers,
+            Rule::Shallow,
+            Rule::Hotspots,
+            Rule::Dead,
+        ]
+        .into()
     } else {
         options.rules.iter().copied().collect()
     };
@@ -125,7 +133,10 @@ pub(crate) fn run(options: Options) -> Result<()> {
         }
         _ => None,
     };
-    let cycles = deps.as_ref().map(|deps| deps.cycles.clone());
+    let cycles = match &deps {
+        Some(deps) => Some(confirm_moves(deps.cycles.clone(), &graph, &git.repo_path)?),
+        None => None,
+    };
     let hotspots = match rules.contains(&Rule::Hotspots) {
         true => Some(hotspots(&graph, &git.repo_path, options.limit)?),
         false => None,
@@ -146,6 +157,11 @@ pub(crate) fn run(options: Options) -> Result<()> {
             DeadScope::Ids(&changed_ids),
         )?),
         (false, false) => None,
+    };
+
+    let shallow = match rules.contains(&Rule::Shallow) || options.gate {
+        true => Some(shallow_modules(&graph, &config.shallow, options.depth)?),
+        false => None,
     };
 
     let violations = match (&base, &deps) {
@@ -192,12 +208,35 @@ pub(crate) fn run(options: Options) -> Result<()> {
                 .map(|f| (renames.file(&f.file), f.name))
                 .collect(),
             };
+            let base_shallow: HashSet<(String, String)> =
+                shallow_modules(&base_graph, &config.shallow, options.depth)?
+                    .into_iter()
+                    .map(|m| (m.caller, m.module))
+                    .collect();
             let mut found = gate_violations(
                 cycles.as_deref().unwrap_or_default(),
                 &base_modules,
                 head_dead,
                 &changed_ids,
                 &base_dead,
+            );
+            found.extend(
+                shallow
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .filter(|m| !base_shallow.contains(&(m.caller.clone(), m.module.clone())))
+                    .map(|m| {
+                        format!(
+                            "the change makes {} shallow: {} uses {} of its {} functions and types ({}), above {:.0}%",
+                            m.module,
+                            m.caller,
+                            m.used,
+                            m.surface,
+                            m.examples.join(", "),
+                            config.shallow.max_used_share * 100.0
+                        )
+                    }),
             );
             found.extend(
                 layer_violations
@@ -241,6 +280,8 @@ pub(crate) fn run(options: Options) -> Result<()> {
         layers_configured: layer_rules.as_ref().map(layers::Config::rule_count),
         symbol_uses: symbol_uses.filter(|_| rules.contains(&Rule::Layers)),
         hotspots,
+        shallow: shallow.filter(|_| rules.contains(&Rule::Shallow)),
+        shallow_share: config.shallow.max_used_share,
         dead: dead.filter(|_| rules.contains(&Rule::Dead)),
         violations: options.gate.then_some(violations),
     };
@@ -333,12 +374,25 @@ struct ModuleEdge {
     to: String,
     refs: usize,
     example: String,
+    targets: BTreeSet<String>,
+}
+
+/// A definition that could move to break a cycle: `into` is the only module
+/// that uses it, so moving it there removes the `into -> from` dependency.
+/// It only says the dependency goes away: what the definition itself uses may
+/// still point back into `from`.
+#[derive(Debug, Clone)]
+struct Move {
+    definition: String,
+    from: String,
+    into: String,
 }
 
 #[derive(Debug, Clone)]
 struct Cycle {
     modules: Vec<String>,
     edges: Vec<ModuleEdge>,
+    moves: Vec<Move>,
 }
 
 struct Dependencies {
@@ -384,6 +438,7 @@ ORDER BY sf, sl, tf, tname",
 
     let mut edges: BTreeMap<(String, String), ModuleEdge> = BTreeMap::new();
     let mut files: BTreeMap<(String, String), FileEdge> = BTreeMap::new();
+    let mut users: HashMap<String, (String, BTreeSet<String>)> = HashMap::new();
     for i in 0..sfs.len() {
         let example = || match snames[i].as_str() {
             "" => format!("imports {}  ({}:{})", tnames[i], sfs[i], sls[i]),
@@ -411,8 +466,15 @@ ORDER BY sf, sl, tf, tname",
                 to,
                 refs: 0,
                 example: example(),
+                targets: BTreeSet::new(),
             });
         edge.refs += 1;
+        edge.targets.insert(tnames[i].clone());
+        users
+            .entry(tnames[i].clone())
+            .or_insert_with(|| (module_of(&tfs[i], depth), BTreeSet::new()))
+            .1
+            .insert(module_of(&sfs[i], depth));
     }
 
     let nodes: Vec<String> = edges
@@ -444,9 +506,11 @@ ORDER BY sf, sl, tf, tname",
                 .cloned()
                 .collect();
             inner.sort_by(|a, b| a.refs.cmp(&b.refs).then(a.from.cmp(&b.from)));
+            let moves = cycle_moves(&inner, &users);
             Cycle {
                 modules: members.into_iter().map(String::from).collect(),
                 edges: inner,
+                moves,
             }
         })
         .collect();
@@ -457,6 +521,178 @@ ORDER BY sf, sl, tf, tname",
             .then(a.modules.cmp(&b.modules))
     });
     Ok(Dependencies { files, cycles })
+}
+
+/// For each cycle edge `a -> b`, the definitions in `b` that `a` uses and
+/// that nothing outside `a` uses. Moving all of them into `a` removes the
+/// edge. Edges that need the fewest moves come first.
+fn cycle_moves(
+    edges: &[ModuleEdge],
+    users: &HashMap<String, (String, BTreeSet<String>)>,
+) -> Vec<Move> {
+    let mut best: Option<Vec<Move>> = None;
+    for edge in edges {
+        let moves: Option<Vec<Move>> = edge
+            .targets
+            .iter()
+            .map(|definition| {
+                let (home, used_by) = users.get(definition)?;
+                (home == &edge.to && used_by.len() == 1 && used_by.contains(&edge.from)).then(
+                    || Move {
+                        definition: definition.clone(),
+                        from: edge.to.clone(),
+                        into: edge.from.clone(),
+                    },
+                )
+            })
+            .collect();
+        if let Some(moves) = moves
+            && best
+                .as_ref()
+                .is_none_or(|current| moves.len() < current.len())
+        {
+            best = Some(moves);
+        }
+    }
+    best.unwrap_or_default()
+}
+
+/// Keeps a move hint only when the graph's view of who uses a definition is
+/// complete enough to trust: the definition's name appears in the commit's
+/// files no more often than the graph shows it (its own definitions plus the
+/// edges it counted). An unresolved use elsewhere voids the hint.
+fn confirm_moves(mut cycles: Vec<Cycle>, graph: &Graph, repo: &Path) -> Result<Vec<Cycle>> {
+    let names: HashSet<String> = cycles
+        .iter()
+        .flat_map(|cycle| cycle.moves.iter())
+        .map(|m| leaf(&m.definition).to_string())
+        .collect();
+    if names.is_empty() {
+        return Ok(cycles);
+    }
+    let wanted: HashSet<&str> = names.iter().map(String::as_str).collect();
+    let commit = graph.params[1].as_str().unwrap_or("HEAD").to_string();
+    let mentions = count_identifiers(&commit_files(repo, &commit)?, &wanted);
+    let list = names
+        .iter()
+        .map(|n| sql_lit(n))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "WITH {DEFINITIONS_CTE}, {CALLS_CTE}
+SELECT d.name, CAST(count(DISTINCT d.id) AS BIGINT) AS defs,
+       CAST((SELECT count(*) FROM gl_edge e JOIN d u ON u.id = e.target_id
+             WHERE u.name = d.name AND e.relationship_kind IN ('CALLS', 'EXTENDS', 'IMPORTS')) AS BIGINT) AS uses
+FROM d WHERE d.name IN ({list}) GROUP BY d.name"
+    );
+    let batches = graph.query(&sql)?;
+    let known: HashMap<String, i64> = string_column(&batches, "name")
+        .into_iter()
+        .zip(i64_column(&batches, "defs"))
+        .zip(i64_column(&batches, "uses"))
+        .map(|((name, defs), uses)| (name, defs + uses))
+        .collect();
+    for cycle in &mut cycles {
+        let complete = cycle.moves.iter().all(|m| {
+            let name = leaf(&m.definition);
+            mentions.get(name).copied().unwrap_or(0) as i64 <= known.get(name).copied().unwrap_or(0)
+        });
+        if !complete {
+            cycle.moves.clear();
+        }
+    }
+    Ok(cycles)
+}
+
+fn leaf(fqn: &str) -> &str {
+    fqn.rsplit([':', '.', '#', '/'])
+        .find(|part| !part.is_empty())
+        .unwrap_or(fqn)
+}
+
+const SURFACE_KINDS: &str =
+    "'Function', 'Struct', 'Enum', 'Trait', 'Class', 'Interface', 'TypeAlias', 'Constant'";
+const LISTED_EXAMPLES: usize = 6;
+
+#[derive(Debug, Clone)]
+struct Shallow {
+    caller: String,
+    module: String,
+    used: usize,
+    surface: usize,
+    examples: Vec<String>,
+}
+
+/// Pairs of modules where `caller` uses `max_used_share` or more of
+/// `module`'s functions and types: the module hands out most of what it
+/// has, instead of hiding it behind a few entry points. A module and its own
+/// parent or child directory are left out, since they are one unit.
+fn shallow_modules(
+    graph: &Graph,
+    config: &layers::ShallowConfig,
+    depth: Option<usize>,
+) -> Result<Vec<Shallow>> {
+    let sql = format!(
+        "WITH {DEFINITIONS_CTE}, {CALLS_CTE}
+SELECT s.file_path AS sf, t.file_path AS tf, t.fqn AS tname, t.name AS name
+FROM c JOIN d s ON s.id = c.source_id JOIN d t ON t.id = c.target_id
+WHERE t.definition_type IN ({SURFACE_KINDS}) AND NOT {} AND NOT {}
+UNION ALL
+SELECT '', d.file_path, d.fqn, d.name FROM d
+WHERE d.definition_type IN ({SURFACE_KINDS}) AND NOT {}",
+        test_code("s.file_path", "s.fqn"),
+        test_code("t.file_path", "t.fqn"),
+        test_code("d.file_path", "d.fqn")
+    );
+    let batches = graph.query(&sql)?;
+    let sfs = string_column(&batches, "sf");
+    let tfs = string_column(&batches, "tf");
+    let tnames = string_column(&batches, "tname");
+    let names = string_column(&batches, "name");
+    let mut surface: HashMap<String, BTreeSet<String>> = HashMap::new();
+    let mut used: BTreeMap<(String, String), BTreeMap<String, String>> = BTreeMap::new();
+    for i in 0..tfs.len() {
+        let module = module_of(&tfs[i], depth);
+        if sfs[i].is_empty() {
+            surface.entry(module).or_default().insert(tnames[i].clone());
+            continue;
+        }
+        let caller = module_of(&sfs[i], depth);
+        let nested =
+            caller.starts_with(&format!("{module}/")) || module.starts_with(&format!("{caller}/"));
+        if caller == module || nested {
+            continue;
+        }
+        used.entry((caller, module))
+            .or_default()
+            .insert(tnames[i].clone(), names[i].clone());
+    }
+    let mut out: Vec<Shallow> = used
+        .into_iter()
+        .filter_map(|((caller, module), defs)| {
+            let size = surface.get(&module).map_or(0, BTreeSet::len);
+            let share = defs.len() as f64 / size.max(1) as f64;
+            (size >= config.min_surface
+                && share >= config.max_used_share
+                && !config.ignores(&module)
+                && !config.ignores(&caller))
+            .then(|| Shallow {
+                caller,
+                module,
+                used: defs.len(),
+                surface: size,
+                examples: defs.into_values().take(LISTED_EXAMPLES).collect(),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        let share = |m: &Shallow| m.used as f64 / m.surface as f64;
+        share(b)
+            .total_cmp(&share(a))
+            .then(b.used.cmp(&a.used))
+            .then(a.module.cmp(&b.module))
+    });
+    Ok(out)
 }
 
 fn strongly_connected(adjacency: &[Vec<usize>]) -> Vec<Vec<usize>> {
@@ -1065,6 +1301,8 @@ struct Report {
     layers_configured: Option<usize>,
     symbol_uses: Option<Vec<layers::SymbolUse>>,
     hotspots: Option<Vec<Hotspot>>,
+    shallow: Option<Vec<Shallow>>,
+    shallow_share: f64,
     dead: Option<Vec<Dead>>,
     violations: Option<Vec<String>>,
 }
@@ -1100,6 +1338,21 @@ impl Report {
                 }
                 if cycle.edges.len() > self.limit {
                     let _ = writeln!(out, "     … {} more edges", cycle.edges.len() - self.limit);
+                }
+                if let Some(first) = cycle.moves.first() {
+                    let names: Vec<&str> =
+                        cycle.moves.iter().map(|m| m.definition.as_str()).collect();
+                    let _ = writeln!(
+                        out,
+                        "     fix: move {} from {} into {}; only {} uses {}, so {} -> {} goes away",
+                        names.join(", "),
+                        first.from,
+                        first.into,
+                        first.into,
+                        if names.len() == 1 { "it" } else { "them" },
+                        first.into,
+                        first.from
+                    );
                 }
             }
             if cycles.len() > self.limit {
@@ -1175,6 +1428,29 @@ impl Report {
                 );
             }
         }
+        if let Some(found) = &self.shallow {
+            let _ = writeln!(
+                out,
+                "\nShallow modules (one caller uses {:.0}% or more of a module's functions and types): {}",
+                self.shallow_share * 100.0,
+                found.len()
+            );
+            for m in found.iter().take(self.limit) {
+                let _ = writeln!(
+                    out,
+                    "  {} uses {} of {}'s {} ({:.0}%): {}",
+                    m.caller,
+                    m.used,
+                    m.module,
+                    m.surface,
+                    m.used as f64 * 100.0 / m.surface as f64,
+                    m.examples.join(", ")
+                );
+            }
+            if found.len() > self.limit {
+                let _ = writeln!(out, "  … {} more", found.len() - self.limit);
+            }
+        }
         if let Some(dead) = &self.dead {
             let _ = writeln!(
                 out,
@@ -1216,6 +1492,9 @@ impl Report {
             "base": self.base,
             "cycles": self.cycles.as_ref().map(|cycles| cycles.iter().map(|cycle| json!({
                 "modules": cycle.modules,
+                "moves": cycle.moves.iter().map(|m| json!({
+                    "definition": m.definition, "from": m.from, "into": m.into,
+                })).collect::<Vec<_>>(),
                 "edges": cycle.edges.iter().map(|edge| json!({
                     "from": edge.from, "to": edge.to, "refs": edge.refs, "example": edge.example,
                 })).collect::<Vec<_>>(),
@@ -1229,6 +1508,10 @@ impl Report {
             "hotspots": self.hotspots.as_ref().map(|spots| spots.iter().map(|spot| json!({
                 "fqn": spot.fqn, "kind": spot.kind, "location": spot.loc,
                 "callers": spot.callers, "caller_files": spot.files, "churn_90d": spot.churn,
+            })).collect::<Vec<_>>()),
+            "shallow": self.shallow.as_ref().map(|found| found.iter().map(|m| json!({
+                "caller": m.caller, "module": m.module, "used": m.used,
+                "surface": m.surface, "examples": m.examples,
             })).collect::<Vec<_>>()),
             "dead": self.dead.as_ref().map(|dead| dead.iter().map(|function| json!({
                 "id": function.id, "fqn": function.fqn, "location": function.loc,
@@ -1321,9 +1604,56 @@ mod tests {
                     to: to.to_string(),
                     refs: 1,
                     example: String::new(),
+                    targets: BTreeSet::new(),
                 })
                 .collect(),
+            moves: Vec::new(),
         }
+    }
+
+    fn edge(from: &str, to: &str, targets: &[&str]) -> ModuleEdge {
+        ModuleEdge {
+            from: from.to_string(),
+            to: to.to_string(),
+            refs: targets.len(),
+            example: String::new(),
+            targets: targets.iter().map(|t| t.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn a_definition_used_only_across_the_edge_can_move() {
+        let users: HashMap<String, (String, BTreeSet<String>)> = [
+            ("socket::BACKLOG_MOST", ("socket", &["kinds"][..])),
+            ("socket::listen", ("socket", &["kinds", "app"][..])),
+            ("kinds::Stream::new", ("kinds", &["socket"][..])),
+        ]
+        .into_iter()
+        .map(|(def, (home, used_by))| {
+            (
+                def.to_string(),
+                (
+                    home.to_string(),
+                    used_by.iter().map(|u| u.to_string()).collect(),
+                ),
+            )
+        })
+        .collect();
+        let moves = cycle_moves(
+            &[
+                edge("kinds", "socket", &["socket::BACKLOG_MOST"]),
+                edge("socket", "kinds", &["kinds::Stream::new"]),
+            ],
+            &users,
+        );
+        assert_eq!(moves.len(), 1);
+        assert_eq!(moves[0].definition, "socket::BACKLOG_MOST");
+        assert_eq!(
+            (moves[0].from.as_str(), moves[0].into.as_str()),
+            ("socket", "kinds")
+        );
+        let shared = cycle_moves(&[edge("kinds", "socket", &["socket::listen"])], &users);
+        assert!(shared.is_empty());
     }
 
     fn dead(id: i64, name: &str) -> Dead {

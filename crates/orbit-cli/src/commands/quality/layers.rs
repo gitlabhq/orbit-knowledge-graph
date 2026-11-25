@@ -19,6 +19,63 @@ struct ConfigFile {
     test_paths: Vec<String>,
     #[serde(default)]
     test_symbols: Vec<String>,
+    #[serde(default)]
+    shallow: ShallowSpec,
+}
+
+/// When a caller module uses too much of another module's surface: the
+/// module has at least `min_surface` functions and types, and one caller
+/// uses at least `max_used_share` of them.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ShallowSpec {
+    #[serde(default = "default_min_surface")]
+    min_surface: usize,
+    #[serde(default = "default_max_used_share")]
+    max_used_share: f64,
+    #[serde(default)]
+    ignore_modules: Vec<String>,
+}
+
+impl Default for ShallowSpec {
+    fn default() -> Self {
+        Self {
+            min_surface: default_min_surface(),
+            max_used_share: default_max_used_share(),
+            ignore_modules: Vec::new(),
+        }
+    }
+}
+
+fn default_min_surface() -> usize {
+    6
+}
+
+fn default_max_used_share() -> f64 {
+    0.5
+}
+
+#[derive(Debug)]
+pub(crate) struct ShallowConfig {
+    pub min_surface: usize,
+    pub max_used_share: f64,
+    ignore: Vec<GlobMatcher>,
+}
+
+impl Default for ShallowConfig {
+    fn default() -> Self {
+        Self {
+            min_surface: default_min_surface(),
+            max_used_share: default_max_used_share(),
+            ignore: Vec::new(),
+        }
+    }
+}
+
+impl ShallowConfig {
+    pub(crate) fn ignores(&self, module: &str) -> bool {
+        any(&self.ignore, module)
+    }
 }
 
 /// Names and paths the dead-code check leaves out, such as entry points and
@@ -71,6 +128,7 @@ pub(crate) struct Config {
     pub dead: DeadConfig,
     pub test_paths: Vec<String>,
     pub test_symbols: Vec<String>,
+    pub shallow: ShallowConfig,
 }
 
 impl Config {
@@ -259,6 +317,17 @@ pub(crate) fn parse_config(yaml: &str) -> Result<Config> {
         },
         test_paths: config.test_paths,
         test_symbols: config.test_symbols,
+        shallow: {
+            anyhow::ensure!(
+                (0.0..=1.0).contains(&config.shallow.max_used_share),
+                "shallow: max_used_share must be between 0 and 1"
+            );
+            ShallowConfig {
+                min_surface: config.shallow.min_surface.max(1),
+                max_used_share: config.shallow.max_used_share,
+                ignore: matchers("ignore_modules", "shallow", &config.shallow.ignore_modules)?,
+            }
+        },
     })
 }
 
@@ -377,6 +446,20 @@ forbid:
         );
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].file, "a.rb");
+    }
+
+    #[test]
+    fn shallow_defaults_and_bounds() {
+        let config = parse_config("layers: []\n").unwrap();
+        assert_eq!(config.shallow.min_surface, 6);
+        assert!((config.shallow.max_used_share - 0.5).abs() < f64::EPSILON);
+        assert!(parse_config("shallow:\n  max_used_share: 1.5\n").is_err());
+        let tuned =
+            parse_config("shallow:\n  min_surface: 10\n  ignore_modules: [\"crates/utils/**\"]\n")
+                .unwrap();
+        assert_eq!(tuned.shallow.min_surface, 10);
+        assert!(tuned.shallow.ignores("crates/utils/src"));
+        assert!(!tuned.shallow.ignores("crates/ontology/src"));
     }
 
     #[test]
