@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::builder::EngineBuilder;
-use crate::lane::Lane;
+use crate::lane::LaneId;
 use crate::trigger::Trigger;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -10,14 +10,12 @@ pub enum BuildError {
     InvalidName { kind: &'static str, name: String },
     #[error("two of the registered {kind}s have the name {name}")]
     DuplicateName { kind: &'static str, name: String },
-    #[error("the config lane {lane:?} must look like <worker>/<lane>")]
-    InvalidLane { lane: String },
     #[error("the config lane {lane} belongs to no registered worker")]
-    UnknownLaneWorker { lane: String },
+    UnknownLaneWorker { lane: LaneId },
     #[error(
         "the config lane {lane} moves timed out tasks to {on_timeout}, which is not a lane of the same worker"
     )]
-    UnknownTimeoutLane { lane: String, on_timeout: String },
+    UnknownTimeoutLane { lane: LaneId, on_timeout: LaneId },
     #[error("the config sizes the pool {pool}, but no module registered it")]
     UnregisteredPool { pool: String },
     #[error("the planner {planner} waits for the worker {worker}, but no module registered it")]
@@ -46,21 +44,16 @@ pub(super) fn reject_invalid_or_duplicate_names(builder: &EngineBuilder) -> Resu
 pub(super) fn reject_unknown_lanes(builder: &EngineBuilder) -> Result<(), BuildError> {
     let workers: BTreeSet<&str> = builder.workers.iter().map(|entry| entry.name).collect();
     for (lane, config) in &builder.config.lanes {
-        let Some((worker, _)) = Lane::parse_id(lane) else {
-            return Err(BuildError::InvalidLane { lane: lane.clone() });
-        };
-        if !workers.contains(worker) {
+        if !workers.contains(lane.worker()) {
             return Err(BuildError::UnknownLaneWorker { lane: lane.clone() });
         }
-        if let Some(on_timeout) = &config.on_timeout {
-            let same_worker =
-                Lane::parse_id(on_timeout).is_some_and(|(target, _)| target == worker);
-            if !same_worker {
-                return Err(BuildError::UnknownTimeoutLane {
-                    lane: lane.clone(),
-                    on_timeout: on_timeout.clone(),
-                });
-            }
+        if let Some(on_timeout) = &config.on_timeout
+            && on_timeout.worker() != lane.worker()
+        {
+            return Err(BuildError::UnknownTimeoutLane {
+                lane: lane.clone(),
+                on_timeout: on_timeout.clone(),
+            });
         }
     }
     Ok(())

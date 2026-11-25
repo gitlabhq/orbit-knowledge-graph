@@ -1,0 +1,11 @@
+id: comments-python
+valid:
+  - "# /// script\n# requires-python = \">=3.11\"\n# dependencies = [\n#   \"tree-sitter==0.25.2\",\n# ]\n# ///\nprint(1)"
+  - 'x = "# not a comment"'
+invalid:
+  - '# a comment'
+  - 'x = 1  # trailing comment'
+  - "# /// script\n# ///\n# a comment after the metadata block"
+  - "# /// note\n# prose\n# ///"
+  - "print(1)\n# /// script\n# requires-python = \">=3.11\"\n# ///"
+  - "# /// script\n# some prose inside the block\n# ///"

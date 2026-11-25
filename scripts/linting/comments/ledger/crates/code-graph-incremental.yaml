@@ -1,0 +1,48 @@
+"crates/code-graph-incremental/langs/c.yaml":
+- category: known-gap
+  reason: "One wildcard slot per file means only the last include gets unresolved calls"
+  preview: "# C rewrite rules."
+  hash: 42c0ccdf42881afa
+  lines: 8
+"crates/code-graph-incremental/langs/cpp.yaml":
+- category: known-gap
+  reason: "Records the engine gaps for includes and the missing Namespace and Concept kinds"
+  preview: "# C++ rewrite rules."
+  hash: 79cd815409ed2ef4
+  lines: 12
+"crates/code-graph-incremental/langs/csharp.yaml":
+- category: known-gap
+  reason: "Records the engine gaps for namespace imports and same-namespace siblings"
+  preview: "# C# rewrite rules."
+  hash: f324299262eb0fc7
+  lines: 9
+"crates/code-graph-incremental/langs/go.yaml":
+- category: known-gap
+  reason: "The DSL cannot see a parent node, so package-level and local var/const get the same treatment."
+  preview: "# Go rewrite rules."
+  hash: b9c320bbbdc2bc5f
+  lines: 13
+"crates/code-graph-incremental/langs/java.yaml":
+- category: known-gap
+  reason: "Records the resolver gaps for same-package siblings and wildcard imports"
+  preview: "# Java rewrite rules."
+  hash: 8b184f48f266781b
+  lines: 13
+"crates/code-graph-incremental/langs/kotlin.yaml":
+- category: known-gap
+  reason: "Kotlin engine gaps (package scope, directory wildcards, no parent view) are facts the rules cannot express"
+  preview: "# Kotlin rewrite rules."
+  hash: 6e5118b34dda9291
+  lines: 11
+"crates/code-graph-incremental/langs/php.yaml":
+- category: known-gap
+  reason: "PHP resolver gaps and the PSR-4 path convention are not visible from the rewrite rules"
+  preview: "# PHP rewrite rules."
+  hash: b21af8dfeddbbdc6
+  lines: 16
+"crates/code-graph-incremental/langs/ruby.yaml":
+- category: known-gap
+  reason: "Ruby implicit-self over-linking is an engine limit the rules cannot show"
+  preview: "# Ruby rewrite rules."
+  hash: 28b6ae4dd1a3d536
+  lines: 10

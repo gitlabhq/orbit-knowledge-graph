@@ -2,11 +2,9 @@
 
 use std::time::Duration;
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcConfig {
     pub keepalive_interval_secs: u64,
     pub keepalive_timeout_secs: u64,
@@ -19,18 +17,14 @@ pub struct GrpcConfig {
     /// 300. Set it to `null` to turn the maximum age off: behind the Orbit
     /// Gateway, which balances each request, the closes rebalance nothing and
     /// can end running queries.
-    #[schemars(range(min = 1))]
     pub max_connection_age_secs: Option<u64>,
     // Must stay paired with max_connection_age_secs: without a grace value,
     // tonic 0.14.5 panics with "async fn resumed after completion" when the
     // connection-age timer fires (hyperium/tonic#2522).
-    #[schemars(range(min = 1))]
     pub max_connection_age_grace_secs: u64,
     pub stream_timeout_secs: u64,
     pub max_header_list_size_bytes: u32,
-    #[schemars(range(min = 65536, max = 4194304))]
     pub result_chunk_bytes: usize,
-    #[schemars(range(min = 1048576))]
     pub max_result_bytes: usize,
 }
 

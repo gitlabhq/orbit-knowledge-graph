@@ -1,0 +1,47 @@
+".gitlab/ci/doc-principles-sync.yml":
+- category: upstream
+  reason: "Project GITLAB_TOKEN outranks glab auth login, so without the override glab silently acts as the wrong bot."
+  preview: "# The project-level GITLAB_TOKEN variable outranks glab auth login conf…"
+  hash: 0c3a2fea9fb65b17
+  lines: 2
+".gitlab/ci/e2e-pin-bump.yml":
+- category: upstream
+  reason: "Project GITLAB_TOKEN outranks glab auth, so without the export glab silently acts as the wrong bot."
+  preview: "# The project-level GITLAB_TOKEN variable outranks glab auth login conf…"
+  hash: 0c3a2fea9fb65b17
+  lines: 2
+".gitlab/ci/mr-housekeeping.yml":
+- category: invariant
+  reason: "Needs: [] stops the blocking manual release job from gating housekeeping; removing it silently stalls the job."
+  preview: "# Run independently of stage order so the blocking manual release job c…"
+  hash: 4d5ccf3407d317e3
+  lines: 2
+".gitlab/ci/orbit-perf.yml":
+- category: invariant
+  reason: "Adding strategy: depend would make merges wait for the perf run."
+  preview: "# No strategy: depend, so the merge does not wait for the perf run."
+  hash: 0d70d75b4b890bbe
+  lines: 1
+".gitlab/ci/release-local.yml":
+- category: upstream
+  reason: "The runner's system mise config installs broken unrelated tools, so the project mise.toml is bypassed on purpose."
+  preview: "# macos-15-xcode-16 ships with rustup but no toolchain pre-selected; the"
+  hash: 38443344319f1528
+  lines: 4
+".gitlab/ci/review-docs.yml":
+- category: invariant
+  reason: "The cleanup job runs after branch deletion on merge, so cloning the repo would silently fail."
+  preview: "# We need to download the script rather than clone the repo since the"
+  hash: 1ddc5ff1b9ecb1e2
+  lines: 3
+".gitlab/ci/rust-job-templates.yml":
+- category: invariant
+  reason: "Only merged code may write the cargo cache; otherwise MR branches could poison the shared cache."
+  preview: "# So only merged code writes the cache; set in unit-test."
+  hash: 25738f638c6cb7b0
+  lines: 1
+- category: security
+  reason: "An empty cache policy lets the runner upload; pull is the fail-closed choice."
+  preview: "# Fail closed: an empty policy would let the runner upload."
+  hash: 6c206f7845f696d3
+  lines: 1

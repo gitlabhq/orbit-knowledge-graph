@@ -1,0 +1,180 @@
+"crates/code-graph/src/utils.rs":
+- category: upstream
+  reason: "Oxc has no recursion limit and aborts the process at depth 4000-8000; the cap prevents process crashes."
+  preview: "/// oxc has no recursion limit and aborts the process past depth 4000-8…"
+  hash: d1fa0cf674dd3c4c
+  lines: 3
+"crates/code-graph/src/v2/config/lang.rs":
+- category: invariant
+  reason: "OXC accepts Svelte and Astro, but no fixture suite tests them, so Orbit must not claim them."
+  preview: "// `.svelte` and `.astro` are intentionally absent: OXC's"
+  hash: 3e7f8cc689193194
+  lines: 4
+"crates/code-graph/src/v2/dsl/ssa.rs":
+- category: magic-value
+  reason: "Raising the depth lets deep input overflow the worker stack, an uncatchable SIGSEGV."
+  preview: "/// Past this reaching-def recursion depth a read degrades to `Opaque` …"
+  hash: 050614c4a77ce1ad
+  lines: 2
+"crates/code-graph/src/v2/dsl/types.rs":
+- category: invariant
+  reason: "Custom parsers must honor the CPU budget and survive pathological input; walk phases have no budget."
+  preview: "/// `Custom` replaces tree-sitter parsing wholesale. It receives the pa…"
+  hash: 1a1e230405e4d479
+  lines: 3
+"crates/code-graph/src/v2/langs/custom/js/analyze/analyzer.rs":
+- category: upstream
+  reason: "Oxc 0.137 turned build_nodes off by default; the analyzer needs random access to semantic nodes."
+  preview: "// oxc 0.137 flipped the default to off; the analyzer relies on"
+  hash: f3ca5cb8b98e2be7
+  lines: 2
+- category: invariant
+  reason: "Without stack growth the recursive walk overflows the 2 MiB worker stack, an uncatchable SIGSEGV."
+  preview: "// Grow the stack on demand: the recursive CallExtractor walk overflows…"
+  hash: 2f5ba6eac677c531
+  lines: 1
+- category: upstream
+  reason: "OXC omits anonymous export default objects from module_record; removing the synthesis silently drops Vue bindings."
+  preview: "// OXC's module_record may not include `export default { ... }` for ano…"
+  hash: b1fee3d7af78842b
+  lines: 2
+"crates/code-graph/src/v2/langs/custom/js/analyze/dataflow.rs":
+- category: security
+  reason: "Member-expression depth is attacker-controlled; without stack growth a hostile repo crashes the indexer."
+  preview: "// Member-expression nesting is attacker-controlled (`a.b.c...` deep"
+  hash: 4f89656899f00b4d
+  lines: 2
+"crates/code-graph/src/v2/langs/custom/js/analyze/patterns.rs":
+- category: security
+  reason: "Hostile source nests patterns without limit; growing the stack prevents a crash."
+  preview: "// Hostile source can nest object/array patterns arbitrarily deep"
+  hash: 5983e1eebeb4808d
+  lines: 2
+"crates/code-graph/src/v2/langs/custom/js/constants.rs":
+- category: magic-value
+  reason: "The order must match Bun's loader priority, an external rule nothing in code checks."
+  preview: "/// Same set as `RESOLVER_EXTENSIONS`, ordered to match Bun's loader pr…"
+  hash: baf50f7aebf73382
+  lines: 1
+"crates/code-graph/src/v2/langs/custom/js/extract.rs":
+- category: security
+  reason: "Defense in depth against committed symlinks to system paths; the check looks redundant but must stay."
+  preview: "/// Reject relative paths that could escape the repo clone."
+  hash: 6b1426c65fd23397
+  lines: 6
+- category: security
+  reason: "Callers that bypass the walker depend on this cap to stay bounded against oversize input."
+  preview: "/// Per-file ceiling for the JS pipeline. The walker also applies a cap,"
+  hash: 08281e6f1f3b4e3f
+  lines: 3
+- category: security
+  reason: "OXC panic payloads can carry hostile repository bytes into logs, so filtering and the cap must stay."
+  preview: "/// Panic payloads from OXC can embed source snippets (byte ranges of"
+  hash: 6940b4a6b17aae77
+  lines: 7
+"crates/code-graph/src/v2/langs/custom/js/frameworks/mod.rs":
+- category: invariant
+  reason: "The semicolon stops ASI merges across script blocks, which silently corrupt def and range data."
+  preview: "// `;\\n` instead of `\\n` so ASI-defeating tokens at the end"
+  hash: 7ef56c81958ecea6
+  lines: 5
+"crates/code-graph/src/v2/langs/custom/js/resolve/evaluator.rs":
+- category: upstream
+  reason: "Serde_json has no recursion limit, so nested input can overflow the stack without stacker growth."
+  preview: "// `serde_json` parses without a recursion limit, so a 256 KB file of"
+  hash: c6053f2fa99f6bc5
+  lines: 2
+"crates/code-graph/src/v2/langs/custom/js/resolve/specifier.rs":
+- category: security
+  reason: "Upstream: oxc Restriction::Path only matches the exact path, so containment must use the function form."
+  preview: "// Bound every resolution to the repo clone. `Restriction::Path`"
+  hash: d1d1822c3ea525cf
+  lines: 4
+"crates/code-graph/src/v2/langs/custom/js/workspace.rs":
+- category: security
+  reason: "Fail closed on canonicalize failure, or a prefix match can flip a containment check."
+  preview: "// Canonicalize once so downstream path containment checks"
+  hash: e34bbdc956d6db91
+  lines: 7
+- category: security
+  reason: "Auto discovery walks past root_dir and honors ambient server tsconfig files; a hostile repo could exploit it."
+  preview: "/// Resolver configuration for the tsconfig/jsconfig the repo exposes."
+  hash: bedad058f11326fa
+  lines: 7
+"crates/code-graph/src/v2/langs/custom/rust/manifest.rs":
+- category: magic-value
+  reason: "Tradeoff: cfg pinned to linux/x86_64 gives reproducible indexer runs at the cost of local accuracy."
+  preview: "// Pins cfg atoms to linux/x86_64 to match the server indexing environm…"
+  hash: 7c0fa8d5e70c16ad
+  lines: 2
+"crates/code-graph/src/v2/langs/custom/rust/mod.rs":
+- category: magic-value
+  reason: "Tradeoff: sweeping the type interner sooner stalls Rust lanes measurably for little memory gain."
+  preview: "// Sweeping sooner stalls Rust lanes measurably more often for a little…"
+  hash: a222a0b151973d3d
+  lines: 1
+- category: invariant
+  reason: "A second waiting writer on the interner lock stalls every arriving Rust job."
+  preview: "// A second waiting writer would stall every arriving Rust job and swee…"
+  hash: 0c2cf12ba3ca012e
+  lines: 1
+- category: invariant
+  reason: "Drop(parsed) must precede finalize and Arrow conversion; reordering silently doubles peak memory."
+  preview: "// The graph owns interned copies of everything resolution needed, so t…"
+  hash: 53ccd742b759abc3
+  lines: 2
+"crates/code-graph/src/v2/langs/custom/rust/workspace.rs":
+- category: upstream
+  reason: "Upstream load_workspace spawns a VfsLoader thread and inotify watcher; this bypass must not regress to it."
+  preview: "/// Load a rust-analyzer `ProjectWorkspace` into a fresh `RootDatabase`…"
+  hash: d1825edb749ba417
+  lines: 5
+- category: security
+  reason: "The test guards the RUSTSEC-2023-0089 mitigation: the loader must not start a proc-macro server."
+  preview: "/// Guards the atomic-polyfill advisory mitigation (RUSTSEC-2023-0089).…"
+  hash: 21cf7ccfcac65dd6
+  lines: 3
+- category: security
+  reason: "The const pins the RUSTSEC-2023-0089 mitigation: this loader starts no proc-macro server."
+  preview: "// Invariant: this function never starts a proc-macro server."
+  hash: 25f7748354992a2d
+  lines: 1
+"crates/code-graph/src/v2/langs/generic/hcl.rs":
+- category: invariant
+  reason: "Tradeoff: ScopeFqnWalk on HCL fans one ref out to every same-named variable repo-wide."
+  preview: "// No ScopeFqnWalk: HCL has no lexical-scope-relative name resolution."
+  hash: b9e5a12589770402
+  lines: 8
+- category: invariant
+  reason: "Output and Provider stay out of GlobalName on purpose; admitting them adds cross-file false positives."
+  preview: "// var.x / module.x refs stay bare in hcl_rewrite_ref; namespacing the …"
+  hash: f847a13c86a60f2c
+  lines: 5
+"crates/code-graph/src/v2/linker/resolver.rs":
+- category: invariant
+  reason: "GlobalName must stay out of import_strategies, or every bare identifier pays an O(candidates) scan."
+  preview: "// GlobalName: last-resort lookup for chain bases only."
+  hash: 3c47e72af711a3ee
+  lines: 3
+"crates/code-graph/src/v2/pipeline.rs":
+- category: upstream
+  reason: "The substring matches Arrow 58.3.0 panic text; an upgrade can change it and make these panics fatal again."
+  preview: "/// Returns `true` when `message` matches Arrow's offset-overflow panic…"
+  hash: 8bfc4aa78a50180e
+  lines: 7
+- category: upstream
+  reason: "Arrow reports only batch-level offset overflow, so the whole batch is marked to self-heal without false per-file attribution."
+  preview: "// Arrow reports only the batch-level offset overflow, not the row/file…"
+  hash: 947977ca31c80332
+  lines: 4
+- category: invariant
+  reason: "A tree-sitter stack overflow is an uncatchable SIGSEGV, so this headroom must not shrink."
+  preview: "/// Headroom for the native tree-sitter parse, whose stack overflow is …"
+  hash: 8a19d022a33c869d
+  lines: 1
+"crates/code-graph/treesitter-visit/src/tree_sitter/mod.rs":
+- category: invariant
+  reason: "A native parse stack overflow is an uncatchable SIGSEGV, so the bail before the red zone must stay."
+  preview: "// Bail before the native parse overflows the stack; that fault is an u…"
+  hash: c195b170d754ef05
+  lines: 1
