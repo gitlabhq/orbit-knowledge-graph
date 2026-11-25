@@ -639,7 +639,7 @@ description = "Run the YAML layout linter's unit tests"
 
 [tasks."lint:comments"]
 run = "uv run --quiet scripts/linting/comments/check.py"
-description = "Block code comments that scripts/linting/comments/ledger.toml does not allow"
+description = "Block code comments that the comment ledger does not allow"
 
 [tasks."lint:comments:test"]
 run = "ast-grep test -c scripts/linting/comments/sgconfig.yml --skip-snapshot-tests"
