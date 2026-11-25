@@ -1,0 +1,93 @@
+"crates/orbit-cli/build.rs":
+- category: contract
+  reason: "Publish strips the leading v; glab --update compares against bare semver, so versions must match."
+  preview: "// Publish strips the leading `v` (scripts/release/upload-local-cli-rel…"
+  hash: 3de4d50f572c6a60
+  lines: 3
+- category: upstream
+  reason: "Libduckdb-sys 2.0 dropped its rpath; release builds must not carry a build-machine path."
+  preview: "/// libduckdb-sys 2.0 no longer adds an rpath for a downloaded libduckd…"
+  hash: daff8a1f12f8ecb4
+  lines: 5
+"crates/orbit-cli/src/commands/index/incremental/state.rs":
+- category: invariant
+  reason: "The rename must keep the read time that freshness compares against; a copy breaks it silently."
+  preview: "/// Puts each pending snapshot in place. The rename keeps the read time…"
+  hash: ff5508ad2f9fc5f4
+  lines: 1
+"crates/orbit-cli/src/commands/reset.rs":
+- category: invariant
+  reason: "Lock order: shallow paths lock first, so index state and manifest lock before revisions."
+  preview: "/// Shallow paths first, so index state and the manifest lock before th…"
+  hash: 24c710de068c6b1e
+  lines: 1
+"crates/orbit-cli/src/commands/setup/components/skill.rs":
+- category: upstream
+  reason: "Glab skills update rewrites the version line, so the match must ignore it."
+  preview: "/// Matches a lone wrapper `SKILL.md` ignoring its `version:` line, whi…"
+  hash: 574ab84ef0fa220b
+  lines: 1
+- category: upstream
+  reason: "Keeping the other launcher's wrapper stops glab skills update from silently swapping it back."
+  preview: "// Keeping the other launcher's wrapper stops `glab skills update` from…"
+  hash: 717e58edbc9560d8
+  lines: 1
+"crates/orbit-cli/src/list.rs":
+- category: upstream
+  reason: "The ORDER BY must qualify the table column, or it silently sorts the CAST text alias, not the timestamp."
+  preview: "// Cast the enum and timestamp to text so JSON/CSV don't render them as…"
+  hash: a649a6f42c3ffa84
+  lines: 3
+"crates/orbit-cli/src/main.rs":
+- category: magic-value
+  reason: "Raising the timeout buys no delivery and lengthens exit against a dead collector."
+  preview: "/// Only bounds commands too fast to hide a round trip behind their own…"
+  hash: 007cf94ecc92f6c5
+  lines: 2
+- category: upstream
+  reason: "Exit(0) skips the runtime wait on blocking DNS lookups past the flush timeout; a return would hang."
+  preview: "// Skips the runtime's wait on blocking DNS lookups past the flush time…"
+  hash: bf67ed5810eeba58
+  lines: 1
+"crates/orbit-cli/src/remote/client.rs":
+- category: invariant
+  reason: "Tradeoff: a connect timeout means dropped packets, so a retry would pay the timeout again."
+  preview: "// A connect timeout means the host drops packets: retrying"
+  hash: 823293b119b0c60c
+  lines: 2
+"crates/orbit-cli/src/remote/retry.rs":
+- category: invariant
+  reason: "QUERY must never retry 503: the server may already have run the query, and graph queries are billed."
+  preview: "/// Only 429, connect failures other than timeouts, and (when opted in)…"
+  hash: e75721896ffe676a
+  lines: 3
+"crates/orbit-cli/src/skill.rs":
+- category: invariant
+  reason: "Unlinking the lock inode would let another writer lock a replacement file concurrently."
+  preview: "// Never unlink the inode: another writer could lock its replacement."
+  hash: 5104f8e341a94208
+  lines: 2
+"crates/orbit-cli/src/telemetry.rs":
+- category: contract
+  reason: "Glab sets this env value on the binary it runs; renaming it silently breaks distribution analytics."
+  preview: "/// glab sets `GITLAB_ORBIT_DISTRIBUTION=glab` on the binary it runs fo…"
+  hash: fd81642060a28557
+  lines: 1
+"crates/orbit-cli/src/workspace.rs":
+- category: invariant
+  reason: "Lock order: index state first so a reset waits for running indexes before it locks the manifest."
+  preview: "/// Index state comes first so a reset waits for running indexes before…"
+  hash: 034dee7bcb6e2638
+  lines: 2
+"crates/orbit-cli/tests/no_index.rs":
+- category: contract
+  reason: "The nightly search guard in another package parses these outputs; its fixtures must change with them."
+  preview: "/// The nightly search guard (packages/agent-plugins-nightly/search-gua…"
+  hash: 4c8462a4db5ce18a
+  lines: 2
+"crates/orbit-cli/tests/skills_remote.rs":
+- category: invariant
+  reason: "A file blocks the path even for root; chmod would let the test pass vacuously as root."
+  preview: "// Use a file instead of chmod so this fails even when run as root."
+  hash: 46bd595dfbfa20e6
+  lines: 1

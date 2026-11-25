@@ -1,0 +1,35 @@
+"crates/integration-tests/tests/billing_boundary.rs":
+- category: compliance
+  reason: "SOX control statement: a passing run is evidence the billing dependency surface did not expand."
+  preview: "//! SOX boundary check: only permitted crates may depend on `orbit-bill…"
+  hash: c486ae8da9def407
+  lines: 5
+"crates/integration-tests/tests/indexer/clickhouse.rs":
+- category: upstream
+  reason: "Without index_granularity_bytes=0 the page is not one block and the test silently stops covering the case."
+  preview: "// index_granularity_bytes=0 makes the sort coalesce the page into one …"
+  hash: 413205438a6bebca
+  lines: 1
+- category: upstream
+  reason: "The data layout forces ClickHouse 26.6-26.10 to prefer the projection; changing it silently voids the regression test."
+  preview: "// Large rows clustered in the sort key give the merged base part more …"
+  hash: 9afa8d913c045e21
+  lines: 2
+"crates/integration-tests/tests/indexer/common/dispatch.rs":
+- category: invariant
+  reason: "Dispatchers share one fixed versioned stream, so scenarios must stay serial on the shared NATS container."
+  preview: "/// Dispatchers publish to a fixed versioned stream, so the shared NATS…"
+  hash: 4ebff345e1d5a59e
+  lines: 3
+"crates/integration-tests/tests/indexer/scenarios/sdlc/projects/transferred_project_does_not_duplicate_edges.yaml":
+- category: invariant
+  reason: "The projects pseudo-table writes version now(), which outranks the dated rows and voids the test."
+  preview: "# Seeds siphon_projects and the route table directly rather than via the"
+  hash: 1ced1d4bc86afa2d
+  lines: 3
+"crates/integration-tests/tests/indexer/schema/migration.rs":
+- category: upstream
+  reason: "The setting makes a single-node table dedup like Cloud SharedMergeTree; without it the test passes vacuously."
+  preview: "// non_replicated_deduplication_window makes a single-node table dedup …"
+  hash: 34ddbb77eb6dd9ce
+  lines: 1

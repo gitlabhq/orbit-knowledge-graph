@@ -26,12 +26,15 @@
 "scripts/vendored/**":
 - category: vendored
   reason: "Copies of upstream sources"
-"config/setup/agents/*/index.js":
+"config/setup/agents/opencode_ui/index.js":
 - category: generated
-  reason: "Bun build writes this license header into the bundle, and CI diffs the build output"
-  preview: "/*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/ma…"
-  hash: 939e6195fc4b0889
-  lines: 1
+  reason: "packages/agent-plugins/scripts/build.ts writes this file, and CI diffs it against the build"
+"config/setup/agents/opencode_ui/tui.tsx":
+- category: generated
+  reason: "packages/agent-plugins/scripts/build.ts writes this file, and CI diffs it against the build"
+"config/setup/agents/pi_ui/index.js":
+- category: generated
+  reason: "packages/agent-plugins/scripts/build.ts writes this file, and CI diffs it against the build"
 "packages/agent-plugins/core/lib.js":
 - category: generated
   reason: "Bun build writes this license header into the bundle, and CI diffs the build output"
