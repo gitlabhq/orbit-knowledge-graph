@@ -48,9 +48,20 @@ drop_run_databases() {
     done
 }
 
+drop_run_access_entities() {
+  local kind table name_prefix
+  for entity in "USER:users:orbit_reader_" "SETTINGS PROFILE:settings_profiles:orbit_reader_profile_"; do
+    IFS=: read -r kind table name_prefix <<<"$entity"
+    curl --silent --fail --user "default:$password" --data-binary "SELECT name FROM system.$table WHERE startsWith(name, '$name_prefix$GKG_TEST_DATABASE_PREFIX') FORMAT TSVRaw" "$GKG_TEST_CLICKHOUSE_URL" |
+      while read -r name; do
+        curl --silent --fail --user "default:$password" --data-binary "DROP $kind IF EXISTS $name" "$GKG_TEST_CLICKHOUSE_URL" >/dev/null
+      done
+  done
+}
+
 for _ in {1..200}; do
   if curl --silent --fail --user "default:$password" "$GKG_TEST_CLICKHOUSE_URL/ping" >/dev/null 2>&1; then
-    trap 'drop_run_databases || true; cleanup' EXIT
+    trap 'drop_run_access_entities || true; drop_run_databases || true; cleanup' EXIT
     cargo nextest run "$@"
     exit
   fi
