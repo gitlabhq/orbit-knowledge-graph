@@ -332,8 +332,6 @@ impl NodeEntity {
             .collect()
     }
 
-    /// A disabled virtual column resolves to nothing, so listing it would
-    /// advertise a column that never returns a value.
     pub fn listed_fields(&self) -> impl Iterator<Item = &Field> {
         self.fields
             .iter()
