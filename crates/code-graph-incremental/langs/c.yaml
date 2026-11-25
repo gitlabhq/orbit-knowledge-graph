@@ -50,6 +50,7 @@ config:
       { module: threads.h }, { module: uchar.h }, { module: wchar.h }, { module: wctype.h }
     ]
   resolve:
+    root_include_fallback: true
     lookup_from:
       - __source_root
 
