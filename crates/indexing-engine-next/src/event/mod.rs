@@ -34,7 +34,7 @@ pub struct TaskIdentity {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TaskStep {
-    Submitted { found_pending: bool },
+    Submitted { already_pending: bool },
     Published,
     Delivered,
     LeaseAcquired(Hold),
@@ -43,7 +43,7 @@ pub enum TaskStep {
     Renewed(Hold),
     RenewalLost,
     RenewalFailed(Failure),
-    Finished { released: bool },
+    Finished { released_lease: bool },
     Abandoned(Failure),
     PortCallFailed(Failure),
 }

@@ -25,6 +25,16 @@ pub(crate) enum LeaseWrite {
     Conflict,
 }
 
+pub(crate) enum Acquisition {
+    Held(Hold),
+    GivenBack,
+}
+
+enum Extension {
+    Extended,
+    Lost,
+}
+
 pub(crate) struct Leases {
     store: Arc<dyn LeaseStore>,
     clock: Arc<dyn Clock>,
@@ -48,14 +58,14 @@ impl Leases {
         &self,
         message: &TaskMessage,
         in_flight: &dyn InFlight,
-    ) -> anyhow::Result<Option<Hold>> {
+    ) -> anyhow::Result<Acquisition> {
         let now = self.clock.now().await;
         let claim = Claim::new(self.holder.clone(), message.task);
         match self.take_if_free(claim, &message.worker_key(), now).await? {
             Some(hold) => {
                 let acquired = TaskStep::LeaseAcquired(hold.clone());
                 self.observer.observe(&message.build_event(now, acquired));
-                Ok(Some(hold))
+                Ok(Acquisition::Held(hold))
             }
             None => {
                 let delay = self.rules.renew_every;
@@ -65,7 +75,7 @@ impl Leases {
                 }
                 let given_back = TaskStep::GivenBack { delay };
                 self.observer.observe(&message.build_event(now, given_back));
-                Ok(None)
+                Ok(Acquisition::GivenBack)
             }
         }
     }
@@ -84,7 +94,7 @@ impl Leases {
             self.clock.sleep(wait).await;
             now = self.clock.now().await;
             match self.extend_if_ours(hold, &key, now).await {
-                Ok(true) => {
+                Ok(Extension::Extended) => {
                     if let Err(error) = in_flight.ack_progress().await {
                         let failure = Failure::new("ack_progress_failed", error);
                         let failed = TaskStep::PortCallFailed(failure);
@@ -93,7 +103,7 @@ impl Leases {
                     let renewed = TaskStep::Renewed(hold.clone());
                     self.observer.observe(&message.build_event(now, renewed));
                 }
-                Ok(false) => {
+                Ok(Extension::Lost) => {
                     let lost = TaskStep::RenewalLost;
                     self.observer.observe(&message.build_event(now, lost));
                     return;
@@ -139,17 +149,17 @@ impl Leases {
         hold: &mut Hold,
         key: &WorkerKey,
         now: SystemTime,
-    ) -> anyhow::Result<bool> {
+    ) -> anyhow::Result<Extension> {
         let entry = self.store.read(key).await?;
         let lease = match hold.build_renewal(&self.rules, &entry, now) {
             Renewal::Extend(lease) => lease,
-            Renewal::Lost => return Ok(false),
+            Renewal::Lost => return Ok(Extension::Lost),
         };
         let written = self.store.write(key, entry.revision, Some(&lease)).await?;
         let LeaseWrite::Written(fence) = written else {
-            return Ok(false);
+            return Ok(Extension::Lost);
         };
         hold.record_renewal(&self.rules, &lease, fence.revision, now);
-        Ok(true)
+        Ok(Extension::Extended)
     }
 }

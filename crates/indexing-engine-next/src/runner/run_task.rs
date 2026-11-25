@@ -5,7 +5,7 @@ use std::time::SystemTime;
 use super::Runner;
 use crate::builder::ErasedWorker;
 use crate::event::{Failure, TaskStep};
-use crate::lease::Hold;
+use crate::lease::{Acquisition, Hold};
 use crate::submit::submit_task;
 use crate::task::{Delivery, TaskMessage};
 use crate::worker::{EncodedOutcome, TaskContext};
@@ -32,8 +32,8 @@ impl Runner {
 
         let acquired = self.leases.acquire_or_give_back(message, in_flight).await;
         let mut hold = match acquired {
-            Ok(Some(hold)) => hold,
-            Ok(None) => return,
+            Ok(Acquisition::Held(hold)) => hold,
+            Ok(Acquisition::GivenBack) => return,
             Err(error) => return self.abandon_run(message, "lease_failed", error).await,
         };
         let started_at = match self.start_task(message).await {
@@ -94,16 +94,16 @@ impl Runner {
             self.observe_port_call_failure(message, now, Failure::new("ack_failed", error));
         }
 
-        let released = match hold {
+        let released_lease = match hold {
             Some(hold) => self.leases.release(hold, &message.worker_key()).await,
             None => Ok(false),
         };
-        let released = released.unwrap_or_else(|error| {
+        let released_lease = released_lease.unwrap_or_else(|error| {
             let failure = Failure::new("lease_release_failed", error);
             self.observe_port_call_failure(message, now, failure);
             false
         });
-        let finished = TaskStep::Finished { released };
+        let finished = TaskStep::Finished { released_lease };
         self.ports
             .observer
             .observe(&message.build_event(now, finished));

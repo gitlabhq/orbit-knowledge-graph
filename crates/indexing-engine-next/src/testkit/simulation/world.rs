@@ -297,8 +297,8 @@ impl World {
         }
         let task = event.task.id;
         match (actor, &event.step) {
-            (Actor::Planner, TaskStep::Submitted { found_pending }) => {
-                if !found_pending {
+            (Actor::Planner, TaskStep::Submitted { already_pending }) => {
+                if !already_pending {
                     self.ids.push(task);
                 }
                 self.publishing = Some(task);

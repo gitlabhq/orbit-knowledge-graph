@@ -320,6 +320,8 @@ async fn a_registered_observer_sees_every_step_of_a_task_with_its_identity() {
         && event.task.worker == "simulation.write"));
     assert_eq!(
         events.last().map(|event| &event.step),
-        Some(&TaskStep::Finished { released: true })
+        Some(&TaskStep::Finished {
+            released_lease: true
+        })
     );
 }
