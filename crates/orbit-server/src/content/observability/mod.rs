@@ -203,8 +203,6 @@ mod tests {
         TraversalPath::new_unchecked(raw)
     }
 
-    /// The first segment is the organization, so reading it would both miss
-    /// every allowlisted namespace and match other tenants in that org.
     #[test]
     fn the_gate_reads_the_root_namespace_not_the_organization() {
         assert_eq!(gated_namespace(&path("1/9970/12345/")), Some(9970));
@@ -217,8 +215,6 @@ mod tests {
         assert_eq!(gated_namespace(&path("")), None);
     }
 
-    /// Off until features::init runs, so an unconfigured server resolves
-    /// nothing rather than resolving for everyone.
     #[test]
     fn the_gate_is_closed_before_the_flag_is_installed() {
         assert!(!enabled_for_path(&path("1/9970/")));
