@@ -58,9 +58,6 @@ fn reader_profile(ctx: &TestContext) -> String {
 async fn create_orbit_reader(ctx: &TestContext) {
     let user = reader_user(ctx);
     let profile = reader_profile(ctx);
-    ctx.execute(&format!("DROP USER IF EXISTS {user}")).await;
-    ctx.execute(&format!("DROP SETTINGS PROFILE IF EXISTS {profile}"))
-        .await;
     ctx.execute(&format!(
         "CREATE SETTINGS PROFILE {profile} SETTINGS \
          readonly = 2 READONLY, \
