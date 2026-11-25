@@ -808,12 +808,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                      filtered in {qt} queries"
                 )));
             }
-            if vs.disabled {
-                return Err(QueryError::Validation(format!(
-                    "filter on \"{prop}\" for {entity}: virtual column is not yet \
-                     resolvable"
-                )));
-            }
             if node.node_ids.is_empty() {
                 return Err(QueryError::Validation(format!(
                     "filter on \"{prop}\" for {entity}: virtual columns can only be \
@@ -1945,5 +1939,29 @@ mod tests {
             err.to_string().contains("does not exist"),
             "expected the disabled field to be rejected, got: {err}"
         );
+    }
+
+    #[test]
+    fn rejects_a_filter_on_a_disabled_virtual_field_as_unknown() {
+        let ontology = std::sync::Arc::new(Ontology::load_embedded().unwrap());
+        let queries = [
+            (
+                crate::Frontend::JsonDsl,
+                r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Pipeline", "node_ids": [1], "filters": {"observability_trace_id": "abc"}}]}"#,
+            ),
+            (
+                crate::Frontend::Gql,
+                "MATCH (p:Pipeline {id: 1}) WHERE p.observability_trace_id = 'abc' RETURN p",
+            ),
+        ];
+
+        for (frontend, raw) in queries {
+            let error = crate::compile(raw, frontend, &ontology, &crate::testkit::non_admin_ctx())
+                .unwrap_err();
+
+            let message = error.to_string();
+            assert!(message.contains("observability_trace_id"), "{message}");
+            assert!(!message.contains("virtual column"), "{message}");
+        }
     }
 }
