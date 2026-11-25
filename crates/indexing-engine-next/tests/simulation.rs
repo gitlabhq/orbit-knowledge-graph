@@ -1,3 +1,4 @@
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use indexing_engine_next::lease::{Fence, Generation, Revision};
@@ -6,6 +7,7 @@ use indexing_engine_next::testkit::simulation::{
     DatabaseWrite, FaultBudget, MessageState, RevisionConflict, SimulatedBroker, SimulatedDatabase,
     SimulatedKeyValue, Simulation, SimulationReport, TickClock,
 };
+use indexing_engine_next::{EngineEvent, Observer, TaskEvent, TaskStep, Tenant};
 use uuid::Uuid;
 
 const SEEDS: u64 = 300;
@@ -254,4 +256,72 @@ async fn a_seed_replays_the_same_steps() {
     let second = three_processes().run(7).await;
 
     assert_eq!(format!("{first:?}"), format!("{second:?}"));
+}
+
+#[derive(Clone, Default)]
+struct RecordedEvents(Arc<Mutex<Vec<EngineEvent>>>);
+
+impl Observer for RecordedEvents {
+    fn observe(&self, event: &EngineEvent) {
+        self.0.lock().unwrap().push(event.clone());
+    }
+}
+
+impl RecordedEvents {
+    fn list_task_events(&self) -> Vec<TaskEvent> {
+        self.0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|event| match event {
+                EngineEvent::Task(event) => Some(event.clone()),
+                EngineEvent::Lane(_) => None,
+            })
+            .collect()
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_registered_observer_sees_every_step_of_a_task_with_its_identity() {
+    let recorded = RecordedEvents::default();
+    let simulation = Simulation::new()
+        .processes(1)
+        .submits(1)
+        .faults(FaultBudget {
+            stalls: 0,
+            crashes: 0,
+            wipes: 0,
+            duplicates: 0,
+            losses: 0,
+        })
+        .observer(recorded.clone());
+
+    simulation.run(1).await.assert_rules_held();
+
+    let events = recorded.list_task_events();
+    let steps: Vec<&str> = events
+        .iter()
+        .map(|event| event.step.name())
+        .filter(|step| *step != "renewed")
+        .collect();
+    assert_eq!(
+        steps,
+        [
+            "submitted",
+            "published",
+            "delivered",
+            "lease_acquired",
+            "started",
+            "finished"
+        ]
+    );
+    assert!(events.iter().all(|event| event.task.id == events[0].task.id
+        && event.task.tenant == Tenant::new("simulation")
+        && event.task.worker == "simulation.write"));
+    assert_eq!(
+        events.last().map(|event| &event.step),
+        Some(&TaskStep::Finished {
+            released_lease: true
+        })
+    );
 }
