@@ -1,5 +1,3 @@
-# CHILD_OF is a standalone edge enriched on both sides: source tags come
-# from the child pipeline (5002), target tags from the parent (5001).
 description: ci_sources_pipelines rows produce CHILD_OF and TRIGGERS_PIPELINE edges with tags
 scope: { namespace: 100 }
 

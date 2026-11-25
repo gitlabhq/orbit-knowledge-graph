@@ -38,7 +38,6 @@ pub fn get_current_commit_hash(repo_path: &Path) -> Result<String, std::io::Erro
     }
 }
 
-/// Refuse a revision that git would read as an option.
 pub(crate) fn reject_option_like_revision(revision: &str) -> Result<(), std::io::Error> {
     if revision.starts_with('-') {
         return Err(std::io::Error::new(
@@ -49,7 +48,6 @@ pub(crate) fn reject_option_like_revision(revision: &str) -> Result<(), std::io:
     Ok(())
 }
 
-/// Get commit info for multiple commits in a single git command for better performance
 pub fn get_commits_info(
     repo_path: &Path,
     commit_hashes: &[&str],
@@ -62,7 +60,6 @@ pub fn get_commits_info(
         reject_option_like_revision(hash)?;
     }
 
-    // Use ASCII Unit Separator (0x1f) as delimiter - safer than pipe for commit messages
     const DELIMITER: &str = "\x1f";
     let format = format!("%H{DELIMITER}%s{DELIMITER}%an{DELIMITER}%ae");
 
@@ -170,7 +167,7 @@ mod tests {
         let result = get_current_commit_hash(repo.path.as_path());
         assert!(result.is_ok());
         let commit_hash = result.unwrap();
-        assert_eq!(commit_hash.len(), 40); // Full SHA-1 hash
+        assert_eq!(commit_hash.len(), 40);
         assert!(commit_hash.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
@@ -264,7 +261,6 @@ mod tests {
     #[test]
     fn test_commits_with_pipe_in_message() {
         let mut repo = init_test_repo();
-        // Test message with pipe character - should be preserved with new delimiter
         let message_with_pipe = "fix: update parser | add tests";
         let hash = create_commit(&mut repo, "test.txt", "test content", message_with_pipe).unwrap();
 
@@ -272,7 +268,6 @@ mod tests {
         assert!(result.is_ok());
         let commits = result.unwrap();
         assert_eq!(commits.len(), 1);
-        // The message should be preserved completely with our new delimiter
         assert_eq!(commits[0].message, message_with_pipe);
     }
 

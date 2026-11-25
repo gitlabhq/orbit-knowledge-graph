@@ -3,11 +3,9 @@ use ontology::Ontology;
 
 use super::Output;
 
-/// `Directory` list where matches are, and hosted nodes such as `MergeRequest` are reported.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Kinds {
     pub(super) definitions: Vec<String>,
-    /// How the header names the filter: `Definition` rather than every definition kind.
     pub(super) shown: Vec<String>,
     pub(super) output: Option<Output>,
     pub(super) hosted: Vec<String>,
@@ -70,7 +68,6 @@ pub(super) fn languages(requested: &mut Vec<String>) -> Vec<String> {
     types
 }
 
-/// Agent spellings for definition families, matched to kinds by `family_of`.
 const FAMILIES: &[&[&str]] = &[
     &[
         "fn",
@@ -133,8 +130,6 @@ const CALLABLE_KINDS: &[&str] = &[
 
 const MEMBER_EXTRA_KINDS: &[&str] = &["Field", "Attribute", "Property", "ComputedProperty"];
 
-/// The family of a definition kind: the kind lists first, then the name, so labels such as
-/// `DecoratedClass` or a new language's kinds still land somewhere.
 fn family_of(kind: &str) -> Option<usize> {
     let has = |parts: &[&str]| parts.iter().any(|part| kind.contains(part));
     if CALLABLE_KINDS.contains(&kind) || has(&["Function", "Method", "Constructor"]) {

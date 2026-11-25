@@ -9,9 +9,6 @@ pub enum PipelineError {
     #[error("Query compilation failed: {message}")]
     Compile {
         message: String,
-        /// When true the message only describes user-input problems
-        /// (parse/schema/reference/pagination/limit errors) and is safe
-        /// to return to clients verbatim.
         client_safe: bool,
         reason: RejectionReason,
     },

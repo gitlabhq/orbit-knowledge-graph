@@ -1,7 +1,3 @@
-//! With `--check`, compares the regenerated output against the committed file
-//! and fails with a diff if they differ. This is the CI gate that keeps
-//! dashboards and emitted metrics from drifting apart.
-
 use std::fs;
 use std::path::PathBuf;
 
@@ -13,9 +9,6 @@ const DEFAULT_OUTPUT: &str = "crates/orbit-observability/orbit-dashboards/gkg-me
 
 const GENERATED_BY: &str = "cargo xtask metrics-catalog - do not edit";
 
-/// Sanity floor so an accidental truncation (e.g. a missing `v.extend(...)`
-/// line in `orbit_observability::catalog`) fails the `--check` pass rather than
-/// quietly shipping an incomplete dashboard inventory.
 const MIN_CATALOG_SIZE: usize = 55;
 
 pub fn run(output: Option<PathBuf>, check: bool) -> Result<()> {
@@ -82,8 +75,6 @@ fn validate(specs: &[&'static MetricSpec]) -> Result<()> {
     Ok(())
 }
 
-/// Serialisable wrapper that carries every catalog field plus the computed
-/// Prometheus name so jsonnet consumers can use either.
 #[derive(Serialize)]
 struct Entry {
     otel_name: &'static str,
@@ -154,7 +145,6 @@ fn render(specs: &[&'static MetricSpec]) -> Result<String> {
     Ok(json)
 }
 
-/// Canonicalise JSON so whitespace-only differences don't count as drift.
 fn normalise(raw: &str) -> String {
     match serde_json::from_str::<serde_json::Value>(raw) {
         Ok(value) => serde_json::to_string_pretty(&value).unwrap_or_else(|_| raw.to_string()),

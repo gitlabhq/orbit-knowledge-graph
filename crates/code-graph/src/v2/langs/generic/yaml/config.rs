@@ -1,6 +1,3 @@
-//! Embedded document-type configs, validated against
-//! `config/schemas/yaml_document_type.schema.json` when first loaded.
-
 use std::sync::LazyLock;
 
 use rust_embed::Embed;

@@ -21,8 +21,6 @@ use traces::{TraceKey, TraceLookup};
 
 pub const SERVICE_NAME: &str = "observability";
 
-/// A tenant whose ClickHouse accepts the connection and never answers would
-/// otherwise hold the whole batch open.
 async fn bounded<T, E>(
     timeout: Duration,
     fetch: impl Future<Output = Result<T, E>>,
@@ -44,8 +42,6 @@ impl ObservabilityService {
     pub fn new(settings: &ObservabilityResolverSettings) -> Result<Self, reqwest::Error> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-        // The https check only sees the configured URL, so a redirect would
-        // carry the provisioner key somewhere unchecked.
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(settings.request_timeout_seconds))
             .redirect(reqwest::redirect::Policy::none())
@@ -81,9 +77,6 @@ impl ObservabilityService {
     }
 }
 
-/// Rows are grouped by the tenant database they resolve against, not by
-/// traversal path: many projects under one provisioned group share a tenant,
-/// and grouping by path would query that tenant once per project.
 type TenantBatch = (TenantRoute, Vec<TraceKey>);
 
 #[async_trait]

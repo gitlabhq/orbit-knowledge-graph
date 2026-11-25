@@ -5,7 +5,6 @@ use std::borrow::Cow;
 
 pub type KindId = u16;
 
-/// Line and column are zero-based, character offsets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Position {
     line: usize,
@@ -26,8 +25,6 @@ impl Position {
         self.line
     }
 
-    /// Returns the column in terms of characters.
-    /// Note: node does not have to be a node of matching position.
     pub fn column<D: Doc>(&self, node: &Node<'_, D>) -> usize {
         let source = node.get_doc().get_source();
         source.get_char_column(self.byte_column, self.byte_offset)
@@ -38,7 +35,6 @@ impl Position {
     }
 }
 
-/// Owns the source string.
 #[derive(Clone)]
 pub struct Root<D: Doc> {
     pub(crate) doc: D,
@@ -74,7 +70,6 @@ impl<D: Doc> Root<D> {
     }
 }
 
-/// `'r` represents root lifetime.
 #[derive(Clone)]
 pub struct Node<'r, D: Doc> {
     pub(crate) inner: D::Node<'r>,
@@ -118,7 +113,6 @@ impl<'r, D: Doc> Node<'r, D> {
         self.inner.is_missing()
     }
 
-    /// byte offsets of start and end.
     pub fn range(&self) -> std::ops::Range<usize> {
         self.inner.range()
     }
@@ -245,10 +239,6 @@ impl<'r, D: Doc> Node<'r, D> {
         })
     }
 
-    /// Navigate a chain of named fields, returning `None` if any is missing.
-    ///
-    /// `node.field_chain(&["function", "object"])` is equivalent to
-    /// `node.field("function")?.field("object")`.
     #[must_use]
     pub fn field_chain(&self, fields: &[&str]) -> Option<Self> {
         let mut current = self.clone();
@@ -258,7 +248,6 @@ impl<'r, D: Doc> Node<'r, D> {
         Some(current)
     }
 
-    /// DFS, left-to-right. Does not test `self`, only its descendants.
     #[must_use]
     pub fn find_descendant(&self, predicate: impl Fn(&Self) -> bool) -> Option<Self> {
         self.find_descendant_inner(&predicate)
@@ -276,18 +265,6 @@ impl<'r, D: Doc> Node<'r, D> {
         None
     }
 
-    /// Find the first node along `axis` whose kind satisfies `criterion`.
-    ///
-    /// ```
-    /// use treesitter_visit::{Axis::*, Doc, Match::*, Node};
-    ///
-    /// # fn find_examples<D: Doc>(node: &Node<'_, D>) {
-    /// node.find(Child, Kind("identifier"));
-    /// node.find(Ancestor, AnyKind(&["class_definition", "module"]));
-    /// node.find(Descendant, Kind("type_identifier"));
-    /// node.find(Field("name"), Kind("identifier"));
-    /// # }
-    /// ```
     #[must_use]
     pub fn find(&self, axis: Axis<'_>, criterion: Match<'_>) -> Option<Self> {
         match axis {
@@ -321,7 +298,6 @@ impl<'r, D: Doc> Node<'r, D> {
         self.has(Axis::Child, Match::Kind(kind))
     }
 
-    /// Positive `n`: 0-based from the start. Negative: -1 = last, -2 = second-to-last, etc.
     #[must_use]
     pub fn nth(&self, axis: Axis<'_>, criterion: Match<'_>, n: isize) -> Option<Self> {
         match axis {
@@ -330,7 +306,6 @@ impl<'r, D: Doc> Node<'r, D> {
             Axis::NextSibling => self.nth_iter(self.next_all(), criterion, n),
             Axis::Ancestor => self.nth_iter(self.parent_chain(), criterion, n),
             Axis::Descendant => self.nth_iter(self.dfs(), criterion, n),
-            // Single-value axes: only n==0 or n==-1 makes sense
             Axis::Parent | Axis::Field(_) => {
                 if n == 0 || n == -1 {
                     self.find(axis, criterion)
@@ -372,14 +347,11 @@ impl<'r, D: Doc> Node<'r, D> {
     }
 }
 
-/// Which direction to traverse from a node.
 #[derive(Clone, Copy)]
 pub enum Axis<'a> {
     Child,
     Parent,
-    /// Walk up from parent to root.
     Ancestor,
-    /// DFS through all descendants.
     Descendant,
     Field(&'a str),
     PrevSibling,
@@ -393,7 +365,6 @@ pub enum Match<'a> {
     Any,
     Named,
     KindEndsWith(&'a str),
-    /// Match a node whose text content is exactly this string.
     Text(&'a str),
 }
 

@@ -33,7 +33,6 @@ run() {
     fi
 }
 
-# Replace the GitLab Orbit section of the navigation on stdin with docs/navigation.yaml.
 swap_navigation() {
     awk -v section="$ORBIT_ROOT/docs/navigation.yaml" '
         /^# GITLAB ORBIT$/ {
@@ -58,8 +57,6 @@ apply_navigation() {
     echo "docs-gitlab-com: GitLab Orbit navigation replaced with docs/navigation.yaml."
 }
 
-# An old checkout builds an old side nav next to the new pages, so update it.
-# The navigation swap from an earlier run is the only local change this discards.
 update_site() {
     local branch=$1 nav="data/en-us/navigation.yaml"
     if [[ "$(git branch --show-current)" != "$branch" ]]; then
@@ -96,7 +93,6 @@ prepare_site() {
     apply_navigation
 
     export PATH="$SITE_DIR/bin:$PATH" COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-    # A global Yarn 1 answers --version too, but the site needs the Yarn from packageManager.
     if [[ "$(run yarn --version 2>/dev/null)" != [2-9]* ]]; then
         rm -rf "${SITE_DIR:?}/bin"
         mkdir "$SITE_DIR/bin"
@@ -133,7 +129,6 @@ build() {
 
 case "${1:-}" in
     serve)
-        # Hugo moves to a random port when 1313 is taken, and the browser keeps showing the old server.
         if lsof -nP -iTCP:1313 -sTCP:LISTEN >/dev/null 2>&1; then
             echo "ERROR: port 1313 is in use. Stop the other docs server, then run this again." >&2
             exit 1

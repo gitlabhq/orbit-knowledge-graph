@@ -125,8 +125,6 @@ impl BillingObserver {
             record_dropped(REASON_ROOT_NAMESPACE_MISSING);
             return None;
         }
-        // Rails mints `license_checksum` only for online cloud licenses, so its
-        // absence on SM means an offline or legacy license.
         if realm == REALM_SM && !self.inputs.has_license_checksum {
             orbit_log_fields::debug!(
                 safe(GL_USER_ID) = self.inputs.user_id,

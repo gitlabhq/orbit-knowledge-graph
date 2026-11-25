@@ -48,7 +48,6 @@ fixtures:
       }
 
 tests:
-  # corrected: List<T>.m() does not resolve to T.m; the factory call is the only call
   - name: All call edges from useGenericReturn
     description: "getUsers() returns List<UserService> — inner() extracts UserService from type_arguments"
     query: |
@@ -61,7 +60,6 @@ tests:
       - { not: true, row: { callee: "com.example.UserService.save" } }
       - { not: true, row: { callee: "com.example.OrderService.process" } }
 
-  # corrected: List<T>.m() does not resolve to T.m; the factory call is the only call
   - name: All call edges from useGenericLocal
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

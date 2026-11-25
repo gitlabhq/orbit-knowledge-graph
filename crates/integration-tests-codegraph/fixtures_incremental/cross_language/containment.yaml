@@ -11,8 +11,6 @@ fixtures:
               pass
 
 tests:
-  # ── Original targeted queries, hardened ──────────────────────
-
   - name: Nested class produces containment edge
     skip: false
     query: |
@@ -40,8 +38,6 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { fqn: "app.Outer.Inner.method" } }
-
-  # ── Broader exhaustive checks ────────────────────────────────
 
   - name: Exactly 4 definitions with correct types
     query: |

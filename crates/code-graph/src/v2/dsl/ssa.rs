@@ -1,11 +1,3 @@
-//! Parser-level SSA engine (Braun et al., CC 2013).
-//!
-//! Moved from the linker so that SSA construction happens during parsing,
-//! not during a second AST walk. Values are parser-local indices
-//! (`LocalDef(u32)`, `ImportRef(u32)`) instead of graph `NodeIndex`.
-//!
-//! All variable names are `&'a str` backed by `FileArena` (bumpalo).
-
 use crate::trace_event;
 use crate::v2::trace::Tracer;
 use crate::v2::types::ssa::ParseValue;
@@ -18,8 +10,6 @@ use smallvec::SmallVec;
 /// than overflowing the worker stack (an uncatchable SIGSEGV).
 const MAX_SSA_READ_DEPTH: usize = 10_000;
 
-/// Grow the stack by a 4 MiB segment when a reaching-def read drops below this
-/// headroom, so a deep predecessor chain resolves instead of overflowing.
 const SSA_READ_RED_ZONE: usize = 128 * 1024;
 const SSA_READ_STACK_SEGMENT: usize = 4 * 1024 * 1024;
 
@@ -36,24 +26,15 @@ pub(crate) struct ResolvedSite<'a> {
     pub end: u32,
 }
 
-/// SSA value — parser-local, no graph dependency.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum SsaValue<'a> {
-    /// Index into this file's definitions list.
     LocalDef(u32),
-    /// Index into this file's imports list.
     ImportRef(u32),
-    /// A type FQN for nested member lookup (self/this, type annotations).
     Type(&'a str),
-    /// A resolved definition site, potentially outside the current file.
     ResolvedSite(ResolvedSite<'a>),
-    /// Deferred name resolution — chased at write time via copy propagation.
     Alias(&'a str),
-    /// Dead end — parameter, literal, or otherwise unresolvable.
     Opaque,
-    /// Internal: cycle-detection sentinel for the marker algorithm.
     Marker,
-    /// Internal: a phi node (resolved to concrete values).
     Phi(PhiId),
 }
 
@@ -69,7 +50,6 @@ pub(crate) struct SsaStats {
     pub markers_elided: u64,
     pub writes: u64,
     pub blocks_created: u64,
-    /// Reads that hit [`MAX_SSA_READ_DEPTH`] and degraded to `Opaque`.
     pub depth_capped: u64,
 }
 
@@ -79,8 +59,6 @@ pub(crate) struct ReachingDefs<'a> {
 }
 
 impl SsaValue<'_> {
-    /// Convert to a ParseValue for output. Returns None for SSA-internal
-    /// values (Marker, Phi) and Alias (should have been resolved).
     pub(crate) fn to_parse_value(&self) -> Option<ParseValue> {
         match self {
             SsaValue::LocalDef(i) => Some(ParseValue::LocalDef(*i)),
@@ -115,9 +93,6 @@ struct PhiNode<'a> {
     block: BlockId,
     variable: &'a str,
     operands: SmallVec<[SsaValue<'a>; 2]>,
-    /// Witness caching (Section 3.1): first two distinct non-self operands.
-    /// If both are still valid and distinct, the phi is non-trivial without
-    /// scanning all operands.
     witnesses: [Option<SsaValue<'a>>; 2],
 }
 
@@ -130,9 +105,7 @@ struct Block {
 pub(crate) struct SsaEngine<'a> {
     blocks: Vec<Block>,
     phis: Vec<PhiNode<'a>>,
-    /// current_def[variable][block] = value
     current_def: FxHashMap<&'a str, FxHashMap<BlockId, SsaValue<'a>>>,
-    /// Incomplete phis for unsealed blocks: block → variable → phi_id
     incomplete_phis: FxHashMap<BlockId, FxHashMap<&'a str, PhiId>>,
     pub stats: SsaStats,
     tracer: &'a Tracer,
@@ -156,17 +129,14 @@ impl<'a> SsaEngine<'a> {
         }
     }
 
-    /// Arm the reaching-def resolution budget (start of the SSA phase).
     pub(crate) fn set_budget(&mut self, budget: Option<std::time::Duration>) {
         self.budget = budget.map(treesitter_visit::CpuBudget::start);
     }
 
-    /// Whether SSA resolution exceeded its budget and degraded.
     pub(crate) fn timed_out(&self) -> bool {
         self.timed_out
     }
 
-    /// True once the SSA budget has tripped (latches `timed_out`); bounds both the reads and the SCC pass.
     fn deadline_tripped(&mut self) -> bool {
         if !self.timed_out && self.budget.is_some_and(|b| b.expired()) {
             self.timed_out = true;
@@ -224,8 +194,6 @@ impl<'a> SsaEngine<'a> {
         self.add_sealed_successor(predecessor)
     }
 
-    /// Create a join block for one or more branch exits, with an optional
-    /// fallthrough predecessor when one side of the branch is absent.
     pub fn add_branch_join<I>(&mut self, fallthrough: Option<BlockId>, branch_exits: I) -> BlockId
     where
         I: IntoIterator<Item = BlockId>,
@@ -251,7 +219,6 @@ impl<'a> SsaEngine<'a> {
         self.add_sealed_successor(header)
     }
 
-    /// All predecessors are now known; resolves any incomplete phi nodes that were deferred.
     pub(crate) fn seal_block(&mut self, block: BlockId) {
         if let Some(incomplete) = self.incomplete_phis.remove(&block) {
             for (variable, phi_id) in incomplete {
@@ -276,8 +243,6 @@ impl<'a> SsaEngine<'a> {
             .is_some_and(|blocks| blocks.contains_key(&block))
     }
 
-    /// On-the-fly copy propagation (Section 3.1): an alias value is resolved
-    /// to its target immediately instead of being deferred.
     pub(crate) fn write_variable(
         &mut self,
         variable: &'a str,
@@ -316,8 +281,6 @@ impl<'a> SsaEngine<'a> {
     ) -> ReachingDefs<'a> {
         self.stats.reads += 1;
         let mut value = self.read_variable_internal(variable, block);
-        // Chase aliases: if the value is Alias(target), read target in the
-        // same block. Bounded depth to prevent cycles.
         let mut depth = 0;
         while let SsaValue::Alias(target) = &value {
             depth += 1;
@@ -326,7 +289,7 @@ impl<'a> SsaEngine<'a> {
             }
             let target_value = self.read_variable_internal(target, block);
             if matches!(target_value, SsaValue::Opaque | SsaValue::Marker) {
-                break; // target has no useful value, keep the Alias
+                break;
             }
             value = target_value;
         }
@@ -342,8 +305,6 @@ impl<'a> SsaEngine<'a> {
         result
     }
 
-    /// Return the raw SSA value for `variable` at `block`, without expanding phis.
-    /// Use `expand_value` later to resolve once all blocks are sealed.
     pub(crate) fn read_variable_raw(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
         self.stats.reads += 1;
         self.read_variable_internal(variable, block)
@@ -361,14 +322,10 @@ impl<'a> SsaEngine<'a> {
             return value.clone();
         }
 
-        // Past the SSA budget: degrade reads to `Opaque` so resolution unwinds and the file is skipped.
         if self.deadline_tripped() {
             return SsaValue::Opaque;
         }
 
-        // Recurses up the predecessor graph — thousands deep in a wide
-        // function. Grow on demand and cap so a pathological file degrades
-        // instead of overflowing the stack.
         self.stats.recursive_lookups += 1;
         if self.read_depth >= MAX_SSA_READ_DEPTH {
             self.stats.depth_capped += 1;
@@ -387,7 +344,6 @@ impl<'a> SsaEngine<'a> {
         let num_preds = self.blocks[block.0].predecessors.len();
 
         let val = if !sealed {
-            // Incomplete CFG: defer with operandless phi (Algorithm 4)
             self.stats.unsealed_hits += 1;
             let phi_id = self.new_phi(block, variable);
             self.incomplete_phis
@@ -402,9 +358,6 @@ impl<'a> SsaEngine<'a> {
             let pred = self.blocks[block.0].predecessors[0];
             self.read_variable_internal(variable, pred)
         } else {
-            // Marker algorithm (Section 3.3): mark block before recursing.
-            // Only place a phi if we detect a cycle (hit the marker) or
-            // find different values from predecessors.
             self.read_variable_marker(variable, block)
         };
 
@@ -412,12 +365,7 @@ impl<'a> SsaEngine<'a> {
         val
     }
 
-    /// Marker algorithm: mark block, collect values from predecessors,
-    /// only create a phi if values differ or a cycle was detected.
     fn read_variable_marker(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
-        // Place a marker sentinel so recursive lookups that reach this
-        // block again will detect the cycle. Distinct from Opaque so
-        // genuine dead-end values aren't misidentified as cycles.
         self.write_variable_interned(variable, block, SsaValue::Marker);
 
         let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
@@ -435,30 +383,21 @@ impl<'a> SsaEngine<'a> {
                 Some(s) if *s == pred_val => {}
                 Some(_) => {
                     need_phi = true;
-                    // Still need to collect remaining operands for the phi
                     break;
                 }
             }
         }
 
         if !need_phi {
-            // All predecessors agree (or only one non-cycle predecessor).
-            // No phi needed — zero temporary allocations.
             self.stats.markers_elided += 1;
             return same.unwrap_or(SsaValue::Opaque);
         }
 
-        // Different values or cycle detected: fall back to phi creation.
-        // Re-collect all operands properly with cycle-breaking phi.
-        // `add_phi_operands` finishes with `try_remove_trivial_phi`, so
-        // the value we return here is already the replacement when the
-        // phi collapsed.
         let phi_id = self.new_phi(block, variable);
         self.write_variable_interned(variable, block, SsaValue::Phi(phi_id));
         self.add_phi_operands(variable, phi_id)
     }
 
-    /// Internal write that takes an already-interned name.
     fn write_variable_interned(&mut self, variable: &'a str, block: BlockId, value: SsaValue<'a>) {
         self.current_def
             .entry(variable)
@@ -486,16 +425,6 @@ impl<'a> SsaEngine<'a> {
         id
     }
 
-    /// Populate a phi's operands by reading its variable at every
-    /// predecessor, then attempt trivial-phi removal per Braun Algorithm 4.
-    ///
-    /// The return value is the phi itself (`SsaValue::Phi(phi_id)`) when
-    /// the phi survives simplification, or the replacement value when
-    /// every non-self operand is identical. Callers that created the
-    /// phi via the marker path (`read_variable_marker`) propagate the
-    /// replacement upward; `seal_block` ignores the return value because
-    /// the replacement has already propagated through phi users and
-    /// `current_def`.
     fn add_phi_operands(&mut self, variable: &'a str, phi_id: PhiId) -> SsaValue<'a> {
         let block = self.phis[phi_id.0].block;
         let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
@@ -514,11 +443,7 @@ impl<'a> SsaEngine<'a> {
         self.try_remove_trivial_phi(phi_id)
     }
 
-    /// Remove trivial phi: if it references only one real value (plus itself),
-    /// replace it with that value.
     fn try_remove_trivial_phi(&mut self, phi_id: PhiId) -> SsaValue<'a> {
-        // Witness cache fast path: if both witnesses are still distinct
-        // and neither is the phi itself, the phi is non-trivial.
         let w = &self.phis[phi_id.0].witnesses;
         if let (Some(w0), Some(w1)) = (w[0].as_ref(), w[1].as_ref())
             && w0 != w1
@@ -576,7 +501,6 @@ impl<'a> SsaEngine<'a> {
                     *op = replacement.clone();
                 }
             }
-            // Invalidate witnesses — they may reference the removed phi
             for w in &mut user.witnesses {
                 if w.as_ref() == Some(&phi_val) {
                     *w = None;
@@ -593,15 +517,6 @@ impl<'a> SsaEngine<'a> {
         replacement
     }
 
-    /// Remove redundant phi SCCs (Algorithm 5, Section 3.2 of Braun et al.).
-    ///
-    /// After SSA construction and trivial phi removal, some phi nodes may
-    /// form cycles where they reference only each other plus one external
-    /// value. `try_remove_trivial_phi` can't detect these because each
-    /// individual phi sees two distinct operands (itself + another phi in
-    /// the cycle). Tarjan's SCC algorithm detects the cycle and collapses it.
-    ///
-    /// Call after `seal_remaining()`.
     pub fn remove_redundant_phi_sccs(&mut self) {
         let phi_ids: Vec<PhiId> = (0..self.phis.len()).map(PhiId).collect();
         self.remove_redundant_phi_sccs_inner(&phi_ids, 0);
@@ -639,7 +554,6 @@ impl<'a> SsaEngine<'a> {
             }
         }
 
-        // tarjan_scc returns SCCs in reverse topological order.
         let sccs = tarjan_scc(&phi_graph);
 
         for scc_nodes in &sccs {
@@ -704,14 +618,12 @@ impl<'a> SsaEngine<'a> {
                     }
                 }
             } else if outer_values.len() > 1 && !inner_phis.is_empty() {
-                // Inner phis with no external operands may form a sub-SCC.
                 self.remove_redundant_phi_sccs_inner(&inner_phis, depth + 1);
             }
         }
     }
 
     fn resolve_value(&self, value: &SsaValue<'a>) -> ReachingDefs<'a> {
-        // Fast path: non-Phi values resolve directly without allocating HashSets.
         match value {
             SsaValue::LocalDef(_)
             | SsaValue::ImportRef(_)
@@ -747,7 +659,7 @@ impl<'a> SsaEngine<'a> {
         match value {
             SsaValue::Phi(phi_id) => {
                 if !visited.insert(*phi_id) {
-                    return; // cycle
+                    return;
                 }
                 for op in &self.phis[phi_id.0].operands {
                     stacker::maybe_grow(SSA_READ_RED_ZONE, SSA_READ_STACK_SEGMENT, || {
@@ -755,7 +667,7 @@ impl<'a> SsaEngine<'a> {
                     });
                 }
             }
-            SsaValue::Opaque | SsaValue::Marker => {} // don't include in results
+            SsaValue::Opaque | SsaValue::Marker => {}
             other => out.push(other.clone()),
         }
     }
@@ -900,11 +812,6 @@ mod tests {
         assert_eq!(result.values.as_slice(), &[SsaValue::LocalDef(0)]);
     }
 
-    /// Braun et al. Algorithm 4: sealing a block must invoke
-    /// `tryRemoveTrivialPhi` on every operand-less phi it resolves.
-    /// When the deferred phi's predecessors all agree on a single
-    /// value, the phi must collapse rather than survive as dead
-    /// scaffolding in the SSA graph.
     #[test]
     fn unsealed_block_trivial_phi_collapses_on_seal() {
         let mut ssa = SsaEngine::new();
@@ -920,7 +827,6 @@ mod tests {
         ssa.seal_block(entry);
 
         ssa.write_variable("x", entry, SsaValue::LocalDef(0));
-        // Read while header is unsealed: forces an incomplete phi.
         let _ = ssa.read_variable_stateless("x", body);
 
         ssa.write_variable("x", body, SsaValue::LocalDef(0));
@@ -1058,19 +964,6 @@ mod tests {
         assert_eq!(r2.values.as_slice(), &[SsaValue::LocalDef(0)]);
     }
 
-    /// Irreducible control flow: two blocks that are mutual predecessors,
-    /// each defining x via phi. Both phis reference each other + the same
-    /// external value. SCC removal should collapse both to that value.
-    ///
-    /// ```text
-    ///   entry (x = LocalDef(0))
-    ///     |         |
-    ///     v         v
-    ///   left ←→ right
-    ///     |         |
-    ///     v         v
-    ///       exit
-    /// ```
     #[test]
     fn scc_mutual_phi_collapse() {
         let mut ssa = SsaEngine::new();
@@ -1093,11 +986,6 @@ mod tests {
         ssa.seal_block(right);
         ssa.seal_block(exit);
 
-        // Before SCC removal: reading x in exit should produce LocalDef(0)
-        // but the phis in left/right form a cycle referencing each other.
-        // trivial phi removal can't collapse them because each phi sees
-        // two operands: LocalDef(0) + Phi(other).
-        // SCC removal detects the cycle and collapses both to LocalDef(0).
         ssa.remove_redundant_phi_sccs();
 
         let result = ssa.read_variable_stateless("x", exit);
@@ -1160,9 +1048,6 @@ mod tests {
         );
     }
 
-    /// `steps` sequential try/except joins (each a 3-predecessor join, as the
-    /// DSL emits for `try_statement`). The only definition is in the entry, so
-    /// reading from the bottom recurses the whole chain. Returns (entry, bottom).
     fn build_try_except_chain(ssa: &mut SsaEngine<'static>, steps: usize) -> (BlockId, BlockId) {
         let entry = ssa.add_block();
         ssa.seal_block(entry);
@@ -1186,8 +1071,6 @@ mod tests {
         (entry, pre)
     }
 
-    // 512 KiB is below the 2 MiB production worker stack: this chain overflows
-    // without on-demand growth, aborting the test binary (SIGSEGV, not a panic).
     #[test]
     fn wide_function_resolves_without_overflow() {
         let (values, depth_capped) = std::thread::Builder::new()
@@ -1226,7 +1109,6 @@ mod tests {
         );
     }
 
-    // A deep phi-operand chain would overflow a small stack without the maybe_grow guard.
     #[test]
     fn deep_phi_chain_resolves_without_overflow() {
         std::thread::Builder::new()

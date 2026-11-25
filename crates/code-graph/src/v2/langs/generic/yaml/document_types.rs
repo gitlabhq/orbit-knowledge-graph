@@ -1,7 +1,3 @@
-//! Each YAML config in `document_types/` declares how a named
-//! document type matches files, which shapes become definitions, and
-//! which keys become imports.
-
 use super::config::{DOCUMENT_TYPES, DefinitionRule, DocumentType, KeyRule, Shape};
 use super::{
     N, child_mapping, child_sequence, find_pair, is_pair, item_scalar, pair_key, pairs, scalar_text,

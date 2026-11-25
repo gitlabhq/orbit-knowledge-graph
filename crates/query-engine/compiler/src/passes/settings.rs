@@ -6,7 +6,6 @@ use crate::error::Result;
 use crate::input::{Input, QueryType};
 use crate::passes::plan::QueryPlan;
 
-// Deployment config can tighten these compiler-enforced ceilings but cannot raise them.
 const PATHFINDING_EXECUTION_TIME_CEILING_SECONDS: u64 = 15;
 const PATHFINDING_MEMORY_CEILING_BYTES: u64 = 15 * 1024 * 1024 * 1024;
 

@@ -1,8 +1,3 @@
-# Scala rewrite rules.
-# Handles: package, imports (named, selectors, renamed, wildcard), classes,
-# case classes, traits, objects, defs, vals, class parameters with this.x
-# typing, new, member and this-calls, control flow.
-
 config:
   stdlib: [{ module: java, precedence: runtime }, { module: scala }, { module: javax }, { module: jdk },
       { module: scala/Predef, availability: implicit, symbols: [assert, assume, classOf,

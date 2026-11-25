@@ -1,7 +1,6 @@
 name: "Python: inter-file resolution"
 
 fixtures:
-  # ── Layer 1: base models ──────────────────
   - path: models/user.py
     content: |
       class User:
@@ -25,7 +24,6 @@ fixtures:
       from models.user import User
       from models.project import Project
 
-  # ── Layer 2: services that use models ─────
   - path: services/user_service.py
     content: |
       from models.user import User
@@ -45,7 +43,6 @@ fixtures:
           def create(self, title):
               return Project(title)
 
-  # ── Layer 3: main that uses services ──────
   - path: main.py
     content: |
       from services.user_service import UserService
@@ -58,7 +55,6 @@ fixtures:
           proj_svc.create("my project")
 
 tests:
-  # ── Cross-layer call edges ────────────────
   - name: "Layer 3→2: main.run calls UserService"
     description: "from services.user_service import UserService; UserService() in run()"
     query: |
@@ -103,7 +99,6 @@ tests:
       - { match: { field: src, pattern: "*project_service.py" } }
       - { match: { field: tgt, pattern: "*project.py" } }
 
-  # ── File structure ────────────────────────
   - name: "Exactly 6 files in the graph"
     query: |
       MATCH (f:File)

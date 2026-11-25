@@ -8,9 +8,6 @@ use super::format::{Row, Seed, SeedSettings};
 use crate::context::TestContext;
 use crate::t;
 
-/// Fixed replication timestamp injected when a seeded row omits
-/// `_siphon_replicated_at`. Must stay below the default test watermark
-/// (2024-01-21) or the indexer window would exclude the row.
 pub const DEFAULT_REPLICATED_AT: &str = "2024-01-20 12:00:00";
 
 const PREFIXED_AUX_TABLES: [&str; 3] = [
@@ -197,8 +194,6 @@ fn yaml_i64(value: &serde_json::Value, field: &str, location: &str) -> i64 {
         .unwrap_or_else(|| panic!("{location}: {field} must be an integer, got {value:?}"))
 }
 
-/// Field extractor for pseudo-table rows that rejects unknown keys, so a
-/// typo'd field fails loudly instead of silently using the default.
 struct PseudoFields<'a> {
     pseudo_table: &'a str,
     row: &'a Row,

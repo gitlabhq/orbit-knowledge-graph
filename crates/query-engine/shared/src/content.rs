@@ -22,8 +22,6 @@ pub struct ResolverContext {
 
 #[async_trait]
 pub trait ColumnResolver: Send + Sync {
-    /// Returns a `Vec<Option<ColumnValue>>` aligned with `rows` -- `None`
-    /// means the value could not be resolved for that row.
     async fn resolve_batch(
         &self,
         lookup: &str,

@@ -1,5 +1,3 @@
-# config/ontology/edges/has_package_file.yaml
-
 description: Package contains a package file
 
 variants:

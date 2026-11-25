@@ -1,12 +1,3 @@
-//! Compact storage for collected refs between the parse barrier and Phase 2.
-//!
-//! Every file's `Vec<CollectedRef>` stays live from the parse barrier until
-//! Phase 2 consumes it, coexisting with the fully-built graph — on large
-//! repos that plateau is hundreds of MB of small allocations (SmolStrs,
-//! per-chain Vecs). `RefPack` flattens one file's refs into three dense
-//! index buffers backed by a shared [`StringPool`] arena; Phase 2 decodes
-//! one ref at a time into reusable scratch buffers.
-
 use crate::v2::dsl::engine::CollectedRef;
 use crate::v2::types::ExpressionStep;
 use crate::v2::types::ssa::ParseValue;
@@ -39,7 +30,6 @@ enum StepTag {
 #[derive(Debug)]
 struct PackedStep {
     tag: StepTag,
-    /// `None` for `This`/`Super`, which carry no identifier.
     name: Option<StrId>,
 }
 
@@ -55,7 +45,6 @@ enum ValueTag {
 struct PackedValue {
     tag: ValueTag,
     num: u32,
-    /// `Some` only for `Type`.
     name: Option<StrId>,
 }
 
@@ -156,7 +145,6 @@ impl RefPack {
         self.refs.is_empty()
     }
 
-    /// Decode ref `idx` into `chain_buf` and `values_buf`, both cleared first.
     pub fn decode(
         &self,
         idx: usize,
@@ -199,7 +187,6 @@ impl RefPack {
         }
     }
 
-    /// Set ref `idx`'s reaching values to a single `Type(fqn)`; out-of-range `idx` does nothing.
     pub fn set_reaching_type(&mut self, idx: usize, fqn: &str) {
         if idx >= self.refs.len() {
             return;
@@ -215,7 +202,6 @@ impl RefPack {
         self.refs[idx].values_len = 1;
     }
 
-    /// Return the interned name, or an empty string when `name` is `None`.
     fn sym(&self, name: Option<StrId>) -> SmolStr {
         name.map_or_else(SmolStr::default, |id| SmolStr::from(self.strings.get(id)))
     }

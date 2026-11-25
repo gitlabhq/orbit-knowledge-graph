@@ -47,6 +47,5 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const output = run(JSON.parse(readFileSync(0, "utf8")));
     if (output) process.stdout.write(`${JSON.stringify(output)}\n`);
   } catch {
-    // A guard failure must never disturb the session.
   }
 }

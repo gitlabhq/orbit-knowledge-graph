@@ -15,9 +15,6 @@ pub const JOB_SPAN_DURATION: &str = "job_span_duration";
 const PIPELINE_ID_ATTRIBUTE: &str = "cicd.pipeline.run.id";
 const JOB_ID_ATTRIBUTE: &str = "cicd.pipeline.task.run.id";
 
-/// Spans are exported when the pipeline finishes, which can trail the row's
-/// own timestamps, so the window is widened on both sides rather than pinned
-/// to created_at.
 const WINDOW_LEAD: i64 = 3_600;
 const WINDOW_TRAIL: i64 = 86_400;
 
@@ -76,9 +73,6 @@ impl TraceLookup {
     }
 }
 
-/// A row's join key plus the time range its spans can fall in. Without the
-/// range every lookup scans the tenant's whole retention, because the index
-/// table is sorted by time bucket.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceKey {
     pub entity_id: String,
@@ -102,8 +96,6 @@ pub fn trace_key(props: &HashMap<String, ColumnValue>) -> Option<TraceKey> {
     })
 }
 
-/// Hydration renders a `type: timestamp` property as an ISO-8601 string, not
-/// an epoch, so coercing straight to i64 yields nothing.
 fn timestamp(props: &HashMap<String, ColumnValue>, name: &str) -> Option<i64> {
     let value = props.get(name)?;
 
@@ -152,10 +144,6 @@ pub fn build_sql(lookup: TraceLookup) -> String {
     )
 }
 
-/// Only the pipeline span carries the pipeline id, so counting on that
-/// attribute alone misses every failing job. Resolves the trace first, then
-/// counts erroring spans across it, deduplicated by span id so a re-export
-/// does not count twice.
 fn build_error_count_sql() -> String {
     "WITH traces AS ( \
        SELECT attributes_string[{attribute:String}] AS entity_id, trace_id \
@@ -176,13 +164,8 @@ fn build_error_count_sql() -> String {
         .to_string()
 }
 
-/// The index table buckets by half hour, so the bucket bounds are rounded out
-/// from the time range to avoid clipping a span at either edge.
 const BUCKET_SECONDS: i64 = 1_800;
 
-/// Tenant traces expire after 15 days, so a row older than that can only
-/// resolve to null. The batch window spans every key, so keeping one stretches
-/// the scan across everything the tenant still holds.
 const RETENTION_SECONDS: i64 = 15 * 86_400;
 
 fn now_unix() -> i64 {
@@ -315,8 +298,6 @@ mod tests {
         );
     }
 
-    /// ClickHouse builds the hash from the right side, so the span table has
-    /// to stream rather than be hashed.
     #[test]
     fn the_error_count_joins_the_small_side_on_the_right() {
         let sql = build_sql(TraceLookup::PipelineTraceErrorCount);
@@ -372,7 +353,6 @@ mod tests {
         assert_eq!(key.to_unix, 1_000_000 + WINDOW_TRAIL);
     }
 
-    /// The value hydration actually produces for a `type: timestamp` property.
     fn hydrated(seconds: i64) -> ColumnValue {
         ColumnValue::datetime(chrono::DateTime::from_timestamp(seconds, 0).map(|dt| dt.naive_utc()))
     }

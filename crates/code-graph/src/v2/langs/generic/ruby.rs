@@ -17,9 +17,6 @@ use crate::v2::linker::rules::{
 };
 use crate::v2::linker::{CodeGraph, HasRules, ResolutionRules};
 
-/// Methods that act as constructors — `Class.method(args)` returns a
-/// `Class` instance. Shared between `SsaConfig` (binding analysis) and
-/// `ResolverHooks` (chain resolution) to ensure consistency.
 const CONSTRUCTOR_METHODS: &[&str] = &["new", "find", "find_by", "create", "first", "last"];
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -48,8 +45,6 @@ impl DslLanguage for RubyDsl {
                 .metadata(metadata().super_types(ruby_super_types)),
             scope("method", "Method").def_kind(DefKind::Method),
             scope("singleton_method", "SingletonMethod").def_kind(DefKind::Method),
-            // class << self: transparent scope, methods inside are
-            // scoped to the parent class (don't add to FQN).
             scope("singleton_class", "SingletonClass")
                 .def_kind(DefKind::Class)
                 .no_scope()
@@ -58,26 +53,11 @@ impl DslLanguage for RubyDsl {
                 .def_kind(DefKind::Lambda)
                 .no_scope()
                 .name_from(no_extract()),
-            // Constant assignments: `MAX = 2`, `Foo::Bar = obj`. Tree-sitter
-            // tags any uppercase-leading identifier on the LHS as `constant`,
-            // and qualified `Foo::Bar` LHSes as `scope_resolution`. We emit a
-            // Definition so queries like "where is MAX_TRACKED_REFS_PER_PROJECT
-            // defined" return a node; `no_scope` keeps the constant from
-            // pushing a new FQN segment for nested defs.
             scope("assignment", "Constant")
                 .def_kind(DefKind::Other)
                 .when(field_kind("left", &["constant", "scope_resolution"]))
                 .name_from(field("left"))
                 .no_scope(),
-            // `NAME = <callable>`: a lambda or Proc bound to a constant or
-            // variable (`TRIPLE = ->(x) {…}`, `DOUBLE = lambda {…}`,
-            // `VALIDATE = proc {…}`, `MAKER = Proc.new {…}`). Emitted as a
-            // named `Lambda` so callers can ask "what callable constants
-            // exist?" and resolve references to them, rather than seeing an
-            // opaque `Constant`. Declared after the `Constant` rule so it
-            // wins for callable RHSes — scope dispatch tries the
-            // last-declared matching rule first — while a plain `MAX = 2`
-            // still falls through to `Constant`.
             scope("assignment", "Lambda")
                 .def_kind(DefKind::Lambda)
                 .when(ruby_lambda_assignment())
@@ -94,15 +74,6 @@ impl DslLanguage for RubyDsl {
             reference("scope_resolution")
                 .name_from(text())
                 .when(!parent_is("scope_resolution").and(!parent_is("call"))),
-            // Bare constant reference: `MAX_REFS` standalone in an expression.
-            // Tree-sitter tags any uppercase-leading identifier as `constant`,
-            // so this captures the same-class case (`@count < MAX_REFS`) that
-            // the `identifier` rule misses. Definitional positions are always
-            // the first named child of a parent, so we exclude with
-            // `parent_is(...).and(!has_named_prev_sibling)`: the class/module
-            // name, the LHS of an assignment, etc. The chain handler already
-            // picks up constants used as receivers (`Foo.bar`), so
-            // `!parent_is("call")` avoids a duplicate edge there.
             reference("constant").name_from(text()).when(
                 (!parent_is("scope_resolution"))
                     .and(!parent_is("call"))
@@ -114,9 +85,6 @@ impl DslLanguage for RubyDsl {
                     .and(!parent_is("assignment").and(!has_named_prev_sibling()))
                     .and(!parent_is("operator_assignment").and(!has_named_prev_sibling())),
             ),
-            // bare method call without parens/args — just an identifier in Ruby
-            // e.g. `validate_name` inside a method body. Exclude positions
-            // where identifiers are definitely not method calls.
             reference("identifier").name_from(text()).when(
                 (!parent_is("call"))
                     .and(!parent_is("argument_list"))
@@ -172,8 +140,6 @@ impl DslLanguage for RubyDsl {
             branch("ternary")
                 .branches(&["consequence", "alternative"])
                 .condition("condition"),
-            // begin/rescue/ensure: rescue and ensure are alternate branches.
-            // Main body children are walked in the pre-block (non-branch path).
             branch("begin").branches(&["rescue", "ensure"]),
         ]
     }
@@ -210,13 +176,7 @@ impl DslLanguage for RubyDsl {
     }
 }
 
-/// Predicate for the `assignment → Lambda` scope rule: true when the RHS
-/// of an assignment constructs a callable. Covers the four Ruby forms —
-/// `-> {…}` (stabby lambda, a `lambda` node), and the `call`-shaped
-/// `lambda {…}`, `proc {…}`, and `Proc.new {…}`.
 fn ruby_lambda_assignment() -> Pred {
-    // A bare `lambda`/`proc` call has no receiver; `foo.lambda {…}` is a
-    // method named `lambda` on some object, not a Proc constructor.
     let bare_call_to = |method: &'static str| {
         Pred::Exists(Box::new(
             field("right").field("method").where_(Text(method)),
@@ -408,7 +368,6 @@ fn ruby_extract_attr_methods(
             push_first_symbol(&args, defs, "Method", DefKind::Method);
             true
         }
-        // Callbacks: not handled here. Symbol args are refs, not defs.
         "before_action" | "after_action" | "around_action" | "before_filter" | "after_filter"
         | "around_filter" | "before_validation" | "after_validation" | "after_create"
         | "after_save" | "before_save" | "before_create" | "after_update" | "before_update"
@@ -417,8 +376,6 @@ fn ruby_extract_attr_methods(
     }
 }
 
-/// DSL methods recognized by the on_scope hook. Used for early-return
-/// when the call has no arguments.
 const RUBY_DSL_METHODS: &[&str] = &[
     "attr_accessor",
     "attr_reader",
@@ -441,12 +398,7 @@ const RUBY_DSL_METHODS: &[&str] = &[
     "has_and_belongs_to_many",
 ];
 
-/// Resolve a constant identifier as a class/module FQN for chain
-/// resolution. `Model.new.save!` needs `Model` to resolve to the
-/// `Model` class so the chain can look up `Model::save!`.
 fn ruby_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
-    // FQNs are stored root-relative, so a kept cbase prefix (`::Foo::Bar`)
-    // never resolves and the chain call lands on the enclosing class.
     let name = name.strip_prefix("::").unwrap_or(name);
     let nodes = graph.resolve_scope_nodes(name);
     for &node in &nodes {
@@ -460,9 +412,6 @@ fn ruby_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
     None
 }
 
-/// Strips a leading `::` (cbase) so names match root-relative FQNs, then
-/// falls back to rewriting `obj.send(:foo, ...)` / `obj.public_send(:foo, ...)`
-/// as `obj.foo(...)` when the first argument is a literal symbol or string.
 fn ruby_rewrite_ref(node: &N<'_>, name: &str) -> Option<String> {
     if name.starts_with("::") {
         return Some(strip_leading_scope(name));
@@ -510,10 +459,6 @@ fn collect_include_args(call: &N<'_>, types: &mut Vec<String>) {
 fn ruby_super_types(node: &N<'_>) -> Vec<String> {
     let mut types = Vec::new();
 
-    // Direct superclass: class Dog < Animal
-    // The "superclass" field wraps the type in a `superclass` node
-    // that includes the `<` token. Extract the inner constant or
-    // scope_resolution child directly.
     if let Some(s) = node.field("superclass")
         && let Some(type_node) = s.children().find(|c| {
             let k = c.kind();
@@ -922,15 +867,12 @@ mod tests {
                 .map(|d| d.definition_type)
                 .collect()
         };
-        // The callable RHS rule wins over the Constant rule, so a lambda
-        // constant is a Lambda only — never double-emitted as a Constant.
         assert_eq!(
             kinds("TRIPLE"),
             ["Lambda"],
             "TRIPLE must not also be a Constant"
         );
         assert_eq!(kinds("MAX"), ["Constant"]);
-        // `Widget.new` is an ordinary constructor, not `Proc.new`.
         assert_eq!(kinds("BUILDER"), ["Constant"]);
     }
 
@@ -955,10 +897,6 @@ mod tests {
             .unwrap();
         let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
         let count_max = ref_names.iter().filter(|n| **n == "MAX").count();
-        // Two MAX refs expected: one on the RHS of `OTHER = MAX + 1`, and
-        // one inside `@value < MAX`. The LHS `MAX = 2` must not produce
-        // a ref. Same for the LHS of `OTHER = ...` and `X = ...`, and
-        // the class name `Foo` and `class Foo`.
         assert_eq!(
             count_max, 2,
             "expected 2 MAX refs (RHS of `OTHER = MAX + 1`, and `@value < MAX`), got {count_max}: {ref_names:?}"

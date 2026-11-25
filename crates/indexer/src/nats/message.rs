@@ -95,7 +95,6 @@ impl NatsMessage {
         self.acker.ack().await
     }
 
-    /// Tells NATS this message failed permanently, removing it from the stream.
     pub async fn term_ack(self) -> Result<(), NatsError> {
         self.acker.ack_term().await
     }
@@ -108,7 +107,6 @@ impl NatsMessage {
         self.acker.nack(Some(delay)).await
     }
 
-    /// If the DLQ publish fails, the message is nacked for redelivery instead.
     pub async fn to_dlq(
         self,
         broker: &NatsBroker,
@@ -159,9 +157,6 @@ pub enum DlqResult {
     Nacked,
 }
 
-/// Tells NATS "I'm still working on this" so it doesn't redeliver the message.
-///
-/// Each call resets the `ack_wait` timer back to its full duration.
 #[derive(Clone)]
 pub struct ProgressNotifier {
     acker: Option<Arc<dyn MessageAcker>>,

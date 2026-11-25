@@ -1,5 +1,3 @@
-# config/ontology/nodes/agents/agent_session.yaml
-
 node_type: AgentSession
 domain: agents
 description: An AI agent session in a project, recorded in the AI governance sessions table. Existence, source and flow type only, never its content

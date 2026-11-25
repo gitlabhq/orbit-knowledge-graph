@@ -14,8 +14,6 @@ const LANDINGS = new Set(["", "/next"]);
 function RootLayout() {
   const home = useRouterState({ select: (state) => LANDINGS.has(state.location.pathname.replace(/\/+$/, "")) });
 
-  // A landing page starts and ends on a dark band, so the canvas is dark too: iOS paints it under the
-  // status bar, under the toolbar, and in the overscroll past either end.
   useEffect(() => {
     document.documentElement.classList.toggle("page-landing", home);
   }, [home]);

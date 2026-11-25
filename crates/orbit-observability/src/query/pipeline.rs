@@ -1,18 +1,9 @@
-//! Query pipeline metrics: per-stage latency, ClickHouse resource consumption,
-//! and error counters.
-//!
-//! The three `batch_count`, `redacted_count`, and `result_set_size` histograms
-//! in the pre-rename code had Prometheus names ending in `_count` or ambiguous
-//! `_size`, which clashed with the auto-generated histogram child series.
-//! Renamed here to `batches`, `redactions`, and `result_set.rows`.
-
 use crate::MetricSpec;
 use crate::buckets::{LATENCY_FAST_FINE, MEMORY_BYTES, QUERY_LATENCY, ROW_COUNT};
 
 pub mod labels {
     pub const QUERY_TYPE: &str = "query_type";
     pub const STATUS: &str = "status";
-    /// `success`, `caller_error` or `server_error`, as in the `orbit_query` analytics event.
     pub const OUTCOME: &str = "outcome";
     pub const LABEL: &str = "label";
     pub const FAILURE_REASON: &str = "failure_reason";
@@ -73,8 +64,6 @@ pub const HYDRATION_DURATION: MetricSpec = MetricSpec::histogram_f64(
     DOMAIN,
 );
 
-// Renamed from `gkg.query.pipeline.result_set.size` to avoid the unitless
-// "size" naming. Now a bucketed row count with an explicit `rows` token.
 pub const RESULT_SET_ROWS: MetricSpec = MetricSpec::histogram_u64(
     "gkg.query.pipeline.result_set.rows",
     "Number of rows returned after formatting.",
@@ -84,8 +73,6 @@ pub const RESULT_SET_ROWS: MetricSpec = MetricSpec::histogram_u64(
     DOMAIN,
 );
 
-// Renamed from `gkg.query.pipeline.batch.count` to avoid colliding with the
-// auto-generated `_count` child series of Prometheus histograms.
 pub const BATCHES: MetricSpec = MetricSpec::histogram_u64(
     "gkg.query.pipeline.batches",
     "Number of Arrow record batches returned from ClickHouse per query.",
@@ -112,8 +99,6 @@ pub const CH_READ_ROWS: MetricSpec = MetricSpec::counter(
     DOMAIN,
 );
 
-// Dropped `_bytes` from the OTel name; the `By` unit already maps to the
-// `_bytes` Prometheus suffix, previously producing `_bytes_bytes_total`.
 pub const CH_READ_BYTES: MetricSpec = MetricSpec::counter(
     "gkg.query.pipeline.ch.read",
     "ClickHouse bytes read across all queries in the pipeline.",
@@ -131,11 +116,6 @@ pub const CH_MEMORY_USAGE: MetricSpec = MetricSpec::histogram_u64(
     DOMAIN,
 );
 
-/// Counter for every query that failed during pipeline execution (post-compile).
-/// `failure_reason` is a closed enum derived from `PipelineError::code()` with
-/// the `_error` suffix stripped: `security`, `execution`, `authorization`,
-/// `content_resolution`, `streaming`, `custom`. Compile-time rejections are
-/// counted separately under `gkg.query.engine.compiler.rejected`.
 pub const FAILED: MetricSpec = MetricSpec::counter(
     "gkg.query.pipeline.failed",
     "Total queries that failed in the pipeline post-compile, labelled by failure reason.",

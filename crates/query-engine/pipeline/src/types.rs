@@ -51,9 +51,7 @@ pub struct QueryPipelineContext {
     pub compiled: Option<Arc<CompiledQueryContext>>,
     pub ontology: Arc<Ontology>,
     pub security_context: Option<SecurityContext>,
-    /// Server-specific infrastructure (ClickHouse client, etc.)
     pub server_extensions: TypeMap,
-    /// Inter-stage data flowing between pipeline stages.
     pub phases: TypeMap,
 }
 

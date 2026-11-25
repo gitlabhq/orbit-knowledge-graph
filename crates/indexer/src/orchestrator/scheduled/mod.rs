@@ -96,7 +96,6 @@ pub async fn connect(nats_config: &NatsConfiguration) -> Result<SchedulerService
     })
 }
 
-/// Runs all tasks in independent loops until `shutdown` is cancelled.
 pub async fn run_loop(
     tasks: Vec<Box<dyn ScheduledTask>>,
     lock_service: Arc<dyn LockService>,
@@ -200,8 +199,6 @@ async fn run_task_loop(
     info!(safe(TASK) = task_name.as_str(), "task loop stopped");
 }
 
-/// Trigger A: the cron-driven scheduler. Wraps [`run_loop`] over a fixed set of
-/// [`ScheduledTask`]s so it can be launched alongside the other triggers.
 pub struct Scheduled {
     tasks: Vec<Box<dyn ScheduledTask>>,
     lock_service: Arc<dyn LockService>,
@@ -239,11 +236,8 @@ mod tests {
     use super::*;
     use crate::locking::LockError;
 
-    /// Every-second cron: deterministic short delay (≤1s) regardless of wall clock.
     const EVERY_SECOND: &str = "*/1 * * * * *";
-    /// Every-5-seconds cron: short delay (≤5s) regardless of wall clock.
     const EVERY_5S: &str = "*/5 * * * * *";
-    /// Yearly cron: delay is always months, safe for "should not fire" assertions.
     const YEARLY: &str = "0 0 0 1 1 *";
 
     const RUN_TIMEOUT_SECS: u64 = 10;
@@ -330,7 +324,6 @@ mod tests {
         }
     }
 
-    /// Lock service that always grants (simulates TTL expiry between runs).
     struct AlwaysGrantLockService;
 
     #[async_trait]
@@ -359,7 +352,6 @@ mod tests {
         }
     }
 
-    /// Yield enough times for spawned tasks to process through their await points.
     async fn settle() {
         for _ in 0..10 {
             tokio::task::yield_now().await;
@@ -425,7 +417,6 @@ mod tests {
         settle().await;
         assert_eq!(task.run_count(), 0);
 
-        // next_delay for EVERY_5S is ≤5s from real clock; advance 6s to be safe
         tokio::time::advance(Duration::from_secs(6)).await;
         settle().await;
         assert_eq!(task.run_count(), 1, "should run after first interval");
@@ -442,7 +433,6 @@ mod tests {
         let lock_service = Arc::new(AlwaysGrantLockService);
 
         let fast = Arc::new(StubTask::new("fast", EVERY_5S));
-        // Yearly cron: next_delay is always months, won't fire in test window.
         let slow = Arc::new(StubTask::new("slow", YEARLY));
 
         let tasks: Vec<Box<dyn ScheduledTask>> =
@@ -453,7 +443,6 @@ mod tests {
 
         tokio::spawn(async move { run_loop(tasks, lock_service, shutdown_clone).await });
 
-        // Advance 30s — fast task should fire multiple times, slow task 0
         for _ in 0..30 {
             tokio::time::advance(Duration::from_secs(1)).await;
             settle().await;

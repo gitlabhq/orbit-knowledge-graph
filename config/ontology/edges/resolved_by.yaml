@@ -1,5 +1,3 @@
-# config/ontology/edges/resolved_by.yaml
-
 description: User who resolved a vulnerability
 table: gl_sec_edge
 

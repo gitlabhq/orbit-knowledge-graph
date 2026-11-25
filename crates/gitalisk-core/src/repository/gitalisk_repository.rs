@@ -20,32 +20,30 @@ pub struct CoreGitaliskRepository {
     pub workspace_path: String,
 }
 
-/// File information with pre-computed metadata
 #[derive(Debug, Clone)]
 pub struct FileInfo {
-    /// Full file path
     pub path: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StatusCode {
-    Unmodified,  // ' ' (space)
-    Modified,    // M
-    TypeChanged, // T
-    Added,       // A
-    Deleted,     // D
-    Renamed,     // R
-    Copied,      // C
-    Unmerged,    // U
-    Untracked,   // ?
-    Ignored,     // !
-    Unknown,     // For any other cases
+    Unmodified,
+    Modified,
+    TypeChanged,
+    Added,
+    Deleted,
+    Renamed,
+    Copied,
+    Unmerged,
+    Untracked,
+    Ignored,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FileStatus {
-    pub index: StatusCode,    // X status
-    pub worktree: StatusCode, // Y status
+    pub index: StatusCode,
+    pub worktree: StatusCode,
 }
 
 impl FileStatus {
@@ -85,12 +83,12 @@ impl StatusCode {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StagingStatus {
-    Staged,     // Changes in index only
-    Unstaged,   // Changes in worktree only
-    Both,       // Changes in both index and worktree
-    Unmodified, // No changes
-    Untracked,  // File not tracked by git
-    Conflicted, // Merge conflict
+    Staged,
+    Unstaged,
+    Both,
+    Unmodified,
+    Untracked,
+    Conflicted,
 }
 
 impl StagingStatus {
@@ -109,14 +107,13 @@ impl StagingStatus {
 #[derive(Debug, Clone)]
 pub struct FileStatusInfo {
     pub path: PathBuf,
-    pub original_path: Option<PathBuf>, // Only present for renamed/copied files
+    pub original_path: Option<PathBuf>,
     pub status: FileStatus,
     pub staging: StagingStatus,
 }
 
 impl FileStatusInfo {
     fn new(path: PathBuf, original_path: Option<PathBuf>, status: FileStatus) -> Self {
-        // Determine staging status based on index and worktree status
         let staging = StagingStatus::from_file_status(&status);
         Self {
             path,
@@ -131,7 +128,6 @@ impl FileStatusInfo {
 pub struct GetStatusOptions {
     pub include_untracked: bool,
     pub ignore_submodules: bool,
-    /// Literal paths, not globs.
     pub pathspecs: Vec<PathBuf>,
 }
 
@@ -179,9 +175,14 @@ pub struct IterFileOptions {
     pub exclude_patterns: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct IndexedFile {
+    pub path: PathBuf,
+    pub tracked: bool,
+    pub skip_worktree: bool,
+}
+
 impl CoreGitaliskRepository {
-    /// Whether the untracked file at `new_path` holds exactly what HEAD has
-    /// at `deleted_path`: git's own notion of a rename, before staging.
     fn moved_unstaged(&self, deleted_path: &Path, new_path: &Path) -> bool {
         let mut revision_path = std::ffi::OsString::from("HEAD:");
         revision_path.push(deleted_path);
@@ -209,7 +210,6 @@ impl CoreGitaliskRepository {
         get_current_branch(&self.path)
     }
 
-    /// `None` on a detached HEAD.
     pub fn current_branch_name(&self) -> Result<Option<String>, std::io::Error> {
         get_current_branch_name(&self.path)
     }
@@ -222,30 +222,22 @@ impl CoreGitaliskRepository {
         get_current_commit_hash(Path::new(&self.path))
     }
 
-    /// Returns `true` if this repository is a git worktree.
     pub fn is_worktree(&self) -> bool {
         worktree::is_worktree(Path::new(&self.path))
     }
 
-    /// Resolve the parent repository's root path. For worktrees, returns
-    /// the parent repo root. For regular repos, returns this repo's path.
     pub fn parent_repo_path(&self) -> Result<PathBuf, std::io::Error> {
         worktree::parent_repo_path(Path::new(&self.path))
     }
 
-    /// The root of this checkout's working tree.
     pub fn toplevel(&self) -> Result<PathBuf, std::io::Error> {
         worktree::toplevel(Path::new(&self.path))
     }
 
-    /// Whether this repository's ignore rules exclude `path`.
     pub fn is_ignored(&self, path: &Path) -> bool {
         worktree::is_ignored(Path::new(&self.path), path)
     }
 
-    /// Files whose committed content differs between `base` and HEAD, in the
-    /// shape `get_status` uses: the diff letter is the index status, a rename
-    /// carries its old path in `original_path`.
     pub fn changes_since(&self, base: &str) -> Result<Vec<FileStatusInfo>, std::io::Error> {
         reject_option_like_revision(base)?;
         let output = Command::new("git")
@@ -291,7 +283,6 @@ impl CoreGitaliskRepository {
         get_commits_info(Path::new(&self.path), commit_hashes)
     }
 
-    // TODO: Implement this
     pub fn list_branches(&self) -> Result<Vec<String>, std::io::Error> {
         let branch_names: Vec<String> = vec!["main".to_string()];
         Ok(branch_names)
@@ -370,8 +361,6 @@ impl CoreGitaliskRepository {
                 continue;
             }
 
-            // An unstaged move: a deletion followed by an untracked file with
-            // the deleted file's content. Git only detects renames once staged.
             if status_str == " D"
                 && let Some(untracked) = next
                 && untracked.len() >= STATUS_ENTRY_MIN_LENGTH
@@ -417,11 +406,48 @@ impl CoreGitaliskRepository {
         )
     }
 
+    pub fn index_files(&self) -> Result<Vec<IndexedFile>, std::io::Error> {
+        let stdout = self.ls_files(
+            &["-t", "--cached", "--others", "--exclude-standard"],
+            &[] as &[&str],
+        )?;
+        let mut files: Vec<IndexedFile> = stdout
+            .split(|b| *b == 0)
+            .filter_map(|record| {
+                let (tag, path) = record.split_at_checked(2)?;
+                if path.is_empty() || path.ends_with(b"/") {
+                    return None;
+                }
+                Some(IndexedFile {
+                    path: path_from_bytes(path),
+                    tracked: tag[0] != b'?',
+                    skip_worktree: tag[0] == b'S',
+                })
+            })
+            .collect();
+        files.sort();
+        files.dedup_by(|later, earlier| later.path == earlier.path);
+        Ok(files)
+    }
+
     fn list_files<S: AsRef<OsStr>>(
         &self,
         flags: &[&str],
         pathspecs: &[S],
     ) -> Result<Vec<PathBuf>, std::io::Error> {
+        Ok(self
+            .ls_files(flags, pathspecs)?
+            .split(|b| *b == 0)
+            .filter(|path| !path.is_empty())
+            .map(|path| self.join_repo_path(path_from_bytes(path)))
+            .collect())
+    }
+
+    fn ls_files<S: AsRef<OsStr>>(
+        &self,
+        flags: &[&str],
+        pathspecs: &[S],
+    ) -> Result<Vec<u8>, std::io::Error> {
         let output = Command::new("git")
             .arg("--literal-pathspecs")
             .args(["ls-files", "-z"])
@@ -436,25 +462,18 @@ impl CoreGitaliskRepository {
                 String::from_utf8_lossy(&output.stderr).trim()
             )));
         }
-        Ok(output
-            .stdout
-            .split(|b| *b == 0)
-            .filter(|path| !path.is_empty())
-            .map(|path| self.join_repo_path(path_from_bytes(path)))
-            .collect())
+        Ok(output.stdout)
     }
 
     pub fn iter_repo_files(&self, options: IterFileOptions) -> FileInfoIterator {
         let (sender, receiver) = mpsc::channel();
 
         let path = self.path.clone();
-        // Capture options values to avoid lifetime issues in the closure
         let include_ignored = options.include_ignored;
         let include_hidden = options.include_hidden;
         let exclude_patterns = options.exclude_patterns.clone();
 
         let walker_thread = thread::spawn(move || {
-            // Build custom gitignore matcher from exclude patterns
             let custom_ignores = if !exclude_patterns.is_empty() {
                 let mut builder = GitignoreBuilder::new(&path);
                 for pattern in &exclude_patterns {
@@ -472,44 +491,14 @@ impl CoreGitaliskRepository {
             };
 
             let walker = WalkBuilder::new(&path)
-                // Enable standard ignore filters when include_ignored is false.
-                // When include_ignored=false, we want to respect gitignore, so we enable filters.
-                // When include_ignored=true, we want to include ignored files, so we disable filters.
-                //
-                // This toggles, as a group, all the filters that are enabled by default:
-                //
-                // - [hidden()](#method.hidden)
-                // - [parents()](#method.parents)
-                // - [ignore()](#method.ignore)
-                // - [git_ignore()](#method.git_ignore)
-                // - [git_global()](#method.git_global)
-                // - [git_exclude()](#method.git_exclude)
-                //
                 .standard_filters(!include_ignored)
-                // Enables ignoring hidden files.
-                // These files include `.gitignore` files, `.DS_store`, etc.
-                // By default, we want to include these files to replicate
-                // code editors behavior.
                 .hidden(!include_hidden)
-                // Whether a git repository is required to apply git-related ignore
-                // rules (global rules, .gitignore and local exclude rules).
-                //
-                // When disabled, git-related ignore rules are applied even when searching
-                // outside a git repository.
-                //
-                // We enable this to allow for searching outside of a git repository while
-                // still applying git-related ignore rules (which is common in LSP and user
-                // code editors).
                 .require_git(false)
-                // Filter to prevent descending into nested git repositories and .git directories
                 .filter_entry(move |entry| {
-                    // Skip .git directories and their contents unless explicitly including ignored files
                     if entry.file_name() == ".git" && !include_ignored {
                         return false;
                     }
 
-                    // Skip directories that are nested git repositories
-                    // We detect this by checking if a directory (at depth > 0) contains a .git subdirectory
                     if entry.file_type().is_some_and(|ft| ft.is_dir()) && entry.depth() > 0 {
                         let git_dir = entry.path().join(".git");
                         if git_dir.is_dir() {
@@ -517,10 +506,8 @@ impl CoreGitaliskRepository {
                         }
                     }
 
-                    // Apply custom exclude patterns using gitignore matching
                     if let Some(ref ignores) = custom_ignores {
                         let entry_path = entry.path();
-                        // Strip the base path to get relative path for matching
                         let relative_path = entry_path.strip_prefix(&path).unwrap_or(entry_path);
                         let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
 
@@ -786,7 +773,7 @@ mod tests {
         assert!(file_names_with_ignored.contains(&"main.rs".to_string()));
         assert!(file_names_with_ignored.contains(&"utils.rs".to_string()));
         assert!(file_names_with_ignored.contains(&"integration.rs".to_string()));
-        assert!(file_names_with_ignored.contains(&"config".to_string())); // .git/config
+        assert!(file_names_with_ignored.contains(&"config".to_string()));
 
         let files_without_ignored = repo
             .get_repo_files(IterFileOptions {
@@ -811,7 +798,7 @@ mod tests {
         assert!(file_names_without_ignored.contains(&"main.rs".to_string()));
         assert!(file_names_without_ignored.contains(&"utils.rs".to_string()));
         assert!(file_names_without_ignored.contains(&"integration.rs".to_string()));
-        assert!(!file_names_without_ignored.contains(&"config".to_string())); // Should not include .git/config
+        assert!(!file_names_without_ignored.contains(&"config".to_string()));
     }
 
     #[test]
@@ -862,7 +849,7 @@ mod tests {
             .collect();
 
         assert!(file_names_with_ignored.contains(&"root.rs".to_string()));
-        assert!(file_names_with_ignored.contains(&"config".to_string())); // .git/config
+        assert!(file_names_with_ignored.contains(&"config".to_string()));
 
         let files_without_ignored = repo
             .get_repo_files(IterFileOptions {
@@ -903,7 +890,6 @@ mod tests {
             temp_dir.path().to_string_lossy().to_string(),
         );
 
-        // Test excluding multiple patterns
         let files = repo
             .get_repo_files(IterFileOptions {
                 include_ignored: false,
@@ -941,7 +927,6 @@ mod tests {
             temp_dir.path().to_string_lossy().to_string(),
         );
 
-        // Test glob pattern to exclude all test files
         let files = repo
             .get_repo_files(IterFileOptions {
                 include_ignored: false,

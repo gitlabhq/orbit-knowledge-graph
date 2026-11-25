@@ -365,7 +365,6 @@ pub(super) struct SkillDirs {
     pub(super) dir: ScopedPath,
     pub(super) link: Option<ScopedPath>,
     pub(super) permissions: Option<SkillPermissions>,
-    /// The assistant cannot run commands when it loads a skill, so it needs the real tree.
     #[serde(default)]
     pub(super) requires_full: bool,
 }
@@ -395,7 +394,6 @@ pub(super) struct JsonMerge {
     pub(super) review_note: Option<ReviewNote>,
 }
 
-/// Shown when setup writes a hook the assistant runs only after the person enables or reviews it.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ReviewNote {
@@ -425,8 +423,6 @@ pub(super) struct Registration {
     pub(super) ui: bool,
 }
 
-/// What an earlier release installed and this one no longer does. Install and uninstall remove
-/// these: a file only while its checksum shows it is unedited, and a registration by its value.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Retired {

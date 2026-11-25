@@ -1,44 +1,39 @@
 ---
-# See https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md for explanations of each rule
 ignores:
   - "CHANGELOG.md"
   - "LICENSE.md"
 config:
-  # First, set the default
   default: true
 
-  # Per-rule settings in alphabetical order
-  code-block-style:                 # MD046
+  code-block-style:
     style: "fenced"
-  emphasis-style: false             # MD049
-  header-style:                     # MD003
+  emphasis-style: false
+  header-style:
     style: "atx"
-  hr-style:                         # MD035
+  hr-style:
     style: "---"
-  line-length:                      # MD013
+  line-length:
     code_blocks: false
     tables: false
     headings: true
     heading_line_length: 100
     line_length: 800
-  no-duplicate-heading:             # MD024
+  no-duplicate-heading:
     siblings_only: true
-  no-emphasis-as-heading: false     # MD036
-  no-inline-html: false             # MD033
-  no-trailing-punctuation:          # MD026
+  no-emphasis-as-heading: false
+  no-inline-html: false
+  no-trailing-punctuation:
     punctuation: ".,;:!。，；：！"
-  no-trailing-spaces: false         # MD009
-  # Disable this rule in the project
-  ol-prefix: false                  # MD029
-  reference-links-images: false     # MD052
-  ul-style:                         # MD004
+  no-trailing-spaces: false
+  ol-prefix: false
+  reference-links-images: false
+  ul-style:
     style: "dash"
-  table-column-count: false         # MD056, enforced by rumdl
-  table-column-style: false         # MD060
-  table-pipe-style: false           # MD055, enforced by rumdl
+  table-column-count: false
+  table-column-style: false
+  table-pipe-style: false
 
-  # Keep this item last due to length
-  proper-names:                     # MD044
+  proper-names:
     code_blocks: false
     html_elements: false
     names:

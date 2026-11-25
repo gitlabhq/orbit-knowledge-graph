@@ -54,9 +54,6 @@ pub struct LangEntry {
     _source_root: Option<String>,
 }
 
-/// Case-insensitive file-name rules for languages whose files often carry no
-/// language extension (`Dockerfile`, `app.Dockerfile`, `Dockerfile.dev`).
-/// They apply only when the file's extension names no language.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FileNames {
@@ -66,7 +63,6 @@ struct FileNames {
     prefixes: Vec<String>,
     #[serde(default)]
     suffixes: Vec<String>,
-    /// Extensions that mark a template or backup, never the language itself.
     #[serde(default)]
     ignored_extensions: Vec<String>,
 }
@@ -163,8 +159,6 @@ impl SupportLang {
             .map(|(lang, _)| *lang)
     }
 
-    /// The family this language indexes with, from `families:` in
-    /// `config/languages.yaml`; a language in none stands alone under its own name.
     pub fn family(self) -> &'static str {
         LANG_CONFIG
             .families
@@ -173,14 +167,10 @@ impl SupportLang {
             .map_or_else(|| self.into(), |(name, _)| name.as_str())
     }
 
-    /// Whether a rule file exists for the language; a grammar alone only
-    /// lists files.
     pub fn has_rules(self) -> bool {
         lang_yaml(self).is_some()
     }
 
-    /// The language that stands for a family name (`js_ts`, `rust`): the
-    /// family's first member, or the language itself.
     pub fn from_family(name: &str) -> Option<Self> {
         match LANG_CONFIG.families.get(name) {
             Some(family) => family.members.first().copied(),
@@ -190,7 +180,6 @@ impl SupportLang {
         }
     }
 
-    /// The family's members in declared order; a standalone language alone.
     pub fn family_members(self) -> Vec<Self> {
         LANG_CONFIG
             .families
@@ -218,8 +207,6 @@ impl SupportLang {
         &LANG_CONFIG.languages[self].index_names
     }
 
-    /// Resolve a language from a user-provided string like "js", "python", "rs", "typescript".
-    /// Checks aliases first (from languages.yaml), then falls back to extension matching.
     pub fn from_alias(s: &str) -> Option<Self> {
         let lower = s.to_ascii_lowercase();
         for (lang, entry) in &LANG_CONFIG.languages {
@@ -230,8 +217,6 @@ impl SupportLang {
         Self::from_extension(&lower)
     }
 
-    /// Strip this language's file extension from a path. Returns the stem if any
-    /// extension matched, or the original path unchanged.
     pub fn strip_extension<'a>(&self, path: &'a str) -> &'a str {
         for ext in &LANG_CONFIG.languages[self].extensions {
             let dotted = DOTTED_EXTENSIONS.get(ext.as_str());
@@ -245,7 +230,6 @@ impl SupportLang {
     }
 }
 
-/// Pre-computed ".ext" strings for each extension in the config.
 static DOTTED_EXTENSIONS: std::sync::LazyLock<std::collections::HashMap<&'static str, String>> =
     std::sync::LazyLock::new(|| {
         let mut m = std::collections::HashMap::new();
@@ -437,7 +421,6 @@ thread_local! {
     });
 }
 
-/// `None` from tree-sitter means its own timeout or cancellation tripped.
 pub fn parse(
     source: &str,
     support_lang: SupportLang,

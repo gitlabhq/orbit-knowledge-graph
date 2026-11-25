@@ -1,15 +1,10 @@
 #!/usr/bin/env bash
-# Bump the pinned siphon chart + image in e2e/config/versions.yaml to the
-# latest published versions. sync-cdc-tables.sh regenerates the CDC config
-# from the new image at setup.sh time, so nothing else needs committing.
 
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 VERSIONS="$E2E_DIR/config/versions.yaml"
 
-# gitlab-org/analytics-section/platform-insights/siphon-helm-charts, matching
-# the repository URL in helmfile.yaml.gotmpl.
 CHART_PROJECT="76780115"
 
 command -v yq >/dev/null 2>&1 || { echo "yq (mikefarah v4+) required"; exit 1; }
@@ -22,7 +17,6 @@ CHART_VERSION=$(curl -sSL --fail \
   && { echo "Failed to resolve latest siphon chart version"; exit 1; }
 log "  chart: $CHART_VERSION"
 
-# The image is versioned independently of the chart (chart appVersion is null).
 IMAGE_REPO=$(yq -r '.siphon.image.repository' "$VERSIONS")
 IMAGE_PATH=${IMAGE_REPO#registry.gitlab.com/}
 IMAGE_PROJECT_ENC=$(printf '%s' "$IMAGE_PATH" | sed 's#/#%2F#g')

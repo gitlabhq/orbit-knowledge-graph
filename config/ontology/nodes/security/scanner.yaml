@@ -1,5 +1,3 @@
-# config/ontology/nodes/security/scanner.yaml
-
 node_type: VulnerabilityScanner
 domain: security
 description: A security scanner that detects vulnerabilities in projects

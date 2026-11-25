@@ -49,9 +49,6 @@ struct HostMapResponse {
 
 pub type TenantRoutes = Arc<HashMap<String, TenantRoute>>;
 
-/// Nearest first, so a subgroup's own instance wins over an ancestor's. The
-/// first segment is the organization, never a group, so including it would let
-/// a row match a tenant whose group id happens to equal that organization id.
 pub fn namespace_ids_nearest_first(traversal_path: &TraversalPath) -> Vec<String> {
     let mut ids: Vec<String> = traversal_path
         .segments()
@@ -142,9 +139,6 @@ impl TenantHostMap {
         }
     }
 
-    /// Fresh, or stale but within the retry-after window. Serving a stale map
-    /// routes better than serving none, and holding off the retry keeps a
-    /// provisioner outage from adding the request timeout to every query.
     async fn usable_cached(&self) -> Option<TenantRoutes> {
         let now = Instant::now();
         let cache = self.cache.read().await;
@@ -153,8 +147,6 @@ impl TenantHostMap {
         (cached.is_fresh(now) || !cached.may_retry(now)).then(|| Arc::clone(&cached.routes))
     }
 
-    /// Records the retry even with no cache, so a cold start against a down
-    /// provisioner does not make every query wait out the request timeout.
     async fn defer_retry(&self) -> Option<TenantRoutes> {
         let now = Instant::now();
         let mut cache = self.cache.write().await;
@@ -169,7 +161,6 @@ impl TenantHostMap {
         Some(Arc::clone(&cached.routes))
     }
 
-    /// Every tenant in the current map.
     pub async fn live_routes(&self) -> Vec<TenantRoute> {
         let cache = self.cache.read().await;
         let Some(cached) = cache.as_ref() else {
@@ -369,8 +360,6 @@ mod tests {
         );
     }
 
-    /// A row whose organization id happens to equal another tenant's group id
-    /// must not read that tenant's data.
     #[tokio::test]
     async fn an_organization_id_matching_a_provisioned_group_does_not_resolve() {
         let map = host_map();

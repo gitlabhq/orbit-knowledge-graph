@@ -1,17 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run unit tests: --lib tests from all workspace crates plus --bin tests
-# for binary-only crates that contain test modules, plus the integration
-# test targets of code-graph-incremental and indexing-engine-next (one --test
-# per file in their tests/), plus the workspace doctests.
-#
-# integration-tests targets (local, containers, cli) run in their own CI
-# jobs to avoid pulling the entire dependency graph into this job.
-# integration-tests-codegraph has its own job too (lance-graph/datafusion).
-#
-# Extra arguments are forwarded to cargo nextest (e.g. --profile ci).
-
 args=(cargo nextest run --workspace \
   --features orbit-prompts/skill-validation \
   --features code-graph-incremental/pretty-print \
@@ -23,13 +12,11 @@ args=(cargo nextest run --workspace \
   --test vfs_paths --test safe_fs \
   --test budgets --test export --test link --test parse --test pipeline \
   --test resolve --test rewrite --test snapshot --test tree_storage \
-  --test macros --test introduced_versions \
+  --test macros --test compile_fail --test introduced_versions \
   --test build --test config --test dedupe --test errors --test jobs \
   --test lanes --test pools --test reconcilers --test sweeps --test testkit \
   --test protocol --test simulation)
 
-# Append caller's arguments last (e.g. --profile ci) so they can
-# override defaults.
 args+=("$@")
 
 echo "+ ${args[*]}"

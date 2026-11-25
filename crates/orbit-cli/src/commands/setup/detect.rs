@@ -25,8 +25,6 @@ impl Machine {
         &self.home
     }
 
-    /// Expands a global path: `~/x`, or `${VAR:-~/default}/x` where a non-empty
-    /// `VAR` replaces the default prefix and must be absolute.
     pub(super) fn expand_global_path(&self, global: &str) -> Result<PathBuf> {
         let Some(tail) = global.strip_prefix("${") else {
             return self.expand_home(global, global);

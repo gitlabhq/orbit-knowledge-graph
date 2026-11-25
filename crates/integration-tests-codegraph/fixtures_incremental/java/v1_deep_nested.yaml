@@ -29,8 +29,6 @@ fixtures:
       }
 
 tests:
-  # ── J5: test_java_reference_to_deep_nested_class ──
-
   - name: "InnerInnerHelpers.innerInnerDoHelp -> InnerHelpers.innerDoHelp"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -39,8 +37,6 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-
-  # ── J6: test_java_reference_resolve_type_failing_on_nested_type ──
 
   - name: "GrandChild.greet -> Child.GrandChild.greet (nested type regression)"
     query: |

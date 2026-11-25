@@ -23,8 +23,6 @@ fixtures:
       }
 
 tests:
-  # ── Original targeted queries, hardened ──────────────────────
-
   - name: Same-class method call resolves
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -51,8 +49,6 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { fqn: "com.example.Service" } }
-
-  # ── Broader exhaustive checks ────────────────────────────────
 
   - name: Exactly 5 definitions with correct types and files
     query: |

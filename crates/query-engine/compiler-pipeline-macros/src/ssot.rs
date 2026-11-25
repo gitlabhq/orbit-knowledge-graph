@@ -1,9 +1,3 @@
-//! `define_compiler_ctx!` proc macro implementation.
-//!
-//! State fields are private. Access goes through trait methods that assert
-//! the current phase has the required grant. Phase functions take
-//! `&mut impl CompilerCtx`, so they work with any pipeline's ctx.
-
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
@@ -358,8 +352,6 @@ pub fn generate(input: TokenStream) -> TokenStream {
             let mut_arms: Vec<_> = mut_phases.iter().map(|p| quote! { #p }).collect();
             let mut_allowed = mut_phases.join(", ");
 
-            // Generate guard expressions. When no phases grant access,
-            // always deny during pipeline execution (avoids empty matches!()).
             let read_guard = if read_arms.is_empty() {
                 quote! {
                     panic!(

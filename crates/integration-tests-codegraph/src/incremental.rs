@@ -1,7 +1,3 @@
-//! The same YAML suites, indexed by `code-graph-incremental` instead of
-//! `code-graph`: fixtures on disk, production's walk, the full pipeline
-//! into a fresh DuckDB, then the suite's queries.
-
 use std::sync::Arc;
 
 use code_graph_incremental::pipeline::{Display, Emit, Export, Resolved};
@@ -74,8 +70,6 @@ fn suite_limits(suite: &TestSuite) -> Limits {
     }
 }
 
-/// The production budgets, from the embedded config/default.yaml the
-/// server starts from.
 fn default_limits() -> Limits {
     let pipeline = orbit_server_config::app::AppConfig::embedded_defaults()
         .engine
@@ -173,8 +167,6 @@ fn index_and_check(yaml: &str) {
     report(&suite, &failures);
 }
 
-/// Exports the graph into a fresh DuckDB and runs `tests` against it; the
-/// graph comes back for the next step.
 fn check(
     graph: Pipeline<'_, Resolved>,
     ontology: &Arc<Ontology>,
@@ -215,8 +207,6 @@ fn check(
     (displayed.state, run_suite(&suite, &db, ontology, true))
 }
 
-/// Fails unless the files the budgets `kind` (skipped or limited) are the
-/// `expected` ones, each with its label when the suite names one.
 fn assert_files(kind: &str, found: &[Killed], expected: &[SkippedFile]) {
     let mut expected: Vec<&SkippedFile> = expected.iter().collect();
     expected.sort_unstable_by(|a, b| a.path.cmp(&b.path));

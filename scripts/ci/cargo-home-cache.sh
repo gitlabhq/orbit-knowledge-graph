@@ -16,7 +16,6 @@
 # (git/checkouts is rebuilt by cargo).
 set -euo pipefail
 
-# Set by .no-cargo-home-cache for jobs that restore no cache.
 [ -z "${SKIP_CARGO_HOME_CACHE:-}" ] || exit 0
 
 cargo_home="${CARGO_HOME:-/opt/cargo}"

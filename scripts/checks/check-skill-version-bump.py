@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Checks that skill versions are bumped when skill files change.
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+USAGE = """Checks that skill versions are bumped when skill files change.
 
 Compares skill file changes against a base ref and fails if any changed skill
 has no corresponding version increase in skills/<name>/SKILL.md frontmatter.
@@ -15,15 +24,6 @@ Usage:
     python3 scripts/checks/check-skill-version-bump.py --base-ref origin/main --ci
     python3 scripts/checks/check-skill-version-bump.py --debug
 """
-
-from __future__ import annotations
-
-import argparse
-import os
-import re
-import subprocess
-import sys
-from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
@@ -193,7 +193,7 @@ def skip_requested() -> bool:
 def main() -> int:
     global DEBUG
 
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=USAGE)
     parser.add_argument("--ci", action="store_true", help="Exit 1 when a version bump is missing")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--base-ref", help="Base ref to compare against")

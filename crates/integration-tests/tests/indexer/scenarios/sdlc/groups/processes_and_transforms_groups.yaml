@@ -1,5 +1,3 @@
-# The type=Project namespace row must not become a Group node — only the
-# three type=Group namespaces index.
 description: Group namespaces index with transformed visibility; project namespaces drop
 scope: { namespace: 100 }
 

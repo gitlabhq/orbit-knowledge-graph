@@ -1,5 +1,3 @@
-//! Turns a pipeline's declarative `Extract` into the templated ClickHouse query the runtime consumes.
-
 mod generated;
 mod lookup;
 mod sql;
@@ -26,7 +24,6 @@ pub(in crate::modules::sdlc) struct ExtractSpec {
     pub deleted: String,
 }
 
-/// Validated template — the only way a `Plan` gets its `extract_template`.
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct ExtractTemplate(String);
 

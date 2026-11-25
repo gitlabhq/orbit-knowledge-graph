@@ -1,6 +1,3 @@
-# The unknown "description" action is pre-filtered by the extract query's
-# action IN-list; the Snippet noteable drops in process_batch. Neither may
-# fail the handler or produce an edge.
 description: Unknown actions and unsupported noteable types drop without edges
 scope: { namespace: 100 }
 

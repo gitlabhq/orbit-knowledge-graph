@@ -12,8 +12,6 @@ use query_engine::shared::content::{ColumnResolver, PropertyRow, ResolverContext
 
 use crate::content::metrics;
 
-/// `revision` is the git ref used in `<revision>:<path>` for `list_blobs`;
-/// prefers `commit_sha` (immutable) over `branch` (can advance).
 #[derive(Debug, Clone)]
 pub struct GitalyBlobRequest {
     pub project_id: i64,
@@ -23,9 +21,8 @@ pub struct GitalyBlobRequest {
     pub end_byte: Option<i64>,
 }
 
-type FileKey = (i64, String, String); // (project_id, revision, file_path)
+type FileKey = (i64, String, String);
 
-/// Fetches each file once per project and revision, then slices it for each definition.
 pub struct GitalyContentService {
     client: Arc<GitlabClient>,
 }
@@ -132,7 +129,6 @@ async fn fetch_contents(client: &GitlabClient, mut missed: Vec<FileKey>) -> Fetc
     fetched
 }
 
-/// Keys share one revision, so a path names one key. `None` when the request fails.
 async fn list_contents(client: &GitlabClient, keys: &[FileKey]) -> Option<FetchedContents> {
     let project_id = keys[0].0;
     let revisions: Vec<String> = keys
@@ -181,13 +177,9 @@ async fn list_contents(client: &GitlabClient, keys: &[FileKey]) -> Option<Fetche
 }
 
 impl GitalyContentService {
-    /// Expects `project_id` and either `path` (File) or `file_path`
-    /// (Definition). Returns `None` if any required field is missing or byte
-    /// ranges are invalid.
     pub fn build_request(props: &HashMap<String, ColumnValue>) -> Option<GitalyBlobRequest> {
         let project_id: i64 = props.get("project_id").and_then(|v| v.coerce())?;
 
-        // Prefer commit_sha (immutable) over branch (can advance).
         let revision: String = props
             .get("commit_sha")
             .and_then(|v| v.coerce::<String>())
@@ -217,9 +209,6 @@ impl GitalyContentService {
     }
 }
 
-/// Return the byte-range slice of `content`, or the full string when no
-/// range is specified. Returns an empty string if the range is out of
-/// bounds or lands on a UTF-8 boundary.
 fn slice_content(content: &str, start_byte: Option<i64>, end_byte: Option<i64>) -> &str {
     match (start_byte, end_byte) {
         (Some(s), Some(e)) if s >= 0 && e >= s => {
@@ -228,8 +217,6 @@ fn slice_content(content: &str, start_byte: Option<i64>, end_byte: Option<i64>) 
             if s >= content.len() {
                 return "";
             }
-            // str::get checks UTF-8 char boundaries and returns None
-            // if either index falls inside a multi-byte character.
             content.get(s..e).unwrap_or("")
         }
         _ => content,
@@ -326,11 +313,8 @@ mod tests {
 
     #[test]
     fn slice_empty_on_utf8_boundary() {
-        // 'é' is 2 bytes (0xC3 0xA9). Slicing at byte 1 lands mid-character.
         assert_eq!(slice_content("é", Some(0), Some(1)), "");
     }
-
-    // resolve_batch is covered in the integration-tests crate (needs a live GitlabClient).
 
     fn definition_props(start: i64, end: i64) -> HashMap<String, ColumnValue> {
         let mut props = HashMap::new();
