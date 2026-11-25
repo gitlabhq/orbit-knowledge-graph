@@ -59,3 +59,22 @@ engine-spec-code-graph:
       changes: *indexing-engine-code-changes
   script:
     - mise run spec:engine:code
+
+engine-nats:
+  extends: .indexing-engine-spec
+  tags:
+    - ${RUNNER_LARGE}
+  services:
+    - name: docker:dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    TESTCONTAINERS_HOST_OVERRIDE: docker
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - crates/indexing-engine-next/src/**/*
+  script:
+    - mise run test:engine:nats

@@ -173,6 +173,10 @@ run = "./scripts/dev/run-container-tests.sh --all-features --test server_contain
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run container tests (requires the Colima `gkg` profile: `colima start gkg --memory 12`)"
 
+[tasks."test:engine:nats"]
+description = "Run the NATS adapters of the indexing engine against NATS: the port contracts, then a pod crash and a wipe (ENGINE_TEST_NATS_URL reuses a running server)"
+run = "cargo test -p indexing-engine-next --test nats -- --ignored --test-threads=1"
+
 [tasks."test:integration:server"]
 run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(graph_formatter)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }

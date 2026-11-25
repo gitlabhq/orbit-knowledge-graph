@@ -82,7 +82,7 @@ What it doesn't prove:
 
 The model has one key and 2 or 3 pods with one slot each. One time unit is 20 s. The lease lasts 3 units, a pod renews it every unit, and the skew margin and the ack wait are 1 and 2 units. Each pod has a clock offset of 0 or 1.
 
-A wipe empties the key-value store and the broker, and the revisions start again at 1.
+A wipe empties the key-value store and the broker, and the revisions start again at 1. In NATS, a pod whose task stream is gone stops, and a restart creates the stream and the bucket again.
 
 ### The liveness check
 

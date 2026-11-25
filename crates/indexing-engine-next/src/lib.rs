@@ -8,6 +8,7 @@ mod event;
 mod lane;
 pub mod lease;
 mod ledger;
+pub mod nats;
 mod payload;
 mod pending;
 mod planner;

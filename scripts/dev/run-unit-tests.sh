@@ -15,7 +15,7 @@ args=(cargo nextest run --workspace \
   --test macros --test compile_fail --test introduced_versions \
   --test build --test config --test dedupe --test errors --test jobs \
   --test lanes --test pools --test reconcilers --test sweeps --test testkit \
-  --test protocol --test simulation)
+  --test protocol --test simulation --test nats)
 
 args+=("$@")
 

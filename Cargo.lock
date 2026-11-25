@@ -3434,12 +3434,16 @@ name = "indexing-engine-next"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-nats",
  "async-trait",
+ "futures",
  "orbit-log-fields",
  "parking_lot",
  "rand 0.10.2",
  "serde",
  "serde_json",
+ "testcontainers",
+ "testcontainers-modules",
  "thiserror 2.0.18",
  "tokio",
  "uuid",
