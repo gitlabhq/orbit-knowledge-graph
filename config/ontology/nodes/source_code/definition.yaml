@@ -130,7 +130,7 @@ properties:
     type: string
     source: parameter_types
     nullable: false
-    description: "Parameter types of a Java method or constructor, type arguments and annotations dropped (e.g., `(int, String...)`). Empty for other definitions and languages."
+    description: "Java method or constructor parameter types, type arguments and annotations dropped (e.g., `(int, String...)`). Empty for compact constructors, unparsable lists, and non-Java definitions."
 
   front_matter_name:
     type: string
