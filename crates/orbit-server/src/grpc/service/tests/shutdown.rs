@@ -42,8 +42,6 @@ async fn connect(addr: SocketAddr) -> OrbitServiceClient<tonic::transport::Chann
         .unwrap()
 }
 
-/// Opens a query stream and holds it open: the server waits for the first
-/// message until the returned sender sends it.
 async fn open_query_stream(
     client: &mut OrbitServiceClient<tonic::transport::Channel>,
 ) -> (
@@ -66,7 +64,6 @@ async fn open_query_stream(
     (tx, responses)
 }
 
-// The query fails to compile, so the server answers without ClickHouse.
 fn query_message() -> ExecuteQueryMessage {
     ExecuteQueryMessage {
         content: Some(execute_query_message::Content::Request(
@@ -89,8 +86,6 @@ async fn wait_until_refused(addr: SocketAddr) {
     .expect("listener still accepts connections after shutdown");
 }
 
-// HTTP/2 graceful shutdown sends a first GOAWAY that still admits streams,
-// then a final one after a ping round trip, so refusal is not immediate.
 async fn wait_until_new_streams_fail(client: &mut OrbitServiceClient<tonic::transport::Channel>) {
     tokio::time::timeout(WAIT, async {
         while client

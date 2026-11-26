@@ -84,19 +84,11 @@ impl GrpcServer {
         self
     }
 
-    /// Without a shutdown token the server runs until the process exits.
     pub fn with_shutdown(mut self, shutdown: CancellationToken) -> Self {
         self.shutdown = shutdown;
         self
     }
 
-    /// Serves until the shutdown token is cancelled, then drains: the listener
-    /// closes, every connection gets a GOAWAY, and in-flight streams run to
-    /// completion. After `grpc.shutdown_drain_timeout_secs` this stops
-    /// waiting and returns; the remaining streams end when the process exits.
-    ///
-    /// The Kubernetes `terminationGracePeriodSeconds` must exceed the drain
-    /// timeout, or the kubelet sends SIGKILL mid-drain.
     pub async fn run(self, listener: TcpListener) -> Result<(), tonic::transport::Error> {
         let shutdown = self.shutdown;
         let tls_enabled = self.tls_config.is_some();
@@ -175,10 +167,6 @@ impl GrpcServer {
     }
 }
 
-/// Ends `incoming` when `shutdown` is cancelled and drops it, which closes the
-/// listener so new connections are refused rather than left in the backlog.
-/// The returned future resolves once the listener is gone; tonic uses it as
-/// the signal to send GOAWAY and wait for in-flight streams.
 fn close_on_shutdown<S>(
     incoming: S,
     shutdown: CancellationToken,
@@ -186,7 +174,6 @@ fn close_on_shutdown<S>(
 where
     S: Stream + Unpin,
 {
-    // Dropping the sender together with `incoming` resolves the receiver.
     let (closed_tx, closed_rx) = oneshot::channel::<()>();
     let stream = futures::stream::unfold(
         (incoming, shutdown, closed_tx),
