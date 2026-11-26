@@ -428,7 +428,5 @@ DOCS-REVIEW SHADOW {"base":"...","head":"...","pages":[...],"engineering_pages":
 
 Turn a trigger off in **AI** > **Triggers**, or disable a flow in
 **AI** > **Flows**. Disabling removes the service account and its triggers.
-With docs-review off, docs-write runs after its push only when a person
-mentions it on the docs MR, and finds no review there: also empty
-`REVIEW_USER`, or turn docs-write off. To skip one MR in
-both flows, add `~"docs-factory::skip"`.
+With docs-review off, turn docs-write off too, or its docs MRs stay in
+draft. To skip one MR in both flows, add `~"docs-factory::skip"`.
