@@ -773,6 +773,8 @@ pub struct Grpc {
     pub result_chunk_bytes: ::core::option::Option<u64>,
     #[prost(uint64, optional, tag = "12")]
     pub max_result_bytes: ::core::option::Option<u64>,
+    #[prost(uint64, optional, tag = "13")]
+    pub shutdown_drain_timeout_secs: ::core::option::Option<u64>,
 }
 impl ::prost::Name for Grpc {
     const NAME: &'static str = "Grpc";
