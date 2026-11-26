@@ -3,14 +3,19 @@ title: Docs-write flow
 description: How the docs-write and docs-review flows draft, review, and hand off a docs MR, and how they were tested.
 ---
 
-The docs-write flow is a GitLab Duo custom flow. When a feature MR in this project is
-created or marked ready, it decides whether users need a docs change. If they do, it writes
-the change and gets CI green. A separate flow, docs-review, reviews each docs MR head in its
-own session and posts inline threads, and docs-write fixes them.
-Then it marks the docs MR ready and requests review from the feature MR author and the docs reviewers. It never merges or approves anything.
+The docs-write flow is a GitLab Duo custom flow. When someone mentions its service account
+on a feature MR in this project, it decides whether users need a docs change. If they do,
+it writes the change and gets CI green. A separate flow, docs-review, reviews each docs MR
+head in its own session and posts inline threads, and docs-write fixes them. Then
+docs-write marks the docs MR ready and requests review from the feature MR author and the
+docs reviewers. It never merges or approves anything. During rollout its only trigger is
+**Mention**. Triggers for created, ready, and drifted feature MRs come later.
 
-Status: design v2, built and tested in a private sandbox fork. Not enabled in this project
-yet. Plan, decisions, and every result are in
+Status: design v2. The single-session R4 build was tested in a private sandbox fork. The
+separate docs-review flow and the run-per-event chain have not run live yet. In this
+project, docs-write is enabled with the **Mention** trigger only. docs-review is not set up
+yet: its catalog item and service account do not exist. Plan, decisions, and every result
+are in
 [#1494](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1494).
 
 ## The flow at a glance
@@ -18,16 +23,16 @@ yet. Plan, decisions, and every result are in
 ```mermaid
 flowchart TD
     accTitle: The docs-write and docs-review flows
-    accDescr: A feature MR event or a mention starts docs-write. A script gate and a related-MR check decide whether to write. A writer agent writes the change with a check loop, and a publish script checks it again, pushes, and ends the run. The docs MR pipeline starts the separate docs-review flow. On failed docs jobs, docs-review mentions docs-write to fix CI. On green, it posts one inline thread per finding at importance 4 or more and a summary note that mentions docs-write. Each mention starts a new docs-write run that reads the MR, fixes and pushes, or hands off. After four fix cycles the MR stays in draft.
+    accDescr: A mention on a feature MR starts docs-write. A script gate and a related-MR check decide whether to write. A writer agent writes the change with a check loop, and a publish script checks it again, pushes, requests docs-review's review, and ends the run. The review request starts the separate docs-review flow, which waits up to 840 seconds for the head's pipeline. On failed docs jobs, docs-review mentions docs-write to fix CI. On green, it posts one inline thread per finding at importance 4 or more and a summary note that mentions docs-write. Each mention starts a new docs-write run that reads the MR, fixes and pushes, or hands off. After three fix cycles the MR stays in draft.
 
-    A([Feature MR created or marked ready, or a mention]) --> G{Setup: gate and related MRs}
+    A([A mention on a feature MR]) --> G{Setup: gate and related MRs}
     G -->|no docs, a person's docs MR, or shadow mode| E1([End, no model call])
     G -->|docs needed| W[Writer agent: docs-write skill, check.py loop]
-    W --> P[Publish: check.py gate, docs-only push, draft MR]
+    W --> P[Publish: check.py gate, docs-only push, draft MR, review request]
     P -->|check findings| F[Fixer agent: fresh per cycle]
     F --> P
     P --> E2([End of run])
-    E2 -.->|docs MR pipeline finishes| R{docs-review setup}
+    E2 -.->|review request| R{docs-review setup: waits for the pipeline}
     R -->|docs jobs failed| M[Mention docs-write: fix CI]
     R -->|green| V[Review agent: docs-review skill, read-only]
     V --> S[Post threads and a summary that mentions docs-write]
@@ -37,26 +42,28 @@ flowchart TD
     N -->|docs job failed or open threads| F
     N -->|pipeline running or no review yet| E3([End, the next event continues])
     N -->|only threads for a person left| H([Ready, review requested from feature author])
-    N -->|four fix cycles used| D([Stays in draft, reason in description])
+    N -->|three fix cycles used| D([Stays in draft, reason in description])
 ```
 
-The writer, fixer, and review agents are model calls. Every other step is a script. Each run ends after a push, and the next event starts a new run, so no run waits for CI or review. Most feature
-MRs end at the gate. Each agent loads one skill: the writer and the fixers `docs-write`, the
-reviewer only `docs-review`. The reviewer runs in its own flow and session. It sees only the
-pages, the docs diff, and the feature code. It reviews every docs MR in the project the
-same way, a person's or the flow's.
+The writer, fixer, and review agents are model calls. Every other step is a script. Each
+run ends after a push, and the next event starts a new run, so no run waits for CI or
+review. Most feature MRs end at the gate. Each agent loads one skill: the writer and the
+fixers `docs-write`, the reviewer only `docs-review`. The reviewer runs in its own flow and
+session. It sees only the pages, the docs diff, and the feature code. It reviews a flow's
+docs MR on docs-write's review request. It reviews a person's docs MR the same way when it
+is mentioned or, once the Pipeline trigger is on, on each docs MR pipeline.
 
 ## Stages
 
 | Stage | What runs | Model call | Goes to |
 |---|---|---|---|
 | Setup | `needs_docs.py` ends on an MR whose files never need user documentation (website, tests, dependencies, CI configuration, tooling, internal documentation), then scores the diff at threshold 6, `related_mrs.py` groups related MRs, and the docs branch is checked out | No | Write, or end. A mention on a flow docs MR goes to CI: its branch must be in this project, not a fork, and the flow's identity must already have a note on it. |
-| Write | One agent follows `write.md`, writes its report, and runs `check.py` until it is clean: the docs linters, structure checks, and words per fact against the report. Each finding gives a reason, a fix, and its limits | Yes | Publish |
-| Publish | Checks the writer report and runs `check.py`. Pushes only user docs and only when `check.py` reports no errors. Refuses an MR title that `mr-title-check` would reject, opens the draft docs MR, and posts thread replies. | No | A fixer, or end of the run |
-| CI | `ci_loop.py` reads the docs MR pipeline once | No | Threads on green, a fixer on a docs failure, end while it runs |
-| Review (docs-review flow) | Starts when the MR pipeline finishes. On failed docs jobs of a docs-write MR it only mentions docs-write to fix CI. On green, One fresh agent with only the `docs-review` skill reads the changed pages, the docs diff, and the feature MR diff and code, and checks claims, missing steps, brevity, the word list, topic type, and links. A script posts each finding at importance 4 or more, and each blocker, as a thread on its line: a suggestion block for a small exact fix, a **Needs reviewer decision** thread for a question. Then one summary note per head, which mentions docs-write on its docs MRs. It never pushes. | Yes | A new docs-write run |
-| Threads | Reads the docs-review summary on the head, then lists the open threads from trusted authors | No | A fixer, handoff, or end while no review exists |
-| Fix | A fresh agent per cycle, four at most, counted from the flow's pushes on the docs branch. It fixes check or CI findings, or the open threads, review threads included, in one pass. | Yes | Publish, which posts one reply per thread |
+| Write | One agent follows `write.md`, writes its report, and runs `check.py` until it is clean: the docs linters, structure checks, and words per fact against the report. Each finding gives a reason, a fix, and its limits. | Yes | Publish |
+| Publish | Checks the writer report and runs `check.py`. Pushes only user docs and only when `check.py` reports no errors. Refuses an MR title that `mr-title-check` would reject, opens the draft docs MR, posts thread replies, and requests the docs-review account's review. | No | A fixer, or end of the run |
+| CI | `ci_loop.py` reads the docs MR pipeline once | No | Threads on green, a fixer on a docs failure, handoff (hold in draft) at the cap, end while it runs |
+| Review (docs-review flow) | Starts on docs-write's review request, a mention, or (optional) a person's MR pipeline. A review request or a mention waits up to 840 seconds for the head's pipeline, and the run ends with no review if it is still running. On failed docs jobs of a docs-write MR it only mentions docs-write to fix CI. On green, where a failed `docs-write-merge-order-check` alone counts as green, one fresh agent with only the `docs-review` skill reads the changed pages, the docs diff, and the feature MR diff and code, and checks claims, missing steps, brevity, the word list, topic type, and links. A script posts each finding at importance 4 or more, and each blocker, as a thread on its line: a suggestion block for a small exact fix, a plain **Docs review** thread that says what to fix for any other fix, or a **Needs reviewer decision** thread for a question. Then one summary note per head, which mentions docs-write on its docs MRs. It never pushes. | Yes | A new docs-write run |
+| Threads | Reads the docs-review summary on the head, then lists the open threads from trusted authors | No | A fixer, handoff, handoff (hold in draft) at the cap, or end while no review exists |
+| Fix | A fresh agent per cycle, three at most per docs MR. The cap counts the flow's fix pushes since its last write push. Each hop is one level of GitLab's chain depth limit of 10: the write run, its review, and three fix and review pairs end with the handoff at depth 8. It fixes check or CI findings, or the open threads, review threads included, in one pass. | Yes | Publish, which posts one reply per thread and requests docs-review's review again |
 | Handoff | When CI is green on the head, the head has a review, and the only open threads are decisions or threads the flow does not take: removes `Draft:`, adds the feature MR author and the docs reviewers as reviewers, and posts one note. The note lists the decision threads and threads the flow did not take. | No | End. Otherwise the MR stays in draft, with the reason in its description. |
 
 The gate ends the run with no model call on a draft feature MR or one that scores below 6.
@@ -65,15 +72,16 @@ an MR that already changes user docs.
 A mention on a feature MR runs the same gate.
 
 Any step that fails to write its route file ends the flow. When in doubt, the flow does
-nothing. The flow file ships with `MODE=shadow`, which stops after setup and logs one line per MR.
+nothing. Both flow files set `MODE=full`. `MODE=shadow` stops after setup and logs one line
+per MR.
 
 ## What a person does
 
 | Role | What to do |
 |---|---|
 | Feature MR author | Review the docs MR when the flow requests your review. Settle the **Needs reviewer decision** threads. To skip the flow, add `docs-factory::skip`. |
-| Docs reviewer (`DOCS_REVIEWERS` in the flow file: Fiona Neill and Zachary Painter) | Approve and merge the docs MR by hand. Read the docs-review threads and the flow's replies. Check the "What to check" lines in the description, and each claim against the feature code. Add the feature MR as a dependency, then merge after it. |
-| Anyone | Mention the flow's service account on a feature MR to run the gate again. Mention it on a docs MR from the flow to fix the open threads. It fixes only threads from the people and bots listed in [Guardrails](#guardrails). |
+| Docs reviewer (`DOCS_REVIEWERS` in the flow file: Fiona Neill and Zachary Painter) | Approve and merge the docs MR by hand. Read the docs-review threads and the flow's replies. Check the "What to check" lines in the description, and each claim against the feature code. Add the feature MR as a dependency, then merge after it. `docs-write-merge-order-check` fails on each docs MR pipeline until the feature MR merges. That failure is expected: a retry after the merge, or the pipeline the flow starts then, turns it green. |
+| Anyone | Mention the flow's service account on a feature MR to run the gate. Mention it on a docs MR from the flow to fix the open threads. It fixes only threads from the people and bots listed in [Guardrails](#guardrails). Mention the docs-review account on a docs MR to review its head, for example after the 840-second wait ran out. |
 
 ## Guardrails
 
@@ -96,6 +104,14 @@ Script steps enforce these rules:
   run's start note.
 - The docs-review flow discards any commit or edit the review agent makes outside
   `.docs-write/`, and never pushes.
+- The reviewer runs in its own session. docs-review setup removes and recreates
+  `.docs-write/`, and the writer never commits it, so the writer's notes are not in the
+  reviewer's workspace.
+- `docs-write-merge-order-check` fails each docs MR pipeline while a feature MR in its marker
+  is not merged. This project requires a green pipeline to merge, so docs never merge before
+  the code. Drift checks after feature MR pushes and merges are in the
+  [flows README](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/.gitlab/duo/catalog/flows),
+  section "Drift and merge order".
 
 Prompts set these rules, and the script steps check the result where they can:
 
@@ -104,14 +120,17 @@ Prompts set these rules, and the script steps check the result where they can:
   and that shell. The intake filter limits who can write the thread text an agent reads.
   Feature MR diffs and code reach the agents unfiltered, and the checks cannot undo an API
   write or a push to another branch.
-- The reviewer is told not to read the writer's notes in `.docs-write/`. Nothing blocks the read.
+- docs-review threads reach docs-write's fixers as trusted text. The reviewer reads
+  unfiltered input: the docs diff of any MR it reviews and the feature MR diffs and code. So
+  an injection that steers the reviewer's findings also reaches a fixer.
 
 Other rules:
 
 - The docs change gets its own MR, as this project's `AGENTS.md` requires.
 - A run acts as the flow's service account together with the person who triggered it. When
   that person cannot read the private skills project, the run ends with no docs MR.
-- The docs MRs it opens start the flow again, and the gate ends those runs before any model call.
+- Once **Merge request** triggers are on, the docs MRs it opens start the flow again, and the
+  gate ends those runs before any model call.
 
 ## Where things live
 
@@ -157,8 +176,9 @@ the commit it merged into:
 | Decision finding | MR created | An injected code comment left a product question open. The review raised it as a **Needs reviewer decision** thread. The flow fixed the 2 other items and handed off with the thread open and listed. |
 | Threads from others | A mention on the docs MR | Duo Code Review posted 5 threads and a person posted 1. A fixer fixed the 5, and Duo posted 1 more after the push. A second fixer fixed it. The person's product question stayed open as a decision. |
 
-The first build posted a thread per finding. It also tested the no-docs exit: the writer
-found nothing a user needs and ended the run with no docs MR.
+Before R4, the first sandbox build posted a thread per finding in the same session. It also
+tested the no-docs exit: the writer found nothing a user needs and ended the run with no
+docs MR.
 
 Every flow-made docs MR started the flow again, on **Created** and on **Marked ready**. Each
 of those runs ended at the gate with no model call. Each event started one session.
