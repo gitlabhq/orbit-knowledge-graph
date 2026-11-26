@@ -32,6 +32,13 @@ pub async fn run_index_explains(ctx: &TestContext, directory: &Path) {
             ));
             continue;
         }
+        if let Some(prefix) = &scenario.schema_version_prefix {
+            failures.push(format!(
+                "{}: index EXPLAIN runs on the default schema, so drop schema_version_prefix {prefix} or the indexes check",
+                path.display()
+            ));
+            continue;
+        }
         for (language, raw) in &scenario.query {
             let label = format!(
                 "{}: {} [{language}/clickhouse]",
@@ -86,6 +93,74 @@ fn compile(
             compiler::compile_model(raw, frontend, model, &security)
         }
     }
+}
+
+pub(super) struct CteReads {
+    pub(super) failures: Vec<String>,
+    pub(super) reads_other: bool,
+}
+
+pub(super) fn check_cte_reads(ast: &compiler::Node, main_sql: &str) -> Result<CteReads, String> {
+    let compiler::Node::Query(query) = ast else {
+        return Ok(CteReads {
+            failures: vec![],
+            reads_other: false,
+        });
+    };
+    let statements = cte_statements(ast).map_err(|error| error.to_string())?;
+    let bodies = query
+        .ctes
+        .iter()
+        .map(|cte| (cte.name.as_str(), cte.query.as_ref()));
+    let main = std::iter::once(("main", query.as_ref()));
+    let rendered: Vec<String> = std::iter::once(main_sql.to_string())
+        .chain(statements.into_iter().map(|(_, sql, _)| sql))
+        .collect();
+    let mut failures = Vec::new();
+    let mut reads_other = false;
+    for ((own, body), sql) in main.chain(bodies).zip(&rendered) {
+        let mut reads = Vec::new();
+        query_cte_reads(body, &mut reads);
+        for (name, alias) in reads {
+            reads_other |= own != "main" && name != own;
+            let defined = [" AS (", " AS MATERIALIZED ("]
+                .iter()
+                .any(|definition| sql.contains(&format!("{name}{definition}")));
+            let read = alias
+                .as_ref()
+                .is_none_or(|alias| sql.contains(&format!("{name} AS {alias}")));
+            if !defined || !read {
+                failures.push(format!(
+                    "statement {own} reads CTE {name} that it does not define or render: {sql}"
+                ));
+            }
+        }
+    }
+    Ok(CteReads {
+        failures,
+        reads_other,
+    })
+}
+
+fn query_cte_reads(query: &compiler::Query, reads: &mut Vec<(String, Option<String>)>) {
+    use compiler::ast::visit;
+    visit::visit_queries(query, &mut |query| {
+        visit::visit_relations(&query.from, &mut |table| {
+            if let compiler::TableRef::Cte { name, alias } = table {
+                reads.push((name.clone(), Some(alias.clone())));
+            }
+        });
+        for expression in visit::query_expressions(query) {
+            visit::visit_expressions(expression, &mut |expression| {
+                if let compiler::Expr::InSubquery { cte_name, .. } = expression {
+                    reads.push((cte_name.clone(), None));
+                }
+                Ok(())
+            })?;
+        }
+        Ok(())
+    })
+    .expect("the CTE read walk does not fail");
 }
 
 async fn check_indexes(
@@ -167,7 +242,6 @@ async fn other_skip_indexes(ctx: &TestContext, table: &str, index: &str) -> Stri
         .join(",")
 }
 
-/// Older twins in their own unmerged part give each skip index a granule to prune; FINAL still returns the real rows.
 async fn seed_decoys(ctx: &TestContext, table: &str) {
     let table = format!("{}{table}", *crate::TABLE_PREFIX);
     let columns = ctx
@@ -257,4 +331,45 @@ fn skip_index<'a>(value: &'a Value, name: &str) -> Option<&'a Value> {
         Value::Array(items) => items.iter().find_map(|child| skip_index(child, name)),
         _ => None,
     }
+}
+
+#[test]
+fn cte_read_check_catches_dangling_reads_and_reports_cross_reads() {
+    use compiler::ast::Cte;
+    use compiler::{Node, Query, SelectExpr, TableRef};
+    let scan = |table: &str| Query {
+        select: vec![SelectExpr::col("t", "id")],
+        from: TableRef::scan(table, "t"),
+        ..Default::default()
+    };
+    let read = |cte: &str| Query {
+        select: vec![SelectExpr::col("r", "id")],
+        from: TableRef::Cte {
+            name: cte.into(),
+            alias: "r".into(),
+        },
+        ..Default::default()
+    };
+    let statement = |ctes: Vec<Cte>, body: Query| {
+        let ast = Node::Query(Box::new(Query { ctes, ..body }));
+        let (sql, _) = compiler::emit_simple_query(&ast).unwrap();
+        check_cte_reads(&ast, &sql).unwrap()
+    };
+    let chained = statement(
+        vec![
+            Cte::new("first", scan("gl_user")),
+            Cte::new("second", read("first")),
+        ],
+        read("second"),
+    );
+    assert!(chained.failures.is_empty(), "{:?}", chained.failures);
+    assert!(chained.reads_other);
+    let alone = statement(vec![Cte::new("first", scan("gl_user"))], read("first"));
+    assert!(alone.failures.is_empty() && !alone.reads_other);
+    let dangling = statement(vec![Cte::new("first", scan("gl_user"))], read("missing"));
+    assert!(
+        dangling.failures[0].contains("reads CTE missing"),
+        "{:?}",
+        dangling.failures
+    );
 }

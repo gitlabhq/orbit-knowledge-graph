@@ -3,8 +3,6 @@ use std::time::Duration;
 use std::{fs, process::Command};
 use tempfile::TempDir;
 
-// UTILS
-/// Recursively copy a directory and all its contents
 fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     if !dst.exists() {
         fs::create_dir_all(dst)?;
@@ -153,12 +151,10 @@ impl LocalGitRepoFileSystem {
         self
     }
 
-    // Handle both files and directories
     pub fn move_to(&mut self, rel_path: &str, new_rel_path: &str) -> &mut Self {
         let path = self.valid_rel_path(rel_path).unwrap();
         let new_path = self.repo_path.join(new_rel_path);
 
-        // Create parent directory if it doesn't exist
         if let Some(parent) = new_path.parent() {
             fs::create_dir_all(parent).unwrap();
         }
@@ -168,12 +164,10 @@ impl LocalGitRepoFileSystem {
         self
     }
 
-    // Handle both files and directories
     pub fn rename_to(&mut self, rel_path: &str, new_rel_path: &str) -> &mut Self {
         let path = self.valid_rel_path(rel_path).unwrap();
         let new_path = self.repo_path.join(new_rel_path);
 
-        // Create parent directory if it doesn't exist
         if let Some(parent) = new_path.parent() {
             fs::create_dir_all(parent).unwrap();
         }
@@ -389,7 +383,6 @@ mod tests {
         let path = repo.fs.valid_rel_path("new_directory").unwrap();
         assert!(path.exists());
 
-        // Test nested directories
         repo.fs
             .create_directory("new_directory/nested_directory/sub_directory");
         let path = repo
@@ -413,7 +406,6 @@ mod tests {
     fn test_comprehensive_file_changes() {
         let mut repo = setup_test_repo(false, None);
 
-        // Verify initial state
         assert!(repo.fs.file_content("app/models/user_model.rb").is_ok());
         assert!(
             repo.fs
@@ -422,17 +414,14 @@ mod tests {
         );
 
         repo.fs
-            // 1. Create new config file
             .create_file(
                 "config.rb",
                 Some("# New config file\nmodule Config\n  VERSION = '1.0'\nend"),
             )
-            // 2. Modify existing file (base_model.rb)
             .append_file_content(
                 "app/models/base_model.rb",
                 "\n  # Added timestamp method\n  def timestamp\n    Time.now\n  end",
             )
-            // 3. Create utility directory and file
             .create_directory("app/utils")
             .create_file(
                 "app/utils/string_utils.rb",
@@ -448,29 +437,21 @@ mod tests {
                             end"#,
                 ),
             )
-            // 4. Move file to new location
             .create_directory("lib/models")
             .move_to("app/models/user_model.rb", "lib/models/user_model.rb")
-            // 5. Create another new file
             .create_file(
                 "lib/helper.rb",
                 Some("# Helper module\nmodule Helper\n  def self.help\n    'helping'\n  end\nend"),
             )
-            // 6. Move authentication directory contents
             .create_directory("app/auth")
             .move_to("lib/authentication/providers.rb", "app/auth/providers.rb")
             .move_to("lib/authentication/tokens.rb", "app/auth/tokens.rb")
-            // 7. Modify moved file
             .append_file_content(
                 "lib/models/user_model.rb",
                 "\n  # Another added method\n  def updated_at\n    Time.now\n  end",
             )
-            // 8. Delete helper file
             .delete_file("lib/helper.rb");
 
-        // Verify changes were applied
-
-        // 1. Config file was created
         let config_content = repo
             .fs
             .file_content("config.rb")
@@ -478,14 +459,12 @@ mod tests {
         assert!(config_content.contains("module Config"));
         assert!(config_content.contains("VERSION = '1.0'"));
 
-        // 2. Base model was modified
         let base_model_content = repo
             .fs
             .file_content("app/models/base_model.rb")
             .expect("Base model should exist");
         assert!(base_model_content.contains("def timestamp"));
 
-        // 3. Utility file was created
         let utils_content = repo
             .fs
             .file_content("app/utils/string_utils.rb")
@@ -493,22 +472,18 @@ mod tests {
         assert!(utils_content.contains("module StringUtils"));
         assert!(utils_content.contains("def self.sanitize"));
 
-        // 4. User model was moved
         assert!(repo.fs.file_content("lib/models/user_model.rb").is_ok());
-        assert!(repo.fs.valid_rel_path("app/models/user_model.rb").is_err()); // Should no longer exist
+        assert!(repo.fs.valid_rel_path("app/models/user_model.rb").is_err());
 
-        // 5. Authentication files were moved
         assert!(repo.fs.file_content("app/auth/providers.rb").is_ok());
         assert!(repo.fs.file_content("app/auth/tokens.rb").is_ok());
 
-        // 6. Moved user model was modified
         let moved_user_model = repo
             .fs
             .file_content("lib/models/user_model.rb")
             .expect("Moved user model should exist");
         assert!(moved_user_model.contains("def updated_at"));
 
-        // 7. Helper file was deleted (created then deleted in the chain)
         assert!(repo.fs.valid_rel_path("lib/helper.rb").is_err());
     }
 }

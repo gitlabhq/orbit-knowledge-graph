@@ -38,12 +38,12 @@ pub(crate) fn build_common(
         host_name: parse_opt(&claims.host_name, "host_name")?,
         organization_id: claims.organization_id.map(|id| id as i64),
         root_namespace_ids: claims.root_namespace_id.map(|ns| vec![ns]),
-        coding_agent: None,
         schema_version: Some(
             schema_version
                 .parse::<orbit_common::OrbitCommonSchemaVersion>()
                 .map_err(validation("schema_version"))?,
         ),
+        ..orbit_common::OrbitCommon::default()
     }))
 }
 
@@ -252,8 +252,6 @@ fn apply_metrics(
     q.raw_output_format_version = VERSIONS.raw_output_format.parse().ok();
 }
 
-/// Build a topology fingerprint like `User-[AUTHORED]->MergeRequest`.
-/// Returns `None` for search queries (no relationships).
 fn traversal_shape(input: &query_engine::compiler::Input) -> Option<String> {
     if input.relationships.is_empty() {
         return None;
@@ -279,9 +277,6 @@ fn traversal_shape(input: &query_engine::compiler::Input) -> Option<String> {
     Some(parts.join(", "))
 }
 
-/// Bounds are 255 chars for instance/host fields; exceeding that surfaces a
-/// typed validation error rather than truncating silently.
-/// Same as [`parse_opt`] but for orbit_query newtypes (maxLength 64).
 fn parse_opt_query(
     value: &Option<String>,
     field: &'static str,
@@ -350,6 +345,7 @@ mod tests {
             deployment_type: None,
             realm: None,
             is_gitlab_team_member: None,
+            orbit_quota_exempt: None,
             user_type: None,
             token_type: None,
             license_checksum: None,

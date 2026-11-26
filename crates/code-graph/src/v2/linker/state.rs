@@ -1,30 +1,3 @@
-//! Centralized linker state with collision-safe verified lookups and
-//! arena-backed string storage.
-//!
-//! ## Verified lookups
-//!
-//! All hash-keyed index maps are wrapped in [`VerifiedMap`] / [`NestedMap`]
-//! which force callers to provide the original string key and a verifier
-//! function. There is no API to get raw unverified results — the collision
-//! bug class is structurally impossible.
-//!
-//! ## String storage
-//!
-//! Three tiers eliminate per-string heap allocation and Drop overhead:
-//!
-//! - **[`StringPool`]**: graph-level, contiguous `Vec<u8>` buffer. Owns all
-//!   definition names, FQN strings, import paths, metadata strings. Accessed
-//!   via [`StrId`]. Dropped with the graph.
-//!
-//! - **[`FileArena`]** (`'file`): per-file, thread-local bump allocator.
-//!   Holds walker scratch strings (scope names, cache keys, constructed FQNs).
-//!   Created at Phase 2 file start, dropped wholesale when `FusedWalkResult`
-//!   is returned. Output contains no arena refs, so `'file` never escapes.
-//!
-//! - **[`ScratchBuf`]**: reusable heap `String` for transient lookup keys.
-//!   Allocated once per walker, reused via `clear()` + `write!()`. For
-//!   strings that are used once for a lookup and immediately discarded.
-
 use std::hash::{Hash, Hasher};
 
 use crate::v2::types::{DefKind, ImportBindingKind, ImportMode, Range};
@@ -37,9 +10,6 @@ use smallvec::SmallVec;
 
 use bumpalo::collections::String as BumpString;
 
-/// Hashes a string into a `u64` index key (FxHash, for speed). Also public for
-/// `ssa_names` membership checks in the walker, where a collision only costs
-/// extra work, never wrong edges.
 #[inline]
 pub fn hash_name(s: &str) -> u64 {
     let mut h = FxHasher::default();
@@ -47,8 +17,6 @@ pub fn hash_name(s: &str) -> u64 {
     h.finish()
 }
 
-/// Intern-keyed index map. Keys are `StrId` from the graph's `StringPool`,
-/// so lookups are integer-keyed HashMap probes with no string comparison.
 pub struct VerifiedMap<const N: usize = 8> {
     inner: FxHashMap<StrId, SmallVec<[NodeIndex; N]>>,
 }
@@ -113,7 +81,6 @@ impl<const N: usize> Default for VerifiedMap<N> {
     }
 }
 
-/// Two-level intern-keyed index map for scope → member lookups.
 pub struct NestedMap {
     inner: FxHashMap<StrId, FxHashMap<StrId, SmallVec<[NodeIndex; 8]>>>,
 }
@@ -218,25 +185,14 @@ impl Default for DefinitionRangeIndex {
     }
 }
 
-/// All resolution indexes for a CodeGraph, bundled together.
-///
-/// Construction-only indexes (`dir_index`, `file_index`) are held as
-/// `Option` and dropped after `finalize()`.
 pub struct GraphIndexes {
-    /// FQN → definition nodes. Verified by `fqn.as_str() == key`.
     pub by_fqn: VerifiedMap,
-    /// Bare name → definition nodes. Verified by `def.name == key`.
     pub by_name: VerifiedMap,
-    /// Parent FQN → member name → definition nodes. Both levels verified.
     pub nested: NestedMap,
-    /// Pre-computed ancestor chains from Extends edges (no hash keys).
     pub ancestors: FxHashMap<NodeIndex, SmallVec<[NodeIndex; 8]>>,
 
-    /// Directory path → node index. Only used during Phase 1 construction.
     pub dir_index: Option<FxHashMap<String, NodeIndex>>,
-    /// File path → node index. Only used during Phase 1 construction.
     pub file_index: Option<FxHashMap<String, NodeIndex>>,
-    /// File path → definition range index for source/target lookup.
     pub definition_ranges: FxHashMap<String, DefinitionRangeIndex>,
 }
 
@@ -258,7 +214,6 @@ impl GraphIndexes {
         self.file_index = None;
     }
 
-    /// Free the resolution-only indexes; the Arrow converter never reads them.
     pub fn drop_resolution_indexes(&mut self) {
         self.by_fqn = VerifiedMap::new();
         self.by_name = VerifiedMap::new();
@@ -276,8 +231,6 @@ impl Default for GraphIndexes {
 
 pub use orbit_utils::strings::{StrId, StringPool};
 
-/// Pool-backed definition. All strings are [`StrId`] referencing the graph's
-/// [`StringPool`].
 #[derive(Debug, Clone)]
 pub struct GraphDef {
     pub definition_type: &'static str,
@@ -295,6 +248,7 @@ pub struct GraphDefMeta {
     pub return_type: Option<StrId>,
     pub type_annotation: Option<StrId>,
     pub receiver_type: Option<StrId>,
+    pub signature: Option<StrId>,
     pub decorators: SmallVec<[StrId; 2]>,
     pub companion_of: Option<StrId>,
     pub is_exported: bool,
@@ -325,6 +279,7 @@ impl GraphDef {
                 return_type: m.return_type.as_deref().map(|s| pool.alloc(s)),
                 type_annotation: m.type_annotation.as_deref().map(|s| pool.alloc(s)),
                 receiver_type: m.receiver_type.as_deref().map(|s| pool.alloc(s)),
+                signature: m.signature.as_deref().map(|s| pool.alloc(s)),
                 decorators: m.decorators.iter().map(|s| pool.alloc(s)).collect(),
                 companion_of: m.companion_of.as_deref().map(|s| pool.alloc(s)),
                 is_exported: m.is_exported,
@@ -359,32 +314,6 @@ impl GraphImport {
     }
 }
 
-/// Per-file arena for walker scratch strings.
-///
-/// Wraps a [`bumpalo::Bump`] allocator. Thread-local, created at Phase 2
-/// file start, dropped wholesale when the walk completes. Output from the
-/// walk (`Vec<(NodeIndex, NodeIndex, GraphEdge)>`) contains no arena refs,
-/// so `'file` never escapes.
-///
-/// # What goes here
-///
-/// - `import_name_map` keys and values → `&'file str`
-/// - `import_map` keys → `&'file str`
-/// - `nested_cache` keys → `&'file str`
-/// - `scope_stack[].name` → `&'file str`
-/// - Constructed FQN candidates during resolution → `&'file str`
-/// - `Value::Type` / `Value::Alias` name strings → `&'file str`
-///
-/// # Lifecycle
-///
-/// ```text
-/// // Inside par_iter (one per rayon thread):
-/// let file_arena = FileArena::new();
-/// let walker = FileWalker::new(&graph, &file_arena);
-/// walker.walk(&root);
-/// let result = walker.into_result();  // no &'file refs
-/// drop(file_arena);                   // one free(), all strings gone
-/// ```
 pub struct FileArena(Bump);
 
 impl FileArena {
@@ -392,8 +321,6 @@ impl FileArena {
         Self(Bump::new())
     }
 
-    /// Allocate with a capacity hint. Rule of thumb: ~4KB per file covers
-    /// scope names, cache keys, and constructed FQNs for typical files.
     pub fn with_capacity(bytes: usize) -> Self {
         Self(Bump::with_capacity(bytes))
     }
@@ -414,10 +341,6 @@ impl FileArena {
         self.0.allocated_bytes()
     }
 
-    /// Reset the arena for reuse (e.g. processing another file on the same
-    /// thread without reallocating the backing storage). All references
-    /// previously returned by `alloc_str` / `alloc_fmt` become invalid —
-    /// the caller must ensure nothing borrows them.
     pub fn reset(&mut self) {
         self.0.reset();
     }
@@ -712,6 +635,7 @@ mod tests {
                 return_type: None,
                 type_annotation: None,
                 receiver_type: None,
+                signature: None,
                 decorators: vec![],
                 companion_of: None,
                 is_exported: true,

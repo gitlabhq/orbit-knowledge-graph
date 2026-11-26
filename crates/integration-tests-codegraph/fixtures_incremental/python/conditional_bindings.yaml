@@ -85,7 +85,6 @@ fixtures:
           x = 42
 
 tests:
-  # ── if/else phi ────────────────────────────────────────────
   - name: "if/else: exactly 2 edges, both correct"
     skip: false
     queries:
@@ -98,7 +97,6 @@ tests:
           - { row_count: 2 }
           - { row: { caller_fqn: "main.if_else_caller", callee: "option_a", callee_fqn: "main.option_a" } }
           - { row: { caller_fqn: "main.if_else_caller", callee: "option_b", callee_fqn: "main.option_b" } }
-      # false positive: no edge to option_c, foo, bar, or any other def
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.name = 'if_else_caller'
@@ -107,7 +105,6 @@ tests:
         assert:
           - { empty: true }
 
-  # ── try/except phi ────────────────────────────────────────
   - name: "try/except: exactly 2 edges, both correct"
     skip: false
     queries:
@@ -128,7 +125,6 @@ tests:
         assert:
           - { empty: true }
 
-  # ── trivial phi collapse ──────────────────────────────────
   - name: "trivial phi: exactly 1 edge (collapsed)"
     queries:
       - query: |
@@ -139,7 +135,6 @@ tests:
           - { row_count: 1 }
           - { row: { callee: "foo" } }
 
-  # ── if without else ───────────────────────────────────────
   - name: "no else: exactly 2 edges (pre-branch + if-branch)"
     skip: false
     queries:
@@ -160,7 +155,6 @@ tests:
         assert:
           - { empty: true }
 
-  # ── reassignment after branch ─────────────────────────────
   - name: "reassignment kills phi: exactly 1 edge to final value"
     queries:
       - query: |
@@ -170,7 +164,6 @@ tests:
         assert:
           - { row_count: 1 }
           - { row: { callee: "option_c" } }
-      # false positive: phi targets should NOT survive reassignment
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.name = 'reassign_after_branch'
@@ -179,7 +172,6 @@ tests:
         assert:
           - { empty: true }
 
-  # ── nested if/else ────────────────────────────────────────
   - name: "nested: exactly 3 edges (outer-if + inner-if + inner-else)"
     skip: false
     queries:
@@ -201,7 +193,6 @@ tests:
         assert:
           - { empty: true }
 
-  # ── elif chain ─────────────────────────────────────────────
   - name: "elif: exactly 3 edges"
     skip: false
     queries:
@@ -223,7 +214,6 @@ tests:
         assert:
           - { empty: true }
 
-  # ── no-call function ───────────────────────────────────────
   - name: "no_calls: zero outgoing edges"
     queries:
       - query: |
@@ -233,7 +223,6 @@ tests:
         assert:
           - { empty: true }
 
-  # ── global: no duplicate edges anywhere in the file ────────
   - name: "no duplicate edges in entire file"
     skip: false
     queries:

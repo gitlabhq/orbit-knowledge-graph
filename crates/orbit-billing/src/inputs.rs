@@ -4,7 +4,6 @@
 //! point — `billing_adapter::billing_inputs` — lives in
 //! `crates/orbit-server/src/billing_adapter.rs`. This struct is the entire
 //! contract between auth and billing: only these fields cross the boundary.
-
 #[derive(Clone, Debug)]
 pub struct BillingInputs {
     pub realm: Option<String>,
@@ -19,6 +18,7 @@ pub struct BillingInputs {
     pub root_namespace_id: Option<i64>,
     pub deployment_type: Option<String>,
     pub is_gitlab_team_member: Option<bool>,
+    pub orbit_quota_exempt: Option<bool>,
     pub coding_agent: Option<String>,
     pub has_license_checksum: bool,
 }

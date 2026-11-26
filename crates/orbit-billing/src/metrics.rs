@@ -17,8 +17,6 @@ pub(crate) const REASON_RETRY_QUEUE_FULL: &str = "retry_queue_full";
 pub(crate) const REASON_ABANDONED_AT_SHUTDOWN: &str = "abandoned_at_shutdown";
 pub(crate) const REASON_SERIALIZATION: &str = "serialization";
 pub(crate) const REASON_INVALID_EVENT: &str = "invalid_event";
-// Fallback for any DeliveryFailure variant added upstream (the enum is
-// #[non_exhaustive]) that this code does not yet map explicitly.
 pub(crate) const REASON_UNKNOWN: &str = "unknown";
 
 pub(crate) static METRICS: LazyLock<BillingMetrics> = LazyLock::new(BillingMetrics::new);

@@ -1,5 +1,3 @@
-# config/ontology/edges/declares_dependency.yaml
-
 description: Package declares a dependency
 
 variants:

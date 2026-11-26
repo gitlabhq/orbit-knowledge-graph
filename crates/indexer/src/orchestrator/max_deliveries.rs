@@ -5,7 +5,6 @@
 //! that subject. This listens for JetStream's `MAX_DELIVERIES` advisory and
 //! deletes the exhausted message so the existing sweep/backfill dispatchers
 //! can retry it.
-
 use async_nats::jetstream::ErrorCode;
 use async_nats::jetstream::stream::{DeleteMessageErrorKind, RawMessageErrorKind};
 use async_trait::async_trait;
@@ -19,16 +18,12 @@ use tokio_util::sync::CancellationToken;
 use crate::orchestrator::{Trigger, TriggerError};
 use crate::topic::INDEXER_STREAM;
 
-/// Fixed by the NATS wire protocol, not configurable.
 const ADVISORY_SUBJECT: &str = "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.>";
 
-/// Shared across replicas so JetStream delivers each advisory to exactly one, with no extra locking needed.
 const QUEUE_GROUP: &str = "gkg-max-deliveries-reconciler";
 
-/// Backoff before retrying a failed subscribe attempt.
 const RESUBSCRIBE_BACKOFF: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// `io.nats.jetstream.advisory.v1.max_deliver` fields this trigger needs; `async-nats` 0.49 has no typed struct for it.
 #[derive(Debug, Deserialize)]
 struct MaxDeliverAdvisory {
     stream: String,
@@ -81,7 +76,6 @@ impl MaxDeliveriesReconciler {
         }
     }
 
-    /// Only GKG's own versioned streams have this failure mode; e.g. Siphon's don't.
     fn is_managed_stream(stream: &str) -> bool {
         stream.starts_with(&format!("{INDEXER_STREAM}_V"))
     }
@@ -123,8 +117,6 @@ impl MaxDeliveriesReconciler {
         let subject = match stream.get_raw_message(advisory.stream_seq).await {
             Ok(raw) => Some(raw.subject.to_string()),
             Err(error) if error.kind() == RawMessageErrorKind::NoMessageFound => {
-                // Already gone (e.g. a duplicate advisory, or someone else in the
-                // queue group already deleted it): nothing left to reconcile.
                 return;
             }
             Err(error) => {
@@ -154,10 +146,7 @@ impl MaxDeliveriesReconciler {
             }
             Err(error) => match error.kind() {
                 DeleteMessageErrorKind::JetStream(inner)
-                    if inner.error_code() == ErrorCode::NO_MESSAGE_FOUND =>
-                {
-                    // Deleted between the fetch and the delete (e.g. manual intervention).
-                }
+                    if inner.error_code() == ErrorCode::NO_MESSAGE_FOUND => {}
                 _ => {
                     warn!(
                         safe(NATS_STREAM) = advisory.stream.as_str(),

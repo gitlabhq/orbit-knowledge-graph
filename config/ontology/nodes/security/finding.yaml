@@ -1,5 +1,3 @@
-# config/ontology/nodes/security/finding.yaml
-
 node_type: Finding
 domain: security
 description: A security scan finding (occurrence) that may be linked to a vulnerability

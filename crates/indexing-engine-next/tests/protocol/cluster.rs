@@ -3,12 +3,13 @@ mod tlc;
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::time::{Duration, SystemTime};
 
-use indexing_engine_next::protocol::{
-    Claim, Generation, Hold, HolderId, Lease, LeaseRules, Publish, Renewal, TaskId, decide_submit,
+use indexing_engine_next::lease::{
+    Claim, Fence, Generation, Hold, HolderId, Lease, LeaseRules, Renewal,
 };
-use indexing_engine_next::testkit::simulator::{
-    DatabaseWrite, FaultBudget, MessageState, SimulatedBroker, SimulatedClock, SimulatedDatabase,
-    SimulatedKeyValue,
+use indexing_engine_next::task::TaskId;
+use indexing_engine_next::testkit::simulation::{
+    DatabaseWrite, FaultBudget, MessageState, SimulatedBroker, SimulatedDatabase,
+    SimulatedKeyValue, TickClock,
 };
 use uuid::Uuid;
 
@@ -18,7 +19,7 @@ const UNIT: Duration = Duration::from_secs(20);
 const OFFSETS: [u64; 2] = [0, 1];
 const TTL: u32 = 3;
 const SKEW_MARGIN: u32 = 1;
-const ACKNOWLEDGE_WAIT: u64 = 2;
+const ACK_WAIT: u64 = 2;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Bounds {
@@ -221,10 +222,10 @@ struct Holder {
 struct Cluster {
     bounds: Bounds,
     rules: LeaseRules,
-    clock: SimulatedClock,
+    clock: TickClock,
     holders: Vec<Holder>,
     lease: SimulatedKeyValue<Lease>,
-    marker: SimulatedKeyValue<TaskId>,
+    pending: SimulatedKeyValue<TaskId>,
     generation: SimulatedKeyValue<Generation>,
     broker: SimulatedBroker,
     database: SimulatedDatabase,
@@ -266,12 +267,12 @@ impl Cluster {
                 renew_every: UNIT,
                 skew_margin: UNIT * SKEW_MARGIN,
             },
-            clock: SimulatedClock::new(UNIT),
+            clock: TickClock::new(UNIT),
             holders,
             lease: SimulatedKeyValue::default(),
-            marker: SimulatedKeyValue::default(),
+            pending: SimulatedKeyValue::default(),
             generation,
-            broker: SimulatedBroker::new(ACKNOWLEDGE_WAIT),
+            broker: SimulatedBroker::new(ACK_WAIT),
             database,
             faults: bounds.faults,
             next_id: 1,
@@ -283,7 +284,7 @@ impl Cluster {
         }
     }
 
-    fn lease_entry(&self) -> indexing_engine_next::protocol::LeaseEntry {
+    fn lease_entry(&self) -> indexing_engine_next::lease::LeaseEntry {
         self.lease.entry(self.generation.get().copied())
     }
 
@@ -357,7 +358,7 @@ impl Cluster {
                 }
                 Step::Leasing(claim) => {
                     if claim
-                        .acquire_lease(&self.rules, &self.lease_entry(), self.local_now(h))
+                        .lease_if_free(&self.rules, &self.lease_entry(), self.local_now(h))
                         .is_some()
                     {
                         actions.push(Action::AcquireLease(h));
@@ -432,14 +433,15 @@ impl Cluster {
     }
 
     fn submit(&mut self) {
-        match decide_submit(self.marker.get().copied(), task_id(self.next_id)) {
-            Publish::New(task) => {
-                let created = self.marker.put(self.marker.revision(), Some(task));
+        match self.pending.get().copied() {
+            Some(pending) => self.publishing = Some(pending),
+            None => {
+                let task = task_id(self.next_id);
+                let created = self.pending.put(self.pending.revision(), Some(task));
                 assert!(created.is_ok(), "a submit is atomic in the spec");
                 self.next_id += 1;
                 self.publishing = Some(task);
             }
-            Publish::Pending(task) => self.publishing = Some(task),
         }
     }
 
@@ -454,7 +456,7 @@ impl Cluster {
     fn deliver(&mut self, h: usize, c: usize) {
         let task = self.broker.deliver(c, h, self.clock.ticks());
         let holder = &mut self.holders[h];
-        holder.step = Step::Leasing(Claim::deliver(holder.id.clone(), task));
+        holder.step = Step::Leasing(Claim::new(holder.id.clone(), task));
         holder.held = Some(c);
     }
 
@@ -464,7 +466,7 @@ impl Cluster {
             return;
         };
         let entry = self.lease_entry();
-        let Some(lease) = claim.acquire_lease(&self.rules, &entry, local_now) else {
+        let Some(lease) = claim.lease_if_free(&self.rules, &entry, local_now) else {
             return;
         };
         let Some(generation) = entry.generation else {
@@ -473,8 +475,11 @@ impl Cluster {
         let Ok(written) = self.lease.put(entry.revision, Some(lease.clone())) else {
             return;
         };
-        self.holders[h].step =
-            Step::Leased(claim.hold(&self.rules, &lease, written, generation, local_now));
+        let fence = Fence {
+            generation,
+            revision: written,
+        };
+        self.holders[h].step = Step::Leased(claim.into_hold(&self.rules, &lease, fence, local_now));
     }
 
     fn start_task(&mut self, h: usize) {
@@ -482,11 +487,9 @@ impl Cluster {
             return;
         };
         self.started.insert(hold.task());
-        let marker = self.marker.get().copied();
-        if hold.start_clears_marker(marker) {
-            let cleared = self.marker.put(self.marker.revision(), None);
+        if self.pending.get().copied() == Some(hold.task()) {
+            let cleared = self.pending.put(self.pending.revision(), None);
             assert!(cleared.is_ok(), "a start is atomic in the spec");
-        } else if marker.is_some() {
         }
         self.holders[h].step = Step::Running(hold);
     }
@@ -496,7 +499,7 @@ impl Cluster {
         let entry = self.lease_entry();
         let Some(renewal) = self
             .holds(h)
-            .map(|hold| hold.renew(&self.rules, &entry, local_now))
+            .map(|hold| hold.build_renewal(&self.rules, &entry, local_now))
         else {
             return;
         };
@@ -506,10 +509,10 @@ impl Cluster {
                     return;
                 };
                 if let Some(hold) = self.holders[h].step.hold_mut() {
-                    hold.renewed(&self.rules, &lease, written, local_now);
+                    hold.record_renewal(&self.rules, &lease, written, local_now);
                 }
                 if let Some(c) = self.holders[h].held {
-                    self.broker.acknowledge_progress(c, h, self.clock.ticks());
+                    self.broker.ack_progress(c, h, self.clock.ticks());
                 }
             }
             Renewal::Lost => {
@@ -537,7 +540,7 @@ impl Cluster {
                 let entry = self.lease_entry();
                 let holds_current = self
                     .holds(h)
-                    .is_some_and(|hold| hold.release(&entry).is_some());
+                    .is_some_and(|hold| hold.revision_to_release(&entry).is_some());
                 self.rejected_current |= holds_current;
                 self.drop_run(h);
             }
@@ -546,11 +549,11 @@ impl Cluster {
 
     fn finish(&mut self, h: usize) {
         if let Some(c) = self.holders[h].held {
-            self.broker.acknowledge(c);
+            self.broker.ack(c);
         }
         let release = self
             .holds(h)
-            .and_then(|hold| hold.release(&self.lease_entry()));
+            .and_then(|hold| hold.revision_to_release(&self.lease_entry()));
         if let Some(expected) = release
             && self.lease.put(expected, None).is_ok()
         {}
@@ -560,7 +563,7 @@ impl Cluster {
     fn wipe_nats(&mut self) {
         self.faults.wipes -= 1;
         self.lease.wipe();
-        self.marker.wipe();
+        self.pending.wipe();
         self.generation.wipe();
         self.broker.wipe();
         let unfinished: Vec<TaskId> = (1..self.next_id)
@@ -600,15 +603,15 @@ impl Cluster {
             return Err("NoRejectedCurrentHolder: the database refused the write of the current lease holder".into());
         }
 
-        let marker = self.marker.get().copied();
-        let pending: Vec<TaskId> = self
+        let pending_task = self.pending.get().copied();
+        let waiting: Vec<TaskId> = self
             .broker
             .live_tasks()
             .filter(|task| !self.started.contains(task) && !self.lost_in_wipe.contains(task))
             .collect();
-        if pending.iter().any(|task| Some(*task) != marker) {
+        if waiting.iter().any(|task| Some(*task) != pending_task) {
             return Err(format!(
-                "AtMostOnePending: pending {pending:?}, marker {marker:?}"
+                "AtMostOnePending: waiting {waiting:?}, pending {pending_task:?}"
             ));
         }
 

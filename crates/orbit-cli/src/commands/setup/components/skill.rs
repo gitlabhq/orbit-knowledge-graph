@@ -14,8 +14,6 @@ use crate::commands::setup::{SkillKind, SkillRequest, Target};
 use crate::skill::{INSTALL_DIR_NAME, LEGACY_INSTALL_DIR_NAME, embedded_files};
 
 const MANIFEST: &str = "SKILL.md";
-/// Ownership record next to the skill directory, so the directory itself stays what the
-/// agents (or `glab skills`) expect.
 const MARKER_FILE: &str = ".orbit-managed";
 
 static NO_REQUEST: SkillRequest = SkillRequest {
@@ -36,7 +34,6 @@ pub(super) struct Skill<'a> {
 struct Marker {
     kind: SkillKind,
     agents: BTreeSet<String>,
-    /// Digest of the tree setup wrote, to tell it from a directory put there since.
     #[serde(default)]
     digest: String,
 }
@@ -56,9 +53,6 @@ fn tree_digest(tree: &BTreeMap<String, Vec<u8>>) -> String {
         .collect()
 }
 
-/// Whether `path` still holds what setup wrote, as opposed to a directory created there after
-/// the record was left behind. A lone wrapper `SKILL.md` counts too when it only differs in its version, which is what
-/// `glab skills update` writes from another release.
 fn is_ours(path: &Path) -> bool {
     let Some(marker) = read_marker(path) else {
         return false;
@@ -178,7 +172,6 @@ impl Installer for Skill<'_> {
             if let Some(link) = &skill.link {
                 link_skill_dir(link, &skill, kind, &tree, keep_other, symlink_dir, report)?;
             }
-            // An adopted wrapper may run through the other launcher.
             launchers.extend(read_tree(&skill.root).and_then(|tree| wrapper_launcher(&tree)));
         }
         for agent in agents {
@@ -210,7 +203,6 @@ impl Installer for Skill<'_> {
     }
 }
 
-/// Removes what earlier releases installed as `orbit-cli`, directory and Claude link alike.
 fn migrate_legacy(skill: &SkillTarget, target: &Target, report: &mut Report) -> Result<()> {
     if let Some(legacy_link) = &skill.legacy_link {
         remove_legacy_link(
@@ -220,13 +212,11 @@ fn migrate_legacy(skill: &SkillTarget, target: &Target, report: &mut Report) -> 
             target,
             report,
         )?;
-        // Where symlinks fail, the earlier release wrote a real copy instead.
         remove_legacy(legacy_link, &skill.legacy_link_label, target, report)?;
     }
     remove_legacy(&skill.legacy_root, &skill.legacy_label, target, report)
 }
 
-/// Whether an agent selected now, or recorded for this directory, needs the full tree.
 fn has_full_only_owner(skill: &SkillTarget) -> bool {
     let recorded = read_marker(&skill.root).map(|marker| marker.agents);
     skill.requires_full
@@ -238,7 +228,6 @@ fn has_full_only_owner(skill: &SkillTarget) -> bool {
         })
 }
 
-/// Whether any of these agents' skill directories was last installed as the full tree.
 pub(in crate::commands::setup) fn records_full_skill(agents: &[Agent], target: &Target) -> bool {
     skill_targets(agents, target).is_ok_and(|targets| {
         targets.iter().any(|skill| {
@@ -248,8 +237,6 @@ pub(in crate::commands::setup) fn records_full_skill(agents: &[Agent], target: &
 }
 
 impl Skill<'_> {
-    /// An explicit choice wins. Otherwise a sharing agent that needs the full tree decides, and
-    /// the last install keeps its kind so a rerun for another agent does not swap it.
     fn kind_for(&self, skill: &SkillTarget) -> SkillKind {
         if let Some(requested) = self.request.kind {
             return requested;
@@ -379,7 +366,6 @@ fn install_permissions(
                 .with_context(|| format!("failed to update {}", path.display()))?;
         }
     }
-    // Hooks share this file and back it up before they write it.
     let hooks_wrote_it = agent
         .json_merges
         .iter()
@@ -408,7 +394,6 @@ fn remove_permissions(agent: Agent, target: &Target, report: &mut Report) -> Res
     }
     let mut root = json::read_object(&path)?;
     let mut changed = false;
-    // Either distribution may have written the rules, whichever one runs the uninstall.
     for launcher in [spec::DIRECT_LAUNCHER, spec::GLAB_LAUNCHER] {
         for rule in &permissions.rules {
             let rule = rule.replace("{{orbit}}", launcher);
@@ -467,8 +452,6 @@ fn write_skill_files(
     Ok(())
 }
 
-/// Clears `path` for a new install. Setup's own files and a lone wrapper are replaced; anything
-/// else is renamed to a sibling whose `SKILL.md` no longer loads.
 fn make_room(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     let Ok(metadata) = std::fs::symlink_metadata(path) else {
         return Ok(());
@@ -572,8 +555,6 @@ fn link_skill_dir(
     }
 }
 
-/// Drops `agents` from the owners of the skill and deletes it once nobody is left, so removing
-/// one agent keeps the skill the others still load.
 fn release_skill_files(
     skill_root: &Path,
     label: &str,
@@ -593,7 +574,6 @@ fn release_skill_files(
     };
     marker.agents.retain(|owner| !agents.contains(owner));
     if exists && !is_ours(skill_root) {
-        // Leave the changed directory unrecorded once nobody uses it, so a later setup backs it up.
         match marker.agents.is_empty() {
             true => {
                 let _ = std::fs::remove_file(marker_path(skill_root));
@@ -641,7 +621,6 @@ fn remove_legacy_link(
     Ok(())
 }
 
-/// An unmarked directory loses only files that still match this release; user edits stay.
 fn remove_legacy(path: &Path, label: &str, target: &Target, report: &mut Report) -> Result<()> {
     let Ok(metadata) = std::fs::symlink_metadata(path) else {
         return Ok(());
@@ -683,8 +662,6 @@ fn remove_legacy(path: &Path, label: &str, target: &Target, report: &mut Report)
     Ok(())
 }
 
-/// A differing manifest must stop being a skill, or the agent lists `orbit-cli` next to `orbit`.
-/// The caller removes an unedited one with the other shipped files.
 fn retire_legacy_manifest(dir: &Path, label: &str, report: &mut Report) -> Result<()> {
     let manifest = dir.join(MANIFEST);
     let shipped = embedded_files()
@@ -702,7 +679,6 @@ fn retire_legacy_manifest(dir: &Path, label: &str, report: &mut Report) -> Resul
         return std::fs::remove_file(&manifest)
             .with_context(|| format!("failed to remove {}", manifest.display()));
     }
-    // Never overwrite an earlier backup; it may hold the user's own edit.
     let mut backup = first_backup.clone();
     for attempt in 1.. {
         if !backup.exists() {

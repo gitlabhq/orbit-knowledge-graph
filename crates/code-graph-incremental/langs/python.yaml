@@ -1,6 +1,3 @@
-# Python rewrite rules — complete language definition.
-# Stamps all synthetics needed by SSA and resolver.
-
 config:
   stdlib: [
       { module: sys, precedence: runtime },
@@ -74,23 +71,19 @@ stages:
       - match: '(lambda $$$C)'
         replace: '(__lambda $$$C)'
 
-      # Hoist decorators onto the inner def/class
       - match: '(decorator $N:identifier)'
         replace: '(__decorator @$N)'
       - match: '(decorated_definition $$$DECOS:__decorator definition: $D)'
         replace: '$D { $$$DECOS }'
 
-      # Superclass list → __supertype children on the class
       - match: '(class_definition name: $N superclasses: (argument_list $$$SUPERS:identifier|attribute|call) $$$REST)'
         replace: '(class_definition $N $$$SUPERS=>__supertype $$$REST)'
 
-      # self.x / cls.x → __ivar
       - match: '(attribute object: (identifier "self") attribute: $A)'
         replace: '(__ivar @$A)'
       - match: '(attribute object: (identifier "cls") attribute: $A)'
         replace: '(__ivar @$A)'
 
-      # Aliased import: capture real name as sym, alias as child
       - match: '(aliased_import name: $N alias: $A)'
         replace: '(aliased_import @$N $N (__alias @$A))'
       - match: '(aliased_import name: $N)'
@@ -98,13 +91,10 @@ stages:
 
   - name: retag-refs
     rules:
-      # self.x.method → __member "method" (__object __ivar)
       - match: '(attribute object: $O:__ivar attribute: $M)'
         replace: '(__member @$M (__object $O))'
-      # a.b.c → __member "c" (__object (__member "b" (__object "a")))
       - match: '(attribute object: $O:__member attribute: $M)'
         replace: '(__member @$M (__object $O))'
-      # a.b → __member "b" (__object "a")
       - match: '(attribute object: $O attribute: $M)'
         replace: '(__member @$M (__object @$O $O))'
 
@@ -114,7 +104,6 @@ stages:
         replace: '(__call (__callee $F) $A)'
       - match: '(call function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
-      # `await f()` and `(f())` carry the value of the call they wrap
       - match: '(await $V:__call)'
         replace: '$V'
       - match: '(parenthesized_expression $V:__call)'
@@ -124,23 +113,18 @@ stages:
 
   - name: imports
     rules:
-      # from X import * (must precede named-import rule due to first-match-wins)
       - match: '(import_from_statement module_name: $M $W:wildcard_import)'
         replace: '(__import (__source @$M $M) (__source_path @$M) (__name @$W $W))'
 
-      # from X import a, b  /  from X import a as b  /  mixed
       - match: '(import_from_statement module_name: $M $$$NAMES:dotted_name|aliased_import)'
         replace: '(__import (__source @$M $M) (__source_path @$M) $$$NAMES->__name)'
 
-      # import X / import X.Y.Z
       - match: '(import_statement name: $N:dotted_name)'
         replace: '(__import (__source @$N $N) (__source_path @$N) (__name @$N (__ssa_hint @$N|split_first("."))))'
 
-      # import X as Y — rekind capture to __name, keeping __alias subtree
       - match: '(import_statement name: $N:aliased_import)'
         replace: '(__import (__source @$N) (__source_path @$N) @$N->__name)'
 
-      # from __future__ import X
       - match: '(future_import_statement $$$NAMES:dotted_name)'
         replace: '(__import (__source "__future__") (__source_path "__future__") $$$NAMES=>__name)'
 
@@ -150,7 +134,6 @@ stages:
         replace: '(global_names $$$N=>global_name)'
       - match: '(nonlocal_statement $$$N:identifier)'
         replace: '(nonlocal_names $$$N=>nonlocal_name)'
-      # Defs
       - match: '(assignment left: $N right: $R:__lambda)'
         replace: '(__def (__defname @$N $N) (__lambda) $R)'
       - match: '(assignment left: (attribute object: (identifier "self") attribute: $N) type: $T:type)'
@@ -172,7 +155,6 @@ stages:
       - match: '(lambda_parameters $$$P:identifier|__binding)'
         replace: '(lambda_parameters $$$P->__binding)'
 
-      # Bindings — RHS wrapped in __rhs for canonical containment
       - match: '(assignment left: $N:__ivar right: $R:__call)'
         replace: '(__binding $N (__rhs $R))'
       - match: '(assignment left: $N:__ivar right: $R)'
@@ -196,7 +178,6 @@ stages:
       - match: '(named_expression name: $N value: $V)'
         replace: '(__binding @$N (__rhs @$V $V))'
 
-      # Branches
       - match: '(if_statement condition: $COND consequence: $C $$$ALTS:elif_clause|else_clause)'
         replace: '(__ssa_branch $COND (__ssa_arm $C) $$$ALTS->__ssa_arm)'
       - match: '(try_statement body: $B $$$ALTS:except_clause|finally_clause)'
@@ -206,7 +187,6 @@ stages:
       - match: '(conditional_expression $A:_*_named $COND:_*_named $B:_*_named)'
         replace: '(__ssa_branch $COND (__ssa_arm $A) (__ssa_arm $B))'
 
-      # Loops
       - match: '(for_statement left: $N:identifier right: (tuple $$$E) body: $B)'
         replace: '(__ssa_loop (__arr $$$E) (__binding @$N (__declaration "function")) $B)'
       - match: '(for_statement left: $N:identifier right: (list $$$E) body: $B)'
@@ -228,16 +208,13 @@ stages:
       - match: '(generator_expression $$$BODY)'
         replace: '(__ssa_loop $$$BODY)'
 
-      # Methods — has self parameter (before generic function rule)
       - match: '(function_definition name: $N **/(identifier "self") parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R $R) $$$ANN $$$P $B)'
         tag: { flavor: self_method }
 
-      # Functions — no self parameter
       - match: '(function_definition name: $N parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R $R) $$$ANN $$$P $B)'
 
-      # Classes — variadic before body captures __supertype/__decorator
       - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B **/(__def (__defname "__call__")))'
         replace: '(__def (__defname @$N) (__class) (__callable "__call__") $$$ANN $B)'
       - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B)'
@@ -369,7 +346,6 @@ display:
         tag:
           import_type: AliasedImport
           resolved: '@$ROOT|has_incoming("Imports")'
-      # `import os`: the name repeats the module, so the whole module is imported.
       - match: '(__import $S:__source $$$A $N:__name $$$B)'
         where: '$N == $S'
         tag_on: __name

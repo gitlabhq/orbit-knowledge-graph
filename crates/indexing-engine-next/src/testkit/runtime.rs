@@ -8,18 +8,20 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use tokio::runtime::{Handle, RuntimeFlavor};
 use tokio::sync::Notify;
-use tokio::task::{JoinError, JoinSet};
+use tokio::task::JoinSet;
 use tokio::time::Instant;
 use uuid::Uuid;
 
 use crate::builder::{Engine, ErasedPlanner};
 use crate::config::LaneConfig;
 use crate::disposition::{Attempt, Disposition};
-use crate::lane::Lane;
+use crate::lane::{Lane, LaneId};
+use crate::lease::{Fence, Generation, Revision};
 use crate::ledger::JobSummary;
 use crate::payload::{Key, TaskInput, Tenant};
 use crate::planner::{Plan, PlanError, PlannedTask};
 use crate::reconciler::{ReconcileBackend, ReconcileContext, ReconcileError};
+use crate::runner::resume_if_panicked;
 use crate::testkit::ledger::{MemoryLedger, TaskSummary};
 use crate::testkit::timeline::{TaskEvent, Timeline};
 use crate::trigger::{EventBatch, Fired};
@@ -39,8 +41,9 @@ struct KitState {
     queue: Vec<QueuedTask>,
     pending: HashSet<(&'static str, Key)>,
     running_keys: HashSet<(&'static str, Key)>,
-    busy_slots: HashMap<String, u32>,
-    paused_lanes: HashMap<String, Instant>,
+    fences: HashMap<(&'static str, Key), u64>,
+    busy_slots: HashMap<LaneId, u32>,
+    paused_lanes: HashMap<LaneId, Instant>,
     ledger: MemoryLedger,
     timeline: Timeline,
 }
@@ -134,7 +137,7 @@ impl KitRuntime {
                 }
             };
             tokio::select! {
-                Some(joined) = running.join_next() => resume_panic(joined),
+                Some(joined) = running.join_next() => resume_if_panicked(joined),
                 () = wake => {}
                 () = self.submitted.notified() => {}
             }
@@ -218,7 +221,12 @@ impl KitRuntime {
             let error = anyhow!("no module registered the worker {}", task.input.worker);
             return Attempt::Failed(TaskError::permanent(error));
         };
-        let ctx = TaskContext::new(Arc::clone(&self.pools));
+        let fence = self
+            .engine
+            .registry
+            .is_exclusive(task.input.worker)
+            .then(|| self.state.lock().take_next_fence(task));
+        let ctx = TaskContext::new(Arc::clone(&self.pools), fence);
         match tokio::time::timeout(lane.timeout, worker.run(&ctx, &task.input.bytes)).await {
             Ok(Ok(outcome)) => Attempt::Finished(outcome),
             Ok(Err(error)) => Attempt::Failed(error),
@@ -264,7 +272,7 @@ impl KitRuntime {
         self.engine
             .config
             .lanes
-            .get(&task.format_lane_id())
+            .get(&task.lane_id())
             .cloned()
             .unwrap_or_else(|| LaneConfig::new(NonZeroU32::MIN, UNCONFIGURED_LANE_TIMEOUT))
     }
@@ -354,7 +362,7 @@ impl KitState {
         let mut task = self.queue.remove(index);
         self.pending.remove(&task.worker_key());
         self.running_keys.insert(task.worker_key());
-        *self.busy_slots.entry(task.format_lane_id()).or_default() += 1;
+        *self.busy_slots.entry(task.lane_id()).or_default() += 1;
         let first_started = *task.first_started.get_or_insert(now);
         let attempt = task.attempts_used + 1;
         self.timeline
@@ -378,16 +386,22 @@ impl KitState {
             TaskEvent::Ended { attempt, next_step },
         );
         self.running_keys.remove(&task.worker_key());
-        if let Some(busy) = self.busy_slots.get_mut(&task.format_lane_id()) {
+        if let Some(busy) = self.busy_slots.get_mut(&task.lane_id()) {
             *busy -= 1;
         }
     }
 
+    fn take_next_fence(&mut self, task: &QueuedTask) -> Fence {
+        let revision = self.fences.entry(task.worker_key()).or_default();
+        *revision += 1;
+        Fence {
+            generation: Generation(1),
+            revision: Revision(*revision),
+        }
+    }
+
     fn count_busy_slots(&self, task: &QueuedTask) -> u32 {
-        self.busy_slots
-            .get(&task.format_lane_id())
-            .copied()
-            .unwrap_or(0)
+        self.busy_slots.get(&task.lane_id()).copied().unwrap_or(0)
     }
 
     fn find_next_wake(&self, now: Instant) -> Option<Instant> {
@@ -405,7 +419,7 @@ impl KitState {
 
     fn pause_lane(&mut self, task: &QueuedTask, after: Duration) {
         self.paused_lanes
-            .insert(task.format_lane_id(), Instant::now() + after);
+            .insert(task.lane_id(), Instant::now() + after);
     }
 
     fn record_outcome(&mut self, task: &QueuedTask, outcome: EncodedOutcome) -> Option<Vec<u8>> {
@@ -436,7 +450,7 @@ impl KitState {
     }
 
     fn compute_ready_at(&self, task: &QueuedTask) -> Instant {
-        let paused_until = self.paused_lanes.get(&task.format_lane_id());
+        let paused_until = self.paused_lanes.get(&task.lane_id());
         match paused_until {
             Some(paused_until) => task.ready_at.max(*paused_until),
             None => task.ready_at,
@@ -459,8 +473,8 @@ impl QueuedTask {
         (self.input.worker, self.input.key.clone())
     }
 
-    fn format_lane_id(&self) -> String {
-        self.lane.format_id(self.input.worker)
+    fn lane_id(&self) -> LaneId {
+        LaneId::new(self.input.worker, self.lane.clone())
     }
 
     fn summarize(&self, failure: Option<(&'static str, String)>) -> TaskSummary {
@@ -472,13 +486,5 @@ impl QueuedTask {
             error_class,
             error_message,
         }
-    }
-}
-
-fn resume_panic(joined: Result<(), JoinError>) {
-    if let Err(error) = joined
-        && error.is_panic()
-    {
-        std::panic::resume_unwind(error.into_panic());
     }
 }

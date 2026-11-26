@@ -4,24 +4,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Ontology, loading::ONTOLOGY_SCHEMA_FILE};
 
-/// The ledger YAML `scope:` value; an `entities:` subset narrows `Sdlc` only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LedgerScope {
-    /// Full rebuild.
     #[serde(rename = "*")]
     All,
-    /// SDLC-sourced tables. Pairs with an optional `entities:` subset.
     #[serde(rename = "sdlc")]
     Sdlc,
-    /// Code-graph tables.
     #[serde(rename = "code")]
     Code,
-    /// Re-index nothing; requires a `note:` certifying the change is output-neutral.
     #[serde(rename = "none")]
     None,
 }
 
-/// What a migration invalidates and must re-index. Empty `Sdlc` set = the whole SDLC domain.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MigrationScope {
     Full,
@@ -50,7 +44,6 @@ impl MigrationScope {
         }
     }
 
-    /// The widest of the two scopes; mixing `code` and `sdlc` widens to `"*"`.
     #[must_use]
     pub fn widened_with(&self, other: &Self) -> Self {
         match (self, other) {
@@ -85,8 +78,6 @@ impl std::fmt::Display for MigrationScope {
     }
 }
 
-/// The minimal [`MigrationScope`] a fingerprint diff justifies, or `None` if
-/// nothing changed. Fail-safe: anything unmapped widens to [`MigrationScope::Full`].
 #[must_use]
 pub fn derive_scope(
     ontology: &Ontology,
@@ -98,10 +89,18 @@ pub fn derive_scope(
         return None;
     }
 
+    let changed_sources: BTreeSet<String> = changed_sources
+        .iter()
+        .map(|path| match path.strip_suffix(".sql.j2") {
+            Some(stem) => format!("{stem}.yaml"),
+            None => path.clone(),
+        })
+        .collect();
+
     let mut sdlc_entities: BTreeSet<String> = BTreeSet::new();
     let mut code_changed = false;
 
-    for path in changed_sources {
+    for path in &changed_sources {
         if path == ONTOLOGY_SCHEMA_FILE || path == "reference.yaml" {
             return Some(MigrationScope::Full);
         }
@@ -161,8 +160,6 @@ pub fn derive_scope(
     Some(MigrationScope::Sdlc(sdlc_entities))
 }
 
-/// Names accepted in an entry's `entities:` list: pipeline-bearing nodes, derived
-/// entities, and SDLC-routed relationship kinds (code edges are excluded).
 #[must_use]
 pub fn sdlc_entity_names(ontology: &Ontology) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
@@ -234,7 +231,6 @@ fn parse_derived_name(content: &str) -> Option<String> {
     Some(parsed.name)
 }
 
-/// `edges/<stem>.yaml` → the relationship kind, when it resolves in the ontology.
 fn edge_kind_for_path(ontology: &Ontology, path: &str) -> Option<String> {
     let stem = path
         .strip_prefix("edges/")?
@@ -243,7 +239,6 @@ fn edge_kind_for_path(ontology: &Ontology, path: &str) -> Option<String> {
     ontology.has_edge(&stem).then_some(stem)
 }
 
-/// Whether `table`'s DDL change is explained by the scope collected so far.
 fn table_owned_by_scope(
     ontology: &Ontology,
     table: &str,
@@ -418,6 +413,41 @@ mod tests {
     }
 
     #[test]
+    fn derive_scope_node_template_maps_to_owning_node() {
+        let ontology = Ontology::new();
+        let embedded = BTreeMap::from([
+            (
+                "nodes/ci/pipeline.yaml".to_string(),
+                "node_type: Pipeline\npipelines:\n  - name: Pipeline\n    extract:\n      query: pipeline.sql.j2\n".to_string(),
+            ),
+            ("nodes/ci/pipeline.sql.j2".to_string(), "SELECT 1\n".to_string()),
+        ]);
+        let scope = derive_scope(
+            &ontology,
+            &embedded,
+            &entities(&["nodes/ci/pipeline.sql.j2"]),
+            &BTreeSet::new(),
+        );
+        assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["Pipeline"]))));
+    }
+
+    #[test]
+    fn derive_scope_template_without_a_yaml_is_full() {
+        let ontology = Ontology::new();
+        let embedded = BTreeMap::from([(
+            "nodes/ci/orphan.sql.j2".to_string(),
+            "SELECT 1\n".to_string(),
+        )]);
+        let scope = derive_scope(
+            &ontology,
+            &embedded,
+            &entities(&["nodes/ci/orphan.sql.j2"]),
+            &BTreeSet::new(),
+        );
+        assert_eq!(scope, Some(MigrationScope::Full));
+    }
+
+    #[test]
     fn derive_scope_mixed_code_and_sdlc_is_full() {
         let ontology = Ontology::new();
         let embedded = BTreeMap::from([
@@ -471,8 +501,6 @@ mod tests {
         assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["Note"]))));
     }
 
-    // HAS_NOTE is FK-derived: no edge `pipelines:` block, but routed to the default
-    // SDLC edge table, so it must derive an sdlc entity — not code.
     #[test]
     fn derive_scope_edge_resolves_to_relationship_kind() {
         let ontology = Ontology::new().with_edges(["HAS_NOTE"]);
@@ -485,8 +513,29 @@ mod tests {
         assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["HAS_NOTE"]))));
     }
 
-    // calls/defines/extends/imports/on_branch route to gl_code_edge, so an edge
-    // change there must derive `code`, never a bogus sdlc entity.
+    #[test]
+    fn derive_scope_edge_template_maps_to_relationship_kind() {
+        let ontology = Ontology::new().with_edges(["CREATED_MR"]);
+        let embedded = BTreeMap::from([
+            (
+                "edges/created_mr.yaml".to_string(),
+                "pipelines:\n  - name: CREATED_MR\n    extract:\n      query: created_mr.sql.j2\n"
+                    .to_string(),
+            ),
+            (
+                "edges/created_mr.sql.j2".to_string(),
+                "SELECT 1\n".to_string(),
+            ),
+        ]);
+        let scope = derive_scope(
+            &ontology,
+            &embedded,
+            &entities(&["edges/created_mr.sql.j2"]),
+            &BTreeSet::new(),
+        );
+        assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["CREATED_MR"]))));
+    }
+
     #[test]
     fn derive_scope_code_edge_is_code() {
         let ontology = Ontology::new()

@@ -182,8 +182,6 @@ impl JsCrossFileResolver {
         }
     }
 
-    /// Files are resolved in parallel via rayon; calls within a single file
-    /// are processed sequentially.
     pub fn resolve_calls(
         &self,
         calls_by_file: &[(String, Vec<JsCallEdge>)],

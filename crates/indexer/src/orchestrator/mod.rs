@@ -1,18 +1,3 @@
-//! The orchestrator drives indexing: it owns the clock, decides what to index,
-//! reacts to Siphon CDC, and dispatches work requests for the indexer to execute.
-//!
-//! Trigger models share one trigger-agnostic [`dispatch`] layer:
-//!
-//! - [`scheduled`] — cron-driven periodic tasks ([`scheduled::Scheduled`]),
-//!   including the coverage-driven code-backfill sweep.
-//! - [`siphon`] — a continuous, reactive CDC consumer ([`siphon::Siphon`]).
-//! - [`max_deliveries`] — a continuous, reactive JetStream advisory consumer
-//!   ([`max_deliveries::MaxDeliveriesReconciler`]) that frees permanently
-//!   stuck messages once NATS itself gives up on redelivery.
-//!
-//! Each implements [`Trigger`]; [`launch`] runs them concurrently until one
-//! errors or all complete.
-
 pub mod dispatch;
 pub mod max_deliveries;
 pub mod scheduled;
@@ -32,8 +17,6 @@ pub enum TriggerError {
     Panicked { count: usize },
 }
 
-/// A long-running orchestration driver. Each trigger owns its own run loop and
-/// exits cleanly when `cancel` is fired.
 #[async_trait]
 pub trait Trigger: Send + Sync {
     fn name(&self) -> &str;
@@ -41,8 +24,6 @@ pub trait Trigger: Send + Sync {
     async fn run(self: Box<Self>, cancel: CancellationToken) -> Result<(), TriggerError>;
 }
 
-/// On the first error, the shared `cancel` token is fired so the remaining
-/// triggers shut down, and the originating error is returned.
 pub async fn launch(
     triggers: Vec<Box<dyn Trigger>>,
     cancel: CancellationToken,

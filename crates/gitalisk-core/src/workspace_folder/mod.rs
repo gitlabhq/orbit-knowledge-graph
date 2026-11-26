@@ -1,7 +1,5 @@
 pub mod gitalisk_workspace;
 
-// Re‑export the public types so that callers don't have to reference the
-// `gitalisk_workspace` sub‑module directly.
 pub use gitalisk_workspace::{CoreGitaliskWorkspaceFolder, WorkspaceFolderStatistics};
 
 #[cfg(test)]
@@ -19,7 +17,6 @@ mod tests {
             let repo_path = workspace_path.join(repo_name);
             fs::create_dir_all(&repo_path)?;
 
-            // Create .git directory with config
             let git_dir = repo_path.join(".git");
             fs::create_dir_all(&git_dir)?;
 
@@ -31,13 +28,11 @@ mod tests {
 "#;
             fs::write(git_dir.join("config"), config_content)?;
 
-            // Create some sample files
             fs::write(repo_path.join("README.md"), format!("# {repo_name}"))?;
             fs::create_dir_all(repo_path.join("src"))?;
             fs::write(repo_path.join("src").join("main.rs"), "fn main() {}")?;
         }
 
-        // Create some non-repo files in workspace
         fs::write(workspace_path.join("workspace.md"), "Workspace info")?;
 
         Ok(())
@@ -47,7 +42,6 @@ mod tests {
     fn test_new_workspace() {
         let workspace = CoreGitaliskWorkspaceFolder::new("/test/workspace".to_string());
 
-        // Test that we can create a new workspace
         assert!(workspace.get_repositories().is_empty());
     }
 
@@ -68,7 +62,6 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let workspace_path = temp_dir.path();
 
-        // Create a single repository
         create_mock_workspace_with_repos(workspace_path, &["test-repo"]).unwrap();
 
         let workspace =
@@ -83,7 +76,6 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let workspace_path = temp_dir.path();
 
-        // Create multiple repositories
         create_mock_workspace_with_repos(workspace_path, &["repo-1", "repo-2", "repo-3"]).unwrap();
 
         let workspace =
@@ -92,7 +84,6 @@ mod tests {
 
         assert_eq!(stats.to_owned().repo_count, 3);
 
-        // Check that all repos are found
         let repo_names: Vec<String> = workspace
             .get_repositories()
             .iter()
@@ -123,11 +114,9 @@ mod tests {
         let workspace =
             CoreGitaliskWorkspaceFolder::new(workspace_path.to_str().unwrap().to_string());
 
-        // Before indexing, should be empty
         let repos_before = workspace.get_repositories();
         assert_eq!(repos_before.len(), 0);
 
-        // After indexing, should have repos
         let _indexed_repos = workspace.index_repositories().unwrap();
         let repos_after = workspace.get_repositories();
         assert_eq!(repos_after.len(), 1);
@@ -153,18 +142,14 @@ mod tests {
             CoreGitaliskWorkspaceFolder::new(workspace_path.to_str().unwrap().to_string());
         let _repos = workspace.index_repositories().unwrap();
 
-        // Should have repos before cleanup
         let repos_before = workspace.get_repositories();
         assert_eq!(repos_before.len(), 1);
 
-        // After cleanup, should be empty
         workspace.cleanup();
         let repos_after = workspace.get_repositories();
         assert_eq!(repos_after.len(), 0);
 
         let _stats = workspace.index_repositories().unwrap();
-        // After cleanup, statistics are not cleared in current implementation
-        // This is expected behavior as statistics represent last indexing results
     }
 
     #[test]
@@ -184,20 +169,16 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let workspace_path = temp_dir.path();
 
-        // Create a directory that looks like a git repo but isn't
         let fake_repo = workspace_path.join("fake-repo");
         fs::create_dir_all(&fake_repo).unwrap();
         fs::create_dir_all(fake_repo.join(".git")).unwrap();
-        // Note: No config file, so it shouldn't be counted as a valid repo
 
-        // Create a valid repo
         create_mock_workspace_with_repos(workspace_path, &["valid-repo"]).unwrap();
 
         let workspace =
             CoreGitaliskWorkspaceFolder::new(workspace_path.to_str().unwrap().to_string());
         let stats = workspace.index_repositories().unwrap();
 
-        // Should only find the valid repo
         assert_eq!(stats.to_owned().repo_count, 1);
         assert_eq!(
             workspace.get_repositories()[0].path,
@@ -208,7 +189,6 @@ mod tests {
         println!("stats2: {stats2:?}");
         assert_eq!(stats2.to_owned().repo_count, 1);
 
-        // get repository names
         let repo_names: Vec<String> = workspace
             .get_repositories()
             .iter()
@@ -246,7 +226,6 @@ mod tests {
         assert_eq!(stats1.to_owned().repo_count, 2);
         assert_eq!(stats2.to_owned().repo_count, 1);
 
-        // Check that both workspaces are tracked separately
         let repos1_cached = workspace1.get_repositories();
         let repos2_cached = workspace2.get_repositories();
 

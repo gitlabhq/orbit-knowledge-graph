@@ -8,26 +8,22 @@
 //! inherit that identity or name their own, so an external-facing certificate
 //! and an internal one can be rotated on different cycles.
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 pub struct TlsConfig {
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
     /// The internal listeners: the probe server in every mode and the
     /// health-check API.
     #[serde(default)]
-    #[schemars(default)]
     pub internal: ListenerTlsConfig,
 }
 
 /// TLS for a group of listeners.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 pub struct ListenerTlsConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -63,8 +59,6 @@ impl TlsConfig {
         listener: &'a ListenerTlsConfig,
         group: &'static str,
     ) -> Result<Option<(&'a str, &'a str)>, IdentityError> {
-        // A group carries an identity as a pair or not at all; falling back
-        // per-half would silently mix one group's certificate with another's key.
         let own = match (listener.cert_path.as_deref(), listener.key_path.as_deref()) {
             (Some(cert), Some(key)) => Some((cert, key)),
             (None, None) => None,
@@ -172,9 +166,6 @@ mod tests {
 
     #[test]
     fn a_misspelled_key_is_rejected_rather_than_ignored() {
-        // Both halves matter: a typo in the group name and a typo in a key
-        // inside it would each leave the listener plaintext while the config
-        // looks right.
         for overlay in [
             "tls:\n  internal:\n    enable: true\n",
             "tls:\n  internl:\n    enabled: true\n",

@@ -1,6 +1,3 @@
-# The wide-page limit triggers text truncation. The ClickHouse filter
-# matches the full value, but the response property is truncated.
-# The filter assertion checks the response (truncated) value.
 description: Wide-page limit triggers text truncation with [truncated] suffix
 
 query:
@@ -21,5 +18,5 @@ expect:
     Note:
       ids: [3002]
       filters:
-        note: { ends_with: " [truncated]" }
+        note: { ends_with: " [truncated]", max_chars: 3000 }
       prop_present: [note, discussion_id]

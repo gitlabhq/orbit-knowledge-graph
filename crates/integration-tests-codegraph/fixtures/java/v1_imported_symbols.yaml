@@ -52,7 +52,7 @@ tests:
       - { row_count: 1 }
 
   - name: "Traceable -> Retention (annotation import)"
-    skip: true
+    known_gap: "reason not recorded"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.Traceable'
@@ -62,7 +62,7 @@ tests:
       - { row_count: 1 }
 
   - name: "Traceable -> Target (annotation import)"
-    skip: true
+    known_gap: "reason not recorded"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.Traceable'

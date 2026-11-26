@@ -16,7 +16,6 @@ variables:
 
 workflow:
   rules:
-    # Security fork
     - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_TAG
       variables:
         DEV_PREFIX: "sec"
@@ -30,7 +29,6 @@ workflow:
     - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       variables:
         DEV_PREFIX: "sec"
-    # Non-canonical (other forks)
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_TAG
       variables:
         RUNNER_LARGE: saas-linux-medium-amd64
@@ -47,7 +45,6 @@ workflow:
       variables:
         RUNNER_LARGE: saas-linux-medium-amd64
         RUNNER_LARGE_ARM: saas-linux-medium-arm64
-    # Canonical project — original behavior
     - if: $CI_COMMIT_TAG
     - if: $CI_MERGE_REQUEST_EVENT_TYPE == 'merge_train'
       # Every path outside docs/, plus the docs/ files that code checks read.
@@ -134,8 +131,6 @@ stages:
   - release
   - review
 
-# Job Templates
-
 .test-template:
   extends:
     - .job-template
@@ -148,9 +143,6 @@ stages:
       junit:
         - target/nextest/ci/junit.xml
 
-# Identity for jobs acting as the Orbit automation bot (infra-mgmt!3039): the
-# glab image plus the bot token from Vault, readable on protected refs only.
-# Extend it and add your own rules, needs, and script.
 .automation-bot:
   image: registry.gitlab.com/gitlab-org/cli:v1.102.0
   tags:
@@ -178,7 +170,6 @@ stages:
     - if: $DOCS_ONLY == "true"
       when: never
 
-# Jobs that also run on docs-only MRs.
 .docs-mr-rules:
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
@@ -222,8 +213,6 @@ stages:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-
-# Lint Stage
 
 docs-in-code-mr-check:
   stage: lint
@@ -413,16 +402,6 @@ xtask-build:
     - .xtask-check
     - .job-template
 
-generate-config-schema:
-  extends: .xtask-check
-  script:
-    - $XTASK schema -o config/schemas/config.schema.json
-    - git diff --exit-code config/schemas/config.schema.json || (echo "config/schemas/config.schema.json is out of date. Run 'mise schema:generate' and commit." && exit 1)
-  artifacts:
-    paths:
-      - config/schemas/config.schema.json
-    expire_in: 24 hours
-
 generate-config-proto:
   extends: .xtask-check-with-tools
   script:
@@ -498,9 +477,6 @@ pinned-version-check:
   needs: []
   script:
     - apk add --no-cache git bash
-    # Prefer the commit a merged results pipeline merged into, then the MR diff
-    # base. Both are in HEAD's history, so the three-dot diff has a merge base.
-    # A branch longer than the clone depth needs its full history to reach it.
     - |
       BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
       if [ -z "$BASE" ]; then echo "No merge request diff base for this commit, so nothing to compare."; exit 0; fi
@@ -550,9 +526,6 @@ iglu-schema-check:
   extends:
     - .mr-only-rules
   needs: []
-  # Full check (local file vs upstream content from the public Iglu
-  # Pages CDN). Drift between committed schema JSON and upstream fails
-  # the job.
   script:
     - apk add --no-cache bash curl python3 yq
     - bash ./scripts/vendored/run.sh check iglu
@@ -564,8 +537,6 @@ system-note-actions-check:
   extends:
     - .alpine-image-mr-only
   needs: []
-  # Verifies config/vendored/system_note_metadata.actions matches Rails
-  # SystemNoteMetadata::ICON_TYPES at the pinned commit SHA.
   script:
     - apk add --no-cache bash curl python3 yq
     - bash ./scripts/vendored/run.sh check gitlab_system_note_actions
@@ -622,8 +593,6 @@ lint-check:
     - cargo clippy --workspace --exclude duckdb-client --all-targets --all-features -- -D warnings
     - cargo clippy -p duckdb-client --all-targets -- -D warnings
     - sccache --show-stats || true
-
-# Security Stage
 
 # Every server binary must link the AWS-LC FIPS module and nothing else for TLS.
 fips-check:
@@ -758,8 +727,6 @@ secret_detection:
       interruptible: true
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
-# Docs stage
-
 check_docs_markdown:
   stage: docs
   needs: []
@@ -767,11 +734,9 @@ check_docs_markdown:
     - .docs-mr-rules
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.24-vale-3.21.0-markdownlint2-0.23.2-lychee-0.24.2-rumdl-0.2.69
   script:
-    # Lint prose
     - vale --minAlertLevel error *.md docs
     - markdownlint-cli2 '*.md' 'docs/**/*.md'
     - rumdl check --config docs/.rumdl/rumdl.toml docs
-    # Check links
     - lychee --offline --include-fragments --root-dir . '*.md' 'docs/**/*.md'
 
 check_docs_i18n_markdown:
@@ -786,11 +751,8 @@ check_docs_i18n_markdown:
       changes:
         - docs-locale/${LOCALE_CODE}/**/*
   script:
-    # Lint prose
     - vale --config="docs-locale/${LOCALE_CODE}/.vale.ini" --minAlertLevel error docs-locale/${LOCALE_CODE}/docs-gitlab-com/
-    # Lint Markdown
     - markdownlint-cli2 "docs-locale/${LOCALE_CODE}/docs-gitlab-com/**/*.md"
-    # Check links
     - lychee --offline --include-fragments docs-locale/${LOCALE_CODE}/docs-gitlab-com/**/*.md
 
 .engineering-site:
@@ -860,7 +822,6 @@ pages:preview:
   extends: .engineering-site
   allow_failure: true
   variables:
-    # Pages serves previews at gitlaborbit.dev/<branch>/; site-kit derives its base path from this.
     SITE_URL: https://gitlaborbit.dev/$CI_COMMIT_REF_SLUG/
     SITE_NOINDEX: "1"
   pages:
@@ -889,9 +850,6 @@ pages:preview:
   variables:
     DOCS_BRANCH: "main"
   before_script:
-    # Check if this a release branch, which would be the case for a backport.
-    # If this is a backport MR, we need to checkout the appropriate version
-    # of the Docs website.
     - |
       if [[ $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ [0-9]+-[0-9]+-stable ]]; then
         BRANCH_NAME=$CI_MERGE_REQUEST_TARGET_BRANCH_NAME
@@ -918,7 +876,6 @@ pages:preview:
           echo "Branch $DOCS_BRANCH_CANDIDATE does not exist, falling back to main"
         fi
       fi
-    # Clone the Docs website project
     - git clone --depth 1 --filter=tree:0 --branch $DOCS_BRANCH https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com.git
     - cd docs-gitlab-com
 
@@ -928,23 +885,18 @@ docs_hugo_build:
   allow_failure: true
   script:
     - make add-latest-icons
-    - hugo --gc --printPathWarnings --environment test
+    - hugo --gc --printPathWarnings --panicOnWarning --environment test
 
 docs_index_pages:
   extends:
     - .docs-gitlab-com
   script:
-    # See https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/-/blob/main/scripts/check-index-filenames.sh
     - make check-index-pages SEARCH_DIR="../docs/docs-gitlab-com"
-    #- make check-index-pages SEARCH_DIR="../doc-locale/source" # Enable when translation is added
-
-# Test Stage
 
 unit-test:
   stage: test
   extends:
     - .test-template
-  # Same rules as .mr-and-main-rules, plus the cache upload on main only.
   rules:
     - !reference [.skip-on-docs-only, rules]
     - !reference [.skip-on-solo-schedule, rules]
@@ -963,7 +915,6 @@ unit-test:
     - ./scripts/dev/run-unit-tests.sh --profile ci
     - sccache --show-stats || true
 
-# No --all-targets: some tests are unix-only.
 windows-cli-check:
   stage: test
   extends:
@@ -1122,8 +1073,6 @@ corpus-smoke-test:
     NEXTEST_FILTER: test(corpus_smoke)
   needs: []
   script:
-    # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
-    # against a real ClickHouse schema (no correctness assertions).
     - ./scripts/dev/run-container-tests.sh --profile ci -p integration-tests --test server_containers --no-capture -E "$NEXTEST_FILTER"
     - sccache --show-stats || true
 
@@ -1213,10 +1162,6 @@ fuzz-deep:
       - crates/fuzz/tests/*/corpus/
     expire_in: 30 days
 
-# Build Stage
-
-# Keyless signing needs a GitLab OIDC token with the sigstore audience; the
-# script itself skips signing outside the canonical project.
 .sign-image:
   id_tokens:
     SIGSTORE_ID_TOKEN:
@@ -1427,8 +1372,6 @@ publish-proto-gem:
     name: rubygems
     url: https://rubygems.org/gems/gitlab-orbit-proto
 
-# Release Stage
-
 semantic-release:
   stage: release
   image: oven/bun:1.4.4
@@ -1545,19 +1488,6 @@ release-manifest:
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-amd64@$(cat image-digests/amd64)"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-arm64@$(cat image-digests/arm64)"
 
-# Review stage
-
-# AI Review Stage
-#
-# Manually-triggered AI agents for MR review. Uses the shared
-# ai-review-bot framework from gitlab-org/orbit/experiments/ai-review-bot.
-#
-# Required CI/CD variables (Settings > CI/CD > Variables):
-#   GITLAB_REVIEW_TOKEN  — Masked + Hidden
-#   AI_PROXY_INIT_TOKEN  — Masked + Hidden
-#   GOOGLE_CLOUD_PROJECT — GCP project ID for Vertex AI
-#   VERTEX_SA_KEY_B64    — Masked + Hidden
-
 ai:performance:
   extends: .ai-review-base
   stage: ai
@@ -1614,8 +1544,6 @@ ai:docs:
     AI_AGENT: docs
     GOOGLE_CLOUD_LOCATION: "global"
 
-# E2E Stage
-
 e2e:
   stage: e2e
   extends:
@@ -1647,7 +1575,6 @@ e2e:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    # Scheduled pin-bump MRs exist to be validated, so e2e runs and blocks.
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == 'automation/e2e-pin-bump'
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
@@ -1659,8 +1586,6 @@ e2e:
   script:
     - export E2E_SHA="${CI_COMMIT_SHORT_SHA}${E2E_SUFFIX:-}"
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-    # Sourced: exports E2E_GKG_IMAGE/E2E_GKG_TAG and backgrounds the MR build
-    # so `wait "$E2E_BUILD_PID"` below stays in this shell.
     - source e2e/scripts/build-orbit-image.sh
     - |
       E2E_ROBOT_TAG=$(sha256sum e2e/Dockerfile.robot | cut -c1-12)
@@ -1693,7 +1618,6 @@ e2e:
   after_script:
     - bash e2e/scripts/install-ci-tools.sh
     - kubectl config use-context "$KCTX"
-    # Before teardown wipes the namespaces; failure-only (the dump costs ~3 min).
     - |
       if [ "$CI_JOB_STATUS" != "success" ]; then
         E2E_SHA="${CI_COMMIT_SHORT_SHA}${E2E_SUFFIX:-}" bash e2e/scripts/dump-diagnostics.sh || true
@@ -1707,15 +1631,12 @@ e2e:
       junit: e2e/diagnostics/junit.xml
     expire_in: 3 days
 
-# Same suite against a 3-replica ClickHouse cluster; ch-chaos.sh kills one
-# replica during the schema migration and another during the run.
 e2e-ha:
   extends: e2e
   timeout: 90 minutes
   variables:
     E2E_CH_REPLICAS: "3"
     E2E_SUFFIX: "-ha"
-    # Quorum inserts make the initial Siphon snapshot merge about three times slower.
     E2E_INDEXING_BUDGET_MULTIPLIER: "5"
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID

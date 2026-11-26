@@ -1,6 +1,3 @@
-//! All knowledge of the Vue options vocabulary routes through
-//! `constants::VUE_*` so adding a new option is a single-site edit.
-
 use crate::utils::Range;
 use oxc::ast::AstKind;
 use oxc::ast::ast::{
@@ -150,8 +147,6 @@ fn is_contract_value(expression: &Expression<'_>) -> bool {
     )
 }
 
-/// `is_executable` and `is_contract` require both a valid classification
-/// *and* a value shape that matches the classification.
 fn classify_property(property: &ObjectProperty<'_>) -> Option<(VueOption, bool, bool)> {
     let key = property.key.static_name()?;
     let classification = VueOption::classify(key.as_ref())?;
@@ -239,12 +234,6 @@ pub(in crate::v2::langs::custom::js) fn extract_vue_options_api(
                 .unwrap_or("Component")
                 .to_string()
         });
-        // If a real class with this FQN already exists in the file
-        // (hostile case: `export class Foo {}` alongside a Vue default
-        // export whose component name defaults to the file stem `Foo`),
-        // namespace the virtual class so it cannot collide. The `<vue>`
-        // marker uses angle brackets which cannot appear in a valid JS
-        // identifier.
         let collides = defs
             .iter()
             .any(|def| def.kind == JsDefKind::Class && def.fqn == component_name);

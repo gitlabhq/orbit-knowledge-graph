@@ -8,8 +8,6 @@ pub struct LocalGraphData {
     pub tables: Vec<(String, RecordBatch)>,
 }
 
-/// DuckDB's Appender does not support dictionary-encoded Arrow arrays,
-/// so all string columns use plain Utf8.
 fn entity_specs(ontology: &Ontology, entity: &str) -> Vec<ColumnSpec> {
     ontology
         .local_entity_fields(entity)

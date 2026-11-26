@@ -148,10 +148,6 @@ pub async fn unfinished_partition_blocks_parent_consolidation(ctx: &TestContext)
     );
 }
 
-/// A partition-configured entity whose parent checkpoint already exists does not
-/// re-partition: `should_partition` requires an absent parent. The in-progress
-/// parent (cursor + floor) drives the single-pull resume path, which must honor
-/// the floor and write no partition checkpoint rows.
 pub async fn present_parent_takes_single_pull_path_and_honors_floor(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (key, watermark, cursor_values, _version) \
@@ -200,12 +196,6 @@ pub async fn present_parent_takes_single_pull_path_and_honors_floor(ctx: &TestCo
     );
 }
 
-/// A partitioned retry with mixed pre-existing partition state. Bucket cuts on
-/// ids 1..=12 with count=4 are [1, 4, 7, 10] -> p0=[1,4), p1=[4,7), p2=[7,10),
-/// p3=[10,). p0/p1 are pre-completed (skipped), p2 is mid-pull at cursor 6
-/// (below its range, so it pulls 7-9 in full), p3 is fresh. When the run
-/// finishes every partition, the parent consolidates at the oldest partition
-/// watermark and all partition checkpoints are tombstoned.
 pub async fn retry_skips_completed_resumes_in_progress_and_pins_watermark(ctx: &TestContext) {
     for id in 1..=12 {
         create_user(ctx, id).await;
@@ -305,10 +295,6 @@ async fn assert_indexed_ids(ctx: &TestContext, table: &str, expected: Vec<i64>, 
     assert_eq!(indexed, expected, "{message}");
 }
 
-/// Namespaced partitioning over both etl source shapes: `Group` is query-ETL
-/// (its partition probe scans `namespace_traversal_paths`), `Milestone` is a
-/// namespaced siphon table keyed on `(traversal_path, id)`. Both must scope the
-/// partition ranges by `startsWith(traversal_path, ...)` and land every row.
 pub async fn namespaced_entities_partition_by_id_within_scope(ctx: &TestContext) {
     create_namespace(ctx, 100, None, 0, "1/100/").await;
     for id in 101..=112 {

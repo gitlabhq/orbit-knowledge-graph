@@ -1,5 +1,3 @@
-# config/ontology/edges/closes.yaml
-
 description: Merge request closes a work item when merged
 
 variants:

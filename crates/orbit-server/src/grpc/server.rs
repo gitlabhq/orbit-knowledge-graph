@@ -115,9 +115,12 @@ impl GrpcServer {
             .initial_connection_window_size(gc.connection_window_size)
             .initial_stream_window_size(gc.stream_window_size)
             .concurrency_limit_per_connection(gc.concurrency_limit)
-            .max_connection_age(Duration::from_secs(gc.max_connection_age_secs))
-            .max_connection_age_grace(Duration::from_secs(gc.max_connection_age_grace_secs))
             .http2_max_header_list_size(Some(gc.max_header_list_size_bytes));
+        if let Some(max_age) = gc.max_connection_age() {
+            builder = builder
+                .max_connection_age(max_age.age)
+                .max_connection_age_grace(max_age.grace);
+        }
         if let Some(tls) = self.tls_config {
             builder = builder.tls_config(tls)?;
         }

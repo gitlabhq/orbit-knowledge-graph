@@ -24,10 +24,6 @@ fixtures:
       }
 
 tests:
-  # Struct embedding resolution uses the ancestor walk added to
-  # lookup_nested_cached: when receiver-type lookup fails for the direct
-  # type, it retries for each ancestor in the extends chain built by
-  # finalize().
   - name: svc.Log() resolves via embedding
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

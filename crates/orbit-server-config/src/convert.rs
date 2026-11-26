@@ -465,7 +465,7 @@ fn grpc(value: proto::Grpc) -> Result<GrpcConfig> {
         connection_window_size: present(value.connection_window_size),
         stream_window_size: present(value.stream_window_size),
         concurrency_limit: present(value.concurrency_limit) as usize,
-        max_connection_age_secs: present(value.max_connection_age_secs),
+        max_connection_age_secs: value.max_connection_age_secs,
         max_connection_age_grace_secs: present(value.max_connection_age_grace_secs),
         stream_timeout_secs: present(value.stream_timeout_secs),
         max_header_list_size_bytes: present(value.max_header_list_size_bytes),

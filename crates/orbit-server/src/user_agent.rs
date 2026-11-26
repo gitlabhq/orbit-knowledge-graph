@@ -1,11 +1,3 @@
-//! Rails forwards the caller's User-Agent header as `x-client-user-agent`.
-//! The Orbit CLI adds the `Distribution/` and `Coding-Agent/` tags to it.
-
-/// What a User-Agent says about the client that sent the request.
-///
-/// `curl/8.7.1` is curl at version 8.7.1.
-/// `orbit/0.158.0 (macos, aarch64) Distribution/glab Coding-Agent/codex`
-/// is the Orbit CLI, started by glab, inside Codex.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UserAgent {
     pub client_name: Option<String>,
@@ -47,7 +39,6 @@ fn split_name_and_value(token: &str) -> (&str, Option<&str>) {
     }
 }
 
-/// The header is free text, so only plain names and versions reach analytics.
 fn plain(value: &str) -> Option<String> {
     let is_plain_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-');
     let fits = !value.is_empty() && value.len() <= 64;

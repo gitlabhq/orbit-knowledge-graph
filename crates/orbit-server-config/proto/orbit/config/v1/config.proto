@@ -294,8 +294,10 @@ message Grpc {
   optional uint32 connection_window_size = 4 [(buf.validate.field).required = true];
   optional uint32 stream_window_size = 5 [(buf.validate.field).required = true];
   optional uint64 concurrency_limit = 6 [(buf.validate.field).required = true];
-  optional uint64 max_connection_age_secs = 7 [(buf.validate.field).required = true];
-  optional uint64 max_connection_age_grace_secs = 8 [(buf.validate.field).required = true];
+  // An explicit null turns the maximum connection age off. Leaving the key out
+  // keeps the default from config/default.yaml.
+  optional uint64 max_connection_age_secs = 7 [(buf.validate.field).uint64.gte = 1];
+  optional uint64 max_connection_age_grace_secs = 8 [(buf.validate.field).required = true, (buf.validate.field).uint64.gte = 1];
   optional uint64 stream_timeout_secs = 9 [(buf.validate.field).required = true];
   optional uint32 max_header_list_size_bytes = 10 [(buf.validate.field).required = true];
   // GitLab Rails rejects gRPC messages over 8 MiB.

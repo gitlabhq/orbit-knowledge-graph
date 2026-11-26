@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use labkit_config::{Format, Loader};
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::analytics::AnalyticsConfig;
@@ -37,8 +36,7 @@ pub const OVERLAY_CONFIG_FILE: &str = "config/config.yaml";
 pub const EMBEDDED_DEFAULTS: &str =
     include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/default.yaml"));
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
     pub grpc_bind_address: SocketAddr,
     pub jwt_clock_skew_secs: u64,
@@ -193,7 +191,6 @@ fn parse_yaml(data: &[u8], path: &Path) -> Result<serde_json::Value, ConfigError
         path: path.to_path_buf(),
         source: Box::new(source),
     })?;
-    // An empty or comment-only file parses to null, which would replace every layer beneath it.
     Ok(match document {
         serde_json::Value::Null => serde_json::Value::Object(serde_json::Map::new()),
         document => document,

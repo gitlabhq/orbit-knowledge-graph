@@ -7,7 +7,6 @@
 //! This file, the orbit-billing crate, and the extended hook points form
 //! the SOX billing surface defined in ADR 020:
 //! `docs/pages/engineering/adr/020_billing_sox_scope.md`.
-
 use orbit_billing::{BillingInputs, QuotaCheckInputs};
 
 use crate::auth::Claims;
@@ -26,6 +25,7 @@ pub fn billing_inputs(claims: &Claims, coding_agent: Option<String>) -> BillingI
         root_namespace_id: claims.root_namespace_id,
         deployment_type: claims.deployment_type.clone(),
         is_gitlab_team_member: claims.is_gitlab_team_member,
+        orbit_quota_exempt: claims.orbit_quota_exempt,
         coding_agent,
         has_license_checksum: claims.license_checksum.is_some(),
     }
@@ -44,6 +44,49 @@ impl From<&Claims> for QuotaCheckInputs {
             instance_version: c.instance_version.clone(),
             license_checksum: c.license_checksum.clone(),
             is_gitlab_team_member: c.is_gitlab_team_member.unwrap_or(false),
+            orbit_quota_exempt: c.orbit_quota_exempt.unwrap_or(false),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn claims_with_quota_exempt(orbit_quota_exempt: Option<bool>) -> Claims {
+        let mut json = json!({
+            "sub": "u",
+            "iss": "gitlab",
+            "aud": "gitlab-knowledge-graph",
+            "iat": 0,
+            "exp": 0,
+            "user_id": 1,
+            "username": "u",
+            "source_type": "mcp",
+        });
+        if let Some(exempt) = orbit_quota_exempt {
+            json["orbit_quota_exempt"] = json!(exempt);
+        }
+        serde_json::from_value(json).unwrap()
+    }
+
+    #[test]
+    fn orbit_quota_exempt_claim_reaches_quota_and_billing_inputs() {
+        for (claim, quota_exempt) in [(Some(true), true), (Some(false), false), (None, false)] {
+            let claims = claims_with_quota_exempt(claim);
+
+            assert_eq!(
+                QuotaCheckInputs::from(&claims).orbit_quota_exempt,
+                quota_exempt,
+                "claim {claim:?}"
+            );
+            assert_eq!(
+                billing_inputs(&claims, None).orbit_quota_exempt,
+                claim,
+                "claim {claim:?}"
+            );
         }
     }
 }

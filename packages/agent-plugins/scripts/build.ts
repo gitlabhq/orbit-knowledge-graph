@@ -36,7 +36,6 @@ for (const file of ['rpc.ts', 'tui.tsx']) {
   await copyFile(join(root, 'opencode', file), join(root, OPENCODE_UI, file))
 }
 
-// Pi loads the extension through its own runtime, which provides the pi-tui package.
 const piExternal: BunPlugin = {
   name: 'pi-external',
   setup(build) {

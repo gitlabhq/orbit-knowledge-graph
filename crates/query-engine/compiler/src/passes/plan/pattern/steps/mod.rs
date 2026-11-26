@@ -1,6 +1,3 @@
-//! Assembles the relation graph: the shared chain state (root, bindings, id sets), node table reads,
-//! and the steps in `edge`, `fk`, and `multi_hop` that each add one relation to the chain.
-
 mod edge;
 mod fk;
 mod multi_hop;
@@ -113,7 +110,6 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         self.nodes.get(node)?.ids.as_ref()
     }
 
-    /// Ids a non-selective node received from the edges around it; a selective node reads its own.
     fn reached_ids(&self, node: &str) -> Option<IdSet> {
         if self.pattern.endpoint_is_selective(node) {
             return None;
@@ -192,7 +188,6 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         })
     }
 
-    /// Reads a node's table into the chain, joined on the columns `on` picks, and binds the node to it.
     fn attach_table(
         &mut self,
         node: &NodePlan,
@@ -265,7 +260,6 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         Ok(ids)
     }
 
-    /// Keeps the ids an edge read produces for an endpoint when a later step can narrow by them.
     fn bind_relation_ids(&mut self, index: usize, relation: &EdgeRelation, source: RelationId) {
         let pattern = self.pattern;
         let (start, end) = relation.direction.edge_columns();

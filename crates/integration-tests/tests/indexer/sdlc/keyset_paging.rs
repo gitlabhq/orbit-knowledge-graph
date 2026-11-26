@@ -8,7 +8,6 @@ use crate::indexer::common::{
 
 const PAGE_SIZE: u64 = 2;
 
-// Id order and (started_at, id) order disagree, so a mis-ordered query would skip id 0.
 const SESSIONS: [(i64, &str, &str); 9] = [
     (0, "1/100/1000/", "2024-01-15 10:00:01.000000"),
     (1, "1/100/1000/", "2024-01-15 10:00:00.000000"),
@@ -74,7 +73,6 @@ pub async fn agent_sessions_page_by_sort_key_without_skips_or_duplicates(ctx: &T
 
 pub async fn agent_sessions_resume_from_a_saved_cursor(ctx: &TestContext) {
     seed_sessions(ctx).await;
-    // The last saved page ended at (1/100/1000/, 10:00:00.5, 3).
     ctx.execute(&format!(
         "INSERT INTO {} (key, watermark, cursor_values, _version) \
          VALUES ('ns.100.AgentSession', '2024-01-20 12:00:00.000000', \
@@ -97,7 +95,6 @@ pub async fn agent_sessions_restart_when_the_saved_cursor_has_the_old_sort_key_a
     ctx: &TestContext,
 ) {
     seed_sessions(ctx).await;
-    // Saved while AgentSession paged by [traversal_path, id].
     ctx.execute(&format!(
         "INSERT INTO {} (key, watermark, cursor_values, _version) \
          VALUES ('ns.100.AgentSession', '2024-01-20 12:00:00.000000', \

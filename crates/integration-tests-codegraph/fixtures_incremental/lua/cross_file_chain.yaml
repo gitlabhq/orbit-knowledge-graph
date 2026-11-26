@@ -62,8 +62,7 @@ tests:
       - { row: { caller: middle, callee: helper, file: a.lua } }
 
   - name: "a call to a global function from a required file links across files"
-    # Known gap: a global function that a required file defines does not link; only module tables do.
-    skip: true
+    known_gap: "a global function that a required file defines does not link; only module tables do."
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'helper'

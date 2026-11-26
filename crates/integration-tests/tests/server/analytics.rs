@@ -20,8 +20,6 @@ const IGLU_CENTRAL: &str = "https://iglucentral.com";
 const GITLAB_IGLU: &str = "https://gitlab-org.gitlab.io/iglu";
 const EMBEDDED_IGLU_ROOT: &str = "/config/iglu-client-embedded";
 
-// Must match the envelope schema versions the pinned labkit-events rev emits
-// (they are pub(crate) there); revisit on every labkit-rs bump.
 const ENVELOPE_SCHEMAS: [&str; 3] = [
     "iglu:com.snowplowanalytics.snowplow/payload_data/jsonschema/1-0-4",
     "iglu:com.snowplowanalytics.snowplow/contexts/jsonschema/1-0-1",
@@ -148,12 +146,9 @@ fn query_executed_event() -> StructuredEvent {
         environment: Some("staging".parse().expect("environment")),
         correlation_id: Some("corr-it-1".parse().expect("correlation_id")),
         instance_id: Some("inst-it".parse().expect("instance_id")),
-        unique_instance_id: None,
-        host_name: None,
         organization_id: Some(42),
         root_namespace_ids: Some(vec![99]),
-        coding_agent: None,
-        schema_version: None,
+        ..orbit_common::OrbitCommon::default()
     });
 
     let query = OrbitQueryContext::new(orbit_query::OrbitQuery {

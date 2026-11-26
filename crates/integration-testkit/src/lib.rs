@@ -18,7 +18,6 @@ pub use context::{CLICKHOUSE_IMAGE, CLICKHOUSE_TAG, TestContext};
 pub use seed::load_seed;
 pub use seeded_resolver::SeededColumnResolver;
 
-/// `GKG_TEST_ONTOLOGY_OVERLAY=<name>` merges `config/seeds/overlays/<name>/` over the ontology.
 pub(crate) fn load_unprefixed_ontology() -> ontology::Ontology {
     let Some(name) = std::env::var("GKG_TEST_ONTOLOGY_OVERLAY")
         .ok()
@@ -63,7 +62,6 @@ pub fn derive_clickhouse_data_model(
 
 pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("SEEDS_DIR"), "/siphon.sql"));
 
-/// Version 0 -> "" (empty), version N -> "vN_".
 pub static TABLE_PREFIX: std::sync::LazyLock<String> =
     std::sync::LazyLock::new(|| match orbit_versions::VERSIONS.schema {
         0 => String::new(),
@@ -74,8 +72,6 @@ pub fn t(table: &str) -> String {
     format!("{}{}", *TABLE_PREFIX, table)
 }
 
-/// Generated from the ontology so integration tests create the same prefixed
-/// tables and materialized views the indexer writes to at runtime.
 pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(|| {
     let ontology = load_unprefixed_ontology();
     let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology).unwrap();
@@ -136,12 +132,6 @@ pub async fn collect_subtest_results(handles: Vec<(String, tokio::task::JoinHand
     }
 }
 
-/// Each subtest gets its own isolated ClickHouse database via
-/// [`TestContext::fork`]. Use this when subtests write data beyond the
-/// initial seed (e.g. additional INSERTs in specific test cases).
-///
-/// At most `SUBTEST_CONCURRENCY` subtests run at a time (default 8, env
-/// var override).
 #[macro_export]
 macro_rules! run_subtests {
     ($ctx:expr, $($test_fn:path),+ $(,)?) => {{
@@ -184,12 +174,6 @@ macro_rules! run_subtests {
     }};
 }
 
-/// Unlike [`run_subtests!`], this does NOT fork a separate database per
-/// subtest. All subtests share the caller's [`TestContext`] directly.
-/// Use this when all subtests are read-only against pre-seeded data.
-///
-/// At most `SUBTEST_CONCURRENCY` subtests run at a time (default 8, env
-/// var override).
 #[macro_export]
 macro_rules! run_subtests_shared {
     ($ctx:expr, $($test_fn:path),+ $(,)?) => {{
@@ -220,4 +204,33 @@ macro_rules! run_subtests_shared {
 
         $crate::collect_subtest_results(_handles).await;
     }};
+}
+
+pub struct NamedQueryExample {
+    pub name: String,
+    pub json: String,
+    pub gql: String,
+}
+
+pub fn named_query_examples(
+    queries: &named_queries::NamedQueries,
+    current_user_id: u64,
+) -> Result<Vec<NamedQueryExample>, String> {
+    let values = named_queries::BindingValues { current_user_id };
+    queries
+        .iter()
+        .map(|query| {
+            let params = query.example_parameters();
+            let render = |language| {
+                query
+                    .render_language(language, &values, &params)
+                    .map_err(|error| format!("{}: {error}", query.name))
+            };
+            Ok(NamedQueryExample {
+                name: query.name.clone(),
+                json: render(named_queries::Language::Json)?,
+                gql: render(named_queries::Language::Gql)?,
+            })
+        })
+        .collect()
 }

@@ -52,3 +52,27 @@ cases:
             (Neighbors center=w direction=both directional outgoing=[gl_edge] incoming=[gl_edge] center_filter=false relationships=[ASSIGNED, AUTHORED, BLOCKS, CLOSED, CLOSES, CONTAINS, HAS_LABEL, HAS_NOTE, IN_GROUP, IN_MILESTONE, IN_PROJECT, MENTIONS, RELATED_TO, REOPENED] incoming_scoped=[] incoming_cross_scope=[ASSIGNED, AUTHORED, BLOCKS, CLOSED, CLOSES, CONTAINS, MENTIONS, RELATED_TO, REOPENED]
               (Filter w.id = 7, w._deleted = false
                 (NodeScan WorkItem AS w)))
+
+  - name: A single-id center records the center and its label for the response
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing"},"limit":10}
+      gql: |
+        MATCH (u:User {id: 1})-->(n) RETURN u, n LIMIT 10
+    physical:
+      clickhouse:
+        result_context:
+          neighbors_center: { entity: User, id: 1 }
+          labels: { User: username }
+
+  - name: A multi-id center records no center and no label
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1,2]}],"neighbors":{"direction":"outgoing"},"limit":10}
+      gql: |
+        MATCH (u:User)-->(n) WHERE u.id IN [1, 2] RETURN u, n LIMIT 10
+    physical:
+      clickhouse:
+        result_context:
+          neighbors_center: null
+          labels: { $exact: {} }

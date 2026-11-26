@@ -1,6 +1,3 @@
-//! Cooperative deadlines: hot loops call `check()`, and past the budget it
-//! returns `Killed` and the caller unwinds.
-
 use std::borrow::Cow;
 use std::time::{Duration, Instant};
 
@@ -135,7 +132,6 @@ impl Clock {
     }
 }
 
-/// `u64::MAX` means no deadline.
 #[derive(Clone)]
 pub struct Sentinel {
     started: Clock,

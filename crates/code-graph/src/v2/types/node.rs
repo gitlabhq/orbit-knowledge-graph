@@ -4,8 +4,6 @@ use crate::v2::config::Language;
 use orbit_utils::markdown::FrontMatterValues;
 use strum::{AsRefStr, Display, EnumIter, EnumString};
 
-/// Canonical definition categories used by the linker for
-/// language-agnostic relationship determination.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter, EnumString, AsRefStr, Display)]
 #[strum(serialize_all = "snake_case")]
 pub enum DefKind {
@@ -37,8 +35,6 @@ impl DefKind {
         }
     }
 
-    /// When a value resolves to a definition of this kind, the resolver uses its
-    /// FQN as a type name for member lookup.
     pub const fn is_type_container(&self) -> bool {
         matches!(self, Self::Class | Self::Interface | Self::Module)
     }
@@ -52,20 +48,17 @@ pub struct CanonicalDefinition {
     pub fqn: Fqn,
     pub range: Range,
     pub is_top_level: bool,
-    /// `None` for most definitions keeps the common case small.
     pub metadata: Option<Box<DefinitionMetadata>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DefinitionMetadata {
     pub super_types: Vec<String>,
-    /// `None` for void/untyped.
     pub return_type: Option<String>,
     pub type_annotation: Option<String>,
-    /// Receiver type for extension functions (Kotlin).
     pub receiver_type: Option<String>,
+    pub signature: Option<String>,
     pub decorators: Vec<String>,
-    /// If this is a companion object, the FQN of the owning class.
     pub companion_of: Option<String>,
     pub is_exported: bool,
     pub front_matter: Option<Box<FrontMatterValues>>,
@@ -80,7 +73,6 @@ pub enum ImportBindingKind {
     SideEffect,
 }
 
-/// Whether a binding enters scope through a declarative import form or a runtime load primitive.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum ImportMode {
     #[default]
@@ -99,16 +91,11 @@ pub struct CanonicalImport {
     pub scope_fqn: Option<Fqn>,
     pub range: Range,
     pub is_type_only: bool,
-    /// The resolver uses this to drive wildcard import lookup instead of matching
-    /// on `import_type` strings.
     pub wildcard: bool,
 }
 
-/// Chains are read left-to-right. The resolver resolves the base then applies
-/// each subsequent step, threading the resolved type through.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExpressionStep {
-    /// Bare identifier — the base of the chain.
     Ident(smol_str::SmolStr),
     Field(smol_str::SmolStr),
     Call(smol_str::SmolStr),
@@ -139,8 +126,6 @@ pub struct CanonicalFile {
     pub extension: String,
     pub language: Option<Language>,
     pub size: u64,
-    /// Why the file did not index cleanly (skip/fault), or `None`. Strictly an
-    /// enum so `gl_file.reason` can never hold an unbounded string.
     pub reason: crate::v2::error::FileReason,
 }
 

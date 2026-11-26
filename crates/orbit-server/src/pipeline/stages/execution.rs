@@ -143,7 +143,6 @@ async fn execute_query(
     Ok((batches, execution))
 }
 
-/// Stats come from the `X-ClickHouse-Summary` HTTP header.
 pub(crate) fn apply_summary(
     mut stats: QueryExecutionStats,
     summary: Option<&QuerySummary>,
@@ -158,7 +157,6 @@ pub(crate) fn apply_summary(
         if stats.memory_usage == 0 {
             stats.memory_usage = i64::try_from(s.memory_usage().unwrap_or(0)).unwrap_or(i64::MAX);
         }
-        // Prefer ClickHouse server elapsed over the caller's local wall time.
         if let Some(ns) = s.elapsed_ns() {
             stats.elapsed_ns = ns;
         }

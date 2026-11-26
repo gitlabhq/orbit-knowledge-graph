@@ -8,12 +8,12 @@ pub use treesitter_visit::extract::{
     no_extract, text,
 };
 
-/// Single-value fields use `Extract`. Multi-value fields use `fn(&Node) -> Vec<String>`.
 pub struct MetadataRule {
     pub super_types: Option<fn(&N<'_>) -> Vec<String>>,
     pub return_type: Option<Extract>,
     pub type_annotation: Option<Extract>,
     pub receiver_type: Option<Extract>,
+    pub signature: Option<fn(&N<'_>) -> Option<String>>,
     pub decorators: Option<fn(&N<'_>) -> Vec<String>>,
     pub companion_of: Option<Extract>,
 }
@@ -31,6 +31,7 @@ impl MetadataRule {
             return_type: None,
             type_annotation: None,
             receiver_type: None,
+            signature: None,
             decorators: None,
             companion_of: None,
         }
@@ -52,6 +53,10 @@ impl MetadataRule {
         self.receiver_type = Some(extract);
         self
     }
+    pub fn signature(mut self, f: fn(&N<'_>) -> Option<String>) -> Self {
+        self.signature = Some(f);
+        self
+    }
     pub fn decorators(mut self, f: fn(&N<'_>) -> Vec<String>) -> Self {
         self.decorators = Some(f);
         self
@@ -61,7 +66,6 @@ impl MetadataRule {
         self
     }
 
-    /// The `resolve` closure transforms bare type names into FQNs using tree context + import map.
     pub fn extract_metadata(
         &self,
         node: &N<'_>,
@@ -79,10 +83,8 @@ impl MetadataRule {
             .type_annotation
             .as_ref()
             .and_then(|e| e.apply_with(node, &resolve));
-        // receiver_type uses bare apply (no import resolution) so it
-        // stores the source-level type name. The lookup_by_receiver_type
-        // matches against bare_type extracted from the chain's FQN.
         let receiver_type = self.receiver_type.as_ref().and_then(|e| e.apply(node));
+        let signature = self.signature.and_then(|f| f(node));
         let decorators = self.decorators.map(|f| f(node)).unwrap_or_default();
         let companion_of = self.companion_of.as_ref().and_then(|e| e.apply(node));
 
@@ -90,6 +92,7 @@ impl MetadataRule {
             || return_type.is_some()
             || type_annotation.is_some()
             || receiver_type.is_some()
+            || signature.is_some()
             || !decorators.is_empty()
             || companion_of.is_some();
 
@@ -102,6 +105,7 @@ impl MetadataRule {
             return_type,
             type_annotation,
             receiver_type,
+            signature,
             decorators,
             companion_of,
             is_exported: false,

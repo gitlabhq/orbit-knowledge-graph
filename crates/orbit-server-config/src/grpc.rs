@@ -1,10 +1,10 @@
 //! gRPC server HTTP/2 tuning configuration.
 
-use schemars::JsonSchema;
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcConfig {
     pub keepalive_interval_secs: u64,
     pub keepalive_timeout_secs: u64,
@@ -12,23 +12,40 @@ pub struct GrpcConfig {
     pub connection_window_size: u32,
     pub stream_window_size: u32,
     pub concurrency_limit: usize,
-    pub max_connection_age_secs: u64,
+    /// Connection age at which the server closes a connection so clients
+    /// reconnect and spread across pods behind an L4 load balancer. Defaults to
+    /// 300. Set it to `null` to turn the maximum age off: behind the Orbit
+    /// Gateway, which balances each request, the closes rebalance nothing and
+    /// can end running queries.
+    pub max_connection_age_secs: Option<u64>,
     // Must stay paired with max_connection_age_secs: without a grace value,
     // tonic 0.14.5 panics with "async fn resumed after completion" when the
     // connection-age timer fires (hyperium/tonic#2522).
     pub max_connection_age_grace_secs: u64,
     pub stream_timeout_secs: u64,
     pub max_header_list_size_bytes: u32,
-    #[schemars(range(min = 65536, max = 4194304))]
     pub result_chunk_bytes: usize,
-    #[schemars(range(min = 1048576))]
     pub max_result_bytes: usize,
     /// How long the server waits on shutdown for in-flight requests to
     /// finish before it stops waiting and exits; requests still running then
     /// end with the process. Keep it above the longest query time and below
     /// the Kubernetes `terminationGracePeriodSeconds`.
-    #[schemars(range(min = 1))]
     pub shutdown_drain_timeout_secs: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MaxConnectionAge {
+    pub age: Duration,
+    pub grace: Duration,
+}
+
+impl GrpcConfig {
+    pub fn max_connection_age(&self) -> Option<MaxConnectionAge> {
+        self.max_connection_age_secs.map(|age| MaxConnectionAge {
+            age: Duration::from_secs(age),
+            grace: Duration::from_secs(self.max_connection_age_grace_secs),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -36,13 +53,60 @@ mod tests {
     use super::*;
     use crate::AppConfig;
 
-    // Regression guard for hyperium/tonic#2522: a zero grace with a non-zero
-    // max age reproduces the "async fn resumed after completion" panic.
     #[test]
     fn default_pairs_max_connection_age_with_nonzero_grace() {
         let cfg = AppConfig::embedded_defaults().grpc;
-        assert!(cfg.max_connection_age_secs > 0);
+        assert_eq!(cfg.max_connection_age_secs, Some(300));
         assert!(cfg.max_connection_age_grace_secs > 0);
+        assert_eq!(
+            cfg.max_connection_age(),
+            Some(MaxConnectionAge {
+                age: Duration::from_secs(300),
+                grace: Duration::from_secs(30),
+            })
+        );
+    }
+
+    #[test]
+    fn a_null_max_connection_age_turns_it_off() {
+        let cfg = AppConfig::with_overlay("grpc:\n  max_connection_age_secs: null\n")
+            .unwrap()
+            .grpc;
+        assert_eq!(cfg.max_connection_age_secs, None);
+        assert_eq!(cfg.max_connection_age(), None);
+    }
+
+    #[test]
+    fn zero_grace_is_rejected() {
+        for overlay in [
+            "grpc:\n  max_connection_age_grace_secs: 0\n",
+            "grpc:\n  max_connection_age_secs: null\n  max_connection_age_grace_secs: 0\n",
+        ] {
+            let error = AppConfig::with_overlay(overlay).unwrap_err().to_string();
+            assert!(
+                error.contains("- grpc.max_connection_age_grace_secs: "),
+                "{overlay}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn zero_max_connection_age_is_rejected() {
+        let error = rejection("max_connection_age_secs", 0);
+        assert!(
+            error.contains("- grpc.max_connection_age_secs: "),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_null_grace_is_rejected_by_the_schema() {
+        let err =
+            AppConfig::with_overlay("grpc:\n  max_connection_age_grace_secs: null\n").unwrap_err();
+        assert!(
+            err.to_string().contains("max_connection_age_grace_secs"),
+            "{err}"
+        );
     }
 
     #[test]

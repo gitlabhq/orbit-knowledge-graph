@@ -197,10 +197,6 @@ fixtures:
       }
 
 tests:
-  # ══════════════════════════════════════════════════════════════
-  # EXACT TOTAL COUNTS
-  # ══════════════════════════════════════════════════════════════
-
   - name: "Exact file count"
     query: |
       MATCH (f:File)
@@ -209,7 +205,6 @@ tests:
       - { row_count: 14 }
       - { unique: path }
 
-  # corrected: a namespace reopened in two files is one definition per block
   - name: "Class definitions — exact count"
     query: |
       MATCH (d:Definition)
@@ -247,10 +242,6 @@ tests:
       - { row: { fqn: "types::core::ErrorCode::ERR_IO" } }
       - { row: { fqn: "types::core::ErrorCode::ERR_MEM" } }
 
-  # ══════════════════════════════════════════════════════════════
-  # STATIC FUNCTION VISIBILITY
-  # ══════════════════════════════════════════════════════════════
-
   - name: "Static functions exist as definitions"
     query: |
       MATCH (d:Definition)
@@ -268,10 +259,6 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "reader::io::internal_seek", callee: "reader::io::internal_flush" } }
-
-  # ══════════════════════════════════════════════════════════════
-  # NEGATIVE ASSERTIONS
-  # ══════════════════════════════════════════════════════════════
 
   - name: "NO edge from app to static internal_flush"
     query: |
@@ -300,10 +287,6 @@ tests:
     assert:
       - { row_count: 0 }
 
-  # ══════════════════════════════════════════════════════════════
-  # INCLUDE CHAIN RESOLUTION
-  # ══════════════════════════════════════════════════════════════
-
   - name: "main calls copy_file (same file)"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -314,10 +297,6 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "app::main", callee: "app::copy_file" } }
 
-  # ══════════════════════════════════════════════════════════════
-  # DUPLICATE EDGE CHECK
-  # ══════════════════════════════════════════════════════════════
-
   - name: "copy_file CALLS edges have no duplicates"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -325,10 +304,6 @@ tests:
       RETURN callee.fqn AS callee
     assert:
       - { empty: true }
-
-  # ══════════════════════════════════════════════════════════════
-  # NESTED NAMESPACES
-  # ══════════════════════════════════════════════════════════════
 
   - name: "Nested namespace scoping"
     query: |
@@ -359,10 +334,6 @@ tests:
       - { row_count: 1 }
       - { row: { parent: "nested::outer::inner", child: "nested::outer::inner::Widget" } }
 
-  # ══════════════════════════════════════════════════════════════
-  # TEMPLATE DEFINITIONS
-  # ══════════════════════════════════════════════════════════════
-
   - name: "Template class Container exists"
     query: |
       MATCH (d:Definition)
@@ -380,10 +351,6 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { fqn: "templates::tmpl::swap", type: Function } }
-
-  # ══════════════════════════════════════════════════════════════
-  # FILE CONTAINMENT
-  # ══════════════════════════════════════════════════════════════
 
   - name: "reader.cpp defines correct functions"
     query: |
@@ -424,10 +391,6 @@ tests:
       - { row: { fqn: "app::copy_file" } }
       - { row: { fqn: "app::main" } }
 
-  # ══════════════════════════════════════════════════════════════
-  # UNION DEFINITIONS
-  # ══════════════════════════════════════════════════════════════
-
   - name: "Union Variant exists"
     query: |
       MATCH (d:Definition)
@@ -446,10 +409,6 @@ tests:
       - { row_count: 1 }
       - { row: { fqn: "unions::extra::read_int", type: Function } }
 
-  # ══════════════════════════════════════════════════════════════
-  # FOR-RANGE LOOPS
-  # ══════════════════════════════════════════════════════════════
-
   - name: "For-range loop function exists"
     query: |
       MATCH (d:Definition)
@@ -467,10 +426,6 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { fqn: "loops::extra::sum_array", type: Function } }
-
-  # ══════════════════════════════════════════════════════════════
-  # TEMPLATE USAGE (cross-file)
-  # ══════════════════════════════════════════════════════════════
 
   - name: "Template usage function exists"
     query: |

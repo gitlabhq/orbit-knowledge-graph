@@ -1,8 +1,3 @@
-//! Builders that turn accumulated indexing stats into typed Snowplow
-//! contexts. Mirrors the webserver's `analytics::context` but sources its
-//! dimensions from the indexer config, dispatch, and the instance identity
-//! Rails serves, rather than JWT claims.
-
 use gitlab_client::InstanceIdentity;
 use labkit_events::Error as LabkitError;
 use orbit_analytics::{
@@ -13,17 +8,12 @@ use orbit_server_config::AnalyticsConfig;
 
 use crate::observer::IndexingMode;
 
-/// What triggered an indexing run. The indexer can't tell a scheduled
-/// backfill from a manual one, so a campaign-correlated dispatch is treated
-/// as `Scheduled` and everything else as `Push`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TriggerType {
     Push,
     Scheduled,
 }
 
-/// Clamp to `i64::MAX` so an over-range count can't wrap to a negative,
-/// schema-invalid value (the Iglu schemas cap these fields at `i64::MAX`).
 pub(crate) fn saturating_i64(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
@@ -44,14 +34,11 @@ pub(crate) fn build_common(
                 .parse::<orbit_common::OrbitCommonEnvironment>()
                 .map_err(validation("environment"))?,
         ),
-        correlation_id: None,
         instance_id: parse_opt(&instance.instance_id, "instance_id")?,
         unique_instance_id: parse_opt(&instance.unique_instance_id, "unique_instance_id")?,
         host_name: parse_opt(&instance.host_name, "host_name")?,
-        organization_id: None,
         root_namespace_ids: root_namespace_id.map(|id| vec![id]),
-        coding_agent: None,
-        schema_version: None,
+        ..orbit_common::OrbitCommon::default()
     }))
 }
 

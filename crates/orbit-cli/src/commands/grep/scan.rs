@@ -17,11 +17,9 @@ pub(super) struct Hit {
     pub(super) text: String,
     pub(super) def: Option<Def>,
     pub(super) imports: Vec<String>,
-    /// A `-A`/`-B`/`-C` line around a match rather than a match.
     pub(super) context: bool,
 }
 
-/// Collects one file's matches and `-A`/`-B`/`-C` context lines, stopping after `-m` matches.
 struct Collect<'a> {
     file: &'a str,
     hits: Vec<Hit>,
@@ -138,8 +136,6 @@ pub(super) fn scan(
     Ok(found.into_inner().unwrap())
 }
 
-/// Path scopes compiled once for the walk. Paths that exist are literal, even with glob
-/// characters such as `app/[slug]`; the rest are globs over files and directories.
 struct Scope {
     globs: Option<globset::GlobSet>,
     prefixes: Vec<String>,

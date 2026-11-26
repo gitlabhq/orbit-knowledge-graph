@@ -1,5 +1,3 @@
-# config/ontology/nodes/code_review/merge_request_diff_file.yaml
-
 node_type: MergeRequestDiffFile
 domain: code_review
 description: A file changed in a merge request diff

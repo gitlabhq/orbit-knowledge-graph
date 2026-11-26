@@ -23,8 +23,7 @@ fixtures:
 
 tests:
   - name: a call of an overload declared before the val of its name targets the def
-    # Known gap: a class-body val is a binding, not a def, so the call of its name is typed by the val, on main too.
-    skip: true
+    known_gap: "a class-body val is a binding, not a def, so the call of its name is typed by the val."
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.fqn = 'late.Late.goCall'

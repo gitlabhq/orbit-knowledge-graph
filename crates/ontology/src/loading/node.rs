@@ -21,8 +21,6 @@ const GENERATED_QUERY: &str = "generated";
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct NodeYaml {
-    /// Mirrors the `schema.yaml` registry key, which is the value the loader
-    /// actually reads for node identity; this field is documentation only.
     #[expect(
         dead_code,
         reason = "human-facing self-documentation; the entity name is read from the schema.yaml registry key, this field mirrors it for readability in the node file"
@@ -58,8 +56,6 @@ pub(crate) struct NodeYaml {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct IndexerYaml {
-    /// Explicit reindex trigger tables: Siphon changes to any of these mean
-    /// this entity's root namespace must be re-indexed.
     #[serde(default)]
     pub(crate) reindex: Vec<ReindexOnYaml>,
 }
@@ -80,8 +76,6 @@ struct ExtractYaml {
     fields: Vec<String>,
     order_by: Vec<String>,
     query: String,
-    /// Extra `_batch` WHERE predicate appended to the traversal-path scope, e.g.
-    /// `state = 5`. Used by `query: generated` edges and `query: generated` nodes.
     #[serde(default)]
     filter: Option<String>,
     #[serde(default)]
@@ -171,11 +165,8 @@ enum EndpointKindYaml {
 struct PropertyYaml {
     #[serde(rename = "type")]
     data_type: DataType,
-    /// Source column name. Required for column-backed fields, absent for virtual fields.
     #[serde(default)]
     source: Option<String>,
-    /// Virtual source configuration. Present only for fields resolved from a
-    /// remote service. Mutually exclusive with `source`.
     #[serde(default, rename = "virtual")]
     virtual_config: Option<VirtualSourceYaml>,
     #[serde(default)]
@@ -249,7 +240,6 @@ struct NodeStorageYaml {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct StorageColumnYaml {
     pub name: String,
-    /// Exact ClickHouse type, e.g. `"Int64"`, `"Nullable(String)"`, `"LowCardinality(String)"`.
     #[serde(rename = "type")]
     pub ch_type: String,
     #[serde(default)]
@@ -280,13 +270,8 @@ pub(crate) enum StorageProjectionYaml {
     #[serde(rename = "lightweight")]
     Lightweight {
         name: String,
-        /// Raw ORDER BY columns. Mutually exclusive with `versioned_sort_key`.
         #[serde(default)]
         order_by: Vec<String>,
-        /// Prefix columns for a dedup-compatible LWP. The table sort key and
-        /// `_version` are appended automatically, producing an ORDER BY of
-        /// `(prefix..., sort_key..., _version)`. Mutually exclusive with
-        /// `order_by`.
         #[serde(default)]
         versioned_sort_key: Vec<String>,
     },
@@ -304,12 +289,8 @@ struct VirtualSourceYaml {
     lookup: String,
     #[serde(default)]
     disabled: bool,
-    /// Column-backed properties this virtual field needs in the property map
-    /// for resolution. The compiler ensures these are fetched during hydration.
     #[serde(default)]
     depends_on: Vec<String>,
-    /// Filter operators allowed on this virtual column. When omitted, all
-    /// default virtual ops are allowed.
     #[serde(default)]
     allowed_ops: Vec<String>,
 }
@@ -516,7 +497,6 @@ impl NodeYaml {
             .iter()
             .any(|f| f.name == crate::constants::TRAVERSAL_PATH_COLUMN);
 
-        // A global hub must be non-namespaced; a traversal_path would let elision drop a scope filter.
         if self.global && has_traversal_path {
             return Err(OntologyError::Validation(format!(
                 "node '{name}' is `global: true` but declares a `traversal_path` column; global hubs must be non-namespaced"
@@ -616,9 +596,6 @@ fn validate_generated_node_transform_source_fields(
 pub(crate) struct PipelineOptions<'a> {
     pub yaml_path: &'a str,
     pub allow_rust_transform: bool,
-    /// True only for derived-entity pipelines, which must carry authored SQL
-    /// (their rows are neither node properties nor edge endpoints, so there is
-    /// nothing for the indexer to generate a projection from).
     pub is_derived: bool,
 }
 
@@ -707,9 +684,6 @@ struct BuildPipeline<'a, R: ReadOntologyFile> {
     is_derived: bool,
 }
 
-/// Builds the declarative `Pipeline` shared by node and edge construction. The
-/// extract SQL itself is not produced here — the indexer generates it from this
-/// model; only authored `.sql.j2` files are resolved (verbatim) at load time.
 fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeline, OntologyError> {
     if b.extract.order_by.is_empty() {
         return Err(OntologyError::Validation(format!(
@@ -731,8 +705,6 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
             b.extract.tables.len()
         )));
     }
-    // Derived-entity rows are neither node properties nor edge endpoints, so the
-    // indexer has nothing to project them from; they must carry authored SQL.
     if b.is_derived && generated {
         return Err(OntologyError::Validation(format!(
             "pipeline '{}': derived entities require an authored .sql.j2 extract, not query: generated",
@@ -860,9 +832,6 @@ fn convert_path_resolution(
 }
 
 impl ExtractYaml {
-    /// Classifies the `query:` field. `generated` builds `ExtractQuery::Generated`
-    /// (the indexer produces the SQL); a `.sql.j2` file is read and carried verbatim.
-    /// No substitution or parsing happens here — that is the indexer's concern.
     fn resolve_query(
         &self,
         reader: &impl ReadOntologyFile,
@@ -873,6 +842,16 @@ impl ExtractYaml {
         match self.query.as_str() {
             GENERATED_QUERY => Ok(ExtractQuery::Generated { filter }),
             file if file.ends_with(".sql.j2") => {
+                let yaml_stem = Path::new(yaml_path)
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy())
+                    .unwrap_or_default();
+                let expected = format!("{yaml_stem}.sql.j2");
+                if file != expected {
+                    return Err(OntologyError::Validation(format!(
+                        "pipeline '{pipeline_name}': extract.query must be '{expected}', named after its YAML file"
+                    )));
+                }
                 let sql_path = Path::new(yaml_path)
                     .parent()
                     .map(|dir| dir.join(file))
@@ -1338,6 +1317,36 @@ mod tests {
     }
 
     #[test]
+    fn node_rejects_a_template_named_after_another_file() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  order_by: [id]
+                  query: other_node.sql.j2
+                transform:
+                  type: datafusion
+            "#,
+        );
+        let err = result.expect_err("a template named after another file should be rejected");
+        assert!(
+            err.to_string()
+                .contains("extract.query must be 'test_node.sql.j2'"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
     fn node_rejects_lookups_on_sql_query() {
         let result = parse_test_node(
             r#"
@@ -1750,8 +1759,6 @@ mod tests {
 
     #[test]
     fn generated_edge_carries_filter_and_lookup_declaration() {
-        // The edge SQL itself is generated by the indexer (covered by its golden);
-        // here we assert the declarative model the indexer consumes.
         let ontology = crate::Ontology::load_embedded().expect("load");
         let edge_pipeline = |name: &str| {
             ontology

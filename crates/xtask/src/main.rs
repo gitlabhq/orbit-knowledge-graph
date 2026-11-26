@@ -11,15 +11,16 @@ mod metrics_catalog;
 mod migration_ledger;
 mod proto;
 mod query_docs;
-mod schema;
 mod synth;
 
-/// GKG development task runner.
-///
-/// Automates common development workflows like synthetic data generation,
-/// query evaluation, and schema management.
 #[derive(Parser)]
-#[command(name = "xtask", version, about)]
+#[command(
+    name = "xtask",
+    version,
+    about = "GKG development task runner",
+    long_about = "GKG development task runner.\n\n\
+        Automates common development workflows like synthetic data generation, query evaluation, and schema management."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -31,191 +32,247 @@ enum Command {
     CodeIndexingBenchmark {
         #[arg(value_enum)]
         action: code_indexing_benchmark::Action,
-        /// Cache root for repositories, builds, index data, and results.
-        #[arg(long, env = "ORBIT_BENCH_ROOT")]
-        root: Option<std::path::PathBuf>,
-        /// Repository corpus configuration.
         #[arg(
             long,
-            default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/../../code-indexing-benchmark.yaml")
+            env = "ORBIT_BENCH_ROOT",
+            help = "Cache root for repositories, builds, index data, and results"
+        )]
+        root: Option<std::path::PathBuf>,
+        #[arg(
+            long,
+            default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/../../code-indexing-benchmark.yaml"),
+            help = "Repository corpus configuration",
         )]
         config: std::path::PathBuf,
     },
-    /// Synthetic graph data pipeline (generate, load, evaluate).
+    #[command(about = "Synthetic graph data pipeline (generate, load, evaluate)")]
     Synth {
         #[command(subcommand)]
         command: SynthCommand,
     },
-    /// Regenerate the prost types and descriptor set for the server
-    /// configuration schema.
+    #[command(
+        about = "Regenerate the prost types and descriptor set for the server configuration schema"
+    )]
     ProtoConfig,
-    /// Generate JSON Schema for the server configuration.
-    Schema {
-        /// Write schema to a file instead of stdout.
-        #[arg(short, long)]
-        output: Option<std::path::PathBuf>,
-    },
-    /// Generate the shared metrics catalog consumed by runbooks dashboards.
+    #[command(about = "Generate the shared metrics catalog consumed by runbooks dashboards")]
     MetricsCatalog {
-        /// Write catalog JSON to this path instead of the default.
-        #[arg(short, long)]
+        #[arg(
+            short,
+            long,
+            help = "Write catalog JSON to this path instead of the default"
+        )]
         output: Option<std::path::PathBuf>,
-        /// Diff the regenerated catalog against the committed file and
-        /// return a non-zero exit if they differ.
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Diff the regenerated catalog against the committed file and return a non-zero exit if they differ"
+        )]
         check: bool,
     },
-    /// Generate graph DDL from the ontology.
+    #[command(about = "Generate graph DDL from the ontology")]
     Ddl {
-        /// Target database dialect.
-        #[arg(long, short, default_value = "remote")]
+        #[arg(
+            long,
+            short,
+            default_value = "remote",
+            help = "Target database dialect"
+        )]
         target: DdlTarget,
 
-        /// Path to ontology directory (default: embedded).
-        #[arg(long, short)]
+        #[arg(long, short, help = "Path to ontology directory (default: embedded)")]
         ontology: Option<std::path::PathBuf>,
 
-        /// Table prefix (e.g., "v1_"; remote only).
-        #[arg(long, short, default_value = "")]
+        #[arg(
+            long,
+            short,
+            default_value = "",
+            help = "Table prefix (e.g., \"v1_\"; remote only)"
+        )]
         prefix: String,
 
-        /// Diff generated DDL against an existing .sql file (remote only).
-        #[arg(long, short)]
+        #[arg(
+            long,
+            short,
+            help = "Diff generated DDL against an existing .sql file (remote only)"
+        )]
         diff: Option<std::path::PathBuf>,
     },
-    /// Generate the Orbit Grafana dashboards from the metric catalog.
+    #[command(about = "Generate the Orbit Grafana dashboards from the metric catalog")]
     Dashboards {
-        /// Write dashboards under this directory instead of the default.
-        #[arg(short, long)]
+        #[arg(
+            short,
+            long,
+            help = "Write dashboards under this directory instead of the default"
+        )]
         dir: Option<std::path::PathBuf>,
-        /// Diff regenerated dashboards against the committed files and
-        /// return a non-zero exit if they differ.
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Diff regenerated dashboards against the committed files and return a non-zero exit if they differ"
+        )]
         check: bool,
     },
-    /// Manage the schema-migration ledger (config/schema-migrations.yaml).
+    #[command(about = "Manage the schema-migration ledger (config/schema-migrations.yaml)")]
     MigrationLedger {
         #[command(subcommand)]
         command: MigrationLedgerCommand,
     },
-    /// Verify that the integration lanes partition every container test.
+    #[command(about = "Verify that the integration lanes partition every container test")]
     IntegrationLanes {
-        /// Check the filters in .gitlab-ci.yml.
-        #[arg(long)]
+        #[arg(long, help = "Check the filters in .gitlab-ci.yml")]
         check: bool,
     },
-    /// Regenerate the auto-derived tables in the query language reference doc
-    /// from the ontology (currently the text-indexed properties table).
+    #[command(
+        about = "Regenerate the auto-derived tables in the query language reference doc from the ontology (currently the text-indexed properties table)"
+    )]
     QueryDocs {
-        /// Path to the doc to update instead of the default.
-        #[arg(short, long)]
+        #[arg(short, long, help = "Path to the doc to update instead of the default")]
         doc: Option<std::path::PathBuf>,
-        /// Diff the regenerated table against the committed doc and return a
-        /// non-zero exit if they differ.
-        #[arg(long)]
-        check: bool,
-    },
-    /// Run a gRPC load test against a running Orbit server, replaying the
-    /// performance query corpus and reporting latency percentiles (plus
-    /// optional ClickHouse server-side work per query).
-    ///
-    /// Requires GKG_JWT_SECRET (base64-encoded HMAC key, same as the server).
-    #[cfg(feature = "loadtest")]
-    Loadtest {
-        /// gRPC endpoint of the Orbit server (plaintext HTTP/2).
-        #[arg(long, env = "ORBIT_ENDPOINT", default_value = "http://127.0.0.1:50054")]
-        endpoint: String,
-
-        /// Requests per query per round, all in flight at once.
-        #[arg(long, default_value_t = 20)]
-        concurrency: usize,
-
-        /// Measured rounds; each runs every query once in seeded shuffled order.
-        /// Requests per query = concurrency * rounds.
-        #[arg(long, default_value_t = 5)]
-        rounds: usize,
-
-        /// Discarded rounds, shaped like measured ones, before measuring (0 = none).
-        #[arg(long, default_value_t = 1)]
-        warmup_rounds: usize,
-
-        /// Seed for the per-round query order.
-        #[arg(long, default_value_t = 42)]
-        seed: u64,
-
-        /// ClickHouse HTTP URL for server-side stats from system.query_log
-        /// (unset = skip).
-        #[arg(long, env = "ORBIT_PERF_CLICKHOUSE_URL")]
-        clickhouse_url: Option<String>,
-
-        /// ClickHouse user for server-side stats.
-        #[arg(long, env = "ORBIT_PERF_CLICKHOUSE_USER", default_value = "default")]
-        clickhouse_user: String,
-
-        /// ClickHouse password for server-side stats.
-        #[arg(long, env = "ORBIT_PERF_CLICKHOUSE_PASSWORD", hide_env_values = true)]
-        clickhouse_password: Option<String>,
-
-        /// Run id embedded in every correlation id ([A-Za-z0-9-]; default:
-        /// timestamp-derived).
-        #[arg(long, env = "CI_JOB_ID")]
-        run_id: Option<String>,
-
-        /// Directory of scenario YAML files to replay (recursively).
         #[arg(
             long,
-            default_value = "crates/integration-tests/tests/server/performance/scenarios"
+            help = "Diff the regenerated table against the committed doc and return a non-zero exit if they differ"
+        )]
+        check: bool,
+    },
+    #[command(
+        about = "Run a gRPC load test against a running Orbit server, replaying the performance query corpus and reporting latency percentiles (plus optional ClickHouse server-side work per query)",
+        long_about = "Run a gRPC load test against a running Orbit server, replaying the performance query corpus and reporting latency percentiles (plus optional ClickHouse server-side work per query).\n\n\
+            Requires GKG_JWT_SECRET (base64-encoded HMAC key, same as the server)."
+    )]
+    #[cfg(feature = "loadtest")]
+    Loadtest {
+        #[arg(
+            long,
+            env = "ORBIT_ENDPOINT",
+            default_value = "http://127.0.0.1:50054",
+            help = "gRPC endpoint of the Orbit server (plaintext HTTP/2)"
+        )]
+        endpoint: String,
+
+        #[arg(
+            long,
+            default_value_t = 20,
+            help = "Requests per query per round, all in flight at once"
+        )]
+        concurrency: usize,
+
+        #[arg(
+            long,
+            default_value_t = 5,
+            help = "Measured rounds; each runs every query once in seeded shuffled order. Requests per query = concurrency * rounds"
+        )]
+        rounds: usize,
+
+        #[arg(
+            long,
+            default_value_t = 1,
+            help = "Discarded rounds, shaped like measured ones, before measuring (0 = none)"
+        )]
+        warmup_rounds: usize,
+
+        #[arg(
+            long,
+            default_value_t = 42,
+            help = "Seed for the per-round query order"
+        )]
+        seed: u64,
+
+        #[arg(
+            long,
+            env = "ORBIT_PERF_CLICKHOUSE_URL",
+            help = "ClickHouse HTTP URL for server-side stats from system.query_log (unset = skip)"
+        )]
+        clickhouse_url: Option<String>,
+
+        #[arg(
+            long,
+            env = "ORBIT_PERF_CLICKHOUSE_USER",
+            default_value = "default",
+            help = "ClickHouse user for server-side stats"
+        )]
+        clickhouse_user: String,
+
+        #[arg(
+            long,
+            env = "ORBIT_PERF_CLICKHOUSE_PASSWORD",
+            hide_env_values = true,
+            help = "ClickHouse password for server-side stats"
+        )]
+        clickhouse_password: Option<String>,
+
+        #[arg(
+            long,
+            env = "CI_JOB_ID",
+            help = "Run id embedded in every correlation id ([A-Za-z0-9-]; default: timestamp-derived)"
+        )]
+        run_id: Option<String>,
+
+        #[arg(
+            long,
+            default_value = "crates/integration-tests/tests/server/performance/scenarios",
+            help = "Directory of scenario YAML files to replay (recursively)"
         )]
         scenarios: std::path::PathBuf,
 
-        /// Run a single scenario whose label contains this substring.
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Run a single scenario whose label contains this substring"
+        )]
         query: Option<String>,
 
-        /// Sign the JWT as a non-admin user (admin bypasses path scoping).
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Sign the JWT as a non-admin user (admin bypasses path scoping)"
+        )]
         no_admin: bool,
 
-        /// Per-request gRPC deadline, in seconds.
-        #[arg(long, default_value_t = 30)]
+        #[arg(
+            long,
+            default_value_t = 30,
+            help = "Per-request gRPC deadline, in seconds"
+        )]
         timeout: u64,
 
-        /// Print each scenario's `<entity>\t<node id>\t<label>` and exit without connecting.
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Print each scenario's `<entity>\\t<node id>\\t<label>` and exit without connecting"
+        )]
         list_node_ids: bool,
     },
 }
 
 #[derive(Subcommand)]
 enum MigrationLedgerCommand {
-    /// Recompute fingerprints, derive the scope, and append or amend an entry.
+    #[command(about = "Recompute fingerprints, derive the scope, and append or amend an entry")]
     Bump {
-        /// Widen the derived scope: `*`, `sdlc`, or `code`.
-        #[arg(long)]
+        #[arg(long, help = "Widen the derived scope: `*`, `sdlc`, or `code`")]
         scope: Option<String>,
-        /// Comma-separated SDLC entities (with `--scope sdlc`) to widen the entry.
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Comma-separated SDLC entities (with `--scope sdlc`) to widen the entry"
+        )]
         entities: Option<String>,
-        /// Note recorded on the entry.
-        #[arg(long)]
+        #[arg(long, help = "Note recorded on the entry")]
         note: Option<String>,
-        /// Ref whose schema pin decides bump-vs-amend (default origin/main).
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Ref whose schema pin decides bump-vs-amend (default origin/main)"
+        )]
         base: Option<String>,
-        /// Force amend when the base ref is unavailable.
-        #[arg(long)]
+        #[arg(long, help = "Force amend when the base ref is unavailable")]
         amend: bool,
-        /// Force a new bump when the base ref is unavailable.
-        #[arg(long)]
+        #[arg(long, help = "Force a new bump when the base ref is unavailable")]
         new: bool,
     },
-    /// Verify the committed snapshot and ledger match the working ontology.
+    #[command(about = "Verify the committed snapshot and ledger match the working ontology")]
     Check {
-        /// Enforce the under-declaration guard against this base ref.
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Enforce the under-declaration guard against this base ref"
+        )]
         base: Option<String>,
     },
-    /// Snapshot auxiliary tables and refreshable views without changing the schema pin.
+    #[command(
+        about = "Snapshot auxiliary tables and refreshable views without changing the schema pin"
+    )]
     Snapshot,
 }
 
@@ -264,54 +321,49 @@ impl clap::ValueEnum for DdlTarget {
 
 #[derive(Subcommand)]
 enum SynthCommand {
-    /// Generate synthetic SDLC data to Parquet files.
+    #[command(about = "Generate synthetic SDLC data to Parquet files")]
     Generate {
-        /// Path to YAML configuration file.
-        #[arg(short, long, default_value = concat!(env!("XTASK_DIR"), "/simulator.yaml"))]
+        #[arg(short, long, default_value = concat!(env!("XTASK_DIR"), "/simulator.yaml"), help = "Path to YAML configuration file")]
         config: std::path::PathBuf,
 
-        /// Print the generation plan without executing.
-        #[arg(long)]
+        #[arg(long, help = "Print the generation plan without executing")]
         dry_run: bool,
 
-        /// Force regeneration even if data exists.
-        #[arg(long)]
+        #[arg(long, help = "Force regeneration even if data exists")]
         force: bool,
     },
-    /// Load generated Parquet data into ClickHouse.
+    #[command(about = "Load generated Parquet data into ClickHouse")]
     Load {
-        /// Path to YAML configuration file.
-        #[arg(short, long, default_value = concat!(env!("XTASK_DIR"), "/simulator.yaml"))]
+        #[arg(short, long, default_value = concat!(env!("XTASK_DIR"), "/simulator.yaml"), help = "Path to YAML configuration file")]
         config: std::path::PathBuf,
 
-        /// Skip creating/dropping tables (useful for reloading).
-        #[arg(long)]
+        #[arg(long, help = "Skip creating/dropping tables (useful for reloading)")]
         no_schema: bool,
 
-        /// Skip loading data (useful for just adding indexes/projections).
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Skip loading data (useful for just adding indexes/projections)"
+        )]
         no_data: bool,
 
-        /// Skip adding indexes.
-        #[arg(long)]
+        #[arg(long, help = "Skip adding indexes")]
         no_indexes: bool,
 
-        /// Skip adding projections.
-        #[arg(long)]
+        #[arg(long, help = "Skip adding projections")]
         no_projections: bool,
 
-        /// Use clickhouse-client CLI for loading (faster, more reliable).
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Use clickhouse-client CLI for loading (faster, more reliable)"
+        )]
         use_cli: bool,
     },
-    /// Execute SDLC queries and collect statistics.
+    #[command(about = "Execute SDLC queries and collect statistics")]
     Evaluate {
-        /// Path to YAML configuration file.
-        #[arg(short, long, default_value = concat!(env!("XTASK_DIR"), "/simulator.yaml"))]
+        #[arg(short, long, default_value = concat!(env!("XTASK_DIR"), "/simulator.yaml"), help = "Path to YAML configuration file")]
         config: std::path::PathBuf,
 
-        /// Verbose output.
-        #[arg(short, long)]
+        #[arg(short, long, help = "Verbose output")]
         verbose: bool,
     },
 }
@@ -386,7 +438,6 @@ async fn main() -> Result<()> {
             }
         },
         Command::ProtoConfig => proto::run(),
-        Command::Schema { output } => schema::run(output),
         Command::MigrationLedger { command } => match command {
             MigrationLedgerCommand::Bump {
                 scope,

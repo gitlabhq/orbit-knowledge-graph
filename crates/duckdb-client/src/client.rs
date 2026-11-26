@@ -19,8 +19,6 @@ pub struct DuckDbClient {
     conn: duckdb::Connection,
 }
 
-/// DuckDB emits `IO Error: Could not set lock on file` when another
-/// process holds the write lock, surfaced with the message embedded.
 fn is_lock_error(e: &impl std::fmt::Display) -> bool {
     let msg = e.to_string().to_ascii_lowercase();
     msg.contains("could not set lock") || msg.contains("lock on file")
@@ -31,11 +29,8 @@ pub enum OpenMode<'a> {
     ReadWrite(&'a Path),
     ReadOnly(&'a Path),
     InMemory,
-    /// In memory, where SQL may `ATTACH` database files under this directory only.
     InMemoryAttaching(&'a Path),
-    /// In memory, where [`DuckDbClient::create_temp_table`] can load Arrow batches.
     InMemoryArrow,
-    /// Another connection to an open database, sharing its settings and thread pool.
     Connection(&'a DuckDbClient),
 }
 
@@ -64,8 +59,6 @@ impl DuckDbClient {
         }
     }
 
-    /// Retries while another process holds the lock: briefly when read-only,
-    /// with backoff up to ~26 s when read-write.
     fn open_file(path: &Path, read_only: bool) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| DuckDbError::Schema(e.to_string()))?;
@@ -111,14 +104,14 @@ impl DuckDbClient {
                 )
             })
             .unwrap_or_default();
+        let time_zone = utc_time_zone_statement(&conn)?;
         conn.execute_batch(&format!(
-            "{allowed} SET TimeZone = 'UTC'; SET enable_external_access = false; SET lock_configuration = true;"
+            "{allowed} {time_zone} SET enable_external_access = false; SET lock_configuration = true;"
         ))
         .map_err(|e| DuckDbError::Schema(e.to_string()))?;
         Ok(Self { conn })
     }
 
-    /// The table lives until this connection closes.
     pub fn create_temp_table(&self, table: &str, batch: RecordBatch) -> Result<()> {
         let batch = ArrowBatchRegistration::new(batch);
         self.conn.execute(
@@ -138,8 +131,6 @@ impl DuckDbClient {
         Ok(())
     }
 
-    /// Bulk insert via DuckDB's Appender, which converts Arrow RecordBatch
-    /// directly to DuckDB DataChunks — no SQL parsing, no vtab overhead.
     pub fn insert_arrow(
         &self,
         table: &str,
@@ -213,6 +204,20 @@ impl DuckDbClient {
         let boxed = json_params_to_sql(params);
         self.query_arrow_params(sql, &boxed)
     }
+}
+
+fn utc_time_zone_statement(conn: &duckdb::Connection) -> Result<&'static str> {
+    let has_setting: bool = conn
+        .query_row(
+            "SELECT count(*) > 0 FROM duckdb_settings() WHERE name = 'TimeZone'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| DuckDbError::Schema(e.to_string()))?;
+    if !has_setting {
+        return Ok("");
+    }
+    Ok("SET TimeZone = 'UTC';")
 }
 
 fn json_params_to_sql(params: &[serde_json::Value]) -> Vec<Box<dyn duckdb::ToSql>> {

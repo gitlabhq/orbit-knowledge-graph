@@ -1,42 +1,14 @@
-//! Regenerates the auto-derivable tables in the query language reference docs
-//! from the ontology.
-//!
-//! Currently this owns the **text-indexed properties** table: the set of
-//! `(entity, property)` pairs that accept the `token_match`, `all_tokens`, and
-//! `any_tokens` operators. That set is the columns carrying the `text`
-//! storage index in the ontology YAML — the same signal the compiler's
-//! token-operator validation enforces — so the table is fully derivable and
-//! must never be hand-edited.
-//!
-//! The table appears in the committed published reference, which is updated here:
-//! - `docs/docs-gitlab-com/queries/query-language.md`
-//!
-//! The generated table lives between HTML marker comments in each doc:
-//!
-//! ```text
-//! <!-- BEGIN GENERATED: text-indexed-properties -->
-//! ...generated table...
-//! <!-- END GENERATED: text-indexed-properties -->
-//! ```
-//!
-//! Everything outside the markers stays hand-authored. With `--check`, each
-//! committed file is compared against a fresh render and the command fails on
-//! drift, mirroring the `metrics-catalog` and `dashboards` CI gates.
-
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use ontology::Ontology;
 
-/// Paths are relative to the workspace root.
 const DEFAULT_DOCS: &[&str] = &["docs/docs-gitlab-com/queries/query-language.md"];
 
 const BEGIN_MARKER: &str = "<!-- BEGIN GENERATED: text-indexed-properties -->";
 const END_MARKER: &str = "<!-- END GENERATED: text-indexed-properties -->";
 
-/// Sanity floor so an accidental ontology-loading regression (or an empty
-/// embedded ontology) fails the check rather than silently wiping the table.
 const MIN_ENTITIES: usize = 10;
 
 pub fn run(doc: Option<PathBuf>, check: bool) -> Result<()> {
@@ -69,8 +41,6 @@ pub fn run(doc: Option<PathBuf>, check: bool) -> Result<()> {
     Ok(())
 }
 
-/// Updates one doc in place (or, with `check`, reports drift without writing).
-/// Returns `true` when `check` is set and the doc is stale.
 fn process_doc(path: &Path, table: &str, check: bool) -> Result<bool> {
     let current =
         fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
@@ -95,12 +65,7 @@ fn process_doc(path: &Path, table: &str, check: bool) -> Result<bool> {
     Ok(false)
 }
 
-/// Renders the markdown table body (without the surrounding marker comments).
 fn render_table(ontology: &Ontology) -> Result<String> {
-    // Node-only by design: the validator's token-op gate keys off
-    // `text_indexed_columns`, which is itself node-only, and no edge YAML
-    // carries a `text` index. If an edge ever gains one, extend both this
-    // iteration and the validator lookup together so the docs can't omit it.
     let mut rows: Vec<(&str, Vec<&str>)> = ontology
         .nodes()
         .filter_map(|node| {
@@ -136,17 +101,6 @@ fn render_table(ontology: &Ontology) -> Result<String> {
     Ok(out)
 }
 
-/// Replaces the content between the BEGIN/END markers with `table`, leaving the
-/// markers (and a blank line of padding) in place. Fails if either marker is
-/// missing or duplicated so a botched edit can't silently disable the gate. A
-/// duplicate marker pair is the dangerous case: `find()` would only ever
-/// rewrite the first region, so a stale second region would survive while
-/// `--check` reports "up to date".
-///
-/// END is searched only after BEGIN's end position, so an END that precedes
-/// BEGIN (or one embedded inside the region) can never be mistaken for the
-/// closing marker — it falls through to the missing-marker error instead of
-/// silently truncating the replacement.
 fn replace_marked_region(doc: &str, table: &str) -> Result<String> {
     let begin_count = doc.matches(BEGIN_MARKER).count();
     let end_count = doc.matches(END_MARKER).count();
@@ -175,12 +129,6 @@ fn replace_marked_region(doc: &str, table: &str) -> Result<String> {
     Ok(out)
 }
 
-/// Prints a positional (line-index) comparison, not an LCS diff: when a row is
-/// inserted or removed every following line reads as changed. That is adequate
-/// here because the generated region is a sorted table — drift is almost always
-/// an in-place edit or an added/removed adjacent row — and a real diff crate is
-/// not worth the dependency for a CI hint. The authoritative output is the
-/// "run `mise run docs:query-language`" instruction, not this preview.
 fn print_diff(before: &str, after: &str) {
     let before_lines: Vec<&str> = before.lines().collect();
     let after_lines: Vec<&str> = after.lines().collect();

@@ -1,0 +1,85 @@
+name: "C++: quoted includes resolve through the src and include roots"
+
+fixtures:
+  - path: include/calc/calc.hpp
+    content: |
+      int add(int a, int b);
+
+  - path: include/flat.hpp
+    content: |
+      int flat(int a);
+
+  - path: src/calc.cpp
+    content: |
+      #include "calc/calc.hpp"
+      int add(int a, int b) { return a + b; }
+
+  - path: src/flat.cpp
+    content: |
+      #include "flat.hpp"
+      int flat(int a) { return a; }
+
+  - path: src/main.cpp
+    content: |
+      #include "calc/calc.hpp"
+      #include "flat.hpp"
+      #include "include/flat.hpp"
+      #include "missing/gone.hpp"
+      int run() { return add(1, 2) + flat(3); }
+
+  - path: src/local.hpp
+    content: |
+      int local();
+
+  - path: include/local.hpp
+    content: |
+      int local();
+
+  - path: src/local.cpp
+    content: |
+      #include "local.hpp"
+      int local() { return 1; }
+
+  - path: include/local_impl.cpp
+    content: |
+      #include "local.hpp"
+      int local() { return 2; }
+
+  - path: src/use_local.cpp
+    content: |
+      #include "local.hpp"
+      int use_local() { return local(); }
+
+  - path: src/orphan.cpp
+    content: |
+      #include "missing/gone.hpp"
+      int orphan() { return gone(); }
+
+tests:
+  - name: "an include directory path and a flat include reach the header definitions"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: add } }
+      - { row: { name: flat } }
+
+  - name: "a header next to the includer wins over the same name under include"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'use_local'
+      RETURN callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: src/local.cpp } }
+
+  - name: "a missing header produces no edge"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'orphan'
+      RETURN callee.name AS name
+    assert:
+      - { row_count: 0 }

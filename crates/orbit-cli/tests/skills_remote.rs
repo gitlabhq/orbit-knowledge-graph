@@ -88,8 +88,6 @@ fn mock_server(replies: Vec<Reply>) -> (String, thread::JoinHandle<Vec<Request>>
     (base_url, handle)
 }
 
-/// A `PATH` with no `glab` on it, so no test reaches the developer's real glab
-/// login through the credential helper.
 const PATH_WITHOUT_GLAB: &str = "/nonexistent-orbit-test-path";
 
 #[cfg(unix)]
@@ -807,7 +805,6 @@ fn installed_manifest(skills: &std::path::Path) -> String {
 #[test]
 fn setup_installs_the_wrapper_without_contacting_the_instance() {
     let project = tempfile::tempdir().unwrap();
-    // No reply is queued: any request would fail the mock server's accept deadline.
     let (url, server) = mock_server(vec![]);
 
     let (output, skills) = setup_skill(Some(&url), &project, &[]);

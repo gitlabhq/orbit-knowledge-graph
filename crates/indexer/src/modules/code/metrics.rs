@@ -225,7 +225,6 @@ impl CodeMetrics {
         }
     }
 
-    /// Queue time is off the work budget, so without this a starved pod is invisible.
     pub(in crate::modules::code) fn record_slot_wait(&self, slot: &'static str, elapsed: Duration) {
         self.pipeline_phase_duration.record(
             elapsed.as_secs_f64(),
@@ -311,7 +310,6 @@ impl<T> RecordStageError<T> for Result<T, HandlerError> {
     }
 }
 
-/// Path-based because files skip or fault before parsing. `.ts` is `type_script` here but `java_script` in the timing metrics.
 fn file_language(path: &str) -> String {
     detect_language_from_path(path).map_or_else(|| "unknown".to_string(), |l| l.to_string())
 }

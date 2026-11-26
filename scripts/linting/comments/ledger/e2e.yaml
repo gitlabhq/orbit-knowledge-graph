@@ -1,0 +1,142 @@
+"e2e/config/siphon-layout.yaml":
+- category: contract
+  reason: "Identifiers must match application_identifier values in siphon.yaml.gotmpl; no check links the files."
+  preview: "# Siphon deployment layout for e2e."
+  hash: d4e11195253487d1
+  lines: 8
+- category: upstream
+  reason: "Required since siphon 0.0.99-beta; it must match the producer stream_name or events are not consumed."
+  preview: "# Required since siphon 0.0.99-beta; must match the producer's queueing…"
+  hash: b82ad6e988315cee
+  lines: 1
+- category: invariant
+  reason: "Without the reconciler, rows inserted before their JOIN dependencies stay missing from the view."
+  preview: "# Reconciler runs scheduled refresh jobs that backfill derived ClickHou…"
+  hash: 1c1ddc122f0570bd
+  lines: 4
+"e2e/config/versions.yaml":
+- category: upstream
+  reason: "Chart, ref, and CNG digests must bump together; images default to a moving :master tag."
+  preview: "# Devel (nightly) chart from gitlab-devel/gitlab. The chart version,"
+  hash: daada5c286ad1e16
+  lines: 6
+- category: contract
+  reason: "An unpinned master workhorse can misread the pinned webservice payload and silently 502."
+  preview: "# Per-component digest pins. Consumed by values/gitlab.yaml.gotmpl which"
+  hash: 7619246359f9d769
+  lines: 6
+- category: upstream
+  reason: "Bitnami's main registry went paid; the legacy mirror is the only free source of these tags."
+  preview: "# Bitnami's main registry switched to paid in Aug 2025; the legacy free"
+  hash: ccb4b1fe479e327e
+  lines: 2
+"e2e/scripts/bootstrap-instance.sh":
+- category: invariant
+  reason: "Toolbox runs before migrations finish, so gating on the pod crashes rails-runner."
+  preview: "# Gate on the migrations Job, not the toolbox pod: toolbox goes Running"
+  hash: 7814cbd4e1fe0ba6
+  lines: 2
+- category: security
+  reason: "Only the PAT goes to stdout and the activation code stays out of the process list."
+  preview: "# Status messages go to stderr; only the PAT lands on stdout so the bash"
+  hash: 539d5b3fe2f2001a
+  lines: 5
+"e2e/scripts/ch-chaos.sh":
+- category: upstream
+  reason: "DDL blocks and fails while a replica is down, so the first kill follows migrations."
+  preview: "# Kill one ClickHouse replica while the stack is busy, then wait for it…"
+  hash: ce8ea4df07db50dc
+  lines: 4
+"e2e/scripts/install-ci-tools.sh":
+- category: upstream
+  reason: "GitLab SaaS runs after_script in a fresh container, so tooling must install again."
+  preview: "# Installs the kube tooling the e2e job needs. Idempotent so it can be …"
+  hash: ec2b9e2b0c8de2d3
+  lines: 3
+"e2e/scripts/patch-ch-dicts.sh":
+- category: upstream
+  reason: "The upstream CACHE layout can cache a CDC race miss as '0/' and poison inserts; DIRECT avoids it."
+  preview: "# Recreate the traversal-path dictionaries with LAYOUT(DIRECT). The ups…"
+  hash: cc6c83605db13af2
+  lines: 6
+- category: upstream
+  reason: "SHOW CREATE redacts the password as [HIDDEN], which makes a dict that fails every lookup."
+  preview: "# Pull the default-user password from the pod env so we can rewrite the"
+  hash: 387ff43374988e44
+  lines: 6
+- category: upstream
+  reason: "DIRECT layouts reject LIFETIME and default TSV escapes newlines, which breaks the DDL."
+  preview: "# SHOW CREATE round-trip preserves SOURCE/columns; DIRECT layouts reject"
+  hash: 63d8578883a65c5d
+  lines: 3
+- category: upstream
+  reason: "System.dictionaries.type stays empty until first load, so a type check right after CREATE is a false negative."
+  preview: "# system.dictionaries.type stays empty until the dictionary first loads…"
+  hash: f2f7940d2eefdbd2
+  lines: 4
+"e2e/scripts/patch-ch-siphon-watermark.sh":
+- category: upstream
+  reason: "Siphon 0.0.100-beta handles _siphon_watermark but never creates it, so the e2e stack must add it."
+  preview: "# Create the _siphon_watermark column the SDLC indexer queries."
+  hash: fd63eb6cb3855248
+  lines: 4
+- category: upstream
+  reason: "ADD COLUMN leaves old rows unstored, so without MATERIALIZE now() recomputes and strands rows."
+  preview: "# Default now64() matches what siphon expects ClickHouse to manage. The"
+  hash: fb4bc33895d306b7
+  lines: 10
+"e2e/scripts/publish-siphon-tables.sh":
+- category: upstream
+  reason: "Arbitrary-SHA upload-pack fetches on this repo get throttled beyond any retry."
+  preview: "# A path-filtered archive is one cached HTTP request. Fetching an arbit…"
+  hash: d11c0f734c517226
+  lines: 3
+- category: upstream
+  reason: "The siphon container reads files as another user; a local umask of 077 breaks it."
+  preview: "# The siphon container reads the files as another user; a local umask o…"
+  hash: baaa76be1741d6d6
+  lines: 1
+"e2e/scripts/setup.sh":
+- category: upstream
+  reason: "GitLab chart cluster-scoped resources survive namespace deletion and block later helm releases unless cleaned."
+  preview: "# Clean cluster-scoped resources orphaned by previous e2e runs whose ow…"
+  hash: 96d6db0732f39ea5
+  lines: 8
+- category: upstream
+  reason: "Helm install fails while the object still exists, even with deletionTimestamp set."
+  preview: "# 3. Poll up to 30s for actual removal — helm install fails if the"
+  hash: 268801646bcd936b
+  lines: 2
+- category: invariant
+  reason: "The watermark step must run after sync because it enumerates tables the siphon consumer creates."
+  preview: "# Both self-gate on their prerequisites, so they overlap the sync. Wate…"
+  hash: b53e44df32e594b1
+  lines: 2
+"e2e/scripts/sync-cdc-tables.sh":
+- category: upstream
+  reason: "The dind daemon and colima only mount specific roots, so the tmp dir must stay under them."
+  preview: "# Tmp dir must live somewhere the docker daemon can volume-mount. Under…"
+  hash: 291609fd2a55c3bd
+  lines: 4
+"e2e/scripts/teardown.sh":
+- category: upstream
+  reason: "Helmfile needs every env var to parse .gotmpl even for destroy."
+  preview: "# helmfile needs all env vars to parse .gotmpl; values don't matter for…"
+  hash: 6ce2aceb9a161229
+  lines: 1
+"e2e/scripts/test.sh":
+- category: upstream
+  reason: "Kubectl --from-file flattens directories and strips exec bits, so fixtures must ship as a tarball."
+  preview: "# Bundle fixtures (binary tarball — preserves directory structure and e…"
+  hash: 695c373a3e37f4d1
+  lines: 3
+- category: upstream
+  reason: "Job objects emit several True conditions, so an exact match never sees Complete."
+  preview: "# Modern Job objects emit multiple True conditions (SuccessCriteriaMet +"
+  hash: cb623bf72f549aec
+  lines: 3
+- category: upstream
+  reason: "Kubectl cp cannot exec into completed pods, so the report must come from job logs."
+  preview: "# Extract JUnit report from job logs (kubectl cp can't exec into comple…"
+  hash: 7545917ca2b571ab
+  lines: 1

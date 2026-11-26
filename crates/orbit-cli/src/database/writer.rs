@@ -55,9 +55,6 @@ impl GraphWriter {
         Ok(())
     }
 
-    /// Deletes the rows of `paths`: their files, the entities in them, and
-    /// every edge that starts or ends at one of those. Directories are left
-    /// alone: one can share a path with a file it replaced.
     pub fn delete_files(&self, ontology: &Ontology, paths: &[String]) -> Result<()> {
         if paths.is_empty() {
             return Ok(());
@@ -115,8 +112,6 @@ impl GraphWriter {
         Ok(())
     }
 
-    /// Deletes every directory and the edges between directories; the edges
-    /// from a directory to a file go with the file.
     pub fn delete_directories(&self, ontology: &Ontology) -> Result<()> {
         let local = LocalTables::of(ontology)?;
         let directory = local
@@ -145,7 +140,6 @@ impl GraphWriter {
         Ok(duckdb_client::scalar_i64(&self.client.query_arrow(sql)?) as usize)
     }
 
-    /// Runs `write` in one transaction, so a failure leaves the graph as it was.
     pub fn in_transaction<T>(&self, write: impl FnOnce() -> Result<T>) -> Result<T> {
         self.client.execute("BEGIN TRANSACTION", &[])?;
         match write() {
@@ -175,13 +169,11 @@ impl GraphWriter {
 
 const DIRECTORY: &str = "Directory";
 
-/// The local graph tables, as the ontology names them.
 struct LocalTables<'a> {
     edges: &'a str,
     entities: Vec<LocalEntity<'a>>,
 }
 
-/// A local entity's table, and the column that names the file a row is in.
 struct LocalEntity<'a> {
     name: &'a str,
     table: &'a str,

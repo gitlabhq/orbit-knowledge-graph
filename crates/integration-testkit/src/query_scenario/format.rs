@@ -26,8 +26,6 @@ pub struct QueryScenario {
     pub steps: Vec<QueryStep>,
 }
 
-/// One query of a multi-step scenario. `seed` rows are inserted before the
-/// query runs, so a later step can observe a write made after an earlier one.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueryStep {
@@ -55,7 +53,7 @@ impl QueryScenario {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioConfig {
     pub ontology_overlay: Option<String>,
@@ -69,11 +67,50 @@ pub struct ScenarioConfig {
     pub security: Option<PresetOr<SecurityOverride>>,
     #[serde(default)]
     pub redaction: Option<PresetOr<RedactionConfig>>,
-    #[serde(default)]
-    pub duckdb: bool,
+    #[serde(default = "clickhouse_only", deserialize_with = "backends")]
+    pub backends: Vec<Backend>,
 }
 
-/// Either a preset name (string) or an inline value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Backend {
+    Clickhouse,
+    Duckdb,
+}
+
+impl Default for ScenarioConfig {
+    fn default() -> Self {
+        Self {
+            ontology_overlay: None,
+            seed: None,
+            extra_seed: Seed::default(),
+            unmerged_seed: false,
+            security: None,
+            redaction: None,
+            backends: clickhouse_only(),
+        }
+    }
+}
+
+fn clickhouse_only() -> Vec<Backend> {
+    vec![Backend::Clickhouse]
+}
+
+fn backends<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Backend>, D::Error> {
+    let backends = Vec::<Backend>::deserialize(deserializer)?;
+    if backends.is_empty()
+        || backends
+            .iter()
+            .enumerate()
+            .any(|(index, backend)| backends[..index].contains(backend))
+    {
+        return Err(serde::de::Error::custom(
+            "backends must list clickhouse, duckdb, or both, once each",
+        ));
+    }
+    Ok(backends)
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum PresetOr<T> {
@@ -86,10 +123,8 @@ pub enum PresetOr<T> {
 pub struct SecurityOverride {
     #[serde(default)]
     pub admin: Option<bool>,
-    /// Uniform paths (all share the same access_level).
     #[serde(default)]
     pub paths: Option<Vec<String>>,
-    /// Per-path access levels: `[{path: "1/100/", access_level: 20}]`
     #[serde(default)]
     pub authorized_paths: Option<Vec<AuthorizedPathSpec>>,
     #[serde(default)]
@@ -117,7 +152,6 @@ pub struct RedactionConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueryExpect {
-    /// Run the query N times and assert all responses are identical.
     #[serde(default)]
     pub repeat_count: Option<usize>,
     #[serde(default)]
@@ -130,7 +164,6 @@ pub struct QueryExpect {
     pub node_count: Option<usize>,
     #[serde(default)]
     pub nodes: BTreeMap<String, NodeExpect>,
-    /// Exact edge set: `{ MEMBER_OF: [[1,100], [2,100]] }`
     #[serde(default)]
     pub edges: BTreeMap<String, Vec<[i64; 2]>>,
     #[serde(default)]
@@ -143,47 +176,32 @@ pub struct QueryExpect {
     pub groups: BTreeMap<String, GroupExpect>,
     #[serde(default)]
     pub empty_aggregation: bool,
-    /// Assert row count for ungrouped/property-grouped aggregation results.
     #[serde(default)]
     pub row_count: Option<usize>,
     #[serde(default)]
     pub row_values: Vec<BTreeMap<String, serde_json::Value>>,
-    /// Assert group column metadata: `{ v_severity: "v.severity" }` verifies
-    /// the response declares a group column named `v_severity` backed by
-    /// node `v`, property `severity`.
     #[serde(default)]
     pub group_columns: BTreeMap<String, String>,
     #[serde(default)]
     pub aggregation_columns: Option<Vec<ColumnDescriptor>>,
     #[serde(default)]
     pub edge_prop_absent: Vec<String>,
-    /// Assert total edge count across all types.
     #[serde(default)]
     pub total_edge_count: Option<usize>,
-    /// Assert the number of paths returned by a path_finding query.
     #[serde(default)]
     pub path_count: Option<usize>,
-    /// Assert path destinations: `{ Project: [1000, 1004] }`.
-    /// Collects the `to_id` of the last edge in each path, grouped by
-    /// `to` entity type. Compared as sorted sets.
     #[serde(default)]
     pub path_destinations: BTreeMap<String, Vec<i64>>,
-    /// Assert per-path edge structure: each entry is one path's edges
-    /// in step order. `{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 100 }`
     #[serde(default)]
     pub path_edges: Vec<Vec<PathEdgeExpect>>,
-    /// Assert entities that must NOT appear as path edge endpoints.
     #[serde(default)]
     pub path_endpoint_absent: Vec<String>,
     #[serde(default)]
     pub referential_integrity: bool,
     #[serde(default)]
     pub has_more: Option<bool>,
-    /// Assertions across ALL pages combined. The runner collects node IDs
-    /// and edge tuples from every page and asserts at the end.
     #[serde(default)]
     pub all_pages: Option<AllPagesExpect>,
-    /// Multi-page pagination: the runner chains cursors automatically.
     #[serde(default)]
     pub pages: Vec<QueryExpect>,
 }
@@ -199,17 +217,12 @@ pub struct NodeExpect {
     pub ids: Option<Vec<i64>>,
     #[serde(default)]
     pub absent: Option<Vec<i64>>,
-    /// Per-field filter assertions: `{ state: blocked }` verifies every
-    /// returned node of this entity has `state == "blocked"`.
     #[serde(default)]
     pub filters: BTreeMap<String, serde_json::Value>,
-    /// Assert these properties exist on every node of this entity.
     #[serde(default)]
     pub prop_present: Vec<String>,
-    /// Assert these properties are absent on every node of this entity.
     #[serde(default)]
     pub prop_absent: Vec<String>,
-    /// Assert every node of this entity carries no properties at all.
     #[serde(default)]
     pub no_properties: bool,
     #[serde(default)]
@@ -254,22 +267,16 @@ pub struct GroupRowExpect {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AllPagesExpect {
-    /// Expected node IDs collected across all pages, sorted.
     #[serde(default)]
     pub node_ids: BTreeMap<String, Vec<i64>>,
     #[serde(default)]
     pub node_order: BTreeMap<String, Vec<i64>>,
-    /// Expected group node IDs collected across all pages, sorted.
-    /// Key is "group_key:EntityType", e.g. "u:User".
     #[serde(default)]
     pub group_node_ids: BTreeMap<String, Vec<i64>>,
-    /// Expected total edge count across all pages (after dedup).
     #[serde(default)]
     pub edge_count: Option<usize>,
-    /// Expected number of pages.
     #[serde(default)]
     pub page_count: Option<usize>,
-    /// Assert no node ID appears on multiple pages.
     #[serde(default)]
     pub no_duplicate_ids: bool,
     #[serde(default)]
@@ -350,9 +357,6 @@ impl QueryExpect {
             || !self.format.is_empty()
     }
 
-    /// Derive a total node count from per-entity specs when `node_count` is
-    /// not set explicitly. Returns `None` when no entity carries a countable
-    /// spec (count, order, or ids).
     pub fn derived_node_count(&self) -> Option<usize> {
         let total: usize = self
             .nodes

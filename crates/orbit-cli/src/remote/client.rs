@@ -26,9 +26,6 @@ const CONTEXT_PATH: &str = "/api/v4/orbit/context";
 const SHORT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const GREP_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Base URLs whose last connection attempt in this process failed, with the
-/// failure message. Requests to them fail at once instead of each waiting out
-/// its own connect timeout against a host that drops packets.
 static UNREACHABLE: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(Default::default);
 
 pub(crate) struct SkillHttpResponse {
@@ -74,9 +71,6 @@ impl OrbitClient {
         )
     }
 
-    /// Resolves credentials like `from_env`, but a missing credential is not an
-    /// error: it returns `None` so callers can fall back to local Orbit. An
-    /// invalid base URL is still an error so callers can say why they fall back.
     pub(crate) fn from_env_in_if_signed_in(dir: &Path) -> Result<Option<Self>, RemoteError> {
         match resolve_endpoint(
             |key| std::env::var(key).ok(),
@@ -799,7 +793,6 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn connect_timeout_fails_once_and_skips_later_requests() {
-        // Linux drops new SYNs once the accept queue is full, like a host that drops packets.
         let socket = tokio::net::TcpSocket::new_v4().unwrap();
         socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
         let listener = socket.listen(0).unwrap();

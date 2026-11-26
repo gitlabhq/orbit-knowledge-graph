@@ -57,9 +57,58 @@ fn java_super_types(node: &N<'_>) -> Vec<String> {
     result
 }
 
-/// Extract implicit accessor definitions for record components, only when
-/// the body does not explicitly define a no-arg method that shares a name
-/// with that component.
+fn is_annotation(node: &N<'_>) -> bool {
+    matches!(node.kind().as_ref(), "annotation" | "marker_annotation")
+}
+
+fn bracket_pairs(node: &N<'_>) -> usize {
+    node.children().filter(|c| c.kind() == "[").count()
+}
+
+fn erased_type(node: &N<'_>) -> String {
+    match node.kind().as_ref() {
+        "array_type" => {
+            let element = node.field("element").map(|e| erased_type(&e));
+            let dims = node.field("dimensions").map_or(0, |d| bracket_pairs(&d));
+            format!("{}{}", element.unwrap_or_default(), "[]".repeat(dims))
+        }
+        "generic_type" | "scoped_type_identifier" => node
+            .children()
+            .filter(|c| c.is_named() && !is_annotation(c) && c.kind() != "type_arguments")
+            .map(|c| erased_type(&c))
+            .collect::<Vec<_>>()
+            .join("."),
+        _ => node.text().to_string(),
+    }
+}
+
+fn java_signature(node: &N<'_>) -> Option<String> {
+    let parameters = node.field("parameters")?;
+    if parameters.get_inner_node().has_error() {
+        return None;
+    }
+    let types: Vec<String> = parameters
+        .children()
+        .filter_map(|param| match param.kind().as_ref() {
+            "formal_parameter" => {
+                let ty = erased_type(&param.field("type")?);
+                let dims = param.field("dimensions").map_or(0, |d| bracket_pairs(&d));
+                Some(format!("{ty}{}", "[]".repeat(dims)))
+            }
+            "spread_parameter" => {
+                let ty = param
+                    .children()
+                    .take_while(|c| c.kind() != "...")
+                    .filter(|c| c.is_named() && c.kind() != "modifiers" && !is_annotation(c))
+                    .last()?;
+                Some(format!("{}...", erased_type(&ty)))
+            }
+            _ => None,
+        })
+        .collect();
+    Some(format!("({})", types.join(", ")))
+}
+
 fn java_record_accessors(
     node: &N<'_>,
     defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
@@ -167,13 +216,16 @@ impl DslLanguage for JavaDsl {
                     metadata()
                         .type_annotation(field("type").inner("type_arguments", "type_identifier")),
                 ),
-            scope("constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
+            scope("constructor_declaration", "Constructor")
+                .def_kind(DefKind::Constructor)
+                .metadata(metadata().signature(java_signature)),
             scope("compact_constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
                 .metadata(
                     metadata()
-                        .return_type(field("type").inner("type_arguments", "type_identifier")),
+                        .return_type(field("type").inner("type_arguments", "type_identifier"))
+                        .signature(java_signature),
                 ),
             scope("lambda_expression", "Lambda")
                 .def_kind(DefKind::Lambda)
@@ -190,14 +242,10 @@ impl DslLanguage for JavaDsl {
             reference("object_creation_expression")
                 .name_from(field("type").inner("type_arguments", "type_identifier"))
                 .when(!has_descendant("scoped_type_identifier")),
-            // Qualified constructor new Outer.Inner(): chain becomes
-            // [Ident("Outer"), Call("Inner")] so the resolver looks up Inner as a
-            // nested member of Outer.
             reference("object_creation_expression")
                 .name_from(field("type").nth(Child, Kind("type_identifier"), -1))
                 .when(has_descendant("scoped_type_identifier"))
                 .receiver_via(field("type").nth(Child, Kind("type_identifier"), 0)),
-            // Skip inside object_creation_expression (already tracked above).
             reference("type_identifier")
                 .name_from(text())
                 .when(!parent_is("object_creation_expression")),
@@ -267,8 +315,6 @@ impl DslLanguage for JavaDsl {
         let java_type = |rule: BindingRule| {
             rule.typed(
                 vec![
-                    // Dotted types (Outer.Inner): the engine resolves the first segment
-                    // via imports and appends the rest, so emit the full scoped text.
                     Extract::one(Field("type"), Kind("scoped_type_identifier")),
                     field("type").inner("type_arguments", "type_identifier"),
                 ],
@@ -451,13 +497,6 @@ mod tests {
 
     #[test]
     fn permits_clause_names_reach_the_reference_stream() {
-        // JEP 409 sealed types: the `permits` clause is not extracted into
-        // metadata and produces no semantic Extends edge (#847) — in valid
-        // Java the child-side extends/implements clause already provides it.
-        // The permitted type names are still picked up by the bare
-        // `reference("type_identifier")` rule, attributed to the sealed
-        // parent, so the parent->child relationship stays reachable even
-        // when a child file is missing or malformed.
         let probe = |code: &str| {
             JavaDsl::spec()
                 .parse_full_collect(
@@ -543,8 +582,6 @@ mod tests {
             .map(|d| d.range.start.line)
             .collect();
         lines.sort_unstable();
-        // Line 0 is the synthetic accessor anchored to the component; line 1
-        // is the explicit radius(int) overload, which must not suppress it.
         assert_eq!(lines, [0, 1]);
     }
 

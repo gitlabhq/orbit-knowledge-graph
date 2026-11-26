@@ -7,12 +7,9 @@ use std::time::Duration;
 use chrono::{DateTime, Timelike, Utc};
 use croner::Cron;
 use orbit_log_fields::info;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::resources::{ContainerResources, derive_code_indexing_slots};
-
-// ── Base config types ────────────────────────────────────────────────
 
 /// Sparse per-subscription policy override (retry, concurrency, DLQ).
 ///
@@ -23,8 +20,7 @@ use crate::resources::{ContainerResources, derive_code_indexing_slots};
 /// fields the entry sets change; every unset field keeps the module default. Each
 /// field is therefore `Option`, so "unset" is distinguishable from an explicit
 /// value (notably `dead_letter_on_exhaustion: false`).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SubscriptionConfig {
     /// Which concurrency group this subscription belongs to.
     /// Maps to a named semaphore in `EngineConfiguration::concurrency_groups`.
@@ -91,9 +87,8 @@ fn truncate_subsecond(dt: DateTime<Utc>) -> DateTime<Utc> {
 
 /// A six-field cron expression (`sec min hour dom mon dow`), validated when
 /// the configuration is deserialized so an invalid schedule fails startup.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-#[schemars(with = "String")]
 pub struct CronSchedule {
     expression: String,
     #[serde(skip)]
@@ -125,8 +120,7 @@ impl From<CronSchedule> for String {
 ///
 /// Each scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.
 /// The scheduler reads it via `task.schedule()`.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScheduleConfiguration {
     pub cron: CronSchedule,
     pub run_timeout_secs: u64,
@@ -167,16 +161,13 @@ impl ScheduleConfiguration {
     }
 }
 
-// ── Handler config types ─────────────────────────────────────────────
-
 /// Tuning for the SDLC datalake extract retry loop.
 ///
 /// The first attempt uses the datalake's configured `max_block_size`
 /// (typically `datalake_batch_size`). After a failure, subsequent attempts
 /// seed at `halving_initial_block_size` and halve on each retry, with
 /// `halving_min_block_size` as the floor.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DatalakeRetryConfig {
     /// Starting `max_block_size` (in rows) for the halving series after the
     /// first failure. Sized to stay safely under the Arrow String int32
@@ -188,8 +179,7 @@ pub struct DatalakeRetryConfig {
     pub halving_min_block_size: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct EntityHandlerConfig {
     /// Rows per SDLC datalake page (also the ClickHouse `max_block_size`). Unset =
     /// derived from the container memory limit (prod's 32 GiB sdlc pool anchors
@@ -200,7 +190,6 @@ pub struct EntityHandlerConfig {
     pub batch_size_overrides: HashMap<String, u64>,
 
     /// Maximum number of items bound into each SystemNote resolver lookup.
-    #[schemars(range(min = 1))]
     pub system_notes_resolve_lookup_batch_size: usize,
 }
 
@@ -226,8 +215,7 @@ impl EntityHandlerConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CodeIndexingPipelineConfig {
     pub max_file_size_bytes: u64,
     /// Most files parsed per repository; the rest stay `File` nodes. 0 = no limit.
@@ -357,8 +345,7 @@ impl CodeIndexingPipelineConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CodeIndexingTaskHandlerConfig {
     pub pipeline: CodeIndexingPipelineConfig,
 }
@@ -366,23 +353,20 @@ pub struct CodeIndexingTaskHandlerConfig {
 /// Typed per-handler domain configuration (batch sizes, pipeline settings).
 ///
 /// Engine-level config (retry, concurrency, DLQ) lives in `topics`.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-#[schemars(deny_unknown_fields)]
 pub struct HandlersConfiguration {
     pub entity_handler: EntityHandlerConfig,
     pub code_indexing_task: CodeIndexingTaskHandlerConfig,
 }
 
-// ── Dispatcher / scheduler config types ──────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NamespaceDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
@@ -391,14 +375,14 @@ pub struct NamespaceDispatcherConfig {
 
 /// Drives the continuous Siphon CDC trigger: which JetStream the orchestrator
 /// drains and how many messages per `consume_pending` call.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SiphonRouterConfig {
     pub events_stream_name: String,
     pub batch_size: usize,
 }
 
 /// Cadence for the coverage-driven code-backfill sweep and its publish batch size.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodeBackfillSweepConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
@@ -406,43 +390,40 @@ pub struct CodeBackfillSweepConfig {
     pub stale_sweeps_per_tick: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableCleanupConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NamespaceDeletionSchedulerConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MigrationCompletionConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
 }
 
 /// Sends the daily `orbit_graph_stats` snapshot. Runs when analytics is on, or on self-managed when `local_collector_url` is set.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphStatsConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
 }
 
 /// Records how far indexed SDLC data trails the datalake for every enabled namespace.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NamespaceFreshnessConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
 }
 
 /// Tombstones edges a node's pipeline stopped emitting, off the indexing path.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StaleEdgeReconciliationConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
@@ -456,9 +437,8 @@ impl StaleEdgeReconciliationConfig {
 }
 
 /// Typed per-task configuration for all registered scheduled tasks.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-#[schemars(deny_unknown_fields)]
 pub struct ScheduledTasksConfiguration {
     pub global: GlobalDispatcherConfig,
     pub namespace: NamespaceDispatcherConfig,
@@ -472,26 +452,13 @@ pub struct ScheduledTasksConfiguration {
     pub graph_stats: GraphStatsConfig,
 }
 
-// ── Top-level engine config ──────────────────────────────────────────
-
 /// Indexer module selector. Each variant maps to a domain in `crates/indexer/src/modules/`.
 ///
 /// An indexer process registers handlers only for the modules listed in
 /// [`EngineConfiguration::modules`], letting operators run multiple specialised
 /// indexer Deployments (e.g. a light SDLC pool and a beefy code pool) from the
 /// same binary.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    strum::IntoStaticStr,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, strum::IntoStaticStr)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum IndexerModule {
@@ -521,8 +488,7 @@ impl IndexerModule {
 
 /// ETL engine configuration. Scale fields left unset derive from the
 /// container's resources at startup; an explicit value always wins.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineConfiguration {
     /// Maximum concurrent message handlers across all modules. Unset = derived
     /// from the container CPU count, capped by its memory limit.
@@ -564,8 +530,7 @@ impl EngineConfiguration {
 }
 
 /// Top-level schedule configuration.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ScheduleConfig {
     pub tasks: ScheduledTasksConfiguration,
 }
@@ -760,11 +725,6 @@ mod tests {
 
         let hint = sched.interval_hint();
 
-        // interval_hint computes (second_occurrence - first_occurrence).
-        // Even without truncation the chained find_next_occurrence calls
-        // carry the same sub-second fraction, so the difference cancels to
-        // a clean 60s. The truncation is defensive; this test pins the
-        // contract regardless.
         assert_eq!(hint, Duration::from_secs(60));
     }
 
@@ -777,9 +737,6 @@ mod tests {
             run_timeout_secs: 60,
         };
 
-        // 2026-01-15 10:05:00.700 UTC — 700ms into a matching second.
-        // Without truncation croner returns :06:00.700, yielding ~60.0s delay.
-        // With truncation the next occurrence is :06:00.000, yielding exactly 59.3s.
         let now = NaiveDate::from_ymd_opt(2026, 1, 15)
             .unwrap()
             .and_hms_milli_opt(10, 5, 0, 700)
@@ -789,7 +746,6 @@ mod tests {
         let delay = sched.next_delay(now);
         let secs = delay.as_secs_f64();
 
-        // Must be < 60s (snapped to :06:00.000 → 59.3s), not ~60.0s or ~60.7s.
         assert!(
             (59.0..60.0).contains(&secs),
             "expected delay ~59.3s, got {secs:.3}s"

@@ -1,5 +1,3 @@
-# The arguments of a log macro inside another macro, such as `tokio::select!`,
-# where tree-sitter keeps the inner call as plain tokens.
 id: nested-tracing-args
 language: rust
 rule:

@@ -59,17 +59,13 @@ pub struct ResolvedSourcePath {
 
 pub struct ResolveResult {
     pub cross_edges: Vec<Edge>,
-    /// Files, or the whole family, whose cross-file pass overran its budget;
-    /// the edges it had not resolved are absent.
     pub killed: Vec<Killed>,
     pub resolved_source_paths: Vec<ResolvedSourcePath>,
-    /// How long each file's cross-file pass took.
     pub file_timings: Vec<(u32, Duration)>,
 }
 
 #[derive(Default)]
 pub struct FileIndex {
-    /// A file, or a top-level def in one when the key is the def's name.
     keys: FxHashMap<String, Loc>,
     dirs: FxHashMap<String, Vec<u32>>,
 }
@@ -99,15 +95,12 @@ pub struct ImportReq {
     pub fi: u32,
     pub node: u32,
     pub target_fi: u32,
-    /// Def in the target file the path names (`use crate::dep::X` with an
-    /// inline `mod dep {}`), or 0 for the file itself.
     pub anchor: u32,
     pub target_path: String,
+    pub fallback_path: Option<String>,
 }
 
 impl ImportReq {
-    /// What the import can name: the target file's visible names, plus the
-    /// defs directly inside the anchor def when the path named one.
     fn exports<'a>(&self, trees: &[Tree], visible: &'a VisibleMap) -> Cow<'a, FxHashMap<u32, Loc>> {
         if self.anchor == 0 {
             return Cow::Borrowed(&visible[self.target_fi as usize]);
@@ -195,13 +188,32 @@ impl Resolver {
             .reqs
             .par_iter()
             .filter(|req| {
-                self.lookup != *lookup
-                    || !resolve_glob(&req.target_path, &self.file_index, &lookup.prefixes)
-                        .contains(&Loc::new(req.target_fi as usize, req.anchor))
+                if self.lookup != *lookup {
+                    return true;
+                }
+                let mut found = resolve_glob(&req.target_path, &self.file_index, &lookup.prefixes);
+                if found.is_empty()
+                    && let Some(fallback) = &req.fallback_path
+                {
+                    found = resolve_glob(fallback, &self.file_index, &lookup.prefixes);
+                }
+                !found.contains(&Loc::new(req.target_fi as usize, req.anchor))
             })
             .map(|req| req.fi)
             .collect();
         invalidated.extend(dirty_fis);
+        if env.resolve.config.submodule_imports {
+            let roots: FxHashSet<&str> = dirty_fis
+                .iter()
+                .filter_map(|&fi| main_rs_root(&trees[fi as usize].label))
+                .collect();
+            invalidated.extend(
+                self.reqs
+                    .iter()
+                    .filter(|req| roots.contains(req.target_path.as_str()))
+                    .map(|req| req.fi),
+            );
+        }
         let added_keys = self
             .file_index
             .keys
@@ -231,9 +243,6 @@ impl Resolver {
         with_dependents(&self.reqs, invalidated)
     }
 
-    /// Renumbers the resolver's memory after files left the graph. Returns
-    /// the retained files that lost a visible name, whatever brought it in:
-    /// an import or a `visible_from` directive. They must resolve again.
     pub fn remap(
         &mut self,
         old_labels: &[String],
@@ -287,14 +296,13 @@ impl Resolver {
                     target_fi: new_tfi,
                     anchor: r.anchor,
                     target_path: r.target_path.clone(),
+                    fallback_path: r.fallback_path.clone(),
                 })
             })
             .collect();
         lost_a_name
     }
 
-    /// The files outside `dirty` whose visible names differ from `previous`,
-    /// and every file that imports one of them.
     fn importers_of_changed_names(
         &self,
         previous: &VisibleMap,
@@ -373,7 +381,9 @@ impl Resolver {
             .iter()
             .filter(|req| dirty_fis.contains(&req.fi))
             .filter_map(|req| {
-                let sym = lang.syms.intern(&req.target_path);
+                let sym = lang
+                    .syms
+                    .intern(req.fallback_path.as_deref().unwrap_or(&req.target_path));
                 let node = trees[req.fi as usize]
                     .cursor(req.node)
                     .child(C::SourcePath)?
@@ -577,8 +587,6 @@ impl Resolver {
     }
 }
 
-/// `files`, and every file that imports one of them, directly or through
-/// other imports.
 fn with_dependents(reqs: &[ImportReq], mut files: FxHashSet<u32>) -> FxHashSet<u32> {
     let mut dependents: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
     for req in reqs {
@@ -629,8 +637,6 @@ fn expand(
     cross_edges.extend(&wave1);
     ctx.run.check()?;
 
-    // Wildcard references come from the linker and from wave 1's unbound
-    // names alike, so their uses resolve once both are known.
     let mut referrers: FxHashMap<(u32, u32), FxHashSet<u32>> = FxHashMap::default();
     for e in edges
         .iter()
@@ -810,7 +816,6 @@ impl ResolveCtx<'_> {
         }
     }
 
-    /// Import edges into `target`, its name children, or its parent import.
     fn imports_to(&self, fi: usize, target: u32) -> impl Iterator<Item = &Edge> {
         let node = self.corpus.jump(fi as u32, target);
         let related = std::iter::once(node)
@@ -945,9 +950,19 @@ fn gather_imports_for(
                         && target_path.is_empty()
                         && let Some(root) = source_root(tree, lang, root_relative)
                     {
-                        target_path = root.to_owned();
+                        target_path =
+                            binary_crate_root(tree, root, lang, root_relative, trees, file_index)
+                                .unwrap_or_else(|| root.to_owned());
                     }
                     let mut direct = resolve_glob(&target_path, file_index, prefixes);
+                    let mut fallback_path = None;
+                    if direct.is_empty()
+                        && config.root_include_fallback
+                        && let Some(bare) = source_str.strip_prefix("./")
+                    {
+                        direct = resolve_glob(bare, file_index, prefixes);
+                        fallback_path = Some(bare.to_owned());
+                    }
                     direct.retain(|loc| loc.fi != fi);
                     if direct.is_empty() && stdlib {
                         return;
@@ -987,6 +1002,7 @@ fn gather_imports_for(
                             target_fi: loc.fi,
                             anchor: loc.node,
                             target_path: path,
+                            fallback_path: fallback_path.clone().filter(|_| !is_sub),
                         });
                     }
                 })
@@ -1378,10 +1394,6 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
     edges
 }
 
-/// A wildcard import names the file; the definitions it stands for are the
-/// ones the importing code refers to: called, extended or used as a
-/// decorator. Each reference gives the wildcard an import edge to the
-/// definition, and a call to a callable one a call edge; nothing else.
 fn wildcard_uses<'a>(
     ctx: &'a ResolveCtx,
     req: &ImportReq,
@@ -1428,8 +1440,6 @@ fn wildcard_uses<'a>(
     edges
 }
 
-/// A name that is a path in the language's own spelling (`Security::Ctx`):
-/// the first segment resolves as a root, each further one as a member.
 fn qualified<'a>(
     ctx: &'a ResolveCtx,
     sym: u32,
@@ -1713,8 +1723,6 @@ fn resolve_reference<'a>(ctx: &'a ResolveCtx, reference: Cursor<'a>) -> Option<C
     .find(|node| node.is(C::Def))
 }
 
-/// `Self` in `impl Service { fn new() -> Self }` names the enclosing def;
-/// `T` in `fn f<T: Pinger>(t: T)` is the type parameter bound in it.
 fn enclosing_alias<'a>(ctx: &'a ResolveCtx, r: Cursor<'a>) -> Option<Cursor<'a>> {
     let sym = r.sym();
     r.ancestors().filter(|a| a.is(C::Def)).find_map(|d| {
@@ -2011,8 +2019,6 @@ fn declared_member<'a>(
         .find_map(|owner| member_in(ctx, owner, name, role))
 }
 
-/// Cross-file edges for one file that the import pass cannot produce:
-/// inheritance, decorators, destructuring, and member calls on imported types.
 fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
     let file = Sentinel::new("resolve", &ctx.trees[fi].label, ctx.file_resolve_ms).on_thread_cpu();
     let mut out = Vec::new();
@@ -2117,8 +2123,6 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
     Ok(out)
 }
 
-/// Unqualified and self calls inside `class` that reach a member `class` does
-/// not declare itself, resolved on each cross-file parent.
 fn inherited_calls<'a>(
     ctx: &'a ResolveCtx,
     class: Cursor<'a>,
@@ -2155,8 +2159,6 @@ fn inherited_calls<'a>(
     out
 }
 
-/// Each slot of a destructuring pattern reads the matching positional
-/// component of the destructured type.
 fn destructure_calls<'a>(
     ctx: &'a ResolveCtx,
     d: Cursor<'a>,
@@ -2251,8 +2253,32 @@ fn source_root<'a>(tree: &'a Tree, lang: &Lang, root_relative: u32) -> Option<&'
         .map(|root| root.trim_end_matches(PATH_SEP))
 }
 
-/// Module files for `names` under the files in `parents`: `a.rs` keeps them in `a/`.
-/// `lib.rs` and `mod.rs` need no lookup, since their `mod` declarations resolve.
+fn main_rs_root(path: &str) -> Option<&str> {
+    path.strip_suffix("main.rs")?.strip_suffix(PATH_SEP)
+}
+
+fn binary_crate_root(
+    tree: &Tree,
+    root: &str,
+    lang: &Lang,
+    root_relative: u32,
+    trees: &[Tree],
+    file_index: &FileIndex,
+) -> Option<String> {
+    let main_key = format!("{root}{PATH_SEP}main");
+    let main = file_index.get(&main_key).filter(|loc| loc.node == 0)?;
+    let relative = lang.syms.resolve(tree.root().tag(root_relative)?);
+    let top = relative.split(PATH_SEP).next()?.split('.').next()?;
+    let import_type = lang.syms.lookup("import_type");
+    let declaration = lang.syms.lookup("ModDeclaration");
+    let declared = trees[main.fi as usize].root().children().any(|c| {
+        c.kind() == C::Import
+            && c.tag(import_type) == Some(declaration)
+            && c.names().any(|name| lang.syms.resolve(name.sym()) == top)
+    });
+    declared.then_some(main_key)
+}
+
 fn submodule_files(
     parents: &[Loc],
     names: &[&str],
@@ -2336,8 +2362,6 @@ fn resolve_submodule(
         .map(|loc| loc.fi as usize)
 }
 
-/// `@/*` -> `src/*` rewrites a prefix; a key without `*` matches whole path
-/// components only, so `app` never matches `application/x`.
 fn apply_alias(path: &str, pattern: &str, replacement: &str) -> Option<String> {
     if let (Some(prefix), Some(target)) = (pattern.strip_suffix('*'), replacement.strip_suffix('*'))
     {
@@ -2371,8 +2395,6 @@ mod alias_tests {
 mod remap_tests {
     use super::*;
 
-    /// `a` sees a name from `b`, `c` sees a name from `a`. Dropping `b`
-    /// must report `a` and leave `c` alone, however the name got there.
     #[test]
     fn files_that_lost_a_visible_name_are_reported() {
         let lang = Lang::new();

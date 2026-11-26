@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Renders tier-specific values overlay for the GKG helm release.
-# Output goes to stdout; caller redirects to a file.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 cat <<EOF

@@ -1,5 +1,3 @@
-# config/ontology/nodes/source_code/definition.yaml
-
 node_type: Definition
 domain: source_code
 description: A code definition such as a class, function, method, or module
@@ -128,6 +126,12 @@ properties:
     mutable: false
     description: "End column."
 
+  signature:
+    type: string
+    source: signature
+    nullable: false
+    description: "Parameter types as written, generics and annotations erased (e.g., `(int, String...)`). Set for Java methods and constructors; empty otherwise."
+
   front_matter_name:
     type: string
     source: front_matter_name
@@ -234,6 +238,7 @@ storage:
     - {name: end_byte, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: start_char, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: end_char, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: signature, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: front_matter_name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: front_matter_description, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: front_matter_license, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}

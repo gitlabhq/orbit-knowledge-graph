@@ -10,6 +10,10 @@ cases:
         sql:
           contains: ["mr.state = 'opened'", "'AUTHORED'"]
           not_contains: ["{p"]
+        parameterized_sql:
+          contains: ["mr.state = {p"]
+          not_contains: [opened]
+        params: [{ value: opened, data_type: String }]
 
   - name: Rendered SQL inlines an IN filter array
     query:

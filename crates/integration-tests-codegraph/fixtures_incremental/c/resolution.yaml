@@ -123,10 +123,6 @@ tests:
       - { row_count: 1 }
       - { row: { fqn: "shapes::Shape", type: TypeAlias } }
 
-  # ══════════════════════════════════════════════════════════════
-  # INTRA-FILE CALLS (same .c file)
-  # ══════════════════════════════════════════════════════════════
-
   - name: "Intra-file: vec_normalize calls vec_length (both in math.c)"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -136,10 +132,6 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "math::vec_normalize", callee: "math::vec_length" } }
-
-  # ══════════════════════════════════════════════════════════════
-  # CROSS-FILE CALLS (via #include)
-  # ══════════════════════════════════════════════════════════════
 
   - name: "Cross-file: main calls vec_add (main.c -> math.h -> math.c)"
     query: |

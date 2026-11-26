@@ -1,11 +1,6 @@
 name: "Rust: EXTENDS edges across files, modules, and crates"
 
 fixtures:
-  # ─────────────────────────────────────────────────────────────────
-  # Workspace root that wires two crates together. The first crate
-  # exercises cross-file resolution within a single crate (mod files);
-  # the second crate exercises cross-crate resolution.
-  # ─────────────────────────────────────────────────────────────────
   - path: Cargo.toml
     content: |
       [workspace]
@@ -15,9 +10,6 @@ fixtures:
       [workspace.dependencies]
       zoo = { path = "crates/zoo" }
 
-  # ─────────────────────────────────────────────────────────────────
-  # crates/zoo: traits split across two module files in a single crate.
-  # ─────────────────────────────────────────────────────────────────
   - path: crates/zoo/Cargo.toml
     content: |
       [package]
@@ -56,12 +48,6 @@ fixtures:
       pub struct Bear;
       impl Mammal for Bear {}
 
-  # ─────────────────────────────────────────────────────────────────
-  # crates/zoo-impl: implements zoo's traits from a different crate.
-  # Tests cross-crate resolution: the trait FQN we emit must match
-  # the trait's canonical home (`zoo::traits::Audible`), not the
-  # local re-import path.
-  # ─────────────────────────────────────────────────────────────────
   - path: crates/zoo-impl/Cargo.toml
     content: |
       [package]
@@ -97,9 +83,6 @@ fixtures:
       impl Bark for Hound {}
 
 tests:
-  # ─────────────────────────────────────────────────────────────────
-  # Cross-file within a single crate
-  # ─────────────────────────────────────────────────────────────────
   - name: "1. Trait in sibling module file resolves through crate:: path"
     queries:
       - query: |
@@ -140,9 +123,6 @@ tests:
           - { row_count: 1 }
           - { row: { parent: "zoo::traits::Mammal" } }
 
-  # ─────────────────────────────────────────────────────────────────
-  # Cross-crate within a workspace
-  # ─────────────────────────────────────────────────────────────────
   - name: "5. Cross-crate impl resolves trait to its originating crate FQN (via use)"
     queries:
       - query: |

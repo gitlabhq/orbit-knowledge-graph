@@ -58,7 +58,6 @@ fixtures:
       end
 
 tests:
-  # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "gem requires target side-effect imported symbols"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
@@ -68,7 +67,6 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "ApiRunner::fetch", path: "Faraday", name: "Faraday", import_type: "Autoload" } }
 
-  # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "underscored requires target side-effect imported symbols"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
@@ -78,7 +76,6 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "ApiRunner::connect", path: "ExternalClient", name: "ExternalClient", import_type: "Autoload" } }
 
-  # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "observed acronym constants match require paths without path-derived names"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
@@ -88,7 +85,6 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "ApiRunner::parse", path: "JSON", name: "JSON", import_type: "Autoload" } }
 
-  # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "require_relative target imported symbols"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)

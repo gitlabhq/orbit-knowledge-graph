@@ -14,12 +14,8 @@ use crate::types::CloudConnectorToken;
 
 const REFRESH_JITTER_MAX_SECS: i64 = 30;
 
-/// How long before `exp` to refresh, so a brief Rails outage near expiry
-/// doesn't drop events.
 const CC_TOKEN_REFRESH_LEAD_SECS: i64 = 30 * 60;
 
-/// Minimum gap between Rails calls after a failure, so an outage draws at
-/// most one call per pod per interval.
 const CC_TOKEN_RETRY_INTERVAL_SECS: i64 = 60;
 
 /// Caps the fetch while the cached token is still valid, so it can cover for
@@ -129,8 +125,6 @@ impl CloudConnectorTokenCache {
         }
     }
 
-    /// `None` means "attempt a fetch": either `refresh_at` has passed, or
-    /// there is no token yet to rate-limit around.
     fn cached_token_before_refresh_at(&self, now: i64) -> Option<String> {
         let state = self.state.read().unwrap();
         if now < state.refresh_at {

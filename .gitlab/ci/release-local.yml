@@ -1,12 +1,3 @@
-# Build and publish the `orbit` local CLI.
-#
-# "Local CLI" distinguishes this binary (the user-facing `orbit` command for
-# code indexing on a developer machine) from the gkg-server image we ship
-# elsewhere in this pipeline.
-#
-# Build and publish run on tag pipelines (`vX.Y.Z`) on the canonical project.
-# Linux builds and smoke tests also run on main when their inputs change.
-
 .local-cli-infra-retry:
   retry:
     max: 2
@@ -163,9 +154,16 @@ local-cli-build-windows-amd64:
 
 .local-cli-build-darwin:
   extends:
-    - .local-cli-release-rules
     - .local-cli-infra-retry
   stage: build
+  rules:
+    - !reference [.local-cli-release-rules, rules]
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - .gitlab/ci/release-local.yml
+        - scripts/ci/install-protoc-darwin.sh
+      when: manual
+      allow_failure: true
   image: macos-15-xcode-16
   tags:
     - saas-macos-large-m2pro
@@ -183,6 +181,9 @@ local-cli-build-windows-amd64:
     - rustup toolchain install "$RUST_VERSION" --profile minimal
     - rustup default "$RUST_VERSION"
     - rustup target add aarch64-apple-darwin x86_64-apple-darwin
+    - ./scripts/ci/install-protoc-darwin.sh
+    - export PROTOC="$HOME/protoc/bin/protoc"
+    - export PROTOC_INCLUDE="$HOME/protoc/include"
   script:
     - ./scripts/release/build-local-cli.sh
   artifacts:

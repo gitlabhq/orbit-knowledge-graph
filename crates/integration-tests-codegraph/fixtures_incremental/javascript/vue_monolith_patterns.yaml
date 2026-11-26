@@ -208,8 +208,7 @@ fixtures:
 
 tests:
   - name: Synthesizes module definitions for Vue SFC files
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+    known_gap: "The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not."
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Module'
@@ -222,8 +221,7 @@ tests:
       - { row: { fqn: "ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue" } }
 
   - name: jh_else_ce Vue default import targets the primary export proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+    known_gap: "The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not."
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
@@ -234,8 +232,7 @@ tests:
       - { row: { import_type: "DefaultImport", name: "default", target: "GitlabVersionCheckBadge" } }
 
   - name: Barrel named import for Vue component targets the barrel proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+    known_gap: "The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not."
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
@@ -247,8 +244,7 @@ tests:
       - { row: { import_type: "NamedImport", name: "SecurityPatchUpgradeAlertModal", target: "app/assets/javascripts/gitlab_version_check/components/index.js::SecurityPatchUpgradeAlertModal" } }
 
   - name: Vue SFC imports preserve local monolith alias and relative targets
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/components/security_patch_upgrade_alert_modal.vue'
@@ -262,8 +258,7 @@ tests:
       - { row: { path: "../constants", name: "TRACKING_LABELS", alias: null, target: "TRACKING_LABELS" } }
 
   - name: Vue SFC definitions are extracted for lifecycle and methods
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'app/assets/javascripts/gitlab_version_check/components/security_patch_upgrade_alert_modal.vue'
@@ -282,8 +277,7 @@ tests:
       - { row: { name: "trackRemindMeLaterClick", fqn: "SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick", type: "Method" } }
 
   - name: Namespace imports in Vue SFC target synthesized modules
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+    known_gap: "The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not."
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue'
@@ -294,8 +288,7 @@ tests:
       - { row: { import_type: "NamedImport", path: "../constants", name: "STATUS_TYPES", alias: null, target: "STATUS_TYPES" } }
 
   - name: Vue badge definitions are extracted for component methods
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue'
@@ -323,8 +316,7 @@ tests:
       - { empty: true }
 
   - name: Vue namespace member calls resolve to concrete helper definitions
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'GitlabVersionCheckBadge::badgeTitle'
@@ -335,8 +327,7 @@ tests:
       - { row: { caller: "GitlabVersionCheckBadge::badgeTitle", callee: "buildKey" } }
 
   - name: Vue method chains preserve imported helper and local method calls
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick'
@@ -348,8 +339,7 @@ tests:
       - { row: { caller: "SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick", callee: "setHideAlertModalCookie" } }
 
   - name: Script lang ts Vue imports preserve namespace and ee alias targets
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue'
@@ -360,8 +350,7 @@ tests:
       - { row: { import_type: "NamedImport", path: "ee/oncall_schedules/utils", name: "buildSchedulePath", alias: null, target: "buildSchedulePath" } }
 
   - name: Script lang ts Vue definitions are extracted for wrapper methods
-    # Known gap: Vue SFC extraction is not implemented.
-    skip: true
+    known_gap: "Vue SFC extraction is not implemented."
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue'

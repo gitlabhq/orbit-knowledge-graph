@@ -1,37 +1,3 @@
-# How the canonical tree becomes the ontology's local tables.
-#
-# Every column carries an explicit type, and loading checks each table
-# against the ontology: a column missing here, a column unknown to the
-# ontology, or a type or nullability the two disagree on is a load error.
-#
-# Entities are node kinds. Directories and files come from the project tree
-# (`__root` over `__dir` and `__file`), and each parsed file's `__source_file`
-# root stands in for its `__file` node, so an ancestor walk from a definition
-# reaches its file, then its directories.
-#
-# A column is filled by one of:
-#   from: <transforms>   the rule-file transform language, run on the row's
-#                        node: tag("k"), ancestor_tag("k"), child_sym("kind"),
-#                        ancestor_sym("kind"), tree_path(sep), split_last(sep),
-#                        or(a, b), default(v), regex_*, ... Omitted: the
-#                        node's own text.
-#   const: <text>        a literal
-#   position: <which>    start_line | end_line | start_byte | end_byte |
-#                        start_col | end_col
-#     span: [...]        which node the position measures: the first candidate
-#                        that applies, else the row's node. `tag:<key>` applies
-#                        when the node carries the tag; `<kind>` when it has
-#                        such a child.
-# `on: expanded` runs the column on the child produced by `expand:` (the node
-# itself when there was nothing to expand).
-#
-# The caller hands in an envelope of named values (project id, branch,
-# commit); `header` binds them to the columns every row starts with, and
-# `ids.prefix` says which of them seed every row id. `from: id` is the row's
-# own id. An entity's `id` names its seed and the columns hashed after the
-# prefix; `span` adds the node's byte range. This mirrors the code-graph
-# scheme so both pipelines agree on ids.
-
 ids:
   prefix: [project_id, branch]
 
@@ -75,6 +41,7 @@ entities:
       - { name: end_byte, type: Int64, position: end_byte, span: [tag:definition_span, __defname] }
       - { name: start_char, type: Int64, position: start_col, span: [tag:definition_span, __defname] }
       - { name: end_char, type: Int64, position: end_col, span: [tag:definition_span, __defname] }
+      - { name: signature, type: Utf8, from: default("") }
       - { name: front_matter_name, type: Utf8, from: child_sym("__front_matter_name") }
       - { name: front_matter_description, type: Utf8, from: child_sym("__front_matter_description") }
       - { name: front_matter_license, type: Utf8, from: child_sym("__front_matter_license") }
@@ -109,10 +76,6 @@ entities:
       - { name: start_char, type: Int64, position: start_col }
       - { name: end_char, type: Int64, position: end_col }
 
-# The edge table. `containment` rows link each `to` entity to its nearest
-# enclosing `from` entity. `graph` rows come from the resolver, matched on
-# edge kind and the entities at each end; cross-file ones collapse to one
-# row per source, target and kind.
 edges:
   columns:
     - { name: source_id, type: Int64, from: source.id }

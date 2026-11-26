@@ -17,7 +17,6 @@ fn generate(fixtures: &str, out_file: &str, runner: &str) {
     find_yaml(&root, &root, &mut tests);
     tests.sort();
 
-    // Detect duplicate test names (e.g. foo/bar-baz.yaml and foo/bar_baz.yaml)
     for pair in tests.windows(2) {
         if pair[0].0 == pair[1].0 {
             panic!(

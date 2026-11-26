@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Verify config/graph.sql, config/graph_persistent.sql, and config/graph_local.sql
-# match the ontology and have the correct SCHEMA_VERSION in their headers.
 set -euo pipefail
 
 XTASK="${1:-cargo xtask}"
@@ -11,7 +9,6 @@ check_file() {
     local cmd="$1"
     local file="$2"
 
-    # Header must exist and match SCHEMA_VERSION.
     local header_version
     header_version=$(head -1 "$file" | grep -o 'SCHEMA_VERSION=[0-9]*' | grep -o '[0-9]*')
     if [ -z "$header_version" ]; then
@@ -25,7 +22,6 @@ check_file() {
         return
     fi
 
-    # Content must match what the generator produces.
     local generated
     generated=$(eval "$cmd" 2>/dev/null)
     if ! diff -q <(printf '%s' "$generated") <(printf '%s' "$(cat "$file")") >/dev/null 2>&1; then

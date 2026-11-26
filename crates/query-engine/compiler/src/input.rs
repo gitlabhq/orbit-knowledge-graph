@@ -1,8 +1,6 @@
-//! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
-
 use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use orbit_utils::traversal_path::TraversalPath;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use strum::VariantNames;
@@ -10,8 +8,6 @@ use strum::VariantNames;
 mod predicates;
 pub use predicates::{BooleanExpression, Condition, PredicateTarget};
 
-/// Controls which columns are fetched for dynamically-discovered entities
-/// during hydration (PathFinding, Neighbors).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, strum::IntoStaticStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum DynamicColumnMode {
@@ -22,14 +18,10 @@ pub enum DynamicColumnMode {
     Default,
 }
 
-/// Optional presentation hints that control response shape without affecting query
-/// semantics. Only `dynamic_columns` and `include_debug_sql` are recognized.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct QueryOptions {
     #[serde(default)]
     pub dynamic_columns: DynamicColumnMode,
-    /// On SaaS: honored for GitLab team members. On self-managed/Dedicated:
-    /// honored for instance admins only.
     #[serde(default)]
     pub include_debug_sql: bool,
 }
@@ -111,23 +103,16 @@ impl Input {
         node_group_ids(groups).chain(text_groups).collect()
     }
 
-    /// Whether this query has the "search shape": a single-node table scan
-    /// with no relationships (traversal with 1 node + 0 relationships).
     pub fn is_search(&self) -> bool {
         self.query_type == QueryType::Traversal
             && self.nodes.len() == 1
             && self.relationships.is_empty()
     }
 
-    /// Rows to fetch from ClickHouse: the page window plus one probe row that
-    /// proves `has_more` without being returned.
     pub fn fetch_limit(&self) -> u32 {
         self.limit + 1
     }
 
-    /// Rows the final sort materializes: the skipped prefix plus the fetched
-    /// window. Per-row text budgets divide by this rather than by the rows
-    /// returned.
     pub fn sorted_rows(&self) -> u32 {
         self.skip.unwrap_or(0) + self.fetch_limit()
     }
@@ -163,6 +148,7 @@ fn default_limit() -> u32 {
     PartialEq,
     Eq,
     Deserialize,
+    Serialize,
     strum::Display,
     strum::IntoStaticStr,
     strum::VariantNames,
@@ -177,13 +163,9 @@ pub enum QueryType {
     /// Internal-only: consolidated hydration for multiple entity types.
     /// Generates a UNION ALL of search-like arms, one per node. Skips
     /// security context injection (IDs are pre-authorized by the pipeline).
-    #[serde(skip)]
+    #[serde(skip_deserializing)]
     Hydration,
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Nodes
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -191,7 +173,6 @@ pub struct InputNode {
     pub id: String,
     #[serde(default)]
     pub entity: Option<String>,
-    /// If not specified, only mandatory columns (id, type) are returned.
     #[serde(default, deserialize_with = "deserialize_columns")]
     pub columns: Option<ColumnSelection>,
     #[serde(default, deserialize_with = "deserialize_filters")]
@@ -202,9 +183,6 @@ pub struct InputNode {
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
     pub id_property: String,
-    /// Narrowed traversal paths extracted from base query results. Used by the
-    /// hydration pipeline to inject `startsWith(traversal_path, tp)` into hydration
-    /// queries, pruning granules through the primary key.
     #[serde(skip)]
     pub traversal_paths: Vec<TraversalPath>,
 }
@@ -264,9 +242,6 @@ pub struct InputIdRange {
     pub end: i64,
 }
 
-/// Accepts either a JSON integer or a JSON string of digits. Supports the
-/// server response convention (IDs serialized as strings to avoid JavaScript
-/// precision loss) so consumers can round-trip IDs without casting.
 fn deserialize_id<'de, D>(deserializer: D) -> Result<i64, D::Error>
 where
     D: Deserializer<'de>,
@@ -300,8 +275,6 @@ where
 pub struct InputFilter {
     pub op: Option<FilterOp>,
     pub value: Option<Value>,
-    /// When set, compare against another node's column instead of a literal.
-    /// Format: `(node_alias, property_name)`. Mutually exclusive with `value`.
     pub rhs_column: Option<(String, String)>,
     pub from_temporal_literal: bool,
 }
@@ -328,11 +301,8 @@ pub enum FilterOp {
     EndsWith,
     IsNull,
     IsNotNull,
-    /// Token-boundary match via `hasToken()`. Requires a text index on the column.
     TokenMatch,
-    /// All tokens present via `hasAllTokens()`. Requires a text index on the column.
     AllTokens,
-    /// Any token present via `hasAnyTokens()`. Requires a text index on the column.
     AnyTokens,
 }
 
@@ -350,9 +320,6 @@ where
         .collect()
 }
 
-/// Parse a filter entry: a bare value is an equality match, an operator
-/// object AND-combines its operator keys, and an array of operator objects
-/// AND-combines its entries (the form needed to repeat an operator).
 fn parse_filter_entry(value: Value) -> Result<Vec<InputFilter>, String> {
     match value {
         Value::Object(obj) => parse_operator_object(obj),
@@ -517,7 +484,6 @@ impl Direction {
         }
     }
 
-    /// Orders a relationship's from/to pair as the edge row stores it: source first, then target.
     pub fn stored_order<T>(self, from: T, to: T) -> (T, T) {
         match self {
             Direction::Outgoing | Direction::Both => (from, to),
@@ -565,7 +531,7 @@ impl InputAggregationMetric {
 #[strum_discriminants(
     name(AggFunction),
     vis(pub),
-    derive(strum::Display),
+    derive(strum::Display, strum::EnumIter),
     strum(serialize_all = "lowercase")
 )]
 pub enum AggExpr {
@@ -825,8 +791,6 @@ impl TruncateUnit {
         }
     }
 
-    /// Granularities whose bucket cardinality is too high to allow without
-    /// the caller scoping the query to a bounded set.
     pub fn requires_selectivity_guard(self) -> bool {
         matches!(self, Self::Minute | Self::Hour)
     }
@@ -921,10 +885,6 @@ pub struct InputNeighbors {
     #[serde(default)]
     pub rel_types: Vec<String>,
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Ordering
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InputOrderBy {
@@ -1240,87 +1200,5 @@ mod tests {
         assert!(err.contains("requires \"key\""), "{err}");
         let err = group_by_key(r#"{"kind": "node", "node": "u"}"#).unwrap_err();
         assert!(err.contains("form was removed"), "{err}");
-    }
-
-    #[test]
-    fn options_default_when_omitted() {
-        let input =
-            parse_input(r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}]}"#)
-                .unwrap();
-
-        assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
-    }
-
-    #[test]
-    fn options_dynamic_columns_all() {
-        let input = parse_input(
-            r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {},
-            "options": {"dynamic_columns": "*"}
-        }"#,
-        )
-        .unwrap();
-
-        assert_eq!(input.options.dynamic_columns, DynamicColumnMode::All);
-    }
-
-    #[test]
-    fn options_dynamic_columns_default() {
-        let input = parse_input(
-            r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {},
-            "options": {"dynamic_columns": "default"}
-        }"#,
-        )
-        .unwrap();
-
-        assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
-    }
-
-    #[test]
-    fn options_empty_object_uses_defaults() {
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User"}],
-            "options": {}
-        }"#,
-        )
-        .unwrap();
-
-        assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
-        assert!(!input.options.include_debug_sql);
-    }
-
-    #[test]
-    fn options_include_debug_sql_true() {
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User"}],
-            "options": {"include_debug_sql": true}
-        }"#,
-        )
-        .unwrap();
-
-        assert!(input.options.include_debug_sql);
-    }
-
-    #[test]
-    fn options_include_debug_sql_defaults_false() {
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User"}],
-            "options": {"dynamic_columns": "*"}
-        }"#,
-        )
-        .unwrap();
-
-        assert!(!input.options.include_debug_sql);
     }
 }

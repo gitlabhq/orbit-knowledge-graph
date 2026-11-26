@@ -93,7 +93,6 @@ rust-lapper = "1.2.0"
 rkyv = { version = "0.8.18", features = ["alloc"] }
 rustc-hash = "2.1.1"
 rustix = { version = "1.1.4", features = ["termios"] }
-schemars = "1.2.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde-saphyr = "1.1.0"
@@ -110,6 +109,7 @@ parquet = { version = "60", default-features = false, features = ["arrow", "snap
 tokio = { version = "1.49.0", features = ["full"] }
 strum = { version = "0.28.0", features = ["derive"] }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+trybuild = "1"
 tokio-util = { version = "0.7.18", features = ["io-util"] }
 ignore = "0.4.25"
 grep-matcher = "0.1.9"

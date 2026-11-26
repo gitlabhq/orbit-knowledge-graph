@@ -16,7 +16,6 @@ use crate::v2::linker::{CodeGraph, HasRules, ResolutionRules, ResolveSettings};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-// PHP scalar/pseudo types, never user-defined classes.
 const PHP_PRIMITIVE_TYPES: &[&str] = &[
     "int", "float", "string", "bool", "void", "array", "object", "mixed", "null", "false", "true",
     "callable", "iterable", "never", "self", "static", "parent",
@@ -25,7 +24,6 @@ const PHP_PRIMITIVE_TYPES: &[&str] = &[
 #[derive(Default)]
 pub struct PhpDsl;
 
-/// Parents from extends, implements, and body-level `use TraitName;` (traits as supertypes).
 fn php_super_types(node: &N<'_>) -> Vec<String> {
     let is_type_name = |k: &str| k == "name" || k == "qualified_name";
     let mut out = Vec::new();
@@ -34,7 +32,6 @@ fn php_super_types(node: &N<'_>) -> Vec<String> {
             "base_clause" | "class_interface_clause" => {
                 for t in child.children() {
                     if is_type_name(t.kind().as_ref()) {
-                        // Graph FQNs omit the leading `\` of an absolute name.
                         out.push(t.text().trim_start_matches('\\').to_string());
                     }
                 }
@@ -96,7 +93,6 @@ impl DslLanguage for PhpDsl {
             scope("function_definition", "Function")
                 .def_kind(DefKind::Function)
                 .metadata(metadata().return_type(field("return_type").descendant("name"))),
-            // Index the bare member name so `$this->id` resolves.
             scope("property_declaration", "Property")
                 .def_kind(DefKind::Property)
                 .no_scope()
@@ -106,7 +102,6 @@ impl DslLanguage for PhpDsl {
                         .child_of_kind("name"),
                 )
                 .metadata(metadata().type_annotation(field("type").descendant("name"))),
-            // Constructor property promotion (PHP 8.0); php_on_scope re-anchors the FQN to the class.
             scope("property_promotion_parameter", "Property")
                 .def_kind(DefKind::Property)
                 .no_scope()
@@ -133,12 +128,9 @@ impl DslLanguage for PhpDsl {
             reference("scoped_call_expression")
                 .name_from(field("name"))
                 .receiver_via(field("scope")),
-            // Foo::class is the class-name fetch, not a member: reference the class itself
-            // (first named child), not the `class` keyword. ref_name_rewrite maps self/static/parent.
             reference("class_constant_access_expression")
                 .when(has_child_text("class"))
                 .name_from(Extract::one(Child, Named)),
-            // Foo::CONST / self::VERSION / EnumType::Case: scope is the first named child, name the last.
             reference("class_constant_access_expression")
                 .name_from(Extract::terminal(Emit::Text).nth(Child, Named, -1))
                 .receiver_via(Extract::one(Child, Named)),
@@ -147,9 +139,7 @@ impl DslLanguage for PhpDsl {
                 .name_from(Extract::one(Child, AnyKind(&["name", "qualified_name"]))),
             reference("attribute")
                 .name_from(Extract::one(Child, AnyKind(&["name", "qualified_name"]))),
-            // Bare type references: param/return/property types, instanceof, catch.
             reference("named_type").name_from(text()),
-            // $x instanceof Foo: the right operand is the class being tested.
             reference("binary_expression")
                 .when(has_child_text("instanceof"))
                 .name_from(field("right")),
@@ -157,13 +147,11 @@ impl DslLanguage for PhpDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        // Handled entirely by the `php_extract_use` hook.
         vec![]
     }
 
     fn chain_config() -> Option<ChainConfig> {
         Some(ChainConfig {
-            // $this/$repo are variable_name; self/parent/static are relative_scope; qualified_name is one class FQN.
             ident_kinds: &["name", "variable_name", "relative_scope", "qualified_name"],
             this_kinds: &[],
             super_kinds: &[],
@@ -185,7 +173,6 @@ impl DslLanguage for PhpDsl {
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
-        // `namespace App\Models;` becomes the FQN prefix (default_name reads the namespace_name).
         Some(("namespace_definition", default_name()))
     }
 
@@ -196,11 +183,9 @@ impl DslLanguage for PhpDsl {
                 .value_from("right")
                 .typed(
                     vec![
-                        // $x = new \Vendor\Foo(): resolve_type_name strips the leading `\`.
                         field("right")
                             .where_(Kind("object_creation_expression"))
                             .child_of_kind("qualified_name"),
-                        // $x = new Foo(): resolves via import_map or module_prefix.
                         field("right")
                             .where_(Kind("object_creation_expression"))
                             .child_of_kind("name"),
@@ -269,8 +254,6 @@ impl DslLanguage for PhpDsl {
     }
 }
 
-/// On-scope hook: re-anchor a promoted property's FQN to the enclosing class,
-/// and rewrite a method's self/static/parent return type to a concrete class FQN.
 #[expect(
     clippy::ptr_arg,
     reason = "signature must match the on_scope hook fn pointer"
@@ -285,8 +268,6 @@ fn php_on_scope(
     let nk_ref = nk.as_ref();
 
     if nk_ref == "property_promotion_parameter" {
-        // The lexical scope adds the trailing `__construct`; drop it so the
-        // promoted property is class-scoped.
         if let Some(last) = defs.last_mut()
             && last.kind == DefKind::Property
         {
@@ -319,7 +300,6 @@ fn php_on_scope(
             .collect::<Vec<&str>>()
             .join(sep);
         let new_rt = if is_parent {
-            // `parent` returns the declaring class's first super (already `\`-stripped).
             let parent = defs
                 .iter()
                 .rev()
@@ -340,8 +320,6 @@ fn php_on_scope(
     false
 }
 
-/// Rewrite a reference name: strip the leading `\` of an absolute name, and resolve
-/// `new self/static/parent` and `self/static/parent::class` to the enclosing concrete type.
 fn php_rewrite_ref_name(node: &N<'_>, name: &str) -> Option<String> {
     if let Some(stripped) = name.strip_prefix('\\') {
         return Some(stripped.to_string());
@@ -355,8 +333,6 @@ fn php_rewrite_ref_name(node: &N<'_>, name: &str) -> Option<String> {
     ) {
         return None;
     }
-    // Walk up to the enclosing class/enum. Traits/interfaces are skipped: `new self`
-    // there is ambiguous (the resolver has no concrete type to anchor to).
     let mut cur = node.parent();
     while let Some(p) = cur {
         match p.kind().as_ref() {
@@ -370,7 +346,6 @@ fn php_rewrite_ref_name(node: &N<'_>, name: &str) -> Option<String> {
                 }
                 return p.field("name").map(|n| n.text().to_string());
             }
-            // Enums cannot extend; `new parent` inside one is unresolvable by design.
             "enum_declaration" => {
                 return (name != "parent")
                     .then(|| p.field("name").map(|n| n.text().to_string()))
@@ -383,7 +358,6 @@ fn php_rewrite_ref_name(node: &N<'_>, name: &str) -> Option<String> {
     None
 }
 
-/// Extract `use` imports: single, aliased, grouped, and `use function`/`use const`.
 fn php_extract_use(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
     if node.kind().as_ref() != "namespace_use_declaration" {
         return false;
@@ -430,7 +404,6 @@ fn push_use_clause(clause: &N<'_>, group_prefix: Option<&str>, imports: &mut Vec
     let full = full.trim_start_matches('\\').to_string();
     let alias = clause.field("alias").map(|a| a.text().to_string());
 
-    // Split into namespace prefix + symbol so the engine rejoins the full FQN.
     let (path, name) = match full.rsplit_once('\\') {
         Some((p, n)) => (p.to_string(), n.to_string()),
         None => (String::new(), full),
@@ -454,7 +427,6 @@ fn push_use_clause(clause: &N<'_>, group_prefix: Option<&str>, imports: &mut Vec
     });
 }
 
-/// Resolve a bare/qualified class name to its FQN for chain bases with no SSA value.
 fn php_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
     let lookup = name.trim_start_matches('\\');
     for &node in &graph.resolve_scope_nodes(lookup) {
@@ -479,14 +451,12 @@ impl HasRules for PhpRules {
             "php",
             scopes,
             spec,
-            // No ImplicitMember/chain_fallback: in PHP they only mis-routed bare names (and were O(n^2)).
             vec![ResolveStage::SSA, ResolveStage::ImportStrategies],
             vec![
                 ImportStrategy::ScopeFqnWalk,
                 ImportStrategy::ExplicitImport,
                 ImportStrategy::SamePackage,
                 ImportStrategy::SameFile,
-                // Last resort for global-namespace classes used without `use` (capped).
                 ImportStrategy::GlobalName,
             ],
             ReceiverMode::Keyword,

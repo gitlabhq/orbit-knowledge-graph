@@ -1,5 +1,3 @@
-# config/ontology/nodes/ci/pipeline.yaml
-
 node_type: Pipeline
 domain: ci
 description: A CI/CD pipeline that runs a series of stages and jobs to build, test, and deploy code
@@ -49,6 +47,12 @@ properties:
     nullable: false
     mutable: false
     description: "Branch or tag name."
+
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Human-readable pipeline name from ci_pipeline_metadata (empty when the pipeline has no metadata row)."
 
   status:
     type: enum
@@ -220,14 +224,14 @@ properties:
     description: "Namespace path for authz."
 
 indexer:
-  reindex: [siphon_p_ci_pipelines]
+  reindex: [siphon_p_ci_pipelines, siphon_ci_pipeline_metadata]
 pipelines:
   - name: Pipeline
     extract:
       type: clickhouse
-      tables: [siphon_p_ci_pipelines]
+      tables: [siphon_p_ci_pipelines, siphon_ci_pipeline_metadata]
       order_by: [traversal_path, id, partition_id]
-      query: generated
+      query: pipeline.sql.j2
     transform:
       type: datafusion
       edges:
@@ -269,6 +273,7 @@ storage:
     - {name: iid, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: ref, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: source, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: tag, type: "Bool", default: "false"}
@@ -294,6 +299,7 @@ storage:
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_source, column: source, type: "set(20)", granularity: 2}
     - {name: idx_ref, column: ref, type: text, granularity: 1}
+    - {name: idx_name, column: name, type: text, granularity: 1}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_user_id, column: user_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_merge_request_id, column: merge_request_id, type: "bloom_filter(0.0001)", granularity: 1}

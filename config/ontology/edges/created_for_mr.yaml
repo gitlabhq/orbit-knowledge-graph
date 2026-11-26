@@ -1,5 +1,3 @@
-# config/ontology/edges/created_for_mr.yaml
-
 description: Environment was first created by a merge request pipeline
 table: gl_ci_edge
 

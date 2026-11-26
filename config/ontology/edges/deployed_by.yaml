@@ -1,5 +1,3 @@
-# config/ontology/edges/deployed_by.yaml
-
 description: User who triggered a deployment
 table: gl_ci_edge
 

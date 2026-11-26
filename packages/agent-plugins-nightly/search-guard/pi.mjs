@@ -3,7 +3,6 @@ import { resolve } from "node:path";
 import { isGuardDisabled, lookupDefinition, lookupTimeoutMs } from "./core.mjs";
 import { analyzeSearch, normalizeTerm, orbitTerms } from "./parse.mjs";
 
-// Setup replaces the placeholder with the launcher this install uses: `glab orbit` or `orbit`.
 const LAUNCHER = "{{orbit}}".split(" ");
 
 function isFile(cwd) {

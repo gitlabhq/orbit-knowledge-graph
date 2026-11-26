@@ -45,8 +45,7 @@ tests:
       - { row: { callee: helper, file: a.cpp } }
 
   - name: "a namespace-qualified call through the nested include links to the definition"
-    # Known gap: a namespace-qualified call to a function in another file does not link, even through a direct include.
-    skip: true
+    known_gap: "a namespace-qualified call to a function in another file does not link, even through a direct include."
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'run_scaled'

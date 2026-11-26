@@ -1,20 +1,12 @@
 #!/usr/bin/env bash
-# Snapshot e2e cluster state into $E2E_DIR/diagnostics/. Called both from
-# test.sh on assertion failure (full ClickHouse + NATS dumps available) and
-# from .gitlab-ci.yml after_script on helm install timeout (only k8s state
-# available). Data sources are probed before use, so deploy-failure runs
-# silently skip CH/NATS dumps.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-set +e  # never fail the caller
+set +e
 
 DIAG_DIR="${E2E_DIR}/diagnostics"
 mkdir -p "$DIAG_DIR"
 
-# Log lines per failing container echoed into the job trace.
 TRACE_LOG_TAIL=25
 
-# Init containers are picked by restarts (completed ones report ready=false);
-# prefer the previous (crashed) instance's logs.
 trace_failing_container_logs() {
   local ns="$1" pod="$2" failing c
   failing=$($KC get pod "$pod" -n "$ns" -o jsonpath='{range .status.initContainerStatuses[?(@.restartCount>0)]}{.name}{"\n"}{end}{range .status.containerStatuses[?(@.ready==false)]}{.name}{"\n"}{end}' 2>/dev/null)
@@ -27,10 +19,6 @@ trace_failing_container_logs() {
 
 log "Collecting diagnostics to $DIAG_DIR"
 
-# --- Helm releases ---------------------------------------------------------
-# `--all` includes failed/pending-install releases that vanish from the
-# default view; `helm status --show-resources` enumerates every k8s object
-# the release tried to create, including ones that never became Ready.
 helm list -A --all --kube-context "$KCTX" 2>&1 > "$DIAG_DIR/helm-list.txt"
 for ns in "$NS_NATS" "$NS_CH" "$NS_GITLAB" "$NS_SIPHON" "$NS_GKG"; do
   $KC get ns "$ns" >/dev/null 2>&1 || continue
@@ -41,11 +29,6 @@ for ns in "$NS_NATS" "$NS_CH" "$NS_GITLAB" "$NS_SIPHON" "$NS_GKG"; do
   done
 done
 
-# --- Cluster-wide events + nodes -------------------------------------------
-# Catches admission webhook denials, cluster-scoped resource conflicts,
-# and node pressure (DiskPressure/MemoryPressure) that slow image pulls
-# and push gkg release past --timeout=600s. `top nodes` may fail if
-# metrics-server is absent; that's fine.
 $KC get events -A --sort-by=.lastTimestamp 2>&1 | tail -n 200 \
   > "$DIAG_DIR/events-cluster.txt"
 $KC get nodes -o wide 2>&1 > "$DIAG_DIR/nodes.txt"
@@ -54,12 +37,6 @@ $KC top nodes 2>&1 > "$DIAG_DIR/nodes-top.txt"
 $KC get ns -o name 2>/dev/null | grep '^namespace/e2e-' | sort \
   > "$DIAG_DIR/e2e-namespaces.txt"
 
-# --- Per-namespace pods, events, workloads, logs ---------------------------
-# `describe pod` is the highest-signal output for stuck rollouts: it
-# surfaces ImagePullBackOff, ReadinessProbe failure messages, OOMKilled,
-# scheduling failures, and PVC binding issues that don't show up in
-# `kubectl logs`. Only run it for unready/restarted pods to keep volume
-# manageable.
 for ns in "$NS_NATS" "$NS_CH" "$NS_GITLAB" "$NS_SIPHON" "$NS_GKG"; do
   $KC get ns "$ns" >/dev/null 2>&1 || continue
   ns_short="${ns#e2e-${E2E_SHA}-}"
@@ -93,16 +70,10 @@ for ns in "$NS_NATS" "$NS_CH" "$NS_GITLAB" "$NS_SIPHON" "$NS_GKG"; do
   echo ""
 done
 
-# --- ClickHouse state (skipped if CH pod is absent) ------------------------
-# Captures schema, row counts, dictionary state, recent errors, and full
-# contents of base tables so data-correctness failures can be diagnosed
-# offline without re-running the test.
 CH_POD=$($KC get pods -n "$NS_CH" -l app=clickhouse -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 if [[ -n "$CH_POD" ]]; then
   log "Dumping ClickHouse state"
   ch_query() {
-    # Pipe SQL via stdin so we don't need to escape quotes in the query
-    # string. Password lives in the pod's CLICKHOUSE_PASSWORD env var.
     printf '%s\n' "$1" | $KC exec -i -n "$NS_CH" "${2:-$CH_POD}" -- \
       sh -c 'clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD"' 2>&1
   }
@@ -114,9 +85,6 @@ if [[ -n "$CH_POD" ]]; then
       > "$DIAG_DIR/clickhouse-${db}-tables.txt"
   done
 
-  # Cache hit rate, last refresh time, errors. Critical for diagnosing
-  # dictGet-via-DEFAULT issues (namespace_traversal_paths_dict etc.) that
-  # surface as stale '0/' traversal_path in derived tables.
   ch_query "SELECT name, status, type, last_successful_update_time, element_count,
                    found_rate, last_exception
             FROM system.dictionaries WHERE database = 'datalake'
@@ -133,10 +101,6 @@ if [[ -n "$CH_POD" ]]; then
             ORDER BY database, name FORMAT Vertical" \
     > "$DIAG_DIR/clickhouse-schema.txt"
 
-  # Graph DB tables are prefixed at runtime per the schema pin in config/versions.yaml
-  # (e.g. v1_gl_project), so discover them dynamically. Engine filter
-  # skips materialized-view definitions; their target tables are still
-  # captured. Capped per-table to keep dumps manageable on chatty tables.
   CH_DUMP_TABLES=$(ch_query "SELECT database || '.' || name FROM system.tables
                              WHERE database IN ('datalake','gkg')
                                AND engine NOT IN ('View','Null','Dictionary')
@@ -147,7 +111,6 @@ if [[ -n "$CH_POD" ]]; then
       > "$DIAG_DIR/clickhouse-${safe}.txt"
   done
 
-  # Per replica: shows a watermark read that ran before a commit it should see.
   for pod in $($KC get pods -n "$NS_CH" -l app=clickhouse -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
     ch_query "SYSTEM FLUSH LOGS" "$pod" > /dev/null
 
@@ -178,7 +141,6 @@ if [[ -n "$CH_POD" ]]; then
   done
 fi
 
-# --- NATS jetstream state (skipped if nats-box is absent) ------------------
 NATS_BOX=$($KC get pods -n "$NS_NATS" -l app.kubernetes.io/name=nats-box -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 if [[ -n "$NATS_BOX" ]]; then
   log "Dumping NATS jetstream state"

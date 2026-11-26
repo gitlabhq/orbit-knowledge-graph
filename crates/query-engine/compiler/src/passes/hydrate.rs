@@ -1,6 +1,3 @@
-//! Hydration plan: decides how the server fetches entity properties after
-//! the base query returns IDs.
-
 use std::collections::HashSet;
 
 use ontology::VirtualSource;
@@ -10,18 +7,45 @@ use crate::ast::Node;
 use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
 use crate::types::SecurityContext;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum HydrationPlan {
     None,
-    /// One template per input node, with IDs to be filled at runtime.
-    Static(Vec<HydrationTemplate>),
-    /// Column specs are pre-resolved for every ontology entity type so
-    /// the server just looks up the matching spec — no ontology queries.
-    Dynamic(Vec<DynamicEntityColumns>),
+    Static(#[serde(serialize_with = "by_node_alias")] Vec<HydrationTemplate>),
+    Dynamic(#[serde(serialize_with = "by_entity_type")] Vec<DynamicEntityColumns>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, strum::IntoStaticStr)]
-#[serde(rename_all = "lowercase")]
+fn by_node_alias<S: serde::Serializer>(
+    templates: &[HydrationTemplate],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(
+        templates
+            .iter()
+            .map(|template| (&template.node_alias, template)),
+    )
+}
+
+fn by_entity_type<S: serde::Serializer>(
+    entities: &[DynamicEntityColumns],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(entities.iter().map(|entity| (&entity.entity_type, entity)))
+}
+
+fn by_property<S: serde::Serializer>(
+    filters: &[(String, crate::input::InputFilter)],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(filters.iter().map(|(property, filter)| {
+        (
+            property,
+            serde_json::json!({"op": filter.op.map(|op| op.as_ref().to_string()), "value": filter.value}),
+        )
+    }))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum HydrationKind {
     None,
@@ -39,64 +63,37 @@ impl HydrationPlan {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct HydrationTemplate {
     pub entity_type: String,
-    /// Used to correlate hydration results back to the base query's
-    /// `_orbit_{alias}_pk` column.
     pub node_alias: String,
     pub destination_table: String,
-    /// User-requested columns with virtual columns filtered out, plus
-    /// injected dependencies.
     pub columns: Vec<String>,
     pub virtual_columns: Vec<VirtualColumnRequest>,
-    /// Dependency columns injected for virtual column resolvers that the
-    /// user didn't explicitly request. These should be stripped from the
-    /// final output after content resolution.
     pub injected_columns: Vec<String>,
-    /// When true, the hydration pipeline can narrow scans via
-    /// `startsWith(traversal_path, tp)` using TP values from the base query.
     pub has_traversal_path: bool,
-    /// Filters on virtual columns to apply in-memory after hydration resolves
-    /// their values.
+    #[serde(serialize_with = "by_property")]
     pub virtual_filters: Vec<(String, crate::input::InputFilter)>,
-    /// Virtual columns resolved only because they are filtered, not selected.
-    /// Stripped from result rows after the in-memory filter pass.
     pub filter_injected_columns: Vec<String>,
 }
 
-/// Pre-resolved column spec for an entity type in dynamic hydration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct DynamicEntityColumns {
     pub entity_type: String,
     pub destination_table: String,
     pub columns: Vec<String>,
     pub virtual_columns: Vec<VirtualColumnRequest>,
-    /// Columns injected as dependencies, not user-requested.
     pub injected_columns: Vec<String>,
     pub has_traversal_path: bool,
 }
 
-/// A column that must be resolved from a remote service rather than ClickHouse.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct VirtualColumnRequest {
     pub column_name: String,
     pub service: String,
     pub lookup: String,
 }
 
-/// Build the hydration plan for a compiled query.
-///
-/// - Aggregation/Traversal: one static template per input node, minus the
-///   columns `emitted` already projects as `{alias}_{col}`. Nodes the base
-///   query joins inline therefore need no second query; single-node search
-///   keeps only its virtual columns.
-/// - PathFinding/Neighbors: dynamic plan over all ontology entity types.
-///
-/// The security context is threaded through so dynamic plans can strip
-/// `admin_only` fields before they reach the hydration query — static
-/// plans rely on `RestrictPass` having already pruned them from
-/// `node.columns`.
 pub fn generate_hydration_plan(
     input: &Input,
     emitted: &Node,
@@ -111,7 +108,6 @@ pub fn generate_hydration_plan(
         QueryType::Aggregation | QueryType::Traversal => {
             let mut templates = build_static_templates(input, emitted, model);
 
-            // Aggregation builds its own SELECT, so no {alias}_{col} alias exists to match.
             if input.query_type == QueryType::Aggregation {
                 templates.retain(|t| !t.virtual_columns.is_empty());
             }
@@ -200,15 +196,6 @@ fn build_static_templates(
         .collect()
 }
 
-/// Pre-resolve column specs for every ontology entity type based on the
-/// query's `dynamic_columns` mode. The server matches discovered entity
-/// types against this list at runtime.
-///
-/// Non-admin callers have `admin_only` fields stripped from both the
-/// wildcard (`*`) and default column sets. Without this filter a
-/// non-admin using `dynamic_columns: "*"` on Neighbors/PathFinding would
-/// see admin-only fields since hydration is built from the ontology
-/// rather than from `node.columns` that `RestrictPass` pruned.
 fn build_dynamic_specs(
     input: &Input,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
@@ -233,9 +220,6 @@ fn build_dynamic_specs(
             };
 
             let requested: Vec<String> = match input.options.dynamic_columns {
-                // Virtual columns are excluded from dynamic modes: they
-                // require an explicit user request because they incur
-                // external service calls (e.g. Gitaly round-trips).
                 DynamicColumnMode::All => entity
                     .properties
                     .iter()
@@ -285,7 +269,6 @@ fn build_dynamic_specs(
         .collect()
 }
 
-/// Returns the columns that were injected (not originally requested).
 fn inject_model_virtual_dependencies(
     columns: &mut Vec<String>,
     virtual_columns: &[VirtualColumnRequest],
@@ -485,12 +468,6 @@ mod tests {
         assert!(virtual_columns.is_empty());
     }
 
-    // Regression guard: before the fix, `dynamic_columns: "*"` on
-    // Neighbors/PathFinding leaked `is_admin`/`is_auditor` because the
-    // wildcard expansion pulled straight from the ontology without
-    // consulting the security context (RestrictPass only runs on
-    // `node.columns`).
-
     use crate::input::{DynamicColumnMode, Input, InputNode, QueryType};
 
     fn user_ontology() -> Ontology {
@@ -583,9 +560,6 @@ mod tests {
 
     #[test]
     fn dynamic_default_strips_admin_only_for_non_admin() {
-        // Defense-in-depth: even if a developer misconfigures
-        // `default_columns` to include an admin_only field, the runtime
-        // filter must still strip it for non-admins.
         let ont = user_ontology().with_default_columns("User", ["username", "is_admin"]);
         let ctx = non_admin_ctx();
         let input = neighbors_input(DynamicColumnMode::Default);

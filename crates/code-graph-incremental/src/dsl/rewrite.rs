@@ -9,9 +9,6 @@ use super::matching::matches;
 use super::rules::RewriteStage;
 use super::types::{Cap, EdgeCtx, Out, Pat, Rewrite, TagEntry, Text, Tf};
 
-/// How captured subtrees enter a template. The target is about to be removed,
-/// so its descendants can be moved in place of copied, except when the built
-/// tree may be discarded (`unique:`) or the target survives (`append:`).
 pub(crate) struct Placement {
     pub(crate) mv: bool,
     pub(crate) target: NodeId,
@@ -27,7 +24,6 @@ impl Placement {
         }
     }
 
-    /// A capture used twice, or the target itself, is copied on the later use.
     fn place(&mut self, t: &mut Tree, src: NodeId, parent: NodeId) -> NodeId {
         if self.mv && src != self.target && self.moved.insert(src) {
             src.detach(&mut t.storage.0);
@@ -39,8 +35,6 @@ impl Placement {
     }
 }
 
-/// Everything a match hands to template construction that stays fixed while
-/// the template is built.
 pub(crate) struct Fill<'a> {
     pub lang: &'a Lang,
     pub caps: &'a [Cap],
@@ -231,8 +225,6 @@ pub fn apply_rewrites(
     apply_rewrites_inner(t, lang, rules, false, None, sentinels, apply_structure).map(drop)
 }
 
-/// Applies a stage once, or until a pass replaces no node when it is
-/// `repeat`. The sentinels bound a stage that never settles.
 pub fn apply_stage(
     t: &mut Tree,
     lang: &Lang,
@@ -532,7 +524,6 @@ impl Tree {
     }
 }
 
-/// The node `tag_on:` selects: the first descendant of that kind, else `root`.
 fn tag_target<S: Storage<Node = Node>>(t: &Tree<S>, root: S::Id, tag_on: Option<u16>) -> S::Id {
     tag_on
         .and_then(|k| {

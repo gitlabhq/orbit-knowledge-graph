@@ -40,7 +40,6 @@ fn license_checksum_quota(customers_dot_url: String) -> QuotaService {
     QuotaService::from_config(&billing).unwrap()
 }
 
-// `Claims` never serializes the checksum, so it is set in the raw JSON the way Rails signs it.
 fn self_managed_token_with_license_checksum() -> String {
     let now = chrono::Utc::now().timestamp();
     let mut claims = serde_json::to_value(Claims {

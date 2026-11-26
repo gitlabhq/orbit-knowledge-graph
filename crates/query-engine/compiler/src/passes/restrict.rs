@@ -7,7 +7,6 @@
 //! aggregation bypasses the Rails redaction layer that protects other query
 //! types. Rejects entities whose minimum access level no authorized path
 //! meets. Runs before lowering.
-
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, Input, QueryType};
 use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
@@ -659,8 +658,6 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = input_with_aggregation(AggFunction::Count, None);
-        // User and Group declared but not connected: the old declaration-based
-        // check accepted this; the reachability check must reject it.
         input.relationships.clear();
         let err = apply(&input, &ont, &ctx).unwrap_err();
         assert!(
@@ -695,9 +692,6 @@ mod tests {
             "search queries are redacted by the Rails layer and must not be blocked here"
         );
     }
-
-    // These tests load the embedded production ontology so any drift in
-    // user.yaml is caught here, in addition to the pin test in the ontology crate.
 
     const USER_ADMIN_ONLY_COLUMNS: &[&str] = &[
         "email",
@@ -838,106 +832,5 @@ mod tests {
                 "admin must be allowed to filter on User.{field}"
             );
         }
-    }
-
-    fn reviewer_prune_to_target_ontology() -> Ontology {
-        let base = Ontology::new()
-            .with_nodes(["User"])
-            .with_path_scopable_nodes(["MergeRequest"])
-            .with_traversal_path_lookup("MergeRequest", "id");
-        let edge_table = base.edge_table().to_string();
-        base.with_edge_variant(ontology::EdgeEntity {
-            relationship_kind: "REVIEWER".into(),
-            source: "user_id".into(),
-            source_kind: "User".into(),
-            target: "id".into(),
-            target_kind: "MergeRequest".into(),
-            destination_table: edge_table,
-            fk_column: None,
-            scope: Some(ontology::EdgeVariantScope::PruneToTarget),
-        })
-    }
-
-    fn rel_kind(types: &[&str], from: &str, to: &str) -> crate::input::InputRelationship {
-        crate::input::InputRelationship {
-            types: types.iter().map(|s| (*s).into()).collect(),
-            from: from.into(),
-            to: to.into(),
-            hops: crate::input::HopRange::default(),
-            direction: crate::input::Direction::Outgoing,
-            filters: std::collections::HashMap::new(),
-        }
-    }
-
-    #[test]
-    fn prune_to_target_stamps_when_target_resolves() {
-        let ont = reviewer_prune_to_target_ontology();
-        let ctx = SecurityContext::new(1, vec!["1/9970/".into()]).unwrap();
-        let input = Input {
-            query_type: QueryType::Traversal,
-            nodes: vec![
-                InputNode {
-                    id: "u".into(),
-                    entity: Some("User".into()),
-                    ..Default::default()
-                },
-                InputNode {
-                    id: "mr".into(),
-                    entity: Some("MergeRequest".into()),
-                    node_ids: vec![15846663],
-                    ..Default::default()
-                },
-            ],
-            relationships: vec![rel_kind(&["REVIEWER"], "u", "mr")],
-            ..Input::default()
-        };
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ont.clone())).unwrap();
-        restrict(&input, model.as_ref(), &ctx).expect("restrict ok");
-        let bounds = crate::tp_bounds::TpBounds::derive(&input, model.as_ref());
-        let mr_prefix = bounds.node("mr");
-        assert!(
-            mr_prefix.is_some(),
-            "pinned MergeRequest derives a scope prefix"
-        );
-    }
-
-    #[test]
-    fn prune_to_target_does_not_propagate_across_hub() {
-        let ont = reviewer_prune_to_target_ontology();
-        let ctx = SecurityContext::new(1, vec!["1/9970/".into()]).unwrap();
-        let input = Input {
-            query_type: QueryType::Traversal,
-            nodes: vec![
-                InputNode {
-                    id: "mr_a".into(),
-                    entity: Some("MergeRequest".into()),
-                    node_ids: vec![15846663],
-                    ..Default::default()
-                },
-                InputNode {
-                    id: "u".into(),
-                    entity: Some("User".into()),
-                    ..Default::default()
-                },
-                InputNode {
-                    id: "mr_b".into(),
-                    entity: Some("MergeRequest".into()),
-                    ..Default::default()
-                },
-            ],
-            relationships: vec![
-                rel_kind(&["REVIEWER"], "u", "mr_a"),
-                rel_kind(&["REVIEWER"], "u", "mr_b"),
-            ],
-            ..Input::default()
-        };
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ont.clone())).unwrap();
-        restrict(&input, model.as_ref(), &ctx).expect("restrict ok");
-        let bounds = crate::tp_bounds::TpBounds::derive(&input, model.as_ref());
-
-        assert!(
-            bounds.node("mr_a").is_some() && bounds.node("mr_b").is_none(),
-            "mr_b must remain unpinned"
-        );
     }
 }

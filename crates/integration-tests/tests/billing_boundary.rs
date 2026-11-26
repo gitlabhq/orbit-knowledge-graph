@@ -3,7 +3,6 @@
 //! A passing run in CI is control evidence that the billing crate's dependency
 //! surface has not silently expanded. See ADR 020:
 //! docs/pages/engineering/adr/020_billing_sox_scope.md
-
 use std::path::PathBuf;
 
 use cargo_metadata::MetadataCommand;

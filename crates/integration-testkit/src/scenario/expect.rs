@@ -159,9 +159,6 @@ fn assert_exactly_one_match(
     matcher: &RowMatcher,
     location: &str,
 ) {
-    // An absent column means every row silently fails to match; surface it as a
-    // schema/typo error instead of a misleading "matched 0 rows". Skipped when the
-    // result set is empty, where zero matches is the real failure to report.
     if !rows.is_empty() {
         for column in matcher.keys() {
             assert!(
@@ -256,7 +253,6 @@ fn request_matches(payload: &serde_json::Value, matcher: &RowMatcher) -> bool {
 
 fn request_value_matches(expected: &Matcher, actual: &serde_json::Value) -> bool {
     match expected {
-        // `contains` is element membership for arrays, substring for strings.
         Matcher::Contains(c) => match actual {
             serde_json::Value::Array(items) => items
                 .iter()
