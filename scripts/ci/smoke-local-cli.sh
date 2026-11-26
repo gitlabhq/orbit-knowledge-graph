@@ -13,7 +13,7 @@ mkdir -p "$HOME"
 
 repo="$work/repo"
 mkdir -p "$repo"
-printf 'def helper():\n    return 1\n' >"$repo/app.py"
+{ printf 'def helper():\n    return 1\n'; for i in 1 2 3 4 5; do printf 'def f%d():\n    return %d\n' "$i" "$i"; done; } >"$repo/app.py"
 git -C "$repo" init -q
 git -C "$repo" add app.py
 git -C "$repo" -c user.name=smoke -c user.email=smoke@example.com commit -qm init

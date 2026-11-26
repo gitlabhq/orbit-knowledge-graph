@@ -231,7 +231,24 @@ fn count_noun(count: usize, noun: &str) -> String {
     format!("{} {noun}{plural}", tui::format_with_thousands(count))
 }
 
+const INDEX_STACK_BYTES: usize = 64 * 1024 * 1024;
+
+fn on_large_stack<T: Send>(work: impl FnOnce() -> Result<T> + Send) -> Result<T> {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name("orbit-index".into())
+            .stack_size(INDEX_STACK_BYTES)
+            .spawn_scoped(scope, work)?
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
+}
+
 pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>> {
+    on_large_stack(|| index_on_current_thread(path, options))
+}
+
+fn index_on_current_thread(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>> {
     let workspace = workspace::Workspace::open_default()?;
     let manifest_path = std::path::absolute(workspace.manifest_path())?;
     let repos = workspace.resolve_repos(&path)?;
@@ -454,6 +471,14 @@ pub(crate) fn refresh(
 }
 
 pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>) -> Result<()> {
+    on_large_stack(|| refresh_now_on_current_thread(repo, db, files))
+}
+
+fn refresh_now_on_current_thread(
+    repo: PathBuf,
+    db: Option<PathBuf>,
+    files: Vec<String>,
+) -> Result<()> {
     let Some(Incremental {
         git,
         saved,
@@ -516,6 +541,18 @@ pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn on_large_stack_runs_work_on_the_index_thread() {
+        let name = on_large_stack(|| Ok(std::thread::current().name().map(str::to_owned))).unwrap();
+        assert_eq!(name.as_deref(), Some("orbit-index"));
+    }
+
+    #[test]
+    #[should_panic(expected = "boom")]
+    fn on_large_stack_propagates_panics() {
+        let _ = on_large_stack::<()>(|| panic!("boom"));
+    }
 
     #[test]
     fn a_marker_left_by_a_killed_refresh_does_not_block_the_next_one() {
