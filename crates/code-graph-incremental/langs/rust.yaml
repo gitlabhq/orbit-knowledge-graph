@@ -109,6 +109,8 @@ stages:
 
       - match: '(call_expression function: (scoped_identifier path: (self) name: $N) arguments: $A)'
         replace: '(__call (__callee @$N $N) $A)'
+      - match: '(call_expression function: (scoped_identifier "/^(crate|super)::/" path: (scoped_identifier path: $P name: $T:(identifier "/^[A-Z]/")) name: $N) arguments: $A)'
+        replace: '(__call (__import (__source @$P $P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$T)) (__callee (__member @$N (__object @$T $T (__qualifier)))) $A)'
       - match: '(call_expression function: (scoped_identifier "/^(crate|super|std|core|alloc)::/" path: $P name: $N) arguments: $A)'
         replace: '(__call (__import (__source @$P $P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$N)) (__callee @$N $N) $A)'
       - match: '(call_expression function: (scoped_identifier path: (bracketed_type (qualified_type type: $T alias: $Q)) name: $N) arguments: $A)'
