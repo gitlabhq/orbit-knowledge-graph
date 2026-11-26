@@ -125,4 +125,41 @@ mod tests {
         assert!(config.is_enabled_for(flag, Some(42)));
         assert!(!config.is_enabled_for(flag, None));
     }
+
+    #[test]
+    fn the_schema_lists_every_feature_this_release_knows() {
+        let pool =
+            prost_reflect::DescriptorPool::decode(crate::proto::FILE_DESCRIPTOR_SET).unwrap();
+        let rules = pool.get_extension_by_name("buf.validate.field").unwrap();
+        let field = pool
+            .get_message_by_name("orbit.config.v1.Config")
+            .unwrap()
+            .get_field_by_name("features")
+            .unwrap();
+        let message = |parent: &prost_reflect::DynamicMessage, name| {
+            parent
+                .get_field_by_name(name)
+                .unwrap()
+                .as_message()
+                .unwrap()
+                .clone()
+        };
+        let rules = field
+            .options()
+            .get_extension(&rules)
+            .as_message()
+            .unwrap()
+            .clone();
+        let keys = message(&message(&message(&rules, "map"), "keys"), "string");
+        let listed: Vec<String> = keys
+            .get_field_by_name("in")
+            .unwrap()
+            .as_list()
+            .unwrap()
+            .iter()
+            .map(|name| name.as_str().unwrap().to_owned())
+            .collect();
+
+        assert_eq!(listed, <Feature as strum::VariantNames>::VARIANTS);
+    }
 }

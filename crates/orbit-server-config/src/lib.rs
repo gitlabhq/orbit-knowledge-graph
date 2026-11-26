@@ -11,7 +11,6 @@ pub mod app;
 pub mod billing;
 pub mod clickhouse;
 pub mod clickhouse_setup;
-pub mod convert;
 pub mod engine;
 pub mod features;
 pub mod gitlab;

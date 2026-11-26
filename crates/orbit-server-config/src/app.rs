@@ -57,6 +57,7 @@ pub struct AppConfig {
     pub schema: SchemaConfig,
     pub analytics: AnalyticsConfig,
     pub billing: BillingConfig,
+    #[serde(default)]
     pub features: FeaturesConfig,
     pub object_storage: ObjectStorageConfig,
 }
@@ -106,18 +107,19 @@ impl AppConfig {
         Self::decode_with(document, Loader::new())
     }
 
-    fn decode_with(document: serde_json::Value, loader: Loader) -> Result<Self, ConfigError> {
+    fn decode_with(mut document: serde_json::Value, loader: Loader) -> Result<Self, ConfigError> {
         let errors = undeclared(&document);
         if !errors.is_empty() {
             return Err(ConfigError::Undeclared(errors));
         }
 
         let json = serde_json::to_vec(&document).expect("a parsed document re-serialises");
-        let loaded = loader
+        loader
             .with_descriptors(proto::FILE_DESCRIPTOR_SET)?
             .load_bytes::<proto::Config>(&json, Format::Json)?;
 
-        Ok(Self::try_from(loaded)?)
+        drop_nulls(&mut document);
+        Ok(serde_path_to_error::deserialize(document)?)
     }
 
     pub fn jwt_secret(&self) -> Result<&str, ConfigError> {
@@ -182,6 +184,17 @@ fn overlay_path(overlay: Option<&Path>) -> Option<PathBuf> {
     }
 }
 
+fn drop_nulls(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(object) => {
+            object.retain(|_, value| !value.is_null());
+            object.values_mut().for_each(drop_nulls);
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(drop_nulls),
+        _ => {}
+    }
+}
+
 fn parse_yaml(data: &[u8], path: &Path) -> Result<serde_json::Value, ConfigError> {
     let document: serde_json::Value = serde_saphyr::from_slice_with_options(
         data,
@@ -219,8 +232,8 @@ pub enum ConfigError {
     Secrets(#[from] crate::secrets::SecretError),
     #[error(transparent)]
     Load(#[from] labkit_config::Error),
-    #[error(transparent)]
-    Convert(#[from] crate::convert::ConvertError),
+    #[error("config: {0}")]
+    Decode(#[from] serde_path_to_error::Error<serde_json::Error>),
     #[error(
         "gitlab.jwt.verifying_key is required (set it in a config overlay or mount it at /etc/secrets/gitlab/jwt/verifying_key)"
     )]
@@ -384,6 +397,109 @@ graph:
                 .contains("- jwt_clock_skew_secs: value is required"),
             "{err}"
         );
+    }
+
+    fn loader() -> Loader {
+        Loader::new()
+            .with_descriptors(proto::FILE_DESCRIPTOR_SET)
+            .expect("the generated descriptor set registers")
+    }
+
+    fn pointers(value: &serde_json::Value, at: &str, out: &mut Vec<String>) {
+        if let serde_json::Value::Object(object) = value {
+            for (key, value) in object {
+                let path = format!("{at}/{}", key.replace('~', "~0").replace('/', "~1"));
+                pointers(value, &path, out);
+                out.push(path);
+            }
+        }
+    }
+
+    /// Strict mode rejects any key the schema does not declare, so a field
+    /// missing from the proto fails here rather than being dropped at startup.
+    #[test]
+    fn the_schema_declares_every_key_in_the_embedded_defaults() {
+        let json = serde_json::to_vec(&embedded_document()).unwrap();
+        loader()
+            .with_strict_mode()
+            .load_bytes::<proto::Config>(&json, Format::Json)
+            .expect("the embedded defaults load under strict mode");
+    }
+
+    /// Serde ignores a key the Rust types lack, so a field added to the proto
+    /// and the defaults but not to Rust fails here.
+    #[test]
+    fn the_rust_types_read_every_key_in_the_embedded_defaults() {
+        let mut paths = Vec::new();
+        pointers(&embedded_document(), "", &mut paths);
+        let decoded = serde_json::to_value(AppConfig::embedded_defaults()).unwrap();
+
+        let dropped: Vec<_> = paths
+            .into_iter()
+            .filter(|path| decoded.pointer(path).is_none())
+            .collect();
+
+        assert!(dropped.is_empty(), "the Rust types drop: {dropped:?}");
+    }
+
+    /// Unsetting any key the defaults set must be accepted or rejected by the
+    /// schema and the Rust types alike.
+    #[test]
+    fn the_schema_and_the_rust_types_agree_on_every_unset_key() {
+        let defaults = embedded_document();
+        let mut paths = Vec::new();
+        pointers(&defaults, "", &mut paths);
+
+        let loader = loader();
+        let disagree: Vec<_> = paths
+            .into_iter()
+            .filter(|path| {
+                let mut document = defaults.clone();
+                *document.pointer_mut(path).unwrap() = serde_json::Value::Null;
+                let json = serde_json::to_vec(&document).unwrap();
+                let schema_accepts = loader
+                    .load_bytes::<proto::Config>(&json, Format::Json)
+                    .is_ok();
+                schema_accepts != AppConfig::decode(document).is_ok()
+            })
+            .collect();
+
+        assert!(
+            disagree.is_empty(),
+            "the schema accepts these keys unset but the Rust types do not: {disagree:?}"
+        );
+    }
+
+    #[test]
+    fn a_value_the_schema_cannot_check_is_reported_with_its_field() {
+        for (yaml, field) in [
+            ("grpc_bind_address: not-an-address\n", "grpc_bind_address"),
+            (
+                "schedule:\n  tasks:\n    global:\n      cron: \"not a cron\"\n",
+                "schedule.tasks.global",
+            ),
+            (
+                "metrics:\n  prometheus:\n    port: 70000\n",
+                "metrics.prometheus.port",
+            ),
+        ] {
+            let error = AppConfig::with_overlay(yaml).unwrap_err().to_string();
+            assert!(error.starts_with(&format!("config: {field}: ")), "{error}");
+        }
+    }
+
+    #[test]
+    fn stateful_sets_load_under_either_name_the_schema_accepts() {
+        for key in ["statefulSets", "stateful_sets"] {
+            let yaml =
+                format!("health_check:\n  targets:\n    - namespace: orbit\n      {key}: [nats]\n");
+            let config = AppConfig::with_overlay(&yaml).unwrap();
+            assert_eq!(
+                config.health_check.targets[0].stateful_sets,
+                ["nats"],
+                "{key}"
+            );
+        }
     }
 
     fn write_overlay(dir: &Path, name: &str, yaml: &str) -> std::path::PathBuf {

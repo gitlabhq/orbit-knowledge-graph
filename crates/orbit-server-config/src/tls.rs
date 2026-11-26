@@ -17,7 +17,6 @@ pub struct TlsConfig {
     pub key_path: Option<String>,
     /// The internal listeners: the probe server in every mode and the
     /// health-check API.
-    #[serde(default)]
     pub internal: ListenerTlsConfig,
 }
 
@@ -25,7 +24,6 @@ pub struct TlsConfig {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListenerTlsConfig {
-    #[serde(default)]
     pub enabled: bool,
     /// Overrides `tls.cert_path` for this group. Must be set with `key_path`.
     pub cert_path: Option<String>,

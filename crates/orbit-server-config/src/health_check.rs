@@ -10,7 +10,7 @@ pub struct NamespaceTarget {
     pub namespace: String,
     #[serde(default)]
     pub deployments: Vec<String>,
-    #[serde(default, rename = "statefulSets")]
+    #[serde(default, rename = "statefulSets", alias = "stateful_sets")]
     pub stateful_sets: Vec<String>,
 }
 

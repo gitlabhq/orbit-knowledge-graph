@@ -16,6 +16,7 @@ pub struct ExpandedLogsConfig {
     /// Expand every log line.
     pub global_override: bool,
     /// Root namespace IDs whose logs are always expanded.
+    #[serde(default)]
     pub root_namespace_ids: Vec<u64>,
 }
 
