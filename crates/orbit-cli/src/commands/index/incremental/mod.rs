@@ -238,7 +238,8 @@ fn on_large_stack<T: Send>(work: impl FnOnce() -> Result<T> + Send) -> Result<T>
         std::thread::Builder::new()
             .name("orbit-index".into())
             .stack_size(INDEX_STACK_BYTES)
-            .spawn_scoped(scope, work)?
+            .spawn_scoped(scope, work)
+            .context("failed to start the index thread")?
             .join()
             .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
     })
