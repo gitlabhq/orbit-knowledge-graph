@@ -57,6 +57,58 @@ fn java_super_types(node: &N<'_>) -> Vec<String> {
     result
 }
 
+fn is_annotation(node: &N<'_>) -> bool {
+    matches!(node.kind().as_ref(), "annotation" | "marker_annotation")
+}
+
+fn bracket_pairs(node: &N<'_>) -> usize {
+    node.children().filter(|c| c.kind() == "[").count()
+}
+
+fn erased_type(node: &N<'_>) -> String {
+    match node.kind().as_ref() {
+        "array_type" => {
+            let element = node.field("element").map(|e| erased_type(&e));
+            let dims = node.field("dimensions").map_or(0, |d| bracket_pairs(&d));
+            format!("{}{}", element.unwrap_or_default(), "[]".repeat(dims))
+        }
+        "generic_type" | "scoped_type_identifier" => node
+            .children()
+            .filter(|c| c.is_named() && !is_annotation(c) && c.kind() != "type_arguments")
+            .map(|c| erased_type(&c))
+            .collect::<Vec<_>>()
+            .join("."),
+        _ => node.text().to_string(),
+    }
+}
+
+fn java_signature(node: &N<'_>) -> Option<String> {
+    let parameters = node.field("parameters")?;
+    if parameters.get_inner_node().has_error() {
+        return None;
+    }
+    let types: Vec<String> = parameters
+        .children()
+        .filter_map(|param| match param.kind().as_ref() {
+            "formal_parameter" => {
+                let ty = erased_type(&param.field("type")?);
+                let dims = param.field("dimensions").map_or(0, |d| bracket_pairs(&d));
+                Some(format!("{ty}{}", "[]".repeat(dims)))
+            }
+            "spread_parameter" => {
+                let ty = param
+                    .children()
+                    .take_while(|c| c.kind() != "...")
+                    .filter(|c| c.is_named() && c.kind() != "modifiers" && !is_annotation(c))
+                    .last()?;
+                Some(format!("{}...", erased_type(&ty)))
+            }
+            _ => None,
+        })
+        .collect();
+    Some(format!("({})", types.join(", ")))
+}
+
 fn java_record_accessors(
     node: &N<'_>,
     defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
@@ -164,13 +216,16 @@ impl DslLanguage for JavaDsl {
                     metadata()
                         .type_annotation(field("type").inner("type_arguments", "type_identifier")),
                 ),
-            scope("constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
+            scope("constructor_declaration", "Constructor")
+                .def_kind(DefKind::Constructor)
+                .metadata(metadata().signature(java_signature)),
             scope("compact_constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
                 .metadata(
                     metadata()
-                        .return_type(field("type").inner("type_arguments", "type_identifier")),
+                        .return_type(field("type").inner("type_arguments", "type_identifier"))
+                        .signature(java_signature),
                 ),
             scope("lambda_expression", "Lambda")
                 .def_kind(DefKind::Lambda)

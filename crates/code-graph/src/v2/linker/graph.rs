@@ -1390,6 +1390,13 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
         b.col("definition_type")?
             .push_str(self.def.definition_type)?;
         write_range(b, &self.def.range)?;
+        let signature = self
+            .def
+            .metadata
+            .as_ref()
+            .and_then(|m| m.signature)
+            .map_or("", |id| self.pool.get(id));
+        b.col("signature")?.push_str(signature)?;
         let front_matter = self
             .def
             .metadata

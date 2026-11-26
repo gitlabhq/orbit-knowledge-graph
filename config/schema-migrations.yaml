@@ -1,5 +1,12 @@
 # yaml-language-server: $schema=schemas/schema-migrations.schema.json
 migrations:
+- version: 130
+  scope: code
+  note: >-
+    Definition gains a signature column holding Java method and constructor
+    parameter types as written in source, so overloads that share a name can be told apart.
+    Other languages store ''. Code tables are re-derived so existing Java rows pick
+    the value up.
 - version: 129
   scope: none
   note: Ontology YAML comments removed; DDL and reindex output byte-identical.

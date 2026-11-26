@@ -13,6 +13,7 @@ pub struct MetadataRule {
     pub return_type: Option<Extract>,
     pub type_annotation: Option<Extract>,
     pub receiver_type: Option<Extract>,
+    pub signature: Option<fn(&N<'_>) -> Option<String>>,
     pub decorators: Option<fn(&N<'_>) -> Vec<String>>,
     pub companion_of: Option<Extract>,
 }
@@ -30,6 +31,7 @@ impl MetadataRule {
             return_type: None,
             type_annotation: None,
             receiver_type: None,
+            signature: None,
             decorators: None,
             companion_of: None,
         }
@@ -49,6 +51,10 @@ impl MetadataRule {
     }
     pub fn receiver_type(mut self, extract: Extract) -> Self {
         self.receiver_type = Some(extract);
+        self
+    }
+    pub fn signature(mut self, f: fn(&N<'_>) -> Option<String>) -> Self {
+        self.signature = Some(f);
         self
     }
     pub fn decorators(mut self, f: fn(&N<'_>) -> Vec<String>) -> Self {
@@ -78,6 +84,7 @@ impl MetadataRule {
             .as_ref()
             .and_then(|e| e.apply_with(node, &resolve));
         let receiver_type = self.receiver_type.as_ref().and_then(|e| e.apply(node));
+        let signature = self.signature.and_then(|f| f(node));
         let decorators = self.decorators.map(|f| f(node)).unwrap_or_default();
         let companion_of = self.companion_of.as_ref().and_then(|e| e.apply(node));
 
@@ -85,6 +92,7 @@ impl MetadataRule {
             || return_type.is_some()
             || type_annotation.is_some()
             || receiver_type.is_some()
+            || signature.is_some()
             || !decorators.is_empty()
             || companion_of.is_some();
 
@@ -97,6 +105,7 @@ impl MetadataRule {
             return_type,
             type_annotation,
             receiver_type,
+            signature,
             decorators,
             companion_of,
             is_exported: false,

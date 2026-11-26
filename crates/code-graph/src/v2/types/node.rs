@@ -57,6 +57,7 @@ pub struct DefinitionMetadata {
     pub return_type: Option<String>,
     pub type_annotation: Option<String>,
     pub receiver_type: Option<String>,
+    pub signature: Option<String>,
     pub decorators: Vec<String>,
     pub companion_of: Option<String>,
     pub is_exported: bool,
