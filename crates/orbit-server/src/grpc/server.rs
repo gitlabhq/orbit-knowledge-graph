@@ -2,10 +2,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
-use orbit_log_fields::info;
+use futures::{Stream, StreamExt};
+use orbit_log_fields::{info, warn};
 use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::net::TcpListener;
+use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 use tonic::codec::CompressionEncoding;
 use tonic::transport::Server as TonicServer;
 use tonic::transport::server::{ServerTlsConfig, TcpIncoming};
@@ -31,6 +34,7 @@ pub struct GrpcServer {
     service: OrbitServiceImpl,
     tls_config: Option<ServerTlsConfig>,
     grpc_config: GrpcConfig,
+    shutdown: CancellationToken,
 }
 
 impl GrpcServer {
@@ -56,6 +60,7 @@ impl GrpcServer {
             service,
             tls_config,
             grpc_config,
+            shutdown: CancellationToken::new(),
         }
     }
 
@@ -79,7 +84,13 @@ impl GrpcServer {
         self
     }
 
+    pub fn with_shutdown(mut self, shutdown: CancellationToken) -> Self {
+        self.shutdown = shutdown;
+        self
+    }
+
     pub async fn run(self, listener: TcpListener) -> Result<(), tonic::transport::Error> {
+        let shutdown = self.shutdown;
         let tls_enabled = self.tls_config.is_some();
         info!(safe(TLS_ENABLED) = tls_enabled, "Starting gRPC server");
 
@@ -89,6 +100,7 @@ impl GrpcServer {
         let incoming = TcpIncoming::from(listener)
             .with_nodelay(Some(true))
             .with_keepalive(Some(Duration::from_secs(gc.tcp_keepalive_secs)));
+        let (incoming, listener_closed) = close_on_shutdown(incoming, shutdown.clone());
         let mut builder = TonicServer::builder()
             .http2_keepalive_interval(Some(Duration::from_secs(gc.keepalive_interval_secs)))
             .http2_keepalive_timeout(Some(Duration::from_secs(gc.keepalive_timeout_secs)))
@@ -105,7 +117,8 @@ impl GrpcServer {
             builder = builder.tls_config(tls)?;
         }
 
-        builder
+        let drain_timeout = Duration::from_secs(gc.shutdown_drain_timeout_secs);
+        let serve = builder
             .layer(labkit::grpc::GrpcMetricsLayer::with_duration_buckets(
                 [
                     labkit::otel::DEFAULT_DURATION_BUCKETS_SECONDS,
@@ -127,7 +140,52 @@ impl GrpcServer {
             .add_service(super::legacy::LegacyGkgService::new(with_compression(
                 OrbitServiceServer::from_arc(service),
             )))
-            .serve_with_incoming(incoming)
-            .await
+            .serve_with_incoming_shutdown(incoming, listener_closed);
+        tokio::pin!(serve);
+
+        tokio::select! {
+            result = &mut serve => return result,
+            () = shutdown.cancelled() => {}
+        }
+        info!(
+            safe(TIMEOUT_S) = drain_timeout.as_secs(),
+            "Draining gRPC server"
+        );
+        match tokio::time::timeout(drain_timeout, serve).await {
+            Ok(result) => {
+                info!("gRPC server drained");
+                result
+            }
+            Err(_) => {
+                warn!(
+                    safe(TIMEOUT_S) = drain_timeout.as_secs(),
+                    "gRPC drain timed out; exiting with streams still open"
+                );
+                Ok(())
+            }
+        }
     }
+}
+
+fn close_on_shutdown<S>(
+    incoming: S,
+    shutdown: CancellationToken,
+) -> (impl Stream<Item = S::Item>, impl Future<Output = ()>)
+where
+    S: Stream + Unpin,
+{
+    let (closed_tx, closed_rx) = oneshot::channel::<()>();
+    let stream = futures::stream::unfold(
+        (incoming, shutdown, closed_tx),
+        |(mut incoming, shutdown, closed_tx)| async move {
+            tokio::select! {
+                biased;
+                () = shutdown.cancelled() => None,
+                item = incoming.next() => item.map(|item| (item, (incoming, shutdown, closed_tx))),
+            }
+        },
+    );
+    (stream, async move {
+        let _ = closed_rx.await;
+    })
 }

@@ -26,6 +26,11 @@ pub struct GrpcConfig {
     pub max_header_list_size_bytes: u32,
     pub result_chunk_bytes: usize,
     pub max_result_bytes: usize,
+    /// How long the server waits on shutdown for in-flight requests to
+    /// finish before it stops waiting and exits; requests still running then
+    /// end with the process. Keep it above the longest query time and below
+    /// the Kubernetes `terminationGracePeriodSeconds`.
+    pub shutdown_drain_timeout_secs: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,6 +154,28 @@ mod tests {
         let error = rejection("max_result_bytes", 1024 * 1024 - 1);
         assert!(error.contains("- grpc.max_result_bytes: "), "{error}");
         AppConfig::with_overlay("grpc:\n  max_result_bytes: 1048576\n").unwrap();
+    }
+
+    #[test]
+    fn shutdown_drain_timeout_cannot_be_zero() {
+        let error = rejection("shutdown_drain_timeout_secs", 0);
+        assert!(
+            error.contains("- grpc.shutdown_drain_timeout_secs: "),
+            "{error}"
+        );
+        AppConfig::with_overlay("grpc:\n  shutdown_drain_timeout_secs: 1\n").unwrap();
+    }
+
+    #[test]
+    fn default_shutdown_drain_outlasts_the_longest_query() {
+        let defaults = AppConfig::embedded_defaults();
+        let longest_query_secs = std::iter::once(&defaults.query.default)
+            .chain(defaults.query.overrides.values())
+            .filter_map(|query| query.max_execution_time)
+            .chain([defaults.grpc.stream_timeout_secs])
+            .max()
+            .unwrap();
+        assert!(defaults.grpc.shutdown_drain_timeout_secs > longest_query_secs);
     }
 
     #[test]
