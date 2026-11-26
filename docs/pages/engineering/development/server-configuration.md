@@ -21,7 +21,7 @@ To add a setting, add:
 
 - a field to `crates/orbit-server-config/proto/orbit/config/v1/config.proto`, marked
   `(buf.validate.field).required = true` unless it is optional, then run `mise proto:config`
-- a field to the Rust struct in `crates/orbit-server-config/`, and its arm in `convert.rs`
+- a field to the Rust struct in `crates/orbit-server-config/` that serde reads from the same key
 - its value in `config/default.yaml`
 
 ## Modes
