@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     end_byte Int64 CODEC(T64, ZSTD(1)),
     start_char Int64 CODEC(T64, ZSTD(1)),
     end_char Int64 CODEC(T64, ZSTD(1)),
-    signature String DEFAULT '' CODEC(ZSTD(1)),
+    parameter_types String DEFAULT '' CODEC(ZSTD(1)),
     front_matter_name String DEFAULT '' CODEC(ZSTD(1)),
     front_matter_description String DEFAULT '' CODEC(ZSTD(1)),
     front_matter_license LowCardinality(String) DEFAULT '' CODEC(LZ4),

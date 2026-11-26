@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     end_byte BIGINT NOT NULL,
     start_char BIGINT NOT NULL,
     end_char BIGINT NOT NULL,
-    signature VARCHAR NOT NULL DEFAULT '',
+    parameter_types VARCHAR NOT NULL DEFAULT '',
     front_matter_name VARCHAR NOT NULL DEFAULT '',
     front_matter_description VARCHAR NOT NULL DEFAULT '',
     front_matter_license VARCHAR NOT NULL DEFAULT '',

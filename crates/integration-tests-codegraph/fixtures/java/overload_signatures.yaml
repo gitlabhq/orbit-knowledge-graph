@@ -61,87 +61,87 @@ tests:
     query: |
       MATCH (m:Definition)
       WHERE m.name = 'plusMethod'
-      RETURN m.signature AS signature
+      RETURN m.parameter_types AS parameter_types
       ORDER BY m.start_line
     assert:
       - { row_count: 3 }
-      - { row: { signature: "(int, int)" } }
-      - { row: { signature: "(double, double)" } }
-      - { row: { signature: "(String, String)" } }
+      - { row: { parameter_types: "(int, int)" } }
+      - { row: { parameter_types: "(double, double)" } }
+      - { row: { parameter_types: "(String, String)" } }
 
   - name: "instance method overloads, including one inherited from a parent, carry distinct signatures"
     query: |
       MATCH (m:Definition)
       WHERE m.name = 'add'
-      RETURN m.fqn AS fqn, m.signature AS signature
+      RETURN m.fqn AS fqn, m.parameter_types AS parameter_types
       ORDER BY m.start_line
     assert:
       - { row_count: 3 }
-      - { row: { fqn: "com.example.App.add", signature: "(int)" } }
-      - { row: { fqn: "com.example.App.add", signature: "(List, Map, int[], String[])" } }
-      - { row: { fqn: "com.example.Child.add", signature: "(long)" } }
+      - { row: { fqn: "com.example.App.add", parameter_types: "(int)" } }
+      - { row: { fqn: "com.example.App.add", parameter_types: "(List, Map, int[], String[])" } }
+      - { row: { fqn: "com.example.Child.add", parameter_types: "(long)" } }
 
   - name: "varargs keep their marker"
     query: |
       MATCH (m:Definition)
       WHERE m.name = 'log'
-      RETURN m.signature AS signature
+      RETURN m.parameter_types AS parameter_types
     assert:
       - { row_count: 1 }
-      - { row: { signature: "(String...)" } }
+      - { row: { parameter_types: "(String...)" } }
 
   - name: "constructors carry signatures"
     query: |
       MATCH (m:Definition)
       WHERE m.definition_type = 'Constructor' AND m.fqn = 'com.example.App.App'
-      RETURN m.signature AS signature
+      RETURN m.parameter_types AS parameter_types
     assert:
       - { row_count: 2 }
-      - { row: { signature: "()" } }
-      - { row: { signature: "(String, int...)" } }
+      - { row: { parameter_types: "()" } }
+      - { row: { parameter_types: "(String, int...)" } }
 
-  - name: "classes carry no signature"
+  - name: "classes carry no parameter types"
     query: |
       MATCH (c:Definition)
       WHERE c.name = 'App' AND c.definition_type = 'Class'
-      RETURN c.signature AS signature
+      RETURN c.parameter_types AS parameter_types
     assert:
       - { row_count: 1 }
-      - { row: { signature: "" } }
+      - { row: { parameter_types: "" } }
 
   - name: "declaration annotations and modifiers are dropped"
     query: |
       MATCH (m:Definition)
       WHERE m.name = 'declared'
-      RETURN m.signature AS signature
+      RETURN m.parameter_types AS parameter_types
     assert:
       - { row_count: 1 }
-      - { row: { signature: "(String, int...)" } }
+      - { row: { parameter_types: "(String, int...)" } }
 
   - name: "type-use annotations are not part of the signature"
     query: |
       MATCH (m:Definition)
       WHERE m.name = 'typeUse' OR m.name = 'multiDim'
-      RETURN m.name AS name, m.signature AS signature
+      RETURN m.name AS name, m.parameter_types AS parameter_types
     assert:
       - { row_count: 2 }
-      - { row: { name: "typeUse", signature: "(Object[], java.util.List)" } }
-      - { row: { name: "multiDim", signature: "(int[][], int[])" } }
+      - { row: { name: "typeUse", parameter_types: "(Object[], java.util.List)" } }
+      - { row: { name: "multiDim", parameter_types: "(int[][], int[])" } }
 
-  - name: "a parameter list that does not parse stores no signature"
+  - name: "a parameter list that does not parse stores no parameter types"
     query: |
       MATCH (m:Definition)
       WHERE m.name = 'brokenSpread'
-      RETURN m.signature AS signature
+      RETURN m.parameter_types AS parameter_types
     assert:
       - { row_count: 1 }
-      - { row: { signature: "" } }
+      - { row: { parameter_types: "" } }
 
   - name: "receiver parameters are not part of the signature"
     query: |
       MATCH (m:Definition)
       WHERE m.name = 'receiver'
-      RETURN m.signature AS signature
+      RETURN m.parameter_types AS parameter_types
     assert:
       - { row_count: 1 }
-      - { row: { signature: "(int)" } }
+      - { row: { parameter_types: "(int)" } }

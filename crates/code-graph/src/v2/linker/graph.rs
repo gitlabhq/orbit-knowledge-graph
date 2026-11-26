@@ -1396,7 +1396,7 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
             .as_ref()
             .and_then(|m| m.signature)
             .map_or("", |id| self.pool.get(id));
-        b.col("signature")?.push_str(signature)?;
+        b.col("parameter_types")?.push_str(signature)?;
         let front_matter = self
             .def
             .metadata

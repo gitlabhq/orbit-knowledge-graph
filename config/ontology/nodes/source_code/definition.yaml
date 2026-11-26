@@ -126,11 +126,11 @@ properties:
     mutable: false
     description: "End column."
 
-  signature:
+  parameter_types:
     type: string
-    source: signature
+    source: parameter_types
     nullable: false
-    description: "Parameter types as written, generics and annotations erased (e.g., `(int, String...)`). Set for Java methods and constructors; empty otherwise."
+    description: "Parameter types of a Java method or constructor, type arguments and annotations dropped (e.g., `(int, String...)`). Empty for other definitions and languages."
 
   front_matter_name:
     type: string
@@ -238,7 +238,7 @@ storage:
     - {name: end_byte, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: start_char, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: end_char, type: "Int64", codec: ["T64", "ZSTD(1)"]}
-    - {name: signature, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: parameter_types, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: front_matter_name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: front_matter_description, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: front_matter_license, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}

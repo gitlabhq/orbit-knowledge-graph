@@ -1,5 +1,11 @@
 # yaml-language-server: $schema=schemas/schema-migrations.schema.json
 migrations:
+- version: 131
+  scope: code
+  note: >-
+    Renames the Definition signature column added in v130 to parameter_types, which
+    holds Java method and constructor parameter types. Code tables are re-derived so
+    existing rows land in the new column.
 - version: 130
   scope: code
   note: >-
