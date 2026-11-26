@@ -1,12 +1,4 @@
 #!/usr/bin/env python3
-"""Fail a docs-write docs MR while a feature MR it documents is not merged.
-
-The feature MRs are the one in the branch name (`docs-write/mr-<iid>`), which
-nobody can edit, plus the `<!-- docs-write: source=!12,!13 -->` marker in the
-description. This project requires a green pipeline to merge, so this job keeps
-the docs from merging before the code. Retry the job after the feature MRs merge.
-"""
-
 import json
 import os
 import re
