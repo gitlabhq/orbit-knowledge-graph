@@ -403,9 +403,9 @@ MRs with `~documentation` or `~"docs-factory::skip"`. Each run still spends abou
   merge, so docs never merge before the code. The new pipeline that the flow
   starts at merge, or a retry of the job, turns it green. Both flows count
   this one failure as expected, so docs-review still reviews the docs MR and
-  docs-write still hands it off. They match the job by name (`ci_loop.py` in
-  `team/skills`): renaming the job turns every docs MR pipeline into a real
-  failure for the flows.
+  docs-write still hands it off. They match the job by name (`MERGE_ORDER_JOB`
+  in `ci_loop.py` and `review_step.py`, `team/skills`): renaming the job
+  turns every docs MR pipeline into a real failure for the flows.
 
 ## Shadow mode
 
