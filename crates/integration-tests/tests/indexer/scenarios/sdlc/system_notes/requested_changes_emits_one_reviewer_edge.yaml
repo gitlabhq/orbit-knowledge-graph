@@ -1,0 +1,46 @@
+description: A requested_changes system note emits one REQUESTED_CHANGES edge from the reviewer to the merge request, and other review actions emit nothing
+scope: { namespace: 100 }
+
+seed:
+  siphon_routes:
+    - { id: 1, source_id: 200, source_type: Project, path: my-group/my-proj, namespace_id: 100, traversal_path: "1/100/200/" }
+  siphon_notes:
+    - { id: 1, note: "requested changes", noteable_type: MergeRequest, noteable_id: 1000, author_id: 7, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+    - { id: 2, note: "requested changes", noteable_type: MergeRequest, noteable_id: 1000, author_id: 7, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", _siphon_replicated_at: "2024-01-15 10:00:00" }
+    - { id: 3, note: "left review comments", noteable_type: MergeRequest, noteable_id: 1000, author_id: 8, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 10:30:00", updated_at: "2024-01-15 10:30:00", _siphon_replicated_at: "2024-01-15 10:30:00" }
+    - { id: 4, note: "approved this merge request", noteable_type: MergeRequest, noteable_id: 1000, author_id: 7, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 11:00:00", updated_at: "2024-01-15 11:00:00", _siphon_replicated_at: "2024-01-15 11:00:00" }
+    - { id: 5, note: "unapproved this merge request", noteable_type: MergeRequest, noteable_id: 1000, author_id: 7, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 11:30:00", updated_at: "2024-01-15 11:30:00", _siphon_replicated_at: "2024-01-15 11:30:00" }
+    - { id: 6, note: "reset approvals from @reviewer by pushing to the branch", noteable_type: MergeRequest, noteable_id: 1000, author_id: 9, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 12:00:00", updated_at: "2024-01-15 12:00:00", _siphon_replicated_at: "2024-01-15 12:00:00" }
+    - { id: 7, note: "merged", noteable_type: MergeRequest, noteable_id: 1000, author_id: 9, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 13:00:00", updated_at: "2024-01-15 13:00:00", _siphon_replicated_at: "2024-01-15 13:00:00" }
+    - { id: 8, note: "requested changes", noteable_type: Issue, noteable_id: 2000, author_id: 7, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 14:00:00", updated_at: "2024-01-15 14:00:00", _siphon_replicated_at: "2024-01-15 14:00:00" }
+    - { id: 9, note: "closed", noteable_type: Issue, noteable_id: 2000, author_id: 9, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 15:00:00", updated_at: "2024-01-15 15:00:00", _siphon_replicated_at: "2024-01-15 15:00:00" }
+  siphon_system_note_metadata:
+    - { id: 1, note_id: 1, action: requested_changes, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+    - { id: 2, note_id: 2, action: requested_changes, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", _siphon_replicated_at: "2024-01-15 10:00:00" }
+    - { id: 3, note_id: 3, action: reviewed, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 10:30:00", updated_at: "2024-01-15 10:30:00", _siphon_replicated_at: "2024-01-15 10:30:00" }
+    - { id: 4, note_id: 4, action: approved, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 11:00:00", updated_at: "2024-01-15 11:00:00", _siphon_replicated_at: "2024-01-15 11:00:00" }
+    - { id: 5, note_id: 5, action: unapproved, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 11:30:00", updated_at: "2024-01-15 11:30:00", _siphon_replicated_at: "2024-01-15 11:30:00" }
+    - { id: 6, note_id: 6, action: approvals_reset, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 12:00:00", updated_at: "2024-01-15 12:00:00", _siphon_replicated_at: "2024-01-15 12:00:00" }
+    - { id: 7, note_id: 7, action: merged, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 13:00:00", updated_at: "2024-01-15 13:00:00", _siphon_replicated_at: "2024-01-15 13:00:00" }
+    - { id: 8, note_id: 8, action: requested_changes, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 14:00:00", updated_at: "2024-01-15 14:00:00", _siphon_replicated_at: "2024-01-15 14:00:00" }
+    - { id: 9, note_id: 9, action: closed, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 15:00:00", updated_at: "2024-01-15 15:00:00", _siphon_replicated_at: "2024-01-15 15:00:00" }
+
+run: namespace
+targets: [SystemNote]
+
+expect:
+  edges:
+    - kind: REQUESTED_CHANGES
+      count: 1
+      rows:
+        - { source_id: 7, source_kind: User, target_id: 1000, target_kind: MergeRequest, traversal_path: "1/100/200/" }
+    - kind: MERGED
+      count: 1
+      rows:
+        - { source_id: 9, target_id: 1000, target_kind: MergeRequest }
+    - kind: CLOSED
+      count: 1
+      rows:
+        - { source_id: 9, target_id: 2000, target_kind: WorkItem }
+  totals:
+    gl_edge: 3

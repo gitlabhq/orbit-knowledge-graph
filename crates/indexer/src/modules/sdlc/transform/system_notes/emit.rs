@@ -43,6 +43,7 @@ pub mod edge_kinds {
     pub const MENTIONS: &str = "MENTIONS";
     pub const CLOSED: &str = "CLOSED";
     pub const MERGED: &str = "MERGED";
+    pub const REQUESTED_CHANGES: &str = "REQUESTED_CHANGES";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +107,23 @@ where
                 edges.push(EmittedEdge {
                     traversal_path: row.traversal_path,
                     relationship_kind: kind,
+                    source_id: author_id,
+                    source_kind: "User",
+                    target_id: row.noteable_id,
+                    target_kind: row.noteable_kind.as_str(),
+                });
+            }
+
+            Action::RequestedChanges => {
+                let Some(author_id) = row.author_id else {
+                    continue;
+                };
+                if row.noteable_kind != NoteableKind::MergeRequest {
+                    continue;
+                }
+                edges.push(EmittedEdge {
+                    traversal_path: row.traversal_path,
+                    relationship_kind: edge_kinds::REQUESTED_CHANGES,
                     source_id: author_id,
                     source_kind: "User",
                     target_id: row.noteable_id,
@@ -248,6 +266,60 @@ mod tests {
             Some(edge_kinds::MERGED)
         );
         assert_eq!(lifecycle_edge_kind(Action::CrossReference), None);
+    }
+
+    #[test]
+    fn requested_changes_emits_reviewer_to_merge_request_edge() {
+        let row = row_for(
+            Action::RequestedChanges,
+            "requested changes",
+            NoteableKind::MergeRequest,
+            1000,
+        );
+        let edges = build_edges(&[row], always_resolve(0, "1/2/"));
+        assert_eq!(edges.len(), 1);
+        let e = &edges[0];
+        assert_eq!(e.relationship_kind, "REQUESTED_CHANGES");
+        assert_eq!(e.source_id, 7);
+        assert_eq!(e.source_kind, "User");
+        assert_eq!(e.target_id, 1000);
+        assert_eq!(e.target_kind, "MergeRequest");
+        assert_eq!(e.traversal_path, "1/2/");
+    }
+
+    #[test]
+    fn requested_changes_on_non_mr_noteable_is_dropped() {
+        for kind in [NoteableKind::WorkItem, NoteableKind::Commit] {
+            let row = row_for(Action::RequestedChanges, "requested changes", kind, 42);
+            let edges = build_edges(&[row], always_resolve(0, "1/2/"));
+            assert!(edges.is_empty(), "{kind:?} noteable should emit nothing");
+        }
+    }
+
+    #[test]
+    fn requested_changes_without_author_id_drops_edge() {
+        let mut row = row_for(
+            Action::RequestedChanges,
+            "requested changes",
+            NoteableKind::MergeRequest,
+            1000,
+        );
+        row.author_id = None;
+        let edges = build_edges(&[row], always_resolve(0, "1/"));
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn requested_changes_ignores_references_in_the_body() {
+        let row = row_for(
+            Action::RequestedChanges,
+            "requested changes, see !456",
+            NoteableKind::MergeRequest,
+            1000,
+        );
+        let edges = build_edges(&[row], always_resolve(456, "1/2/"));
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].relationship_kind, "REQUESTED_CHANGES");
     }
 
     #[test]

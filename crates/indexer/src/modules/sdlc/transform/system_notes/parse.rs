@@ -34,6 +34,7 @@ pub enum Action {
     Closed,
     Merged,
     Opened,
+    RequestedChanges,
 }
 
 impl Action {
@@ -54,6 +55,7 @@ impl Action {
             "closed" => Self::Closed,
             "merged" => Self::Merged,
             "opened" => Self::Opened,
+            "requested_changes" => Self::RequestedChanges,
             _ => return None,
         })
     }
@@ -75,6 +77,7 @@ impl Action {
             Self::Closed => "closed",
             Self::Merged => "merged",
             Self::Opened => "opened",
+            Self::RequestedChanges => "requested_changes",
         }
     }
 
@@ -141,7 +144,7 @@ static COMMIT_REF: LazyLock<Regex> = LazyLock::new(|| {
 
 pub fn extract(action: Action, body: &str) -> Vec<Reference> {
     match action {
-        Action::Closed | Action::Merged | Action::Opened => Vec::new(),
+        Action::Closed | Action::Merged | Action::Opened | Action::RequestedChanges => Vec::new(),
 
         Action::CrossReference => first_ref_any(body).into_iter().collect(),
 
@@ -307,6 +310,7 @@ mod tests {
             "closed",
             "merged",
             "opened",
+            "requested_changes",
         ] {
             let a = Action::parse(s).unwrap_or_else(|| panic!("action {s} should parse"));
             assert_eq!(a.as_str(), s);
@@ -330,6 +334,10 @@ mod tests {
             "issue_added_to_epic",
             "epic_issue_moved",
             "task",
+            "reviewed",
+            "approved",
+            "unapproved",
+            "approvals_reset",
         ] {
             assert!(Action::parse(s).is_none(), "{s} should not parse");
         }
@@ -342,6 +350,7 @@ mod tests {
         assert!(Action::Opened.is_lifecycle());
         assert!(!Action::CrossReference.is_lifecycle());
         assert!(!Action::Merge.is_lifecycle());
+        assert!(!Action::RequestedChanges.is_lifecycle());
     }
 
     #[test]
@@ -593,6 +602,12 @@ mod tests {
             assert!(extract(action, "merged").is_empty());
             assert!(extract(action, "mentioned in !1").is_empty());
         }
+    }
+
+    #[test]
+    fn requested_changes_extracts_nothing() {
+        assert!(extract(Action::RequestedChanges, "requested changes").is_empty());
+        assert!(extract(Action::RequestedChanges, "mentioned in !1").is_empty());
     }
 
     #[test]

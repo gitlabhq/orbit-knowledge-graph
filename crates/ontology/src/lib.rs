@@ -1827,6 +1827,7 @@ mod tests {
         for (edge, node, direction) in [
             ("MENTIONS", "WorkItem", Source),
             ("MENTIONS", "WorkItem", Target),
+            ("REQUESTED_CHANGES", "MergeRequest", Target),
             ("HAS_NOTE", "WorkItem", Source),
             ("HAS_NOTE", "MergeRequest", Source),
             ("CREATOR", "User", Source),
@@ -1837,6 +1838,10 @@ mod tests {
                 "{edge} must not project {node}.state"
             );
         }
+        assert!(
+            !ontology.edge_projects_column("REQUESTED_CHANGES", "User", Source, "user_type"),
+            "REQUESTED_CHANGES must not project User.user_type"
+        );
         assert!(ontology.edge_projects_column("HAS_NOTE", "Note", Target, "confidential"));
         assert!(ontology.edge_projects_column("CREATOR", "Project", Target, "archived"));
         assert!(ontology.edge_projects_column("CALLS", "Definition", Source, "definition_type"));
@@ -3019,10 +3024,9 @@ properties:
     #[test]
     fn relationship_kinds_emitted_by_derived_entity_are_its_emits() {
         let o = Ontology::load_embedded().unwrap();
-        assert!(
-            o.relationship_kinds_emitted_by("SystemNote")
-                .contains("MENTIONS")
-        );
+        let emitted = o.relationship_kinds_emitted_by("SystemNote");
+        assert!(emitted.contains("MENTIONS"));
+        assert!(emitted.contains("REQUESTED_CHANGES"));
     }
 
     #[test]
@@ -3185,7 +3189,7 @@ properties:
     #[test]
     fn user_lifecycle_edges_to_issuables_are_prune_to_target() {
         let o = Ontology::load_embedded().unwrap();
-        for kind in ["REOPENED", "CLOSED", "MERGED"] {
+        for kind in ["REOPENED", "CLOSED", "MERGED", "REQUESTED_CHANGES"] {
             let variants = o.edges.get(kind).expect(kind);
             assert!(
                 variants

@@ -1,0 +1,9 @@
+description: >-
+  User who requested changes on a merge request at least once. Stays after
+  approval, and repeated rounds are one edge. REVIEWER holds the current state.
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: MergeRequest, id: id }
+    scope: prune_to_target
+    description: "User requested changes on a merge request at least once."

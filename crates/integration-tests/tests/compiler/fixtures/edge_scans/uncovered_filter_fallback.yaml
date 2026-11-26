@@ -76,3 +76,31 @@ cases:
         planned:
           expect: ["(Filter mr.state = 'merged', mr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))"]
           reject: ["(Filter _orbit_edge_0.target_tags HAS ANY ['state:merged'], ... (_))"]
+
+  - name: REQUESTED_CHANGES edges carry no user tags, so a user type filter stays on the node read
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","filters":{"user_type":"human"}},{"id":"mr","entity":"MergeRequest","node_ids":[99002]}],"relationships":[{"type":"REQUESTED_CHANGES","from":"u","to":"mr"}],"aggregations":[{"count":"u","as":"n"}]}
+      gql: |
+        MATCH (u:User {user_type: 'human'})-[:REQUESTED_CHANGES]->(mr:MergeRequest {id: 99002}) RETURN count(u) AS n
+    logical:
+      expect: ["(Filter u.user_type = 'human' (NodeScan User AS u))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter u.user_type = 'human', ... (_))"]
+          reject: ["(Filter _orbit_edge_0.source_tags HAS ANY ['user_type:human'], ... (_))"]
+
+  - name: REQUESTED_CHANGES edges carry no merge request tags, so a state filter stays on the node read
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","filters":{"state":{"eq":"merged"}}}],"relationships":[{"type":"REQUESTED_CHANGES","from":"u","to":"mr"}],"group_by":["u"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1})-[:REQUESTED_CHANGES]->(mr:MergeRequest {state: 'merged'}) RETURN u, count(mr) AS n LIMIT 10
+    logical:
+      expect: ["(Filter mr.state = 'merged' (NodeScan MergeRequest AS mr))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter mr.state = 'merged', mr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))"]
+          reject: ["(Filter _orbit_edge_0.target_tags HAS ANY ['state:merged'], ... (_))"]

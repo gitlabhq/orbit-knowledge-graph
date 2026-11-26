@@ -93,6 +93,7 @@ mod tests {
         let system_note = find(&descriptors(), "SystemNote");
         assert!(system_note.reindex_targets.contains("SystemNote"));
         assert!(system_note.reindex_targets.contains("MENTIONS"));
+        assert!(system_note.reindex_targets.contains("REQUESTED_CHANGES"));
     }
 
     #[test]

@@ -20,6 +20,9 @@ pub const HANDLED_CROSS_REFERENCE_ACTIONS: &[&str] = &[
 pub const HANDLED_LIFECYCLE_ACTIONS: &[&str] = &["closed", "merged", "opened"];
 
 #[cfg(test)]
+pub const HANDLED_REVIEW_ACTIONS: &[&str] = &["requested_changes"];
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -39,6 +42,16 @@ mod tests {
             assert!(
                 ICON_TYPES.contains(action),
                 "handled lifecycle action `{action}` is not in vendored ICON_TYPES"
+            );
+        }
+    }
+
+    #[test]
+    fn handled_review_actions_are_subset_of_icon_types() {
+        for action in HANDLED_REVIEW_ACTIONS {
+            assert!(
+                ICON_TYPES.contains(action),
+                "handled review action `{action}` is not in vendored ICON_TYPES"
             );
         }
     }

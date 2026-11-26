@@ -63,7 +63,7 @@ cases:
     physical:
       clickhouse:
         planned:
-          expect: ["(Neighbors center=u direction=outgoing directional outgoing=[gl_ci_edge, gl_edge, gl_sec_edge] incoming=? center_filter=false relationships=[APPROVED, ASSIGNED, AUTHORED, CLOSED, CONFIRMED_BY, CONTAINS, CREATOR, DEPLOYED_BY, DISMISSED_BY, LAST_EDITED_BY, MEMBER_OF, MERGED, OWNER, REOPENED, RESOLVED_BY, REVIEWER, TRIGGERED, UPDATED_BY] ... (_))"]
+          expect: ["(Neighbors center=u direction=outgoing directional outgoing=[gl_ci_edge, gl_edge, gl_sec_edge] incoming=? center_filter=false relationships=[APPROVED, ASSIGNED, AUTHORED, CLOSED, CONFIRMED_BY, CONTAINS, CREATOR, DEPLOYED_BY, DISMISSED_BY, LAST_EDITED_BY, MEMBER_OF, MERGED, OWNER, REOPENED, REQUESTED_CHANGES, RESOLVED_BY, REVIEWER, TRIGGERED, UPDATED_BY] ... (_))"]
         emitted:
           expect: ["(Scan Table(gl_edge) ...)"]
           reject: ["(Scan Table(gl_code_edge) ...)"]

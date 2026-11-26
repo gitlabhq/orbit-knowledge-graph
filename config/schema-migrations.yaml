@@ -1,5 +1,8 @@
 # yaml-language-server: $schema=schemas/schema-migrations.schema.json
 migrations:
+- version: 131
+  scope: "*"
+  note: "REQUESTED_CHANGES is a new User to MergeRequest edge from requested_changes system notes (#1595). A new edge kind registers in schema.yaml, so this is a full rebuild."
 - version: 130
   scope: code
   note: >-

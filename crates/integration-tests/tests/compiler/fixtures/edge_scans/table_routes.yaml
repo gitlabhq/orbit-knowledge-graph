@@ -80,11 +80,11 @@ cases:
       gql: |
         MATCH (u:User {id: 1})-[]->(mr:MergeRequest) RETURN u, mr LIMIT 10
     logical:
-      expect: ["(EdgeScan APPROVED|ASSIGNED|AUTHORED|CLOSED|LAST_EDITED_BY|MERGED|REOPENED|REVIEWER|UPDATED_BY u->mr AS e0)"]
+      expect: ["(EdgeScan APPROVED|ASSIGNED|AUTHORED|CLOSED|LAST_EDITED_BY|MERGED|REOPENED|REQUESTED_CHANGES|REVIEWER|UPDATED_BY u->mr AS e0)"]
     physical:
       clickhouse:
         planned:
-          expect: ["(Filter _orbit_edge_0.relationship_kind IN ['APPROVED', 'ASSIGNED', 'AUTHORED', 'CLOSED', 'LAST_EDITED_BY', 'MERGED', 'REOPENED', 'REVIEWER', 'UPDATED_BY'], _orbit_edge_0.source_kind = 'User', _orbit_edge_0.target_kind = 'MergeRequest', ... (Scan Table(gl_edge) AS _orbit_edge_0))"]
+          expect: ["(Filter _orbit_edge_0.relationship_kind IN ['APPROVED', 'ASSIGNED', 'AUTHORED', 'CLOSED', 'LAST_EDITED_BY', 'MERGED', 'REOPENED', 'REQUESTED_CHANGES', 'REVIEWER', 'UPDATED_BY'], _orbit_edge_0.source_kind = 'User', _orbit_edge_0.target_kind = 'MergeRequest', ... (Scan Table(gl_edge) AS _orbit_edge_0))"]
           reject: ["(Scan Table(gl_code_edge) ...)"]
         emitted:
           reject: ["(Scan Table(gl_code_edge) ...)"]
