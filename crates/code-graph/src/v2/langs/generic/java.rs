@@ -332,7 +332,12 @@ fn java_call_arg(node: &N<'_>, index: &mut DeclarationIndex) -> ArgType {
             .find(|c| c.is_named())
             .map_or(ArgType::Unknown, |inner| java_call_arg(&inner, index)),
         "unary_expression" => match node.field("operand") {
-            Some(operand) if operand.kind().ends_with("_literal") => java_call_arg(&operand, index),
+            Some(operand) if operand.kind().ends_with("_literal") => {
+                match java_call_arg(&operand, index) {
+                    ArgType::Named(t) if t == "char" => named("int"),
+                    other => other,
+                }
+            }
             _ => ArgType::Unknown,
         },
         "cast_expression" | "object_creation_expression" => node

@@ -168,6 +168,23 @@ fixtures:
         }
       }
 
+  - path: q/Promote.java
+    content: |
+      package q;
+
+      class Promote {
+        static void f(char c) {}
+        static void f(int i) {}
+
+        void negatedChar() {
+          f(-'a');
+        }
+
+        void plainChar() {
+          f('a');
+        }
+      }
+
 tests:
   - name: "an Object argument reaches only the Object overload"
     query: |
@@ -321,3 +338,23 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { signature: "(Number)" } }
+
+  - name: "Promote.negatedChar picks (int)"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.Promote.negatedChar' AND callee.name = 'f'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(int)" } }
+
+  - name: "Promote.plainChar picks (char)"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'q.Promote.plainChar' AND callee.name = 'f'
+      RETURN callee.signature AS signature
+      LIMIT 10
+    assert:
+      - { row_count: 1 }
+      - { row: { signature: "(char)" } }
