@@ -1,0 +1,91 @@
+name: "Rust: associated functions called through a crate:: or super:: path"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_crate_path_associated_calls"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod app;
+      pub mod net;
+      pub mod outer;
+
+  - path: src/net.rs
+    content: |
+      pub struct Client;
+
+      impl Client {
+          pub fn new() -> Self {
+              Client
+          }
+
+          pub fn get(&self) {}
+      }
+
+      pub fn connect() {}
+
+  - path: src/outer.rs
+    content: |
+      pub mod inner;
+
+  - path: src/outer/inner.rs
+    content: |
+      pub fn run() {}
+
+  - path: src/app.rs
+    content: |
+      pub fn via_crate() {
+          let c = crate::net::Client::new();
+          c.get();
+      }
+
+      pub fn via_super() {
+          let c = super::net::Client::new();
+          c.get();
+      }
+
+      pub fn via_crate_fn() {
+          crate::net::connect();
+      }
+
+      pub fn via_nested_fn() {
+          crate::outer::inner::run();
+      }
+
+tests:
+  - name: "crate:: and super:: paths resolve the type and its associated function, as a use import does"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['via_crate', 'via_super']
+      RETURN caller.name AS caller, callee.fqn AS target
+    assert:
+      - { row_count: 6 }
+      - { row: { caller: via_crate, target: "net::Client" } }
+      - { row: { caller: via_super, target: "net::Client" } }
+      - { row: { caller: via_crate, target: "net::Client::new" } }
+      - { row: { caller: via_crate, target: "net::Client::get" } }
+      - { row: { caller: via_super, target: "net::Client::new" } }
+      - { row: { caller: via_super, target: "net::Client::get" } }
+
+  - name: "Control: a crate:: path to a function still resolves"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['via_crate_fn', 'via_nested_fn']
+      RETURN caller.name AS caller, callee.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: via_crate_fn, target: "net::connect" } }
+      - { row: { caller: via_nested_fn, target: "outer::inner::run" } }
+
+  - name: "Control: a crate:: path to a function still imports the function"
+    query: |
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'src/app.rs'
+      RETURN i.identifier_name AS name, d.fqn AS target
+    assert:
+      - { row: { name: connect, target: "net::connect" } }
+      - { row: { name: run, target: "outer::inner::run" } }
