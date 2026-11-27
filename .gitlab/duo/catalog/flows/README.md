@@ -23,7 +23,7 @@ update this table.
 
 | Setting | Value |
 |---|---|
-| `SKILLS_REF` in both files | `7c5408d8d4cb9737c1a2c08d2fefb950ae5a2796`, the squash commit of `team/skills` MR 38 on main |
+| `SKILLS_REF` in both files | `a69956c444d8a0a2e1aef8c2217731342e0686f9`, the squash commit of `team/skills` MR 46 on main |
 | `MODE` in both files | `full` |
 | `FLOW_USER` in `docs-write.yml` | `44621578`, the user ID of `ai-docs-write-gitlab-org_510eee`, the service account that authors the flow's notes. Under composite identity `GET /user` returns the person who triggered the run, so the skills need it. An ID survives a rename. |
 | `REVIEW_USER` in `docs-write.yml` | Empty until the docs-review service account exists, then its user ID. docs-write trusts that account's review threads and its summary note. While it is empty, docs-write finds no review, so a mention on a docs MR with a green pipeline ends without a fix or a handoff. |

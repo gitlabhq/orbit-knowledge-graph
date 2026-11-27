@@ -8,7 +8,7 @@ components:
     inputs:
       - from: >-
           SKILLS_REPO=gitlab-org/orbit/team/skills;
-          SKILLS_REF=7c5408d8d4cb9737c1a2c08d2fefb950ae5a2796;
+          SKILLS_REF=a69956c444d8a0a2e1aef8c2217731342e0686f9;
           MODE=full;
           MIN_IMPORTANCE=4;
           REVIEW_PATHS=docs/docs-gitlab-com/,docs/navigation.yaml;
