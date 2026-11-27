@@ -58,8 +58,10 @@ pub struct NatsConfiguration {
 
     /// Consumer name for durable subscriptions.
     ///
-    /// **Ephemeral consumers** (`None`): Created on subscribe, destroyed on disconnect.
-    /// Messages are only delivered while connected. Good for transient workers or testing.
+    /// **Ephemeral consumers** (`None`): Created on subscribe. NATS deletes one only after
+    /// `consumer_inactive_threshold_secs` without a fetch, so until then a restarted
+    /// process cannot create its own on a workqueue stream and fails with
+    /// `filtered consumer not unique`. Good for testing.
     ///
     /// **Durable consumers** (`Some("name")`): Persist across restarts. NATS tracks the
     /// last acknowledged message, so reconnecting consumers resume where they left off.
