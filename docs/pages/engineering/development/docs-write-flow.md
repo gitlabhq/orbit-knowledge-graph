@@ -69,7 +69,6 @@ is mentioned or, once the Pipeline trigger is on, on each docs MR pipeline.
 The gate ends the run with no model call on a draft feature MR or one that scores below 6.
 It also skips a fork MR, an MR with the `documentation` or `docs-factory::skip` label, and
 an MR that already changes user docs.
-A mention on a feature MR runs the same gate.
 
 Any step that fails to write its route file ends the flow. When in doubt, the flow does
 nothing. Both flow files set `MODE=full`. `MODE=shadow` stops after setup and logs one line
