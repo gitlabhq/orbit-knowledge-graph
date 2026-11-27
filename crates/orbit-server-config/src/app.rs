@@ -408,6 +408,13 @@ graph:
     }
 
     #[test]
+    fn the_embedded_defaults_use_a_durable_consumer() {
+        let config = AppConfig::embedded_defaults();
+
+        assert_eq!(config.nats.consumer_name.as_deref(), Some("gkg-indexer"));
+    }
+
+    #[test]
     fn the_committed_dev_overlay_loads() {
         let overlay = Path::new(env!("ORBIT_CONFIG_DIR")).join("dev.yaml");
         let secrets = tempfile::TempDir::new().unwrap();
