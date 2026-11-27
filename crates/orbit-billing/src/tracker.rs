@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use gitlab_client::CloudConnectorTokenCache;
@@ -9,6 +10,7 @@ use uuid::Uuid;
 
 use crate::cc_token_source::CloudConnectorTokenSource;
 use crate::constants::APP_ID;
+use crate::file_token_source::FileTokenSource;
 use crate::metrics::{
     METRICS, REASON_ABANDONED_AT_SHUTDOWN, REASON_AUTH, REASON_INVALID_EVENT,
     REASON_NON_RETRIABLE_STATUS, REASON_RETRIES_EXHAUSTED, REASON_RETRY_QUEUE_FULL,
@@ -86,8 +88,28 @@ impl SnowplowBillingTracker {
         config: &BillingConfig,
         cc_token_cache: Option<Arc<CloudConnectorTokenCache>>,
     ) -> Result<Arc<dyn TokenSource>, labkit_events::Error> {
+        Self::token_source_with_file(
+            config,
+            cc_token_cache,
+            std::env::var_os("TKE_WEB_IDENTITY_TOKEN_FILE").map(PathBuf::from),
+        )
+    }
+
+    fn token_source_with_file(
+        config: &BillingConfig,
+        cc_token_cache: Option<Arc<CloudConnectorTokenCache>>,
+        token_file: Option<PathBuf>,
+    ) -> Result<Arc<dyn TokenSource>, labkit_events::Error> {
         match config.auth_mode {
             BillingAuthMode::Oidc => {
+                if let Some(path) = token_file {
+                    if path.to_string_lossy().trim().is_empty() {
+                        return Err(labkit_events::Error::Emitter(
+                            "TKE_WEB_IDENTITY_TOKEN_FILE must not be empty when set".into(),
+                        ));
+                    }
+                    return Ok(Arc::new(FileTokenSource::new(path)));
+                }
                 let oidc_config = labkit_events::oidc::ConfigBuilder::new()
                     .skip_if_unsupported_cloud(true)
                     .build();
@@ -208,8 +230,93 @@ mod tests {
     #[test]
     fn oidc_mode_builds_source_without_a_cache() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let source = SnowplowBillingTracker::token_source(&config(BillingAuthMode::Oidc), None);
+        let source = SnowplowBillingTracker::token_source_with_file(
+            &config(BillingAuthMode::Oidc),
+            None,
+            None,
+        );
         assert!(source.is_ok());
+    }
+
+    #[test]
+    fn oidc_rejects_an_empty_web_identity_token_file_path() {
+        for path in ["", "  "] {
+            let error = SnowplowBillingTracker::token_source_with_file(
+                &config(BillingAuthMode::Oidc),
+                None,
+                Some(path.into()),
+            )
+            .err()
+            .unwrap();
+            assert!(error.to_string().contains("TKE_WEB_IDENTITY_TOKEN_FILE"));
+        }
+    }
+
+    #[tokio::test]
+    async fn oidc_reads_and_refreshes_the_web_identity_token_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("token");
+        let source = SnowplowBillingTracker::token_source_with_file(
+            &config(BillingAuthMode::Oidc),
+            None,
+            Some(path.clone()),
+        )
+        .unwrap();
+
+        for token in ["first-token", "rotated-token"] {
+            let replacement = dir.path().join("replacement");
+            std::fs::write(&replacement, format!("{token}\n")).unwrap();
+            std::fs::rename(replacement, &path).unwrap();
+            let mut headers = reqwest::header::HeaderMap::new();
+            source
+                .enhance_header(&mut headers, "collector.example")
+                .await
+                .unwrap();
+            assert_eq!(
+                headers[reqwest::header::AUTHORIZATION],
+                format!("Bearer {token}")
+            );
+            assert!(headers[reqwest::header::AUTHORIZATION].is_sensitive());
+        }
+    }
+
+    #[tokio::test]
+    async fn unreadable_web_identity_token_file_does_not_fall_back_to_cloud_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = SnowplowBillingTracker::token_source_with_file(
+            &config(BillingAuthMode::Oidc),
+            None,
+            Some(dir.path().join("missing")),
+        )
+        .unwrap();
+        let mut headers = reqwest::header::HeaderMap::new();
+        let error = source
+            .enhance_header(&mut headers, "collector.example")
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("failed to read billing token file")
+        );
+        assert!(!headers.contains_key(reqwest::header::AUTHORIZATION));
+    }
+
+    #[tokio::test]
+    async fn cloud_connector_ignores_the_web_identity_token_file() {
+        let cache = Arc::new(CloudConnectorTokenCache::new(Arc::new(StubFetcher)));
+        let source = SnowplowBillingTracker::token_source_with_file(
+            &config(BillingAuthMode::CloudConnector),
+            Some(cache),
+            Some("/missing-web-identity-token".into()),
+        )
+        .unwrap();
+        let mut headers = reqwest::header::HeaderMap::new();
+        source
+            .enhance_header(&mut headers, "collector.example")
+            .await
+            .unwrap();
+        assert_eq!(headers[reqwest::header::AUTHORIZATION], "Bearer t");
     }
 
     #[test]

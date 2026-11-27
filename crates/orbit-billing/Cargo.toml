@@ -38,6 +38,7 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }
+tempfile = { workspace = true }
 rustls = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 
