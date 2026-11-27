@@ -11,7 +11,7 @@ struct Environment {
     collector_url: &'static str,
 }
 
-const ENVIRONMENTS: [Environment; 2] = [
+const ENVIRONMENTS: [Environment; 5] = [
     Environment {
         name: "production",
         customers_dot_url: "https://customers.gitlab.com",
@@ -21,6 +21,21 @@ const ENVIRONMENTS: [Environment; 2] = [
         name: "staging",
         customers_dot_url: "https://customers.staging.gitlab.com",
         collector_url: "https://billing.stgsub.gitlab.net",
+    },
+    Environment {
+        name: "jihulab_production",
+        customers_dot_url: "https://customers.jihulab.com",
+        collector_url: "https://billing.jihulab.com",
+    },
+    Environment {
+        name: "jihulab_staging",
+        customers_dot_url: "https://customers-stg.jihulab.com",
+        collector_url: "https://billing-stg.jihulab.com",
+    },
+    Environment {
+        name: "jihulab_hk",
+        customers_dot_url: "https://customers.gitlab.hk",
+        collector_url: "https://billing.gitlab.hk",
     },
 ];
 
@@ -103,6 +118,8 @@ mod tests {
     const PROD_COLLECTOR: &str = "https://billing.prdsub.gitlab.net";
     const STG_CDOT: &str = "https://customers.staging.gitlab.com";
     const STG_COLLECTOR: &str = "https://billing.stgsub.gitlab.net";
+    const HK_CDOT: &str = "https://customers.gitlab.hk";
+    const HK_COLLECTOR: &str = "https://billing.gitlab.hk";
 
     fn config(
         cdot: &str,
@@ -180,6 +197,63 @@ mod tests {
             BillingAuthMode::Oidc,
         );
         assert_eq!(validate_with(true, &billing), Ok(()));
+    }
+
+    #[test]
+    fn enforced_accepts_jihulab_environments() {
+        for (cdot, collector) in [
+            (
+                "https://customers.jihulab.com",
+                "https://billing.jihulab.com",
+            ),
+            (
+                "https://customers-stg.jihulab.com",
+                "https://billing-stg.jihulab.com",
+            ),
+            (HK_CDOT, HK_COLLECTOR),
+        ] {
+            for (quota_auth, billing_auth) in [
+                (QuotaAuthMode::AdminToken, BillingAuthMode::Oidc),
+                (
+                    QuotaAuthMode::LicenseChecksum,
+                    BillingAuthMode::CloudConnector,
+                ),
+            ] {
+                let billing = config(cdot, collector, quota_auth, billing_auth);
+                assert_eq!(validate_with(true, &billing), Ok(()));
+            }
+        }
+    }
+
+    #[test]
+    fn enforced_rejects_mixed_jihulab_endpoint_pairs() {
+        for (cdot, collector) in [
+            (PROD_CDOT, "https://billing.jihulab.com"),
+            ("https://customers.jihulab.com", PROD_COLLECTOR),
+            (
+                "https://customers.jihulab.com",
+                "https://billing-stg.jihulab.com",
+            ),
+            (
+                "https://customers-stg.jihulab.com",
+                "https://billing.jihulab.com",
+            ),
+            (HK_CDOT, "https://billing.jihulab.com"),
+            ("https://customers.jihulab.com", HK_COLLECTOR),
+            (HK_CDOT, "https://billing-stg.jihulab.com"),
+            ("https://customers-stg.jihulab.com", HK_COLLECTOR),
+        ] {
+            let billing = config(
+                cdot,
+                collector,
+                QuotaAuthMode::AdminToken,
+                BillingAuthMode::Oidc,
+            );
+            assert_eq!(
+                validate_with(true, &billing),
+                Err(EnforcementError::UnknownEnvironment)
+            );
+        }
     }
 
     #[test]
