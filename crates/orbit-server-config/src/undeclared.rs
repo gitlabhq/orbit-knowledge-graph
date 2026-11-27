@@ -2,7 +2,9 @@
 
 use std::sync::LazyLock;
 
-use prost_reflect::{DescriptorPool, ExtensionDescriptor, Kind, MessageDescriptor};
+use prost_reflect::{
+    DescriptorPool, ExtensionDescriptor, FieldDescriptor, Kind, MessageDescriptor,
+};
 use serde_json::Value;
 
 use crate::proto::FILE_DESCRIPTOR_SET;
@@ -24,6 +26,37 @@ pub fn undeclared(document: &Value) -> Vec<String> {
     let mut errors = Vec::new();
     message(document, &config, &closed, "", &mut errors);
     errors
+}
+
+/// The schema field a key path names, one segment per field name, map key or
+/// list index. Either spelling the schema accepts resolves: the field name
+/// and its `json_name`.
+pub fn field(path: &[String]) -> Option<FieldDescriptor> {
+    let mut descriptor = POOL
+        .get_message_by_name("orbit.config.v1.Config")
+        .expect("the schema declares Config");
+    let mut segments = path.iter().peekable();
+    loop {
+        let key = segments.next()?;
+        let field = descriptor
+            .get_field_by_json_name(key)
+            .or_else(|| descriptor.get_field_by_name(key))?;
+        let kind = if field.is_map() {
+            segments.next();
+            let kind = field.kind();
+            let entry = kind.as_message().expect("a map field is a message");
+            entry.map_entry_value_field().kind()
+        } else {
+            if field.is_list() {
+                segments.next();
+            }
+            field.kind()
+        };
+        match kind {
+            Kind::Message(message) if segments.peek().is_some() => descriptor = message,
+            _ => return segments.peek().is_none().then_some(field),
+        }
+    }
 }
 
 fn message(

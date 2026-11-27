@@ -119,7 +119,22 @@ impl AppConfig {
             .load_bytes::<proto::Config>(&json, Format::Json)?;
 
         drop_nulls(&mut document);
-        Ok(serde_path_to_error::deserialize(document)?)
+        let mut unread = Vec::new();
+        let mut record = |path: serde_ignored::Path<'_>| {
+            let mut key = Vec::new();
+            segments(&path, &mut key);
+            if crate::undeclared::field(&key).is_some() {
+                unread.push(key.join("."));
+            }
+        };
+        let config = serde_path_to_error::deserialize(serde_ignored::Deserializer::new(
+            document,
+            &mut record,
+        ))?;
+        if !unread.is_empty() {
+            return Err(ConfigError::Unread(unread));
+        }
+        Ok(config)
     }
 
     pub fn jwt_secret(&self) -> Result<&str, ConfigError> {
@@ -184,6 +199,24 @@ fn overlay_path(overlay: Option<&Path>) -> Option<PathBuf> {
     }
 }
 
+fn segments(path: &serde_ignored::Path<'_>, out: &mut Vec<String>) {
+    use serde_ignored::Path;
+    match path {
+        Path::Root => {}
+        Path::Seq { parent, index } => {
+            segments(parent, out);
+            out.push(index.to_string());
+        }
+        Path::Map { parent, key } => {
+            segments(parent, out);
+            out.push(key.clone());
+        }
+        Path::Some { parent }
+        | Path::NewtypeStruct { parent }
+        | Path::NewtypeVariant { parent } => segments(parent, out),
+    }
+}
+
 fn drop_nulls(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(object) => {
@@ -228,6 +261,11 @@ pub enum ConfigError {
     },
     #[error("config: not declared by the schema:\n  - {}", .0.join("\n  - "))]
     Undeclared(Vec<String>),
+    #[error(
+        "config: the schema accepts these keys but the server does not read them; spell each with its field name in config.proto:\n  - {}",
+        .0.join("\n  - ")
+    )]
+    Unread(Vec<String>),
     #[error(transparent)]
     Secrets(#[from] crate::secrets::SecretError),
     #[error(transparent)]
@@ -440,6 +478,19 @@ graph:
             .collect();
 
         assert!(dropped.is_empty(), "the Rust types drop: {dropped:?}");
+    }
+
+    #[test]
+    fn a_key_the_schema_accepts_but_the_server_does_not_read_fails() {
+        let error = AppConfig::with_overlay("engine:\n  topics:\n    foo:\n      maxAttempts: 3\n")
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("does not read them")
+                && error.contains("- engine.topics.foo.maxAttempts"),
+            "{error}"
+        );
     }
 
     /// Unsetting any key the defaults set must be accepted or rejected by the
