@@ -464,20 +464,71 @@ graph:
             .expect("the embedded defaults load under strict mode");
     }
 
-    /// Serde ignores a key the Rust types lack, so a field added to the proto
-    /// and the defaults but not to Rust fails here.
+    /// A field added to the proto and the defaults but not to Rust, or read
+    /// under another name, fails here.
     #[test]
-    fn the_rust_types_read_every_key_in_the_embedded_defaults() {
+    fn the_rust_types_read_every_value_in_the_embedded_defaults() {
+        let document = embedded_document();
         let mut paths = Vec::new();
-        pointers(&embedded_document(), "", &mut paths);
+        pointers(&document, "", &mut paths);
         let decoded = serde_json::to_value(AppConfig::embedded_defaults()).unwrap();
 
-        let dropped: Vec<_> = paths
+        let misread: Vec<_> = paths
             .into_iter()
-            .filter(|path| decoded.pointer(path).is_none())
+            .filter(|path| match document.pointer(path) {
+                Some(serde_json::Value::Object(_)) => decoded.pointer(path).is_none(),
+                value => decoded.pointer(path) != value,
+            })
             .collect();
 
-        assert!(dropped.is_empty(), "the Rust types drop: {dropped:?}");
+        assert!(misread.is_empty(), "the Rust types misread: {misread:?}");
+    }
+
+    /// A Rust field the proto lacks would load from an overlay unvalidated.
+    #[test]
+    fn the_schema_declares_every_field_of_the_rust_types() {
+        let json = serde_json::to_vec(&AppConfig::embedded_defaults()).unwrap();
+        loader()
+            .with_strict_mode()
+            .load_bytes::<proto::Config>(&json, Format::Json)
+            .expect("the serialised runtime config loads under strict mode");
+    }
+
+    #[test]
+    fn the_rust_types_read_every_enum_value_the_schema_declares() {
+        let defaults = embedded_document();
+        let mut paths = Vec::new();
+        pointers(&defaults, "", &mut paths);
+
+        let loader = loader();
+        let mut unread = Vec::new();
+        for path in paths {
+            let key: Vec<String> = path.split('/').skip(1).map(str::to_owned).collect();
+            let Some(field) = crate::undeclared::field(&key) else {
+                continue;
+            };
+            let prost_reflect::Kind::Enum(descriptor) = field.kind() else {
+                continue;
+            };
+            for value in descriptor.values() {
+                let name = serde_json::Value::String(value.name().to_owned());
+                let mut document = defaults.clone();
+                *document.pointer_mut(&path).unwrap() = if field.is_list() {
+                    serde_json::Value::Array(vec![name])
+                } else {
+                    name
+                };
+                let json = serde_json::to_vec(&document).unwrap();
+                let schema_accepts = loader
+                    .load_bytes::<proto::Config>(&json, Format::Json)
+                    .is_ok();
+                if schema_accepts && AppConfig::decode(document).is_err() {
+                    unread.push(format!("{path}: {}", value.name()));
+                }
+            }
+        }
+
+        assert!(unread.is_empty(), "the Rust types do not read: {unread:?}");
     }
 
     #[test]
