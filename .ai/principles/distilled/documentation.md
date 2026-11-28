@@ -1,6 +1,6 @@
 ---
-source_checksum: 52156bafd2e2b1fc
-distilled_at_sha: cf64a3d8f7ef3e3137b983ecedac825dcf82a0b3
+source_checksum: c0a6705560a30cc7
+distilled_at_sha: 181e757c6115422b6b78d6e0052f22b5b2b0f8bc
 ---
 <!-- Auto-generated from docs.gitlab.com by gitlab-ai-principles-distiller — do not edit manually -->
 
@@ -92,7 +92,8 @@ distilled_at_sha: cf64a3d8f7ef3e3137b983ecedac825dcf82a0b3
 - Make all list items parallel (same grammatical structure).
 - Start all list items with a capital letter.
 - DO NOT end list items with a period unless the item is a complete sentence; give all items in a list the same punctuation and DO NOT use semicolons or commas at the end of items.
-- DO NOT use bold formatting to define keywords or concepts in a list; use bold only for UI element labels.
+- DO NOT use bold formatting to define keywords or concepts in a list. Use the UI text shortcode for UI labels, subject to the hardcoded-string exception.
+- Use a list for three or more parallel items.
 - Use ordered lists for sequential steps; use unordered lists for non-sequential items.
 - Add a colon (`:`) after the introductory phrase before a list.
 - DO NOT use list items to complete an introductory phrase (e.g., "You can do this by: - Copying..."); rewrite as a full sentence introducing the list.
@@ -167,7 +168,7 @@ distilled_at_sha: cf64a3d8f7ef3e3137b983ecedac825dcf82a0b3
 - Use alert boxes sparingly; DO NOT place two alert boxes consecutively.
 - Use `> [!note]`, `> [!warning]`, `> [!flag]`, and `> [!disclaimer]` for alert types.
 - Use notes sparingly; prefer rewriting the sentence into a paragraph, a separate paragraph, or a new topic title over adding a note.
-- Use a warning alert to indicate deprecated features or procedures with potential for data loss.
+- Use a warning alert to indicate deprecated features or procedures with potential for data loss; place the warning before the content that causes the risk (for example, before the step that can cause data loss).
 - Use the `> [!disclaimer]` alert (with no other text) near content about undelivered features: once at the top when the whole page is unavailable, or in the topic when only that topic is not ready.
 - Use the guide shortcode for tutorials only; DO NOT use a guide inside a guide.
 - Build tab sets with the `{{< tabs >}}` and `{{< tab title="..." >}}` shortcodes, and put only paragraphs, lists, alert boxes, and code blocks inside a tab; DO NOT nest version history bullets, topic headings, HTML, or other tabs inside one. Keep tab titles brief, parallel, and capitalized.
@@ -225,7 +226,7 @@ distilled_at_sha: cf64a3d8f7ef3e3137b983ecedac825dcf82a0b3
 
 - Place availability details (`{{< details >}}` shortcode) at the top of the page (after front matter) when they apply to the whole page, or under the applicable section heading when they apply to a specific section.
 - Include tier (`Free, Premium, Ultimate` or subset), add-on (for GitLab Duo features only), offering (`GitLab.com`, `GitLab Self-Managed`, `GitLab Dedicated`, `GitLab Dedicated for Government`), and status (`Beta`, `Experiment`, or `Limited availability`) as applicable; DO NOT add a status entry for generally available features.
-- For GitLab Agent Platform features available on the Free tier, link to the GitLab Credits page in the tier entry (e.g., `[Free](../subscriptions/gitlab_credits.md#for-the-free-tier), Premium, Ultimate`).
+- For GitLab Duo Agent Platform features available on the Free tier, link to the GitLab Credits page in the tier entry (e.g., `[Free](../subscriptions/gitlab_credits.md#for-the-free-tier), Premium, Ultimate`); for GitLab Orbit, link `Premium, Ultimate` to the full URL `https://docs.gitlab.com/subscriptions/gitlab_orbit_credit_usage/#trials-and-purchases`.
 - DO NOT add availability details to tutorials, tier-comparison pages, `/development` pages, or `/solutions` pages.
 - DO NOT repeat tier, offering, or status in a subheading's badge when it matches the parent topic's badge.
 - Place history notes (`{{< history >}}` shortcode) after the details block and immediately after the heading; start each entry with `-` and link to the related issue, MR, or epic when possible.
@@ -264,6 +265,10 @@ distilled_at_sha: cf64a3d8f7ef3e3137b983ecedac825dcf82a0b3
 - Do not restate information already covered earlier in the same page or in a linked topic
 - Each section should add new information. Do not summarize what was just explained
 - Avoid restating the title or introduction in the first paragraph
+
+### Common Mistakes - Product Perspective
+
+- Describe the reader’s goal, the steps they take, and the outcome they can expect. Avoid centering the description on product internals.
 
 ### Common Mistakes - Scope
 

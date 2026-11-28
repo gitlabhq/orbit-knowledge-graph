@@ -1,6 +1,6 @@
 ---
-source_checksum: e3799e3764d12081
-distilled_at_sha: cf64a3d8f7ef3e3137b983ecedac825dcf82a0b3
+source_checksum: 47670c49570faa8f
+distilled_at_sha: 181e757c6115422b6b78d6e0052f22b5b2b0f8bc
 ---
 <!-- Auto-generated from docs.gitlab.com by gitlab-ai-principles-distiller — do not edit manually -->
 
@@ -27,6 +27,8 @@ distilled_at_sha: cf64a3d8f7ef3e3137b983ecedac825dcf82a0b3
 
 - Add the `> [!flag]` note directly below the history block for any feature still behind a flag; remove it when the flag is removed and add a `Generally available` history entry.
 - Include the optional "not ready for production use" sentence in the flag note only when appropriate.
+- When the flag controls only part of a feature (an attribute, option, or limit), name that part in the flag note instead of "this feature".
+- DO NOT add a flag note when the flag controls only the name or UI presentation of a feature (not its availability) and is enabled by default at launch; add history text only.
 
 ### Experiment and Beta Features
 
@@ -75,6 +77,12 @@ distilled_at_sha: cf64a3d8f7ef3e3137b983ecedac825dcf82a0b3
 ### Release Notes — Category Validation
 
 - When a release note MR fails the `docs-lint release-note-categories` CI/CD job due to a renamed or removed category in an older release note, add the `pipeline:skip-release-note-categories` label to skip validation.
+
+### Release Notes — Co-Create Content
+
+- Add the notable contributor text under a `## Notable contributor` heading, after the existing introductory text in the minor release index file.
+- For co-created contributions, list the contributors at the end of the entry with name, profile link, and links to the relevant MRs; when an entry combines several contributions, use the links from the first mentioned contribution for the metadata.
+- Add the What's new in-product entry (five to seven headline features from the release's marketing page) as a new YAML file in `data/whats_new` following the template; after the release, check that it reached the stable branch and backport it if not (skip the `docs-gitlab-com` pipeline step).
 
 ### Upgrade Notes (Version-Specific Changes)
 
