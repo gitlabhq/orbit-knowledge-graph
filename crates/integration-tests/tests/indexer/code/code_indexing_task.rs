@@ -1264,80 +1264,27 @@ async fn a_job_keeps_at_most_write_max_concurrent_inserts_in_flight() {
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
 }
 
+enum ThrottledPart {
+    CheckpointStore,
+    Inserts,
+}
+
 #[tokio::test]
 async fn a_throttled_checkpoint_store_redelivers_the_task_without_spending_an_attempt() {
-    let project_id: i64 = 66;
-    let traversal_path = "1/66/";
-
-    let (clickhouse, mock, throttled) = throttled_project(project_id).await;
-    let deps = CodeIndexingDeps::new(&mock, &throttled.clickhouse());
-    let handler = deps.code_indexing_task_handler();
-    assert_throttled_task_is_backpressure(&handler, &throttled, project_id, traversal_path).await;
-
-    throttled.lift_the_limit().await;
-    let checkpoint = deps
-        .checkpoint_store
-        .load(
-            &TraversalPath::new_unchecked(traversal_path),
-            project_id,
-            "main",
-        )
-        .await
-        .expect("checkpoint load");
-    assert!(checkpoint.is_none(), "no attempt may be recorded");
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        "commit1",
-        1,
-        traversal_path,
-    )
-    .await;
-    assert_file_is_active(&clickhouse, project_id, "src/main.py").await;
+    a_throttled_task_redelivers_without_spending_an_attempt(ThrottledPart::CheckpointStore, 66)
+        .await;
 }
 
 #[tokio::test]
 async fn throttled_inserts_redeliver_the_task_and_keep_the_circuit_closed() {
-    let project_id: i64 = 67;
-    let traversal_path = "1/67/";
-
-    let (clickhouse, mock, throttled) = throttled_project(project_id).await;
-    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
-    let handler = deps.code_indexing_task_handler_with_writer(writer_for(throttled.config.clone()));
-    assert_throttled_task_is_backpressure(&handler, &throttled, project_id, traversal_path).await;
-    let checkpoint = deps
-        .checkpoint_store
-        .load(
-            &TraversalPath::new_unchecked(traversal_path),
-            project_id,
-            "main",
-        )
-        .await
-        .expect("checkpoint load")
-        .expect("the refunded attempt is saved");
-    assert_eq!(checkpoint.attempts, 0);
-
-    throttled.lift_the_limit().await;
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        "commit1",
-        1,
-        traversal_path,
-    )
-    .await;
-    assert_file_is_active(&clickhouse, project_id, "src/main.py").await;
+    a_throttled_task_redelivers_without_spending_an_attempt(ThrottledPart::Inserts, 67).await;
 }
 
-async fn throttled_project(
+async fn a_throttled_task_redelivers_without_spending_an_attempt(
+    part: ThrottledPart,
     project_id: i64,
-) -> (
-    integration_testkit::TestContext,
-    MockGitlabServer,
-    ThrottledUser,
 ) {
+    let traversal_path = format!("1/{project_id}/");
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
         *integration_testkit::GRAPH_SCHEMA_SQL,
@@ -1350,26 +1297,54 @@ async fn throttled_project(
         &[("src/main.py", "def main():\n    pass\n")],
     );
     let throttled = ThrottledUser::create(&clickhouse).await;
-    (clickhouse, mock, throttled)
-}
+    let (deps, handler) = match part {
+        ThrottledPart::CheckpointStore => {
+            let deps = CodeIndexingDeps::new(&mock, &throttled.clickhouse());
+            let handler = deps.code_indexing_task_handler();
+            (deps, handler)
+        }
+        ThrottledPart::Inserts => {
+            let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+            let handler =
+                deps.code_indexing_task_handler_with_writer(writer_for(throttled.config.clone()));
+            (deps, handler)
+        }
+    };
 
-async fn assert_throttled_task_is_backpressure(
-    handler: &indexer::modules::code::CodeIndexingTaskHandler,
-    throttled: &ThrottledUser,
-    project_id: i64,
-    traversal_path: &str,
-) {
     throttled.occupy_the_query_slot().await;
     let result = handler
         .handle(
             handler_context(),
-            code_indexing_task_envelope(project_id, "commit1", 1, traversal_path),
+            code_indexing_task_envelope(project_id, "commit1", 1, &traversal_path),
         )
         .await;
     assert!(
         matches!(result, Err(HandlerError::Backpressure(_))),
         "a throttled task must redeliver as backpressure, got {result:?}"
     );
+
+    throttled.lift_the_limit().await;
+    let attempts = deps
+        .checkpoint_store
+        .load(
+            &TraversalPath::new_unchecked(&traversal_path),
+            project_id,
+            "main",
+        )
+        .await
+        .expect("checkpoint load")
+        .map_or(0, |checkpoint| checkpoint.attempts);
+    assert_eq!(attempts, 0, "a throttled task must not spend an attempt");
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        &traversal_path,
+    )
+    .await;
+    assert_file_is_active(&clickhouse, project_id, "src/main.py").await;
 }
 
 #[tokio::test]
