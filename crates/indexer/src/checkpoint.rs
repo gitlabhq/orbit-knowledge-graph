@@ -39,9 +39,10 @@ pub enum CheckpointError {
 
 impl From<ClickHouseError> for CheckpointError {
     fn from(error: ClickHouseError) -> Self {
-        match error {
-            ClickHouseError::CircuitOpen { .. } => CheckpointError::Unavailable(error.to_string()),
-            _ => CheckpointError::Store(error.to_string()),
+        if error.is_unavailable() {
+            CheckpointError::Unavailable(error.to_string())
+        } else {
+            CheckpointError::Store(error.to_string())
         }
     }
 }

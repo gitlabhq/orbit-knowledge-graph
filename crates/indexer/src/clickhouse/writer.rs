@@ -16,6 +16,9 @@ pub enum WriteError {
     #[error("failed to write: {0}")]
     Write(String),
 
+    #[error("graph store throttled the write: {0}")]
+    Throttled(String),
+
     #[error("graph store unavailable: {0}")]
     Unavailable(String),
 }

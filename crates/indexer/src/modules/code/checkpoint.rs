@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
-use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT, insert_overrides};
+use crate::clickhouse::{
+    ArrowClickHouseClient, ClickHouseError, TIMESTAMP_FORMAT, insert_overrides,
+};
 use crate::durability::WriteDurability;
+use crate::handler::HandlerError;
 use crate::observer::IndexingMode;
 use arrow::array::{Array, Int64Array, StringArray, TimestampMicrosecondArray};
 use arrow::record_batch::RecordBatch;
@@ -20,11 +23,33 @@ pub enum CheckpointError {
     #[error("query failed: {0}")]
     Query(String),
 
+    #[error("checkpoint store unavailable: {0}")]
+    Unavailable(String),
+
     #[error("invalid data type")]
     InvalidType,
 
     #[error("invalid timestamp value")]
     InvalidTimestamp,
+}
+
+impl From<ClickHouseError> for CheckpointError {
+    fn from(error: ClickHouseError) -> Self {
+        if error.is_unavailable() {
+            CheckpointError::Unavailable(error.to_string())
+        } else {
+            CheckpointError::Query(error.to_string())
+        }
+    }
+}
+
+impl From<CheckpointError> for HandlerError {
+    fn from(error: CheckpointError) -> Self {
+        match error {
+            CheckpointError::Unavailable(_) => HandlerError::Backpressure(error.to_string()),
+            _ => HandlerError::Processing(error.to_string()),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -201,7 +226,7 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             .param("branch", branch)
             .fetch_arrow()
             .await
-            .map_err(|e| CheckpointError::Query(e.to_string()))?;
+            .map_err(CheckpointError::from)?;
 
         Self::extract_checkpoint(batches, traversal_path, project_id, branch)
     }
@@ -235,7 +260,7 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             .param("attempts", checkpoint.attempts)
             .execute()
             .await
-            .map_err(|e| CheckpointError::Query(e.to_string()))?;
+            .map_err(CheckpointError::from)?;
 
         Ok(())
     }

@@ -1,5 +1,4 @@
 use crate::checkpoint::CheckpointError;
-use crate::clickhouse::WriteError;
 use crate::handler::HandlerError;
 
 use super::datalake::DatalakeError;
@@ -18,15 +17,6 @@ impl From<CheckpointError> for HandlerError {
         match error {
             CheckpointError::Unavailable(_) => HandlerError::Backpressure(error.to_string()),
             CheckpointError::Store(_) => HandlerError::Processing(error.to_string()),
-        }
-    }
-}
-
-impl From<WriteError> for HandlerError {
-    fn from(error: WriteError) -> Self {
-        match error {
-            WriteError::Unavailable(_) => HandlerError::Backpressure(error.to_string()),
-            WriteError::Write(_) => HandlerError::Processing(error.to_string()),
         }
     }
 }

@@ -1030,7 +1030,6 @@ mod tests {
     fn server_overload_counts_toward_the_circuit() {
         for message in [
             "Code: 252. DB::Exception: Too many parts (3000 with average size of 1.00 MiB) in table 'gl_edge'. Merges are processing significantly slower than inserts. (TOO_MANY_PARTS) (version 26.6.8.7 (official build))",
-            "Code: 202. DB::Exception: Too many simultaneous queries. Maximum: 100. (TOO_MANY_SIMULTANEOUS_QUERIES) (version 26.6.8.7 (official build))",
             "Code: 241. DB::Exception: Memory limit exceeded: would use 28.01 GiB (attempt to allocate chunk of 4.00 MiB), current RSS: 27.90 GiB, maximum: 28.00 GiB. (MEMORY_LIMIT_EXCEEDED) (version 26.6.8.7 (official build))",
         ] {
             assert!(bad_response(message).is_transient(), "{message}");
@@ -1042,6 +1041,7 @@ mod tests {
         for message in [
             "Code: 241. DB::Exception: Query memory limit exceeded: would use 9.31 GiB (attempt to allocate chunk of 4.00 MiB), maximum: 9.31 GiB. (MEMORY_LIMIT_EXCEEDED) (version 26.6.8.7 (official build))",
             "Code: 241. DB::Exception: User memory limit exceeded: would use 9.31 GiB (attempt to allocate chunk of 4.00 MiB), maximum: 9.31 GiB. (MEMORY_LIMIT_EXCEEDED) (version 26.6.8.7 (official build))",
+            "Code: 202. DB::Exception: Too many simultaneous queries. Maximum: 100. (TOO_MANY_SIMULTANEOUS_QUERIES) (version 26.6.8.7 (official build))",
             "Code: 159. DB::Exception: Timeout exceeded: elapsed 30.0 seconds, maximum: 30. (TIMEOUT_EXCEEDED) (version 26.6.8.7 (official build))",
             "Code: 62. DB::Exception: Syntax error: failed at position 1. (SYNTAX_ERROR) (version 26.6.8.7 (official build))",
         ] {

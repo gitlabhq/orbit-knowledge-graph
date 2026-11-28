@@ -38,7 +38,8 @@ fn is_memory_limit_exceeded(message: &str) -> bool {
     message.contains("MEMORY_LIMIT_EXCEEDED")
 }
 
-const SERVER_OVERLOAD_CODES: [&str; 2] = ["TOO_MANY_PARTS", "TOO_MANY_SIMULTANEOUS_QUERIES"];
+const TOO_MANY_PARTS: &str = "TOO_MANY_PARTS";
+const QUERY_SLOT_REJECTED: &str = "TOO_MANY_SIMULTANEOUS_QUERIES";
 
 // Only the server-wide memory tracker adds `current RSS` to MEMORY_LIMIT_EXCEEDED.
 // A query or user limit ("Query memory limit exceeded") is the caller's problem.
@@ -46,30 +47,38 @@ fn is_server_memory_limit(message: &str) -> bool {
     is_memory_limit_exceeded(message) && message.contains("current RSS")
 }
 
-fn is_server_overload_message(message: &str) -> bool {
-    is_server_memory_limit(message)
-        || SERVER_OVERLOAD_CODES
-            .iter()
-            .any(|code| message.contains(code))
-}
-
-fn is_server_unavailable(error: &clickhouse::error::Error) -> bool {
-    match error {
-        clickhouse::error::Error::Network(_) => true,
-        clickhouse::error::Error::BadResponse(message) => is_server_overload_message(message),
-        _ => false,
-    }
+fn is_server_degraded(message: &str) -> bool {
+    is_server_memory_limit(message) || message.contains(TOO_MANY_PARTS)
 }
 
 const UNKNOWN_TABLE_CODE: &str = "(UNKNOWN_TABLE)";
 
 impl ClickHouseError {
+    fn server_message(&self) -> Option<&str> {
+        match self {
+            Self::Query(clickhouse::error::Error::BadResponse(message))
+            | Self::Insert(clickhouse::error::Error::BadResponse(message)) => Some(message),
+            Self::BadResponse { body, .. } => Some(body),
+            _ => None,
+        }
+    }
+
     pub(crate) fn is_retryable(&self) -> bool {
         match self {
             Self::Query(inner) | Self::Insert(inner) => is_clickhouse_error_transient(inner),
             Self::BadResponse { status, .. } => *status >= 500,
             _ => false,
         }
+    }
+
+    pub fn is_server_overload(&self) -> bool {
+        self.server_message().is_some_and(|message| {
+            is_server_degraded(message) || message.contains(QUERY_SLOT_REJECTED)
+        })
+    }
+
+    pub fn is_unavailable(&self) -> bool {
+        matches!(self, Self::CircuitOpen { .. }) || self.is_server_overload()
     }
 
     pub fn is_unknown_table(&self) -> bool {
@@ -85,11 +94,11 @@ impl ClickHouseError {
 
 impl CircuitBreakableError for ClickHouseError {
     fn is_transient(&self) -> bool {
-        match self {
-            Self::Query(inner) | Self::Insert(inner) => is_server_unavailable(inner),
-            Self::BadResponse { body, .. } => is_server_overload_message(body),
-            _ => false,
-        }
+        matches!(
+            self,
+            Self::Query(clickhouse::error::Error::Network(_))
+                | Self::Insert(clickhouse::error::Error::Network(_))
+        ) || self.server_message().is_some_and(is_server_degraded)
     }
 
     fn circuit_open(service: &'static str) -> Self {

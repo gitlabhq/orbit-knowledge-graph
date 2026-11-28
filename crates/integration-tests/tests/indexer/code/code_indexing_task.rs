@@ -4,7 +4,7 @@ use std::sync::Arc;
 use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use chrono::{TimeZone, Utc};
 use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
-use indexer::handler::Handler;
+use indexer::handler::{Handler, HandlerError};
 use indexer::locking::LockService;
 use indexer::modules::code::{
     ClickHouseStaleDataCleaner, CodeCheckpointStore, StaleDataCleaner, config::CodeTableNames,
@@ -1053,8 +1053,8 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
         .await
         .expect_err("a task whose rows never land must fail so NATS redelivers it");
     assert!(
-        matches!(error, indexer::handler::HandlerError::Processing(_)),
-        "unexpected error: {error}"
+        matches!(error, HandlerError::Backpressure(_)),
+        "an unreachable graph store must not spend an attempt, got: {error}"
     );
 
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
@@ -1262,6 +1262,119 @@ async fn a_job_keeps_at_most_write_max_concurrent_inserts_in_flight() {
         "the parse must pause until one of the two in-flight inserts lands"
     );
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+}
+
+#[tokio::test]
+async fn a_throttled_checkpoint_store_redelivers_the_task_without_spending_an_attempt() {
+    let project_id: i64 = 66;
+    let traversal_path = "1/66/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/main.py", "def main():\n    pass\n")],
+    );
+
+    let throttled = ThrottledUser::create(&clickhouse).await;
+    let deps = CodeIndexingDeps::new(&mock, &throttled.clickhouse());
+    let handler = deps.code_indexing_task_handler();
+    throttled.occupy_the_query_slot().await;
+
+    let result = handler
+        .handle(
+            handler_context(),
+            code_indexing_task_envelope(project_id, "commit1", 1, traversal_path),
+        )
+        .await;
+    assert!(
+        matches!(result, Err(HandlerError::Backpressure(_))),
+        "a rejected query slot must redeliver as backpressure, got {result:?}"
+    );
+
+    throttled.lift_the_limit().await;
+    let checkpoint = deps
+        .checkpoint_store
+        .load(
+            &TraversalPath::new_unchecked(traversal_path),
+            project_id,
+            "main",
+        )
+        .await
+        .expect("checkpoint load");
+    assert!(checkpoint.is_none(), "no attempt may be recorded");
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        traversal_path,
+    )
+    .await;
+    assert_file_is_active(&clickhouse, project_id, "src/main.py").await;
+}
+
+#[tokio::test]
+async fn throttled_inserts_redeliver_the_task_and_keep_the_circuit_closed() {
+    let project_id: i64 = 67;
+    let traversal_path = "1/67/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/main.py", "def main():\n    pass\n")],
+    );
+
+    let throttled = ThrottledUser::create(&clickhouse).await;
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler_with_writer(writer_for(throttled.config.clone()));
+    throttled.occupy_the_query_slot().await;
+
+    let result = handler
+        .handle(
+            handler_context(),
+            code_indexing_task_envelope(project_id, "commit1", 1, traversal_path),
+        )
+        .await;
+    assert!(
+        matches!(result, Err(HandlerError::Backpressure(_))),
+        "inserts that stay throttled must redeliver as backpressure, got {result:?}"
+    );
+    let checkpoint = deps
+        .checkpoint_store
+        .load(
+            &TraversalPath::new_unchecked(traversal_path),
+            project_id,
+            "main",
+        )
+        .await
+        .expect("checkpoint load")
+        .expect("the refunded attempt is saved");
+    assert_eq!(checkpoint.attempts, 0);
+
+    throttled.lift_the_limit().await;
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        traversal_path,
+    )
+    .await;
+    assert_file_is_active(&clickhouse, project_id, "src/main.py").await;
 }
 
 #[tokio::test]

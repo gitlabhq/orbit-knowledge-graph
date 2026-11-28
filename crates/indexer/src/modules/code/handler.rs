@@ -227,7 +227,7 @@ impl CodeIndexingTaskHandler {
             .checkpoint_store
             .load(&request.traversal_path, request.project_id, &branch)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to load checkpoint: {e}")))?
+            .map_err(|e| HandlerError::from(e).prefix_message_with("failed to load checkpoint"))?
             .unwrap_or_else(|| {
                 CodeCheckpoint::new(request.traversal_path.clone(), request.project_id, &branch)
             });
@@ -370,7 +370,7 @@ impl CodeIndexingTaskHandler {
         self.checkpoint_store
             .save(&checkpoint)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to save start: {e}")))?;
+            .map_err(|e| HandlerError::from(e).prefix_message_with("failed to save start"))?;
 
         let repository_storage = match request
             .repository_storage

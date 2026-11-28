@@ -4,6 +4,7 @@ use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use arrow::array::UInt64Array;
 use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -26,6 +27,7 @@ use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Event;
 use integration_testkit::{TestContext, t};
+use orbit_arrow::ArrowUtils;
 use orbit_server_config::{CodeIndexingPipelineConfig, GitlabClientConfiguration};
 use parking_lot::Mutex;
 use serde::Deserialize;
@@ -205,6 +207,83 @@ pub fn writer_for(
         config.build_client("graph"),
         Arc::new(indexer::metrics::EngineMetrics::new()),
     ))
+}
+
+pub struct ThrottledUser {
+    admin: TestContext,
+    name: String,
+    pub config: orbit_server_config::ClickHouseConfiguration,
+}
+
+impl ThrottledUser {
+    pub async fn create(clickhouse: &TestContext) -> Self {
+        let name = format!("throttled_{}", uuid::Uuid::new_v4().simple());
+        let password = "throttled-pass";
+        clickhouse
+            .execute(&format!(
+                "CREATE USER {name} IDENTIFIED BY '{password}' \
+                 SETTINGS max_concurrent_queries_for_user = 1"
+            ))
+            .await;
+        clickhouse
+            .execute(&format!(
+                "GRANT ALL ON `{}`.* TO {name}",
+                clickhouse.config.database
+            ))
+            .await;
+        Self {
+            admin: clickhouse.clone(),
+            config: orbit_server_config::ClickHouseConfiguration {
+                username: name.clone(),
+                password: Some(password.to_string()),
+                ..clickhouse.config.clone()
+            },
+            name,
+        }
+    }
+
+    pub fn clickhouse(&self) -> TestContext {
+        let mut clickhouse = self.admin.clone();
+        clickhouse.config = self.config.clone();
+        clickhouse
+    }
+
+    pub async fn occupy_the_query_slot(&self) {
+        let client = self.config.build_client("graph");
+        tokio::spawn(async move {
+            let _ = client
+                .query("SELECT sleepEachRow(1) FROM numbers(600)")
+                .with_setting("max_block_size", "1")
+                .fetch_arrow()
+                .await;
+        });
+        let running = format!(
+            "SELECT count() AS running FROM system.processes WHERE user = '{}'",
+            self.name
+        );
+        loop {
+            let batches = self.admin.query(&running).await;
+            let count = ArrowUtils::get_column_by_name::<UInt64Array>(&batches[0], "running")
+                .expect("running column")
+                .value(0);
+            if count > 0 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }
+
+    pub async fn lift_the_limit(&self) {
+        self.admin
+            .execute(&format!(
+                "ALTER USER {} SETTINGS max_concurrent_queries_for_user = 0",
+                self.name
+            ))
+            .await;
+        self.admin
+            .execute(&format!("KILL QUERY WHERE user = '{}' SYNC", self.name))
+            .await;
+    }
 }
 
 pub struct GatedClickHouse {

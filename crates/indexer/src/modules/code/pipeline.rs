@@ -300,7 +300,7 @@ impl CodeIndexer {
         self.checkpoint_store
             .save(checkpoint)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to set checkpoint: {e}")))
+            .map_err(|e| HandlerError::from(e).prefix_message_with("failed to set checkpoint"))
             .record_error_stage(&self.metrics, "checkpoint")
     }
 
@@ -829,7 +829,7 @@ async fn await_inserts(mut inserts: InFlightInserts) -> Result<(), HandlerError>
         written
             .map_err(|e| HandlerError::Processing(format!("write task failed: {e}")))?
             .map_err(|e| {
-                HandlerError::Processing(format!("rows did not land; retrying the task: {e}"))
+                HandlerError::from(e).prefix_message_with("rows did not land; retrying the task")
             })?;
     }
     Ok(())
