@@ -1,5 +1,15 @@
 # yaml-language-server: $schema=schemas/schema-migrations.schema.json
 migrations:
+- version: 131
+  scope: sdlc
+  entities:
+  - MergeRequest
+  note: >-
+    The MergeRequest pipeline stops writing REVIEWER and APPROVED edges. Their
+    link-table pipelines are now the only writers, so a merge request update no
+    longer replaces those edges with copies that lack user tags (#1559). MergeRequest
+    writes the shared edge table, so the dispatcher widens this to a full rebuild,
+    which restores the tags on stored edges.
 - version: 130
   scope: code
   note: >-

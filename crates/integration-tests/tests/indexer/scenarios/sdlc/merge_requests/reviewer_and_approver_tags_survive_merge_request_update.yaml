@@ -1,0 +1,29 @@
+description: A merge request update keeps the user tags on its REVIEWER and APPROVED edges
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/" }
+      siphon_users:
+        - { id: 10, email: u10@example.com, username: u10, name: U10, state: active, organization_id: 1, user_type: 0, _siphon_replicated_at: "2024-01-10 10:00:00" }
+      merge_requests:
+        - { id: 10, iid: 101, title: Add auth, source_branch: feat, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/", _siphon_replicated_at: "2024-01-10 10:00:00" }
+      siphon_merge_request_reviewers:
+        - { id: 1, user_id: 10, merge_request_id: 10, created_at: "2024-01-15 10:00:00", state: 0, project_id: 1000, traversal_path: "1/100/", _siphon_replicated_at: "2024-01-15 10:00:00" }
+      siphon_approvals:
+        - { id: 1, merge_request_id: 10, user_id: 10, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", project_id: 1000, traversal_path: "1/100/", _siphon_replicated_at: "2024-01-15 10:00:00" }
+    expect:
+      edges:
+        - { kind: REVIEWER, from: User, to: MergeRequest, count: 1, source_tags: { 10: ["user_type:human"] } }
+        - { kind: APPROVED, from: User, to: MergeRequest, count: 1, source_tags: { 10: ["user_type:human"] } }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.MergeRequest, watermark: "2024-01-16 00:00:00.000000", cursor_values: "null", indexed_at: "2024-01-16 00:00:00.000000" }
+      merge_requests:
+        - { id: 10, iid: 101, title: Add auth v2, source_branch: feat, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/", _siphon_replicated_at: "2024-01-20 18:00:00" }
+    expect:
+      edges:
+        - { kind: REVIEWER, from: User, to: MergeRequest, count: 1, source_tags: { 10: ["user_type:human"] } }
+        - { kind: APPROVED, from: User, to: MergeRequest, count: 1, source_tags: { 10: ["user_type:human"] } }

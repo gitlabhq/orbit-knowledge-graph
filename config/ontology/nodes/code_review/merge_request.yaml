@@ -308,12 +308,12 @@ properties:
     description: "Full unified diff. Resolved from GitLab at query time."
 
 indexer:
-  reindex: [merge_requests, siphon_merge_request_metrics, siphon_merge_request_reviewers, siphon_approvals]
+  reindex: [merge_requests, siphon_merge_request_metrics]
 pipelines:
   - name: MergeRequest
     extract:
       type: clickhouse
-      tables: [merge_requests, siphon_merge_request_metrics, siphon_merge_request_reviewers, siphon_approvals]
+      tables: [merge_requests, siphon_merge_request_metrics]
       order_by: [traversal_path, id]
       query: merge_request.sql.j2
     transform:
@@ -396,22 +396,6 @@ pipelines:
             kind: Milestone
           label: IN_MILESTONE
           mutable: true
-        - from:
-            field: reviewers
-            kind: User
-          to:
-            field: id
-            kind: MergeRequest
-          label: REVIEWER
-          array_field: user_id
-        - from:
-            field: approvals
-            kind: User
-          to:
-            field: id
-            kind: MergeRequest
-          label: APPROVED
-          array_field: user_id
         - from:
             field: id
             kind: MergeRequest
