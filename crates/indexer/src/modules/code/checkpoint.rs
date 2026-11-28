@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use crate::clickhouse::{
-    ArrowClickHouseClient, ClickHouseError, TIMESTAMP_FORMAT, insert_overrides,
-};
+use crate::checkpoint::CheckpointError as StoreError;
+use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT, insert_overrides};
 use crate::durability::WriteDurability;
 use crate::handler::HandlerError;
 use crate::observer::IndexingMode;
@@ -20,11 +19,8 @@ const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 #[derive(Debug, Error, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum CheckpointError {
-    #[error("query failed: {0}")]
-    Query(String),
-
-    #[error("checkpoint store unavailable: {0}")]
-    Unavailable(String),
+    #[error(transparent)]
+    Store(#[from] StoreError),
 
     #[error("invalid data type")]
     InvalidType,
@@ -33,20 +29,10 @@ pub enum CheckpointError {
     InvalidTimestamp,
 }
 
-impl From<ClickHouseError> for CheckpointError {
-    fn from(error: ClickHouseError) -> Self {
-        if error.is_unavailable() {
-            CheckpointError::Unavailable(error.to_string())
-        } else {
-            CheckpointError::Query(error.to_string())
-        }
-    }
-}
-
 impl From<CheckpointError> for HandlerError {
     fn from(error: CheckpointError) -> Self {
         match error {
-            CheckpointError::Unavailable(_) => HandlerError::Backpressure(error.to_string()),
+            CheckpointError::Store(store) => store.into(),
             _ => HandlerError::Processing(error.to_string()),
         }
     }
@@ -226,7 +212,7 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             .param("branch", branch)
             .fetch_arrow()
             .await
-            .map_err(CheckpointError::from)?;
+            .map_err(StoreError::from)?;
 
         Self::extract_checkpoint(batches, traversal_path, project_id, branch)
     }
@@ -260,7 +246,7 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             .param("attempts", checkpoint.attempts)
             .execute()
             .await
-            .map_err(CheckpointError::from)?;
+            .map_err(StoreError::from)?;
 
         Ok(())
     }
@@ -306,7 +292,7 @@ pub mod test_utils {
             branch: &str,
         ) -> Result<Option<CodeCheckpoint>, CheckpointError> {
             if self.fail_loads.load(Ordering::Relaxed) {
-                return Err(CheckpointError::Query("load failed".to_string()));
+                return Err(StoreError::Store("load failed".to_string()).into());
             }
             let checkpoints = self.checkpoints.lock();
             Ok(checkpoints

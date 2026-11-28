@@ -1269,33 +1269,10 @@ async fn a_throttled_checkpoint_store_redelivers_the_task_without_spending_an_at
     let project_id: i64 = 66;
     let traversal_path = "1/66/";
 
-    let clickhouse = integration_testkit::TestContext::new(&[
-        integration_testkit::SIPHON_SCHEMA_SQL,
-        *integration_testkit::GRAPH_SCHEMA_SQL,
-    ])
-    .await;
-    let mock = MockGitlabServer::start().await;
-    mock.add_project(
-        project_id,
-        "main",
-        &[("src/main.py", "def main():\n    pass\n")],
-    );
-
-    let throttled = ThrottledUser::create(&clickhouse).await;
+    let (clickhouse, mock, throttled) = throttled_project(project_id).await;
     let deps = CodeIndexingDeps::new(&mock, &throttled.clickhouse());
     let handler = deps.code_indexing_task_handler();
-    throttled.occupy_the_query_slot().await;
-
-    let result = handler
-        .handle(
-            handler_context(),
-            code_indexing_task_envelope(project_id, "commit1", 1, traversal_path),
-        )
-        .await;
-    assert!(
-        matches!(result, Err(HandlerError::Backpressure(_))),
-        "a rejected query slot must redeliver as backpressure, got {result:?}"
-    );
+    assert_throttled_task_is_backpressure(&handler, &throttled, project_id, traversal_path).await;
 
     throttled.lift_the_limit().await;
     let checkpoint = deps
@@ -1325,33 +1302,10 @@ async fn throttled_inserts_redeliver_the_task_and_keep_the_circuit_closed() {
     let project_id: i64 = 67;
     let traversal_path = "1/67/";
 
-    let clickhouse = integration_testkit::TestContext::new(&[
-        integration_testkit::SIPHON_SCHEMA_SQL,
-        *integration_testkit::GRAPH_SCHEMA_SQL,
-    ])
-    .await;
-    let mock = MockGitlabServer::start().await;
-    mock.add_project(
-        project_id,
-        "main",
-        &[("src/main.py", "def main():\n    pass\n")],
-    );
-
-    let throttled = ThrottledUser::create(&clickhouse).await;
+    let (clickhouse, mock, throttled) = throttled_project(project_id).await;
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler_with_writer(writer_for(throttled.config.clone()));
-    throttled.occupy_the_query_slot().await;
-
-    let result = handler
-        .handle(
-            handler_context(),
-            code_indexing_task_envelope(project_id, "commit1", 1, traversal_path),
-        )
-        .await;
-    assert!(
-        matches!(result, Err(HandlerError::Backpressure(_))),
-        "inserts that stay throttled must redeliver as backpressure, got {result:?}"
-    );
+    assert_throttled_task_is_backpressure(&handler, &throttled, project_id, traversal_path).await;
     let checkpoint = deps
         .checkpoint_store
         .load(
@@ -1375,6 +1329,47 @@ async fn throttled_inserts_redeliver_the_task_and_keep_the_circuit_closed() {
     )
     .await;
     assert_file_is_active(&clickhouse, project_id, "src/main.py").await;
+}
+
+async fn throttled_project(
+    project_id: i64,
+) -> (
+    integration_testkit::TestContext,
+    MockGitlabServer,
+    ThrottledUser,
+) {
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/main.py", "def main():\n    pass\n")],
+    );
+    let throttled = ThrottledUser::create(&clickhouse).await;
+    (clickhouse, mock, throttled)
+}
+
+async fn assert_throttled_task_is_backpressure(
+    handler: &indexer::modules::code::CodeIndexingTaskHandler,
+    throttled: &ThrottledUser,
+    project_id: i64,
+    traversal_path: &str,
+) {
+    throttled.occupy_the_query_slot().await;
+    let result = handler
+        .handle(
+            handler_context(),
+            code_indexing_task_envelope(project_id, "commit1", 1, traversal_path),
+        )
+        .await;
+    assert!(
+        matches!(result, Err(HandlerError::Backpressure(_))),
+        "a throttled task must redeliver as backpressure, got {result:?}"
+    );
 }
 
 #[tokio::test]

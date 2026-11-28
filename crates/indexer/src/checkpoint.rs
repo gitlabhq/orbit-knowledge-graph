@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery, ClickHouseError, TIMESTAMP_FORMAT};
 use crate::durability::WriteDurability;
+use crate::handler::HandlerError;
 use crate::observer::IndexingMode;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -43,6 +44,15 @@ impl From<ClickHouseError> for CheckpointError {
             CheckpointError::Unavailable(error.to_string())
         } else {
             CheckpointError::Store(error.to_string())
+        }
+    }
+}
+
+impl From<CheckpointError> for HandlerError {
+    fn from(error: CheckpointError) -> Self {
+        match error {
+            CheckpointError::Unavailable(_) => HandlerError::Backpressure(error.to_string()),
+            CheckpointError::Store(_) => HandlerError::Processing(error.to_string()),
         }
     }
 }
