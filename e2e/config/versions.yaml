@@ -1,8 +1,8 @@
 siphon:
-  chart: "2.4.2"
+  chart: "2.5.1"
   image:
     repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
-    tag: "0.0.163-beta"
+    tag: "0.0.167-beta"
 gitlab:
   # Devel (nightly) chart from gitlab-devel/gitlab. The chart version,
   # gitlab-org/gitlab ref, and CNG image digests below are all bumped
@@ -10,8 +10,8 @@ gitlab:
   # to the current master. Pinning the chart alone is not enough because
   # every CNG image defaults to :master (a moving tag); the `images.*.digest`
   # entries force specific digests so every pod pulls identical rails code.
-  chart: "10.5.1-2993129602"
-  ref: "ec0e8b7afef079cd4e26d187ae6135252df21796"
+  chart: "10.6.3-3125777991"
+  ref: "16463aac79084ccc6915e42d3d53ffe155ed1319"
   # Per-component digest pins. Consumed by values/gitlab.yaml.gotmpl which
   # renders them as "master@<digest>" tags. Pinning every Rails-adjacent image
   # avoids version skew between webservice (Rails) and its workhorse sidecar:
@@ -20,13 +20,13 @@ gitlab:
   # an empty Authorization header and silently 502.
   images:
     webservice:
-      digest: "sha256:ce5b8e1cebe7481d0d1e34cbbd7add45c370505b9fa3310e9157d0caf678cf1e"
+      digest: "sha256:dc889f1588d2defc529519c7cd5b18472657cdbc7f42626116bb8ab3fa5de292"
     workhorse:
-      digest: "sha256:263f4cb3c094ea0415bb3b391845e0e9bedfc165704e56f405ea40d012df0e71"
+      digest: "sha256:9be86c02084cbed7b9b388156ab46ef658f645395f2221482b2bd509eb1b7219"
     sidekiq:
-      digest: "sha256:4ef6036778da09135f940ed50bbf3d4ecb07f552ca86bf28357aa6874af21e8f"
+      digest: "sha256:f896424f650e634ce38d5f06d9907599192dbb2bc1fde9701f8222bb718475d9"
     toolbox:
-      digest: "sha256:0820d6d00b1a5bed7dc0cfd52fda41db306351f1d5a0a93d37c49d83cec03828"
+      digest: "sha256:bdf79e3d06c404cf81606ce52f1f7b68b765a17db6e29236a62f891274b8d98f"
 gitlab_lanes:
   "19-4":
     chart: "10.4.8"
@@ -58,7 +58,7 @@ gkg:
   chart: "4.1.0"
   image:
     repository: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg
-    tag: "0.159.1"
+    tag: "1.9.1"
 nats:
   chart: "2.15.0"
 postgresql:
